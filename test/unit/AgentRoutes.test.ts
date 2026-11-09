@@ -167,6 +167,51 @@ describe('endpoint.json', () => {
     }
   });
 
+  it('reports an open chat on holds-link only when conversation_id is supplied', async () => {
+    const holdsChat = vi.fn((conversationId: string) => conversationId === 'open-chat');
+    const held = new AgentRoutes({
+      paths: () => paths,
+      token: TOKEN,
+      inbox: stubInbox(),
+      holdsLink: () => true,
+      holdsChat,
+    });
+    held.setEnabled(true);
+    held.onListening(base);
+    routes = held;
+    const headers = { headers: { Authorization: `Bearer ${TOKEN}` } };
+    const read = async (conversationId?: string) => {
+      const query = new URLSearchParams({
+        kind: 'codex',
+        sessionId: '00000000-0000-4000-8000-000000000071',
+        ...(conversationId === undefined ? {} : { conversation_id: conversationId }),
+      });
+      const res = await fetch(`${base}/agent/holds-link?${query}`, headers);
+      return (await res.json()) as Record<string, unknown>;
+    };
+    try {
+      expect(await read()).toStrictEqual({ holdsLink: true, cwdMatch: 0 });
+      expect(await read('open-chat')).toStrictEqual({
+        holdsLink: true,
+        cwdMatch: 0,
+        holdsChat: true,
+      });
+      expect(await read('archived-chat')).toStrictEqual({
+        holdsLink: true,
+        cwdMatch: 0,
+        holdsChat: false,
+      });
+      expect(await read('unknown-chat')).toStrictEqual({
+        holdsLink: true,
+        cwdMatch: 0,
+        holdsChat: false,
+      });
+      expect(holdsChat).toHaveBeenCalledTimes(3);
+    } finally {
+      held.dispose();
+    }
+  });
+
   it("answers cwdMatch with the workspace root's length only for a folder inside it", async () => {
     const root = path.join(home, 'repo');
     const held = new AgentRoutes({
@@ -961,6 +1006,94 @@ describe('POST /agent/stop', () => {
   });
 });
 
+describe('POST /agent/reload', () => {
+  const reloadText =
+    'Reloading the window for "Qwen_fine_tuning". Run who or status in a few seconds to see it back.';
+  const busyText =
+    'forge.sh: that window has running turns: Maya [nightly], Untitled. ' +
+    'Run reload again with --force to reload anyway.';
+
+  function install(
+    prepareReload: NonNullable<ConstructorParameters<typeof AgentRoutes>[0]['prepareReload']>,
+    reloadWindow: NonNullable<ConstructorParameters<typeof AgentRoutes>[0]['reloadWindow']>,
+  ): void {
+    routes.dispose();
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      prepareReload,
+      reloadWindow,
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+  }
+
+  async function reload(conversationId: string, force = false) {
+    const response = await fetch(
+      `${base}/agent/reload?from=codex&conversation_id=${conversationId}${force ? '&force=true' : ''}`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${TOKEN}` },
+      },
+    );
+    return { status: response.status, body: await response.text() };
+  }
+
+  it('reloads an idle window after returning the success text', async () => {
+    const prepareReload = vi.fn(async () => ({ ok: true as const, workspaceFolderName: 'Qwen_fine_tuning' }));
+    const reloadWindow = vi.fn(async () => undefined);
+    install(prepareReload, reloadWindow);
+
+    expect(await reload('chat-a')).toEqual({ status: 200, body: `${reloadText}\n` });
+    expect(prepareReload).toHaveBeenCalledWith('codex', 'chat-a', false);
+    expect(reloadWindow).toHaveBeenCalledOnce();
+  });
+
+  it('refuses running turns with the exact text and does not reload', async () => {
+    const prepareReload = vi.fn(async () => ({
+      ok: false as const,
+      status: 409,
+      error: busyText,
+    }));
+    const reloadWindow = vi.fn(async () => undefined);
+    install(prepareReload, reloadWindow);
+
+    expect(await reload('chat-a')).toEqual({ status: 409, body: `${busyText}\n` });
+    expect(reloadWindow).not.toHaveBeenCalled();
+  });
+
+  it('reloads running turns when force is true', async () => {
+    const prepareReload = vi.fn(async (_from: string, _id: string, force: boolean) =>
+      force
+        ? { ok: true as const, workspaceFolderName: 'Qwen_fine_tuning' }
+        : { ok: false as const, status: 409, error: busyText },
+    );
+    const reloadWindow = vi.fn(async () => undefined);
+    install(prepareReload, reloadWindow);
+
+    expect(await reload('chat-a', true)).toEqual({ status: 200, body: `${reloadText}\n` });
+    expect(prepareReload).toHaveBeenCalledWith('codex', 'chat-a', true);
+    expect(reloadWindow).toHaveBeenCalledOnce();
+  });
+
+  it('returns the stop unknown-chat error without reloading', async () => {
+    const prepareReload = vi.fn(async () => ({
+      ok: false as const,
+      status: 404,
+      error: 'Forge chat "missing" is no longer open',
+    }));
+    const reloadWindow = vi.fn(async () => undefined);
+    install(prepareReload, reloadWindow);
+
+    expect(await reload('missing')).toEqual({
+      status: 404,
+      body: 'Forge chat "missing" is no longer open\n',
+    });
+    expect(reloadWindow).not.toHaveBeenCalled();
+  });
+});
+
 /** Run the shipped client the way another agent would. Async: the routes
  *  answer from this same process, so a blocking spawn would deadlock. */
 function runClient(
@@ -970,6 +1103,19 @@ function runClient(
   timeoutMs = 20_000,
   cwd?: string,
 ): Promise<{ code: number; out: string }> {
+  return runClientDetailed(args, input, env, timeoutMs, cwd).then(({ code, stdout, stderr }) => ({
+    code,
+    out: stdout + stderr,
+  }));
+}
+
+function runClientDetailed(
+  args: string[],
+  input: string,
+  env: Record<string, string> = {},
+  timeoutMs = 20_000,
+  cwd?: string,
+): Promise<{ code: number; stdout: string; stderr: string }> {
   const bash = TEST_BASH!;
   return new Promise((resolve) => {
     const child = execFile(
@@ -978,7 +1124,7 @@ function runClient(
       { timeout: timeoutMs, env: gitBashEnvironment(env), cwd },
       (err, stdout, stderr) => {
         const code = err ? ((err as { code?: number }).code ?? 1) : 0;
-        resolve({ code: typeof code === 'number' ? code : 1, out: stdout + stderr });
+        resolve({ code: typeof code === 'number' ? code : 1, stdout, stderr });
       },
     );
     child.stdin?.end(input);
@@ -1027,6 +1173,38 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
     const replied = await runClient(['reply', 'fg2-abc'], 'pong\n');
     expect(replied.out).toContain('"delivered":true');
     await expect(waitForReply(paths, 'fg2-abc', 1_000, undefined, 10)).resolves.toBe('pong\n');
+  }, 30_000);
+
+  it('reload sends the chat id and force flag, and refuses malformed ids like stop', async (ctx) => {
+    if (!usable) ctx.skip();
+    const prepareReload = vi.fn(async (_from: string, _id: string, force: boolean) =>
+      force
+        ? { ok: true as const, workspaceFolderName: 'Qwen_fine_tuning' }
+        : { ok: false as const, status: 409, error: 'must force' },
+    );
+    const env = { CODEX_SESSION_ID: '00000000-0000-4000-8000-000000000001' };
+    const reloadWindow = vi.fn(async () => undefined);
+    installClientRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      holdsChat: (conversationId) => conversationId === 'chat-a',
+      prepareReload,
+      reloadWindow,
+    });
+
+    const success = await runClient(['reload', 'codex', '--to', 'chat-a', '--force'], '', env);
+    expect(success).toEqual({
+      code: 0,
+      out: 'Reloading the window for "Qwen_fine_tuning". Run who or status in a few seconds to see it back.\n',
+    });
+    expect(prepareReload).toHaveBeenCalledWith('codex', 'chat-a', true);
+    expect(reloadWindow).toHaveBeenCalledOnce();
+
+    const malformed = await runClient(['reload', 'codex', '--to', 'bad/id'], '', env);
+    expect(malformed.code).toBe(2);
+    expect(malformed.out).toBe("forge.sh: bad conversation id 'bad/id'\n");
+    expect(prepareReload).toHaveBeenCalledOnce();
   }, 30_000);
 
   it('who prints bracketed and quoted titles and continues past an older JSON window', async (ctx) => {
@@ -1433,6 +1611,116 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
     },
     45_000,
   );
+
+  it('routes reload to the window that holds the named chat', async (ctx) => {
+    if (!usable) ctx.skip();
+    routes.dispose();
+    type WindowName = 'window-a' | 'window-b';
+    const calls: Record<WindowName, string[]> = { 'window-a': [], 'window-b': [] };
+    const holdQueries: string[] = [];
+    const reloadQueries: string[] = [];
+    let chatHolders = new Set<WindowName>(['window-b']);
+    const windows: http.Server[] = [];
+    const listenWindow = async (name: WindowName): Promise<string> => {
+      const windowServer = http.createServer((req, res) => {
+        const requestUrl = new URL(req.url ?? '/', 'http://localhost');
+        calls[name].push(`${req.method ?? 'GET'} ${requestUrl.pathname}`);
+        if (requestUrl.pathname === '/agent/holds-link') {
+          holdQueries.push(requestUrl.search);
+          res.end(
+            JSON.stringify({
+              holdsLink: name === 'window-a',
+              cwdMatch: 0,
+              holdsChat: chatHolders.has(name),
+            }),
+          );
+          return;
+        }
+        if (requestUrl.pathname === '/agent/reload' && req.method === 'POST') {
+          reloadQueries.push(requestUrl.search);
+          res.end('{"reloaded":true}');
+          return;
+        }
+        res.writeHead(404).end('{"error":"not found"}');
+      });
+      const port = await listenLoopback(windowServer);
+      windows.push(windowServer);
+      return `http://127.0.0.1:${port}`;
+    };
+    const endpoint = (windowId: string, url: string) =>
+      JSON.stringify({ windowId, url, token: TOKEN, pid: process.pid }, null, 2);
+    const endpointDir = path.join(paths.root, 'endpoints');
+    const env = { CODEX_SESSION_ID: '00000000-0000-4000-8000-000000000001' };
+    try {
+      const windowA = await listenWindow('window-a');
+      const windowB = await listenWindow('window-b');
+      fs.rmSync(endpointDir, { recursive: true, force: true });
+      fs.mkdirSync(endpointDir, { recursive: true });
+      fs.writeFileSync(paths.endpoint, endpoint('window-b', windowB));
+      fs.writeFileSync(path.join(endpointDir, 'window-a.json'), endpoint('window-a', windowA));
+      fs.writeFileSync(path.join(endpointDir, 'window-b.json'), endpoint('window-b', windowB));
+
+      const targetInOtherWindow = await runClientDetailed(
+        ['reload', 'codex', '--to', 'chat-reload'],
+        '',
+        env,
+      );
+      expect(targetInOtherWindow.code, targetInOtherWindow.stdout + targetInOtherWindow.stderr).toBe(0);
+      expect(targetInOtherWindow.stdout).toContain('{"reloaded":true}');
+      expect(calls['window-a']).toEqual(['GET /agent/holds-link']);
+      expect(calls['window-b']).toEqual(['GET /agent/holds-link', 'POST /agent/reload']);
+      expect(holdQueries).toEqual([
+        expect.stringContaining('conversation_id=chat-reload'),
+        expect.stringContaining('conversation_id=chat-reload'),
+      ]);
+      expect(new URLSearchParams(reloadQueries[0]).get('sender')).toBe(
+        JSON.stringify({ kind: 'codex', sessionId: env.CODEX_SESSION_ID }),
+      );
+
+      calls['window-a'].length = 0;
+      calls['window-b'].length = 0;
+      chatHolders = new Set();
+      const noHolder = await runClientDetailed(['reload', 'codex', '--to', 'chat-reload'], '', env);
+      expect(noHolder.code).toBe(1);
+      expect(noHolder.stdout).toBe('');
+      expect(noHolder.stderr).toBe('forge.sh: no open Forge window holds chat "chat-reload".\n');
+      expect(calls['window-a']).toEqual(['GET /agent/holds-link']);
+      expect(calls['window-b']).toEqual(['GET /agent/holds-link']);
+
+      calls['window-a'].length = 0;
+      calls['window-b'].length = 0;
+      chatHolders = new Set(['window-a', 'window-b']);
+      const multipleHolders = await runClientDetailed(
+        ['reload', 'codex', '--to', 'chat-reload'],
+        '',
+        env,
+      );
+      expect(multipleHolders.code).toBe(1);
+      expect(multipleHolders.stdout).toBe('');
+      expect(multipleHolders.stderr).toBe(
+        'forge.sh: more than one live Forge window holds chat "chat-reload".\n',
+      );
+      expect(calls['window-a']).toEqual(['GET /agent/holds-link']);
+      expect(calls['window-b']).toEqual(['GET /agent/holds-link']);
+
+      calls['window-a'].length = 0;
+      calls['window-b'].length = 0;
+      chatHolders = new Set(['window-a']);
+      const targetInSenderWindow = await runClientDetailed(
+        ['reload', 'codex', '--to', 'chat-reload'],
+        '',
+        env,
+      );
+      expect(targetInSenderWindow.code, targetInSenderWindow.stdout + targetInSenderWindow.stderr).toBe(0);
+      expect(calls['window-a']).toEqual(['GET /agent/holds-link', 'POST /agent/reload']);
+      expect(calls['window-b']).toEqual(['GET /agent/holds-link']);
+    } finally {
+      fs.rmSync(endpointDir, { recursive: true, force: true });
+      await Promise.all(
+        windows.map((windowServer) => new Promise<void>((resolve) => windowServer.close(() => resolve()))),
+      );
+    }
+  }, 45_000);
 
   it('who lists each live window once and skips an unreachable endpoint', async (ctx) => {
     if (!usable) ctx.skip();

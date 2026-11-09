@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+- Added `forge.sh reload <name> --to <conversationId> [--force]` to reload the VS Code window that holds a chat after a VSIX install. Running turns in that window refuse the reload unless `--force` is supplied.
+
 ## 0.17.136
 
 - A path argument that ends in a space is repaired instead of refused (2026-11-09, lab arm

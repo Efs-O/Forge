@@ -79,6 +79,10 @@ interface ZodIssueLike {
   origin?: unknown;
   keys?: readonly string[];
   values?: readonly unknown[];
+  /** A union's own per-shape refusals (Zod 4 `invalid_union.errors`). */
+  errors?: unknown;
+  /** The field a discriminated union switches on. */
+  discriminator?: unknown;
 }
 
 /** Issues that get their own line before the rest are only counted. */
@@ -151,6 +155,8 @@ function describeIssue(issue: ZodIssueLike, args?: Record<string, unknown>): str
         ? `${at}has a field it did not declare: ${listed}. Remove it and resend.`
         : `${at}has fields it did not declare: ${listed}. Remove them and resend.`;
     }
+    case 'invalid_union':
+      return unionError(at, named, issue, args, path);
     default:
       // A custom refine ("A single-select question can recommend only one
       // option") already states the rule and the fix, so its message is used
@@ -162,6 +168,78 @@ function describeIssue(issue: ZodIssueLike, args?: Record<string, unknown>): str
 function issueValueText(value: unknown): string {
   if (value === undefined) return '<missing>';
   return JSON.stringify(value) ?? String(value);
+}
+
+/**
+ * The refusal for a value that matched none of a union's shapes.
+ *
+ * A discriminated union given an unknown `kind` reports `invalid_union` with no
+ * values at all ("No matching discriminator"), so `manage_jobs` answered a bad
+ * schedule with `schedule.kind Invalid input` and the model guessed again (lab
+ * run U3a, 2026-11-09). Where the schema is one this repo owns, the accepted
+ * kinds are already in the message the schema wrote for itself (see
+ * `kindUnionError` in `jobs/jobSchema.ts`), and a message that is not Zod's
+ * placeholder is used as written. A plain union carries its per-shape refusals,
+ * so its literals are gathered here instead.
+ */
+function unionError(
+  at: string,
+  named: string,
+  issue: ZodIssueLike,
+  args: Record<string, unknown> | undefined,
+  path: readonly (string | number)[],
+): string {
+  const message = typeof issue.message === 'string' ? issue.message : '';
+  if (message && message !== 'Invalid input') {
+    // The schema wrote this refusal itself, accepted values and no: rewording
+    // it is how the advice gets lost.
+    return `${at}${message}`;
+  }
+  const gathered = gatherUnionValues(issue);
+  if (gathered.values.length === 0) {
+    // Nothing was learned about the accepted set: say what is known, not nothing.
+    return `${at}is not one of the shapes this field accepts. Check this tool's description for the shapes it takes.`;
+  }
+  const key = typeof issue.discriminator === 'string' ? issue.discriminator : gathered.key;
+  const last = path[path.length - 1];
+  const listed = [...new Set(gathered.values)].map(issueValueText).join(', ');
+  const where = key !== undefined && last !== key ? (named ? `${named}.${key} ` : `${key} `) : at;
+  const received =
+    key !== undefined && last !== key ? valueAt(args, [...path, key]) : valueAt(args, path);
+  return (
+    `${where}must be one of ${listed}` +
+    `${received === undefined ? '' : `; received ${issueValueText(received)}`}.`
+  );
+}
+
+/**
+ * The literals a union's own refusals name, and the single field they all
+ * disagree on (`kind` for a union of `{kind: …}` shapes, undefined when they
+ * disagree on more than one field, which is a shape problem rather than a value).
+ */
+function gatherUnionValues(issue: ZodIssueLike): { key?: string; values: string[] } {
+  const found: { key?: string; values: string[] } = { values: [] };
+  const keys = new Set<string>();
+  const visit = (raw: unknown, path: readonly (string | number)[] = []) => {
+    if (raw === null || typeof raw !== 'object') return;
+    const node = raw as ZodIssueLike;
+    const here = Array.isArray(node.path) ? [...path, ...node.path] : path;
+    if (node.code === 'invalid_value' && Array.isArray(node.values)) {
+      for (const value of node.values) found.values.push(String(value));
+      const leaf = here[here.length - 1];
+      if (typeof leaf === 'string') keys.add(leaf);
+    }
+    if (Array.isArray(node.errors)) {
+      for (const group of node.errors) {
+        if (Array.isArray(group)) group.forEach((inner) => visit(inner, here));
+        else visit(group, here);
+      }
+    }
+  };
+  visit(issue);
+  found.values = [...new Set(found.values)];
+  if (keys.size === 1) found.key = [...keys][0];
+  return found;
 }
 
 function tooBigError(at: string, issue: ZodIssueLike, value: unknown): string {

@@ -83,6 +83,12 @@ cancels that approval card.
 Use \`forge.sh stop <name> [--to <conversationId>]\` to cancel a running Forge
 turn like the Stop button. Queued messages are not withdrawn and may start after
 the turn stops; use \`forge.sh cancel\` for those.
+Use \`forge.sh reload <name> --to <conversationId> [--force]\` to reload the VS Code
+window that holds that chat, so a newly installed VSIX takes effect. It can name
+any open chat in the window, whether or not that chat is linked to your session.
+If any chat in the window is running, reload refuses and names those chats; add
+\`--force\` to reload anyway.
+reload goes to the window that holds that chat, whichever window holds your own link.
 Messages routed to an existing Forge chat print its id and title in the 202
 response. There is no \`join\` command: an agent identifies itself from its
 session environment variable.

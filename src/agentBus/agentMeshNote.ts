@@ -94,6 +94,7 @@ an empty \`who\` is normal before any session is linked.
   an agent session the owner has open in a terminal.
 - \`stop <your-name> [--to <chat>]\`: cancel a running Forge turn; queued messages may
   still start. \`cancel <your-name> <id|all>\`: withdraw your queued messages.
+- \`reload <your-name> --to <chat>\`: reload the VS Code window that holds that chat, so a newly installed VSIX takes effect; it refuses while a turn runs there unless you add \`--force\`.
 - \`status <your-name>\`: what your Forge chat is doing now — before your first message
   has started it answers \`State: queued\` with how many of your messages are waiting,
   which is normal, not an error. \`view <your-name> [n]\`: its last answers; it refuses

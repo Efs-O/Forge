@@ -35,6 +35,10 @@ export type AgentRelayResult =
   | { ok: true; exchangeId?: string; deliveredTo?: string; note?: string }
   | { ok: false; error: string };
 
+type ReloadPreparation =
+  | { ok: true; workspaceFolderName: string }
+  | { ok: false; status: number; error: string };
+
 export interface AgentRoutesDeps {
   paths: () => BusPaths;
   inbox: Pick<AgentInbox, 'accept' | 'cancel' | 'release'>;
@@ -44,6 +48,7 @@ export interface AgentRoutesDeps {
   token?: string;
   windowId?: string;
   holdsLink?: (sender: AgentSender) => boolean;
+  holdsChat?: (conversationId: string) => boolean;
   resolveInboundAgent?: (
     sender: AgentSender,
     selection: InboundAgentSelection,
@@ -121,6 +126,14 @@ export interface AgentRoutesDeps {
     | { ok: true; conversationId: string; title: string }
     | { ok: false; status: 400 | 409; error: string }
   >;
+  /** Resolve an open chat in this window and decide whether reload may proceed. */
+  prepareReload?: (
+    from: string,
+    conversationId: string,
+    force: boolean,
+  ) => ReloadPreparation | Promise<ReloadPreparation>;
+  /** Runs only after the HTTP response has finished, since the command closes this window. */
+  reloadWindow?: () => Promise<void>;
   /** Resolve the Forge chat that will receive an accepted agent message. */
   resolveChatTarget?: (from: string, selection: ChatTargetSelection) => ChatTargetResult;
   /**

@@ -117,6 +117,7 @@ describe('every client flag is named in the bus README', () => {
   it('derives the say and send-file flags from the printed usage header', () => {
     expect(flags).toEqual([
       '--caption-file',
+      '--force',
       '--model',
       '--new',
       '--to',
@@ -145,6 +146,12 @@ describe('every client flag is named in the bus README', () => {
     );
     expect(AGENT_NOTE_TEMPLATE).toContain(
       'the turn ends; use `steer` only to stop the current work.',
+    );
+  });
+
+  it('keeps the agent-note reload verb exact', () => {
+    expect(AGENT_NOTE_TEMPLATE.split('\n')).toContain(
+      '- `reload <your-name> --to <chat>`: reload the VS Code window that holds that chat, so a newly installed VSIX takes effect; it refuses while a turn runs there unless you add `--force`.',
     );
   });
 

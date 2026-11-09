@@ -6,7 +6,8 @@ import { ToolRegistry, type RegisteredTool } from '../../src/tools/ToolRegistry'
 import { isFailureResult } from '../../src/sidebar/toolResultView';
 import { classifyResult } from '../../src/sidebar/compactionLedger';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
-import { toolErrorText } from '../../src/tools/toolErrorText';
+import { toolErrorText, describeToolIssues } from '../../src/tools/toolErrorText';
+import { JobSchema } from '../../src/jobs/jobSchema';
 import { makeAskUserTool } from '../../src/tools/askUserTool';
 import { UserQuestionService } from '../../src/sidebar/UserQuestionService';
 
@@ -346,8 +347,8 @@ describe('ToolRegistry.invalidArgs refuses quoted JSON types', () => {
   it('refuses quoted booleans using the JSON boolean example', () => {
     const tool = makeBoolTool('probe', { enabled: { type: 'boolean' } } as never);
     expect(registry.invalidArgs(tool, { enabled: 'True' })).toBe(
-      'Error: probe: "enabled" must be a JSON boolean, not a string. '
-        + 'Resend the call with enabled as true or false.',
+      'Error: probe: "enabled" must be a JSON boolean, not a string. ' +
+        'Resend the call with enabled as true or false.',
     );
   });
 
@@ -358,7 +359,6 @@ describe('ToolRegistry.invalidArgs refuses quoted JSON types', () => {
         'Resend the call with count as 1.',
     );
   });
-
 });
 
 describe('unavailable tool refusals', () => {
@@ -609,5 +609,84 @@ describe('a refusal before the handler runs is recorded as a failure', () => {
     expect(refusal).toMatch(/^Error: /u);
     expect(isFailureResult(refusal as string), refusal).toBe(true);
     expect(classifyResult(refusal), refusal).toBe('failed');
+  });
+});
+
+/**
+ * A union refusal has to name the values it accepts.
+ *
+ * `manage_jobs` with `schedule: {kind: "hourly"}` used to answer
+ * `schedule.kind Invalid input` — every accepted kind was left for the model to
+ * guess, and it guessed again (lab run U3a, 2026-11-09). The kinds come from the
+ * union's own options, in `jobs/jobSchema.ts`.
+ */
+describe("a value that matches none of a union's shapes", () => {
+  const Plain = z.object({
+    on_change: z.union([
+      z.object({ kind: z.literal('notify') }),
+      z.object({ kind: z.literal('summarize'), focus: z.array(z.string()) }),
+    ]),
+  });
+
+  function firstLine(issues: z.ZodIssue[], args: Record<string, unknown>): string {
+    return describeToolIssues('manage_jobs', issues, args)[0];
+  }
+
+  function refused(
+    schema: z.ZodType,
+    args: Record<string, unknown>,
+  ): [z.ZodIssue[], Record<string, unknown>] {
+    const parsed = schema.safeParse(args);
+    expect(parsed.success).toBe(false);
+    return [(parsed as { error: z.ZodError }).error.issues, args];
+  }
+
+  it('names every kind a job schedule accepts', () => {
+    const candidate = {
+      version: 1 as const,
+      id: 'job-1',
+      name: 'watch releases',
+      after: 'stay_awake' as const,
+      schedule: { kind: 'hourly' },
+      check: { kind: 'none' },
+      on_change: { kind: 'notify' },
+    };
+    const [issues, args] = refused(JobSchema, candidate as unknown as Record<string, unknown>);
+    expect(firstLine(issues, args)).toBe(
+      'Error: manage_jobs schedule.kind must be one of "interval", "daily", "weekly"; received "hourly".',
+    );
+  });
+
+  it('names every kind a job check accepts', () => {
+    const candidate = {
+      version: 1 as const,
+      id: 'job-1',
+      name: 'watch releases',
+      after: 'stay_awake' as const,
+      schedule: { kind: 'interval', minutes: 15 },
+      check: { kind: 'nope' },
+      on_change: { kind: 'notify' },
+    };
+    const [issues, args] = refused(JobSchema, candidate as unknown as Record<string, unknown>);
+    expect(firstLine(issues, args)).toBe(
+      'Error: manage_jobs check.kind must be one of "github_release", "github_issue", ' +
+        '"hf_discussion", "disk_space", "tool_usage", "none"; received "nope".',
+    );
+  });
+
+  it('names the values a plain union refused, and the field they belong to', () => {
+    const [issues, args] = refused(Plain, { on_change: { kind: 'shout' } });
+    expect(firstLine(issues, args)).toContain('kind must be one of "notify", "summarize"');
+    expect(firstLine(issues, args)).toContain('received "shout"');
+  });
+
+  it('still tells the model where to look when the union says nothing', () => {
+    const Loose = z.object({
+      schedule: z.discriminatedUnion('kind', [z.object({ kind: z.literal('daily') })]),
+    });
+    const [issues, args] = refused(Loose, { schedule: { kind: 'hourly' } });
+    const line = firstLine(issues, args);
+    expect(line).toContain('is not one of the shapes this field accepts');
+    expect(line).not.toContain('Invalid input');
   });
 });

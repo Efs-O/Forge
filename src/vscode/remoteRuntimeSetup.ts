@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { executeWindowReloadCommand } from './windowReload';
 import type { ForgeConfig } from '../config/types';
 import { loadConfig } from '../config/ConfigLoader';
 import { updateForgeKeyFile } from '../config/ConfigWriter';
@@ -166,7 +167,7 @@ export async function setupRemoteRuntime(
             expiresAt: Date.now() + RELOAD_NOTICE_TTL_MS,
           });
         }
-        await vscode.commands.executeCommand('workbench.action.reloadWindow');
+        await executeWindowReloadCommand();
       } catch (error) {
         if (telegramChatId) {
           await context.workspaceState

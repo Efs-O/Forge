@@ -33,80 +33,117 @@ const WeekdaySchema = z.enum(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
 export type Weekday = z.infer<typeof WeekdaySchema>;
 
 /**
+ * The refusal a discriminated union gives for a `kind` it does not know.
+ *
+ * Zod reports `invalid_union` with no values at all for that ("No matching
+ * discriminator"), so `manage_jobs` answered a bad schedule with
+ * `schedule.kind Invalid input` and the model guessed again (lab run U3a,
+ * 2026-11-09). The kinds are read from the union's own options, so a kind added
+ * to a shape is listed by the refusal the moment that shape is added, and the
+ * list is never typed twice.
+ */
+function kindUnionError(issue: unknown): string {
+  const raw = issue as {
+    inst?: { options?: readonly { shape?: Record<string, { value?: unknown } | undefined> }[] };
+    input?: unknown;
+  };
+  const kinds = (raw.inst?.options ?? [])
+    .map((option) => option.shape?.['kind']?.value)
+    .filter((value): value is string => typeof value === 'string');
+  const received = JSON.stringify(
+    raw.input !== null && typeof raw.input === 'object'
+      ? (raw.input as Record<string, unknown>)['kind']
+      : raw.input,
+  );
+  return (
+    `must be one of ${kinds.map((kind) => JSON.stringify(kind)).join(', ')}; ` +
+    `received ${received === undefined ? '<missing>' : received}.`
+  );
+}
+
+/**
  * When a job runs. Exactly one of the three:
  * - `interval`: every N minutes (>= 15 — below that a GitHub job hammers the
  *   API; the 15-minute floor is the minimum valid interval, B.10).
  * - `daily`: at a clock time each day.
  * - `weekly`: at a clock time on one or more weekdays.
  */
-const ScheduleSchema = z.discriminatedUnion('kind', [
-  z.object({
-    kind: z.literal('interval'),
-    minutes: z
-      .number()
-      .int()
-      .refine(
-        (minutes) => minutes >= 15,
-        'interval must be at least 15 minutes. To wait for a reply, use `wait` ' +
-          '(ends early on a new message).',
-      ),
-  }),
-  z.object({
-    kind: z.literal('daily'),
-    at: ClockTimeSchema,
-  }),
-  z.object({
-    kind: z.literal('weekly'),
-    days: z
-      .array(WeekdaySchema)
-      .refine((days) => days.length >= 1, 'weekly needs at least one weekday'),
-    at: ClockTimeSchema,
-  }),
-]);
+const ScheduleSchema = z.discriminatedUnion(
+  'kind',
+  [
+    z.object({
+      kind: z.literal('interval'),
+      minutes: z
+        .number()
+        .int()
+        .refine(
+          (minutes) => minutes >= 15,
+          'interval must be at least 15 minutes. To wait for a reply, use `wait` ' +
+            '(ends early on a new message).',
+        ),
+    }),
+    z.object({
+      kind: z.literal('daily'),
+      at: ClockTimeSchema,
+    }),
+    z.object({
+      kind: z.literal('weekly'),
+      days: z
+        .array(WeekdaySchema)
+        .refine((days) => days.length >= 1, 'weekly needs at least one weekday'),
+      at: ClockTimeSchema,
+    }),
+  ],
+  { error: kindUnionError },
+);
 export type Schedule = z.infer<typeof ScheduleSchema>;
 
 /** What a job watches. Exactly one of the five (B.2). */
-export const CheckSchema = z.discriminatedUnion('kind', [
-  z.object({
-    kind: z.literal('github_release'),
-    repo: RepoSchema,
-    /** Glob on the asset file names; omit to track the release regardless. */
-    asset_pattern: z.string().min(1).optional(),
-    /**
-     * Which release channel to watch. `latest` (the default) is the newest
-     * non-prerelease release — `/releases/latest`. `prerelease` is the newest
-     * prerelease — the llama.cpp nightly `bNNNN` builds, which `/releases/latest`
-     * never returns (it returns a stub instead). A `llamacpp_update` job must
-     * use `prerelease` or it will never see a real build.
-     */
-    channel: z.enum(['latest', 'prerelease']).default('latest'),
-  }),
-  z.object({
-    kind: z.literal('github_issue'),
-    repo: RepoSchema,
-    issue_number: z.number().int().positive(),
-  }),
-  /** A Hugging Face discussion or PR thread; a new event or status change is a change. */
-  z.object({
-    kind: z.literal('hf_discussion'),
-    repo: RepoSchema,
-    repo_type: z.enum(['model', 'dataset', 'space']).default('model'),
-    discussion_number: z.number().int().positive(),
-  }),
-  z.object({
-    kind: z.literal('disk_space'),
-    path: z.string().min(1),
-    min_free_gb: z.number().positive(),
-  }),
-  /** Local, file-only daily tool usage measurement. */
-  z.object({
-    kind: z.literal('tool_usage'),
-  }),
-  /** No check: the job runs on every schedule tick. */
-  z.object({
-    kind: z.literal('none'),
-  }),
-]);
+export const CheckSchema = z.discriminatedUnion(
+  'kind',
+  [
+    z.object({
+      kind: z.literal('github_release'),
+      repo: RepoSchema,
+      /** Glob on the asset file names; omit to track the release regardless. */
+      asset_pattern: z.string().min(1).optional(),
+      /**
+       * Which release channel to watch. `latest` (the default) is the newest
+       * non-prerelease release — `/releases/latest`. `prerelease` is the newest
+       * prerelease — the llama.cpp nightly `bNNNN` builds, which `/releases/latest`
+       * never returns (it returns a stub instead). A `llamacpp_update` job must
+       * use `prerelease` or it will never see a real build.
+       */
+      channel: z.enum(['latest', 'prerelease']).default('latest'),
+    }),
+    z.object({
+      kind: z.literal('github_issue'),
+      repo: RepoSchema,
+      issue_number: z.number().int().positive(),
+    }),
+    /** A Hugging Face discussion or PR thread; a new event or status change is a change. */
+    z.object({
+      kind: z.literal('hf_discussion'),
+      repo: RepoSchema,
+      repo_type: z.enum(['model', 'dataset', 'space']).default('model'),
+      discussion_number: z.number().int().positive(),
+    }),
+    z.object({
+      kind: z.literal('disk_space'),
+      path: z.string().min(1),
+      min_free_gb: z.number().positive(),
+    }),
+    /** Local, file-only daily tool usage measurement. */
+    z.object({
+      kind: z.literal('tool_usage'),
+    }),
+    /** No check: the job runs on every schedule tick. */
+    z.object({
+      kind: z.literal('none'),
+    }),
+  ],
+  { error: kindUnionError },
+);
 export type Check = z.infer<typeof CheckSchema>;
 export type GithubReleaseCheck = Extract<Check, { kind: 'github_release' }>;
 export type GithubIssueCheck = Extract<Check, { kind: 'github_issue' }>;
@@ -125,68 +162,76 @@ const SummaryFocusSchema = z.enum(['release_notes', 'breaking_changes', 'cuda', 
  * two. `notify` just reports; `summarize` runs a no-tools model call to
  * summarize the change, only when no turn is streaming (it waits for idle).
  */
-const OnChangeSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('notify') }),
-  z.object({
-    kind: z.literal('summarize'),
-    focus: z.array(SummaryFocusSchema).min(1).max(3).default(['release_notes']),
-  }),
-]);
+const OnChangeSchema = z.discriminatedUnion(
+  'kind',
+  [
+    z.object({ kind: z.literal('notify') }),
+    z.object({
+      kind: z.literal('summarize'),
+      focus: z.array(SummaryFocusSchema).min(1).max(3).default(['release_notes']),
+    }),
+  ],
+  { error: kindUnionError },
+);
 
 /** The mutating actions (B.7). `llamacpp_update` is the fixed pipeline; `agent_task` runs an agent turn. */
-export const ActionSchema = z.discriminatedUnion('kind', [
-  z.object({
-    kind: z.literal('llamacpp_update'),
-    mode: z.enum(['prepare', 'apply']),
+export const ActionSchema = z.discriminatedUnion(
+  'kind',
+  [
+    z.object({
+      kind: z.literal('llamacpp_update'),
+      mode: z.enum(['prepare', 'apply']),
+      /**
+       * Asset filename `*`-glob, e.g. `llama-*-bin-win-cuda-*-x64.zip`.
+       * A literal `{tag}` is NOT substituted — the pattern is matched as a
+       * glob, so write a `*` where the tag varies.
+       */
+      asset_pattern: z.string().min(1),
+    }),
     /**
-     * Asset filename `*`-glob, e.g. `llama-*-bin-win-cuda-*-x64.zip`.
-     * A literal `{tag}` is NOT substituted — the pattern is matched as a
-     * glob, so write a `*` where the tag varies.
+     * An agent task: when the job fires, an agent reads the task, thinks,
+     * runs commands and finishes. The task is capped at 4000 characters.
      */
-    asset_pattern: z.string().min(1),
-  }),
-  /**
-   * An agent task: when the job fires, an agent reads the task, thinks,
-   * runs commands and finishes. The task is capped at 4000 characters.
-   */
-  z.object({
-    kind: z.literal('agent_task'),
-    /** The plain-language task for the agent. Capped at 4000 characters. */
-    task: z
-      .string()
-      .min(1)
-      .refine((task) => task.length <= 4000, 'task must be at most 4000 characters'),
-    /** Optional model override; default: the default chat model. */
-    model: z.string().min(1).optional(),
-    /** Optional wall-clock cap in minutes; omitted = no clock cap. */
-    max_minutes: z.number().int().positive().optional(),
-    /** When to report: "failures_and_changes" or "always". */
-    report: z.enum(['failures_and_changes', 'always']).default('failures_and_changes'),
-  }),
-  /**
-   * The daily retitle pass (`src/jobs/retitleRun.ts`): gives a name to the chats
-   * still called after their first prompt. There is no tool here: the model
-   * returns a name as plain text and the host validates and applies it, so a
-   * run cannot touch a chat its own filter refused.
-   */
-  z.object({
-    kind: z.literal('retitle'),
-    /** Optional model override; default: the default chat model. */
-    model: z.string().min(1).optional(),
-    /** Chats renamed at most per run, so one job cannot rewrite the history list. */
-    max_chats: z.number().int().min(1).max(200).default(20),
-    /** A chat updated less than this many minutes ago is left alone. */
-    min_idle_minutes: z.number().int().min(0).max(1440).default(60),
-    /** Report what would be renamed and change nothing. */
-    dry_run: z.boolean().default(false),
-    /** Chats the job already named, named again on the owner's say-so, for a
-     *  one-off pass over titles it got wrong. A name a person typed is never in
-     *  reach whatever this list says, and the open, streaming, idle and job-chat
-     *  rules still apply. Empty outside such a pass. */
-    reassess_ids: z.array(z.string().min(1)).max(50).default([]),
-    report: z.enum(['failures_and_changes', 'always']).default('failures_and_changes'),
-  }),
-]);
+    z.object({
+      kind: z.literal('agent_task'),
+      /** The plain-language task for the agent. Capped at 4000 characters. */
+      task: z
+        .string()
+        .min(1)
+        .refine((task) => task.length <= 4000, 'task must be at most 4000 characters'),
+      /** Optional model override; default: the default chat model. */
+      model: z.string().min(1).optional(),
+      /** Optional wall-clock cap in minutes; omitted = no clock cap. */
+      max_minutes: z.number().int().positive().optional(),
+      /** When to report: "failures_and_changes" or "always". */
+      report: z.enum(['failures_and_changes', 'always']).default('failures_and_changes'),
+    }),
+    /**
+     * The daily retitle pass (`src/jobs/retitleRun.ts`): gives a name to the chats
+     * still called after their first prompt. There is no tool here: the model
+     * returns a name as plain text and the host validates and applies it, so a
+     * run cannot touch a chat its own filter refused.
+     */
+    z.object({
+      kind: z.literal('retitle'),
+      /** Optional model override; default: the default chat model. */
+      model: z.string().min(1).optional(),
+      /** Chats renamed at most per run, so one job cannot rewrite the history list. */
+      max_chats: z.number().int().min(1).max(200).default(20),
+      /** A chat updated less than this many minutes ago is left alone. */
+      min_idle_minutes: z.number().int().min(0).max(1440).default(60),
+      /** Report what would be renamed and change nothing. */
+      dry_run: z.boolean().default(false),
+      /** Chats the job already named, named again on the owner's say-so, for a
+       *  one-off pass over titles it got wrong. A name a person typed is never in
+       *  reach whatever this list says, and the open, streaming, idle and job-chat
+       *  rules still apply. Empty outside such a pass. */
+      reassess_ids: z.array(z.string().min(1)).max(50).default([]),
+      report: z.enum(['failures_and_changes', 'always']).default('failures_and_changes'),
+    }),
+  ],
+  { error: kindUnionError },
+);
 export type Action = z.infer<typeof ActionSchema>;
 
 /** A job definition. Immutable except by `manage_jobs` create/update. */

@@ -70,6 +70,7 @@ describe('CLIENT_SCRIPT usage block', () => {
       'ack-verdict',
       'steer',
       'stop',
+      'reload',
       'cancel',
       'who',
       'status',
@@ -84,6 +85,7 @@ describe('CLIENT_SCRIPT usage block', () => {
     expect(usage).toContain('--to <conversationId>|--to-running');
     expect(usage).toContain('forge.sh steer <your-name> <to> [--to <conversationId>] [file]');
     expect(usage).toContain('forge.sh stop <your-name> [--to <conversationId>]');
+    expect(usage).toContain('forge.sh reload <your-name> --to <conversationId> [--force]');
     expect(BUS_README).toContain('say <name> --to-running');
     expect(BUS_README).toContain('read-verdict <name> <exchangeId>');
     expect(BUS_README).toContain('forge.sh stop <name> [--to <conversationId>]');

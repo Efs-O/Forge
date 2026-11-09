@@ -29,9 +29,9 @@
  * (the forge-bench tool host), where the whole feature is a no-op.
  */
 import * as fs from 'fs';
-import { formatDiagnosticLine } from './lspTools';
 import { vscodeDiagnosticsSource } from './editDiagnosticsSource';
-import { displayPath, notCheckedNote, notReportedNote } from './editDiagnosticsNotes';
+import { describeProblems } from './editDiagnosticsNotes';
+export { diffProblems } from './editDiagnosticsNotes';
 
 /** `tools.edit_diagnostics` as config.yaml states it. */
 export interface EditDiagnosticsSettings {
@@ -56,8 +56,6 @@ const DEFAULT_MAX_ITEMS = 10;
  * WAS reported on keeps the full `settle_ms`, because there the wait buys a diff.
  */
 const COLD_REPORT_WAIT_MS = 1_000;
-/** Errors and warnings only: `severity` below this is info or hint. */
-const REPORTABLE_SEVERITY = 1;
 
 /** A problem as a language service reported it, in the shape this module needs. */
 export interface ReportedProblem {
@@ -105,6 +103,14 @@ export interface DiagnosticsSource {
    * disposes the listener, including a Stop.
    */
   onChange(listener: (paths: string[]) => void): () => void;
+  /**
+   * The language id of an open document at this path, or undefined when no
+   * editor holds one. It answers the one question a wait cannot: whether this
+   * host has a language service for this kind of file at all. A file whose
+   * language no service has ever reported on is not an edit that went unchecked
+   * — it is an edit nothing can check, and saying so on every write is noise.
+   */
+  languageOf?(path: string): string | undefined;
 }
 
 export type DiagnosticsSourceFactory = () => DiagnosticsSource | undefined;
@@ -125,6 +131,24 @@ export type ProblemWatcher = (writtenPath: string) => Promise<ProblemWatch | und
 /** Nothing to watch: the default for a tool built without the feature wired. */
 export const NO_PROBLEM_WATCHER: ProblemWatcher = async () => undefined;
 
+/**
+ * The languages this host has waited on and never heard from.
+ *
+ * A language with no diagnostics provider — plain text, Markdown, a data file —
+ * answers nothing, so every write to it paid the cold wait for the same hedge.
+ * The first write still pays it and still says so; after that the note is
+ * dropped for that language. In memory only: nothing outlives the window, and a
+ * server that starts late clears its language the first time it reports.
+ */
+export interface LanguageMarks {
+  has(languageId: string): boolean;
+  add(languageId: string): void;
+  delete(languageId: string): void;
+}
+
+/** The one set every tool shares for the life of the window. */
+const unservedLanguages: LanguageMarks = new Set<string>();
+
 /** The one append point: `result` plus the note, or `result` untouched. */
 export function withProblemNote(result: string, note: string): string {
   return note ? `${result}\n${note}` : result;
@@ -141,8 +165,16 @@ export function withProblemNote(result: string, note: string): string {
 export function makeProblemWatcher(deps: {
   settings: EditDiagnosticsGetter;
   source?: DiagnosticsSourceFactory;
+  /** The unserved-language set to use; the shared one when not given (tests pass their own). */
+  languageMarks?: LanguageMarks;
 }): ProblemWatcher {
   const sourceOf = deps.source ?? vscodeDiagnosticsSource;
+  const marks = deps.languageMarks ?? unservedLanguages;
+  // The listener that clears a mark has to outlive the write that set it: a
+  // Python server may report on its own file a minute later, and from then on
+  // writes to Python wait and note as they always did. Installed once per tool,
+  // for as long as the tool lives.
+  let clearingInstalled = false;
   return async (writtenPath: string) => {
     const configured = deps.settings();
     if (configured?.enabled === false) return undefined;
@@ -187,6 +219,22 @@ export function makeProblemWatcher(deps: {
             // Same as before the write: a failed priming step fails nothing.
           }
         }
+        const language = source.languageOf?.(writtenPath) ?? source.languageOf?.(key);
+        if (language !== undefined && marks.has(language)) {
+          // Nothing on this host reports on this kind of file, and this already
+          // said so once: no wait, and no second hedge to read.
+          return '';
+        }
+        if (language !== undefined && source.languageOf && !clearingInstalled) {
+          clearingInstalled = true;
+          source.onChange((paths) => {
+            // A service spoke up about this language: it is served after all.
+            for (const reportedPath of paths) {
+              const served = source.languageOf?.(reportedPath);
+              if (served !== undefined) marks.delete(served);
+            }
+          });
+        }
         const deadlineMs = beforeSeen ? settleMs : Math.min(settleMs, COLD_REPORT_WAIT_MS);
         // A file this host will not open for checking is a file no service is
         // going to report on, so the wait cannot answer anything about it: every
@@ -205,6 +253,16 @@ export function makeProblemWatcher(deps: {
         }
         const after = pairs === undefined ? undefined : problemsByPath(pairs);
         if (after === undefined) return '';
+        if (
+          language !== undefined &&
+          !beforeSeen &&
+          !eventArrived &&
+          (after.get(key) ?? []).length === 0
+        ) {
+          // Waited, nothing arrived: this language has no service here, and the
+          // next write to it will not pay for the same answer again.
+          marks.add(language);
+        }
         return describeProblems({
           beforeSeen,
           beforeProblems,
@@ -219,111 +277,6 @@ export function makeProblemWatcher(deps: {
       },
     };
   };
-}
-
-/** The note text, or '' when there is nothing to say. */
-function describeProblems(context: {
-  beforeSeen: boolean;
-  beforeProblems: readonly ReportedProblem[];
-  afterProblems: readonly ReportedProblem[];
-  /**
-   * A diagnostics event naming this file arrived, so the service had a chance
-   * to re-read it.
-   */
-  eventArrived: boolean;
-  /** The wait ended because the call was stopped, not because time ran out. */
-  aborted: boolean;
-  /** How long the language service actually had, which the note has to state honestly; undefined when no wait ran. */
-  deadlineMs: number | undefined;
-  writtenPath: string;
-  maxItems: number;
-  /** Why the file was never opened for checking, when the source said why. */
-  notPrimed?: string | undefined;
-}): string {
-  const { beforeSeen, beforeProblems, afterProblems, writtenPath, maxItems } = context;
-  const display = displayPath(writtenPath);
-  if (!beforeSeen) {
-    // Nothing reported on this file before the write, so there is nothing to
-    // diff and nothing may be called new: a problem that shows up now may have
-    // been sitting in the file for months. This module used to run the same
-    // diff against an empty before list and call every problem a new one, which
-    // sent the model hunting for a break its edit never introduced.
-    const reportable = afterProblems.filter((problem) => problem.severity <= REPORTABLE_SEVERITY);
-    if (reportable.length > 0) return problemsNote(display, reportable, maxItems);
-    // An event naming this file is the service saying "I looked, and there is
-    // nothing to say"; no event is the service never having looked at all.
-    return context.eventArrived
-      ? `No problems reported in ${display} after this edit.`
-      : notReportedNote(context.aborted, context.deadlineMs, context.notPrimed);
-  }
-  const introduced = diffProblems(beforeProblems, afterProblems).filter(
-    (problem) => problem.severity <= REPORTABLE_SEVERITY,
-  );
-  const shown = introduced.slice(0, maxItems);
-  if (shown.length === 0) {
-    const gone = Math.max(
-      0,
-      beforeProblems.filter((problem) => problem.severity <= REPORTABLE_SEVERITY).length -
-        afterProblems.filter((problem) => problem.severity <= REPORTABLE_SEVERITY).length,
-    );
-    // Two identical reads are not a check. An agent's edit goes to disk and the
-    // editor's file watcher has to carry it to the language service, which can
-    // lag — on a network drive it often lags past the deadline. Then the "after"
-    // read is the picture the service already had BEFORE the write, and calling
-    // that "No new problems" reports a verification that never happened. The
-    // note says what is actually known instead, and where to go ask for it.
-    // A picture that DID move is evidence of a re-check even with no event, so
-    // that case still gets the diff it earned.
-    if (beforeSeen && !context.eventArrived && sameProblems(beforeProblems, afterProblems)) {
-      return notCheckedNote(writtenPath, context.aborted, context.deadlineMs);
-    }
-    return gone > 0
-      ? `No new problems after this edit; ${gone} problem${gone === 1 ? '' : 's'} this file ` +
-          `had before ${gone === 1 ? 'is' : 'are'} gone.`
-      : 'No new problems after this edit.';
-  }
-  const sources = [...new Set(shown.map((problem) => problem.source ?? 'language service'))];
-  const hidden = introduced.length - shown.length;
-  return (
-    `New problems after this edit (${sources.join(', ')}):\n` +
-    shown.map((problem) => formatDiagnosticLine(display, problem)).join('\n') +
-    (hidden > 0 ? `\n(+${hidden} more not shown; ask for the file's diagnostics to see them.)` : '')
-  );
-}
-
-/**
- * Which problems the write introduced.
- *
- * Keyed by source, code, severity and message — the identity of a problem — and
- * matched positionally by line order within that key, so an error that only
- * MOVED because the edit added lines above it is not counted as a new one. The
- * plan's "line after shifting" is exactly this: counting by identity first and
- * by line second is the only way a moved problem and a new problem differ.
- */
-export function diffProblems(
-  before: readonly ReportedProblem[],
-  after: readonly ReportedProblem[],
-): ReportedProblem[] {
-  const byIdentity = new Map<string, { before: ReportedProblem[]; after: ReportedProblem[] }>();
-  const add = (problem: ReportedProblem, side: 'before' | 'after'): void => {
-    const key = `${problem.source ?? ''}|${problem.code ?? ''}|${problem.severity}|${problem.message}`;
-    const group = byIdentity.get(key) ?? { before: [], after: [] };
-    (side === 'before' ? group.before : group.after).push(problem);
-    byIdentity.set(key, group);
-  };
-  for (const problem of before) add(problem, 'before');
-  for (const problem of after) add(problem, 'after');
-  const introduced: ReportedProblem[] = [];
-  for (const group of byIdentity.values()) {
-    const beforeLines = group.before.map((problem) => problem.line).sort((a, b) => a - b);
-    const afterSorted = [...group.after].sort((a, b) => a.line - b.line);
-    // More copies of this identity than there were, or copies at lines that
-    // were not in the before list once the earlier ones are paired off.
-    for (let index = beforeLines.length; index < afterSorted.length; index += 1) {
-      introduced.push(afterSorted[index]!);
-    }
-  }
-  return introduced.sort((a, b) => a.line - b.line);
 }
 
 /** What the wait actually saw, which decides whether the note may claim anything. */
@@ -412,52 +365,6 @@ function problemsByPath(
 function matchingKey(path: string): string {
   const normalized = path.replace(/\\/gu, '/');
   return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
-}
-
-/**
- * The two reads are the same picture, so the diff between them proves nothing.
- *
- * Compared by problem identity and line, not by array order: a service that
- * re-reports the same problems in a different order has not learned anything
- * new about this edit either.
- */
-function sameProblems(
-  before: readonly ReportedProblem[],
-  after: readonly ReportedProblem[],
-): boolean {
-  if (before.length !== after.length) return false;
-  const canon = (list: readonly ReportedProblem[]): string[] =>
-    list
-      .map(
-        (problem) =>
-          `${problem.line}|${problem.source ?? ''}|${problem.code ?? ''}|` +
-          `${problem.severity}|${problem.message}`,
-      )
-      .sort();
-  return canon(before).join('\n') === canon(after).join('\n');
-}
-
-/**
- * Problems a file shows now, when nothing reported on it before the write.
- *
- * Worded differently from the "new problems" header on purpose: with no before
- * picture these are only "what the file shows now", and calling them this
- * edit's work would send the model to fix something it did not break.
- */
-function problemsNote(
-  display: string,
-  reportable: readonly ReportedProblem[],
-  maxItems: number,
-): string {
-  const shown = reportable.slice(0, maxItems);
-  const sources = [...new Set(shown.map((problem) => problem.source ?? 'language service'))];
-  const hidden = reportable.length - shown.length;
-  return (
-    `Problems in ${display} after this edit (${sources.join(', ')}; it had not been checked ` +
-    `before, so some may predate it):\n` +
-    shown.map((problem) => formatDiagnosticLine(display, problem)).join('\n') +
-    (hidden > 0 ? `\n(+${hidden} more not shown; ask for the file's diagnostics to see them.)` : '')
-  );
 }
 
 function bounded(value: unknown, fallback: number, minimum: number, maximum: number): number {

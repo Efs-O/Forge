@@ -799,6 +799,7 @@ overlaps with an existing owner, extend the owner instead.
 | Sidebar/panel + Keep/Undo commands   | `src/vscode/sidebarCommands.ts`  |
 | Config bootstrap (first load, setup fallback) | `src/vscode/configBootstrap.ts` |
 | Remote runtime setup (channels, config setters, wake relay) | `src/vscode/remoteRuntimeSetup.ts` |
+| Shared VS Code window reload command (Telegram and agent bus) | `src/vscode/windowReload.ts` |
 | Which VS Code remote kinds mean this window is hosted on another computer's behalf (`tunnel`, `ssh-remote`) | `src/vscode/remoteWindowKind.ts` |
 | Workspace bootstrap (session migration, FORGE.md, the agent note, the four desktop-bridge commands) | `src/vscode/workspaceBootstrap.ts` |
 | Index file watchers (save/create/delete/rename) | `src/vscode/indexWatchers.ts` |

@@ -105,6 +105,19 @@ export function vscodeDiagnosticsSource(): DiagnosticsSource | undefined {
       }
       return undefined;
     },
+    /**
+     * The language id of an open document, if one holds this file.
+     *
+     * Only open documents are asked: `ensureChecked` has already opened the file
+     * it intends to have checked, and a language id for a file nothing holds
+     * would be a guess.
+     */
+    languageOf(path: string): string | undefined {
+      const target = vscode.Uri.file(path).fsPath;
+      // A host without the document list simply has no answer here.
+      const documents: readonly vscode.TextDocument[] = vscode.workspace.textDocuments ?? [];
+      return documents.find((document) => document.uri.fsPath === target)?.languageId;
+    },
   };
 }
 

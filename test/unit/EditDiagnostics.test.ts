@@ -7,6 +7,7 @@ import {
   diffProblems,
   makeProblemWatcher,
   type DiagnosticsSource,
+  type LanguageMarks,
   type ProblemWatcher,
   type ReportedProblem,
 } from '../../src/tools/editDiagnostics';
@@ -27,10 +28,7 @@ import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
 
 const FILE = '/workspace/src/a.ts';
 
-function problem(
-  line: number,
-  overrides: Partial<ReportedProblem> = {},
-): ReportedProblem {
+function problem(line: number, overrides: Partial<ReportedProblem> = {}): ReportedProblem {
   return {
     line,
     severity: 0,
@@ -51,7 +49,12 @@ class FakeSource implements DiagnosticsSource {
     private pairs: [string, ReportedProblem[]][],
     /** What the source says when it declines to open the file, if anything. */
     private primingReason?: string,
+    /** Which open documents this fake holds, by path: the language id it reports. */
+    private langs: Record<string, string> = {},
   ) {}
+  languageOf(pathToAsk: string): string | undefined {
+    return this.langs[pathToAsk];
+  }
   reported(): [string, ReportedProblem[]][] | undefined {
     this.reportedCalls += 1;
     return this.pairs;
@@ -74,17 +77,20 @@ class FakeSource implements DiagnosticsSource {
   }
   /** The test's stand for "the service noticed the write and re-reported". */
   setProblems(pathToSet: string, problems: ReportedProblem[]): void {
-    this.pairs = [...this.pairs.filter(([entryPath]) => entryPath !== pathToSet), [
-      pathToSet,
-      problems,
-    ]];
+    this.pairs = [
+      ...this.pairs.filter(([entryPath]) => entryPath !== pathToSet),
+      [pathToSet, problems],
+    ];
   }
   fire(paths: string[]): void {
     for (const listener of [...this.listeners]) listener(paths);
   }
 }
 
-function watcherFor(source: FakeSource, settings: { enabled?: boolean; settle_ms?: number; max_items?: number } = {}) {
+function watcherFor(
+  source: FakeSource,
+  settings: { enabled?: boolean; settle_ms?: number; max_items?: number } = {},
+) {
   return makeProblemWatcher({ settings: () => settings, source: () => source });
 }
 
@@ -227,7 +233,9 @@ describe('the note a write result appends', () => {
     source.reported = () => {
       throw new Error('service unavailable');
     };
-    expect(await makeProblemWatcher({ settings: () => ({}), source: () => source })(FILE)).toBeUndefined();
+    expect(
+      await makeProblemWatcher({ settings: () => ({}), source: () => source })(FILE),
+    ).toBeUndefined();
   });
 });
 
@@ -457,8 +465,7 @@ describe('a file nothing has reported on yet — the common agent case', () => {
   // known: a 6 MB file was never going to be parsed inside the wait, and the
   // model can only act on a note that says so.
   it('says the edit was not checked because the file was too large to open', async () => {
-    const reason =
-      'the file is 6.0 MB and this host opens only files up to 5 MB for checking';
+    const reason = 'the file is 6.0 MB and this host opens only files up to 5 MB for checking';
     const source = new FakeSource([], reason);
     const watch = await watcherFor(source, { settle_ms: 0 })(onDisk)!;
     expect(source.opened).toHaveLength(0);
@@ -477,8 +484,7 @@ describe('a file nothing has reported on yet — the common agent case', () => {
   // never come back, and a listener count of zero says the event was never
   // subscribed at all.
   it('does not wait out the deadline for a file it will not open', async () => {
-    const reason =
-      'the file is 6.0 MB and this host opens only files up to 5 MB for checking';
+    const reason = 'the file is 6.0 MB and this host opens only files up to 5 MB for checking';
     const source = new FakeSource([], reason);
     vi.useFakeTimers();
     const watch = await watcherFor(source, { settle_ms: 2_000 })(onDisk)!;
@@ -563,7 +569,9 @@ describe('the VS Code-backed source', () => {
     const listeners: Array<(event: { uris: { fsPath: string }[] }) => void> = [];
     let problems: [vscode.Uri, vscode.Diagnostic[]][] = [[vscode.Uri.file(FILE), []]];
     languages['getDiagnostics'] = () => problems;
-    languages['onDidChangeDiagnostics'] = (listener: (event: { uris: { fsPath: string }[] }) => void) => {
+    languages['onDidChangeDiagnostics'] = (
+      listener: (event: { uris: { fsPath: string }[] }) => void,
+    ) => {
       listeners.push(listener);
       return { dispose: () => listeners.splice(listeners.indexOf(listener), 1) };
     };
@@ -630,9 +638,9 @@ describe('the VS Code-backed source', () => {
       const watcher = makeProblemWatcher({ settings: () => ({ settle_ms: 0 }) });
       await (await watcher(inside))!.settle();
       await (await watcher(outside))!.settle();
-      expect(opened.filter((pathToOpen) => pathToOpen.includes(path.basename(inside)))).toHaveLength(
-        1,
-      );
+      expect(
+        opened.filter((pathToOpen) => pathToOpen.includes(path.basename(inside))),
+      ).toHaveLength(1);
       expect(opened.some((pathToOpen) => pathToOpen.includes(path.basename(outside)))).toBe(false);
     } finally {
       workspace['workspaceFolders'] = hadFolders;
@@ -815,7 +823,11 @@ describe('the three write tools call it from the same point', () => {
   it('adds nothing when no watcher was wired', async () => {
     fs.writeFileSync(target, 'const q = 1;\n');
     const edited = String(
-      await makeEditFileTool().handler({ path: target, old_str: 'const q = 1;', new_str: 'const qq = 1;' }),
+      await makeEditFileTool().handler({
+        path: target,
+        old_str: 'const q = 1;',
+        new_str: 'const qq = 1;',
+      }),
     );
     expect(edited).toBe(`Replaced in ${target}`);
     const written = String(
@@ -837,5 +849,72 @@ describe('the three write tools call it from the same point', () => {
     );
     expect(structured).toContain('"operationsApplied":1');
     expect(structured.split('\n')).toHaveLength(1);
+  });
+});
+
+/**
+ * A language nothing on this host reports on.
+ *
+ * Plain text, Markdown and data files have no diagnostics provider, so every
+ * write to one paid the cold wait for the same hedge sentence (owner report
+ * 2026-11-09: the note came back on every write in a Python-free repo and the
+ * model kept reporting it as if it meant something). The first write still says
+ * it; after that the language is remembered as unserved, in memory only, and a
+ * service that starts late clears its language the moment it reports.
+ */
+describe('a language no service on this host reports on', () => {
+  const TXT = '/workspace/notes/readme.txt';
+  const OTHER = '/workspace/notes/other.txt';
+  const LANGS = { [TXT]: 'plaintext', [OTHER]: 'plaintext' };
+
+  function marksWatcher(source: FakeSource, marks: LanguageMarks, settleMs = 20): ProblemWatcher {
+    return makeProblemWatcher({
+      settings: () => ({ settle_ms: settleMs }),
+      source: () => source,
+      languageMarks: marks,
+    });
+  }
+
+  it('waits and says once that nothing reported on it', async () => {
+    const source = new FakeSource([], undefined, LANGS);
+    const marks = new Set<string>();
+    const watch = await marksWatcher(source, marks)(TXT)!;
+    const note = await watch.settle();
+    expect(note).toContain('No language service reported on this file');
+    expect(note).toContain('that is not proof it is clean');
+    expect(marks.has('plaintext')).toBe(true);
+  });
+
+  it('says nothing on the next write to that language, and does not wait', async () => {
+    const source = new FakeSource([], undefined, LANGS);
+    const marks = new Set<string>();
+    const watcher = marksWatcher(source, marks, 400);
+    await (await watcher(TXT)!).settle();
+    const started = Date.now();
+    const second = await (await watcher(TXT)!).settle();
+    expect(second).toBe('');
+    expect(Date.now() - started).toBeLessThan(100);
+  });
+
+  it('waits and says again once that language has reported on anything', async () => {
+    const source = new FakeSource([], undefined, LANGS);
+    const marks = new Set<string>();
+    const watcher = marksWatcher(source, marks);
+    await (await watcher(TXT)!).settle();
+    expect(marks.has('plaintext')).toBe(true);
+    source.fire([OTHER]);
+    expect(marks.has('plaintext')).toBe(false);
+    const note = await (await watcher(TXT)!).settle();
+    expect(note).toContain('No language service reported on this file');
+    expect(marks.has('plaintext')).toBe(true);
+  });
+
+  it('keeps checking a language that does report', async () => {
+    const source = new FakeSource([[FILE, []]], undefined, { [FILE]: 'typescript' });
+    const marks = new Set<string>();
+    const watch = await marksWatcher(source, marks)(FILE)!;
+    const note = await watch.settle();
+    expect(note).toContain('not checked');
+    expect(marks.size).toBe(0);
   });
 });

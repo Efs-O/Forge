@@ -79,6 +79,12 @@ const ROUTE_FOR_VERB: Record<
     body: `from=codex&id=x1&kind=codex&sessionId=${CODEX_SESSION}`,
     form: true,
   },
+  reload: {
+    method: 'POST',
+    path: '/agent/reload',
+    query: '?from=codex&conversation_id=c1',
+    body: '',
+  },
   cancel: { method: 'POST', path: '/agent/cancel', query: '?from=codex&id=m1', body: '' },
   'remote-ask': {
     method: 'POST',
@@ -324,6 +330,7 @@ describe('the routes a production window registers', () => {
           remoteSessionAction: async (_from: string, _s: string, _id: string, action: string) =>
             action === 'ask' ? { kind: 'asked', questionId: 'q7' } : { kind: 'notified' },
         }) as never,
+      reloadWindow: async () => undefined,
       isFocused: () => true,
     };
   }

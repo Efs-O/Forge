@@ -13,6 +13,7 @@
  * of Truth); a route that is never registered is the same bug one level up.
  */
 
+import * as path from 'path';
 import { busPaths } from '../agentBus/agentBus';
 import type { AgentInbox } from '../agentBus/agentInbox';
 import { BUS_TARGET_SCAN, senderConversation } from '../agentBus/busTarget';
@@ -30,6 +31,7 @@ import type { ChatsReport } from '../backend/agentChatReadRoute';
 import { chatRefs, closedChatRefs } from '../tools/chatMessageResolver';
 import { validateBusSenderName } from '../backend/agentSenderParsing';
 import type { RemoteRuntime } from '../remote/RemoteRuntime';
+import { executeWindowReloadCommand } from './windowReload';
 import { MAX_VIEW_COUNT, parseViewCount } from '../remote/RemoteTranscriptView';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import {
@@ -63,6 +65,7 @@ export interface AgentRouteDepsHosts {
   pendingReplies: PendingAgentReplies;
   askRuntime: AskAgentRuntime;
   getRemoteRuntime(): RemoteRuntime | undefined;
+  reloadWindow?(): Promise<void>;
   isFocused(): boolean;
 }
 
@@ -171,6 +174,12 @@ export function buildAgentRouteDeps(hosts: AgentRouteDepsHosts): AgentRoutesDeps
     isChatBusy: (conversationId) =>
       getFacade().status().streamingConversationIds.includes(conversationId),
     holdsLink: (sender) => linkedAgentOwner(getFacade, sender) !== undefined,
+    holdsChat: (conversationId) =>
+      getFacade()
+        .status()
+        .conversations.some(
+          (conversation) => conversation.id === conversationId && !conversation.archived,
+        ),
     resolveInboundAgent: (sender, selection) => getFacade().routeInboundAgent(sender, selection),
     showAlsoLinkedNotice: (conversationId, message) =>
       getFacade().showConversationNotice(conversationId, message),
@@ -211,6 +220,35 @@ export function buildAgentRouteDeps(hosts: AgentRouteDepsHosts): AgentRoutesDeps
         : steerBlockReason(getFacade(), conversationId, title ?? conversationId, expectedEpoch),
     stopForge: async (from, conversationId) =>
       stopForgeForSender(getFacade(), from, conversationId),
+    prepareReload: (from, conversationId, force) => {
+      const facade = getFacade();
+      const target = resolveBusMessageTarget(
+        facade,
+        from,
+        { conversationId },
+        exchangeConversationFromLedger,
+      );
+      if (!target.ok) return target;
+      const status = facade.status();
+      const running = new Set(status.streamingConversationIds);
+      const runningTitles = status.conversations
+        .filter((conversation) => running.has(conversation.id))
+        .map((conversation) => conversation.title);
+      if (runningTitles.length > 0 && !force) {
+        return {
+          ok: false as const,
+          status: 409,
+          error:
+            `forge.sh: that window has running turns: ${runningTitles.join(', ')}. ` +
+            'Run reload again with --force to reload anyway.',
+        };
+      }
+      return {
+        ok: true as const,
+        workspaceFolderName: path.win32.basename(workspaceRoot.replace(/[\\/]+$/u, '')),
+      };
+    },
+    reloadWindow: hosts.reloadWindow ?? executeWindowReloadCommand,
     // A `--new` message needs a tab to exist. Ask the sidebar NOW whether one
     // could be opened, so the route can answer 409 with the reasons instead of
     // answering 202 and dropping the message in `drain()`.

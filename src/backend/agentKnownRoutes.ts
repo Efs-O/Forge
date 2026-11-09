@@ -17,6 +17,8 @@
  *  gate's business. */
 export interface AgentRouteAvailability {
   stopForge?: unknown;
+  prepareReload?: unknown;
+  reloadWindow?: unknown;
   who?: unknown;
   status?: unknown;
   view?: unknown;
@@ -35,6 +37,7 @@ export function isKnownAgentRoute(route: string, deps: AgentRouteAvailability): 
     route === '/agent/reply' ||
     route === '/agent/cancel' ||
     (route === '/agent/stop' && !!deps.stopForge) ||
+    (route === '/agent/reload' && !!deps.prepareReload && !!deps.reloadWindow) ||
     (route === '/agent/who' && !!deps.who) ||
     (route === '/agent/status' && !!deps.status) ||
     (route === '/agent/view' && !!deps.view) ||

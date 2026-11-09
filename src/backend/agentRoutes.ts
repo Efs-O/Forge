@@ -18,6 +18,7 @@ import {
   type AgentRouteFields as Fields,
 } from './agentRouteFields';
 import { parseAgentMessageOptions, parseOriginConversation } from './agentMessageOptions';
+import { getLogger } from '../util/logger';
 import { dispatchAgentRelay } from './agentRelayDispatch';
 import { handleAgentRemoteSessionRoute } from './agentRemoteSessionRoute';
 import { isPathInside } from '../util/pathContainment';
@@ -29,6 +30,8 @@ import {
   parseOptionalAgentSender,
   validateBusSenderName,
 } from './agentSenderParsing';
+
+const log = getLogger();
 
 /**
  * The path with symlinks resolved, or as given when it cannot be resolved
@@ -112,9 +115,20 @@ export class AgentRoutes {
           kind: url.searchParams.get('kind'),
           sessionId: url.searchParams.get('sessionId'),
         });
+        const rawConversationId = url.searchParams.get('conversation_id');
+        const conversationId =
+          rawConversationId === null
+            ? undefined
+            : parseAgentMessageOptions({ conversation_id: rawConversationId }).conversationId;
+        if (rawConversationId !== null && conversationId === undefined) {
+          throw new HttpError(400, 'conversation_id is required: name the chat by its id');
+        }
         return sendJson(res, 200, {
           holdsLink: this.deps.holdsLink?.(sender) === true,
           cwdMatch: this.cwdMatch(url.searchParams.get('cwd')),
+          ...(conversationId === undefined
+            ? {}
+            : { holdsChat: this.deps.holdsChat?.(conversationId) === true }),
         });
       } catch (error) {
         if (error instanceof HttpError)
@@ -212,6 +226,35 @@ export class AgentRoutes {
               title: result.title,
             })
           : sendJson(res, result.status, { error: result.error });
+      }
+      if (route === '/agent/reload') {
+        const rawConversationId = fields['conversation_id'];
+        if (typeof rawConversationId !== 'string') {
+          throw new HttpError(400, 'conversation_id is required: name the chat by its id');
+        }
+        const options = parseAgentMessageOptions({ conversation_id: rawConversationId });
+        if (options.conversationId === undefined) {
+          throw new HttpError(400, 'conversation_id is required: name the chat by its id');
+        }
+        const rawForce = fields['force'];
+        if (rawForce !== undefined && rawForce !== 'true') {
+          throw new HttpError(400, 'force must be true when supplied');
+        }
+        const result = await this.deps.prepareReload!(
+          from,
+          options.conversationId,
+          rawForce === 'true',
+        );
+        if (!result.ok) return sendText(res, result.status, result.error);
+        const message =
+          `Reloading the window for "${result.workspaceFolderName}". ` +
+          'Run who or status in a few seconds to see it back.';
+        res.once('finish', () => {
+          void this.deps.reloadWindow!().catch((error: unknown) => {
+            log.error(`[agentRoutes] window reload failed: ${String(error)}`);
+          });
+        });
+        return sendText(res, 200, message);
       }
       // M6: an inbound message addressed to another agent (to != forge) is
       // relayed by the host through the recipient's adapter, with zero Forge

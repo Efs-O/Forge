@@ -9,6 +9,7 @@
 #   forge.sh ack-verdict <your-name> <exchangeId>   acknowledge a read verdict and remove its retained copy
 #   forge.sh steer <your-name> <to> [--to <conversationId>] [file] forge: interrupt the running turn and run this next (--to only here); claude/codex/copilot: withdraw this chat's earlier ask to that agent and ask this instead
 #   forge.sh stop <your-name> [--to <conversationId>]  cancel a running Forge turn; queued messages may still start
+#   forge.sh reload <your-name> --to <conversationId> [--force]  reload the window holding that chat; --force allows a running turn to be cut off
 #   forge.sh cancel <your-name> <id|all>  withdraw your queued message(s) to Forge not yet started
 #   forge.sh who                      every live Forge window's linked agent sessions, one row per linked chat (titles may contain brackets or quotes)
 #   forge.sh status <your-name> [--to <conversationId>]  what your chat with Forge is doing now (tool, last words, context); --to reads a chat linked to your session, and a chat that is not linked is refused by name; before your first turn starts, your queue
@@ -78,6 +79,30 @@ resolve_endpoint() {
     if [ -n "$MATCH" ] && [ "$MATCH" -gt "$NEAREST_LEN" ]; then NEAREST="$WINDOW_EP"; NEAREST_LEN="$MATCH"; fi
   done
   if [ -n "$HOLDER" ]; then EP="$HOLDER"; elif [ -n "$NEAREST" ]; then EP="$NEAREST"; fi
+}
+# Reload is addressed to a chat rather than the sender's linked chat. The chat
+# may be held by a different Forge window, so ask every live endpoint directly.
+resolve_reload_endpoint() {
+  local HOLDER="" SENDER_CWD="$PWD" WINDOW_EP WINDOW_URL WINDOW_TOKEN HELD
+  if command -v cygpath >/dev/null 2>&1; then SENDER_CWD="$(cygpath -w "$PWD")"
+  elif [ -n "${WSL_DISTRO_NAME:-}" ] && command -v wslpath >/dev/null 2>&1; then SENDER_CWD="$(wslpath -w "$PWD" 2>/dev/null || printf '%s' "$PWD")"; fi
+  for WINDOW_EP in "$ROOT"/endpoints/*.json; do
+    [ -f "$WINDOW_EP" ] || continue
+    WINDOW_URL="$(grep '"url"' "$WINDOW_EP" | cut -d'"' -f4)"
+    WINDOW_TOKEN="$(grep '"token"' "$WINDOW_EP" | cut -d'"' -f4)"
+    [ -n "$WINDOW_URL" ] && [ -n "$WINDOW_TOKEN" ] || continue
+    HELD="$(curl -sS --connect-timeout 1 --max-time 3 -G -H "Authorization: Bearer $WINDOW_TOKEN" --data-urlencode "kind=$SENDER_KIND" --data-urlencode "sessionId=$SENDER_ID" --data-urlencode "cwd=$SENDER_CWD" --data-urlencode "conversation_id=$CONVERSATION_ID" "$WINDOW_URL/agent/holds-link" 2>/dev/null)" || continue
+    case "$HELD" in *'"holdsChat":true'*)
+      [ -z "$HOLDER" ] || { echo "forge.sh: more than one live Forge window holds chat \"$CONVERSATION_ID\"." >&2; exit 1; }
+      HOLDER="$WINDOW_EP";;
+    esac
+  done
+  if [ -n "$HOLDER" ]; then
+    EP="$HOLDER"
+  else
+    echo "forge.sh: no open Forge window holds chat \"$CONVERSATION_ID\"." >&2
+    exit 1
+  fi
 }
 # Under WSL2 (NAT on Windows 10) 127.0.0.1 is the Linux VM, not Windows where
 # Forge listens; Windows' curl.exe (via interop) reaches Windows' loopback.
@@ -344,7 +369,7 @@ if [ "$VERB" = "send-file" ]; then
   exit 0
 fi
 [ $# -ge 2 ] || usage
-ARG=""; SRC="-"; MODEL=""; NEW_CHAT=""; UNATTENDED=""; CONVERSATION_ID=""; TO_RUNNING=""; ORIGIN_CONVERSATION=""
+ARG=""; SRC="-"; MODEL=""; NEW_CHAT=""; UNATTENDED=""; CONVERSATION_ID=""; TO_RUNNING=""; ORIGIN_CONVERSATION=""; FORCE=""
 if [ "$VERB" = "say" ]; then
   shift
   while [ $# -gt 0 ]; do
@@ -393,6 +418,18 @@ elif [ "$VERB" = "stop" ]; then
   done
   set_sender_identity "$ARG"
   SRC=/dev/null
+elif [ "$VERB" = "reload" ]; then
+  ARG="$2"; shift 2
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --to) [ $# -ge 2 ] && [ -z "$CONVERSATION_ID" ] || usage; CONVERSATION_ID="$2"; shift 2;;
+      --force) [ -z "$FORCE" ] || usage; FORCE=true; shift;;
+      *) usage;;
+    esac
+  done
+  [ -n "$CONVERSATION_ID" ] || usage
+  set_sender_identity "$ARG"
+  SRC=/dev/null
 elif [ $# -ge 2 ]; then
   ARG="$2"
   [ $# -ge 3 ] && SRC="$3"
@@ -415,6 +452,9 @@ case "$VERB" in
   stop)  case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
          case "$CONVERSATION_ID" in ""|*[!A-Za-z0-9._-]*) [ -z "$CONVERSATION_ID" ] || { echo "forge.sh: bad conversation id '$CONVERSATION_ID'" >&2; exit 2; };; esac
          ROUTE=stop; QUERY="from=$ARG$SENDER_QUERY"; [ -n "$CONVERSATION_ID" ] && QUERY="$QUERY&conversation_id=$CONVERSATION_ID"; SRC=/dev/null ;;
+  reload) case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
+          case "$CONVERSATION_ID" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: bad conversation id '$CONVERSATION_ID'" >&2; exit 2;; esac
+          ROUTE=reload; QUERY="from=$ARG$SENDER_QUERY&conversation_id=$CONVERSATION_ID"; [ -n "$FORCE" ] && QUERY="$QUERY&force=true"; SRC=/dev/null ;;
   cancel) case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
          [ $# -eq 3 ] || usage
          case "$3" in ""|*[!A-Za-z0-9_-]*) echo "forge.sh: bad id '$3' (the id say printed, or all)" >&2; exit 2;; esac
@@ -423,10 +463,20 @@ case "$VERB" in
 esac
 TMP="$(mktemp)"; trap 'rm -f "$TMP"' EXIT
 if [ "$SRC" = "-" ]; then cat > "$TMP"; else cp "$SRC" "$TMP" || exit 2; fi
-resolve_endpoint
+if [ "$VERB" = "reload" ]; then resolve_reload_endpoint; else resolve_endpoint; fi
 if [ -f "$EP" ]; then
   URL="$(grep '"url"' "$EP" | cut -d'"' -f4)"
   TOKEN="$(grep '"token"' "$EP" | cut -d'"' -f4)"
+  if [ "$VERB" = "reload" ]; then
+    if RESULT="$(curl -sS --fail-with-body -X POST -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: text/plain; charset=utf-8" --data-binary "@$TMP" "$URL/agent/$ROUTE?$QUERY" 2>/dev/null)"; then
+      printf '%s\n' "$RESULT"
+      exit 0
+    fi
+    if [ -n "${RESULT:-}" ]; then printf '%s\n' "$RESULT" >&2
+    else echo "forge.sh: Forge's endpoint did not accept reload." >&2; fi
+    exit 1
+  fi
   if RESULT="$(curl -sS --fail-with-body -X POST -H "Authorization: Bearer $TOKEN" \
       -H "Content-Type: text/plain; charset=utf-8" --data-binary "@$TMP" "$URL/agent/$ROUTE?$QUERY")"; then
     printf '%s\n' "$RESULT"
