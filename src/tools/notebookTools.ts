@@ -1,10 +1,38 @@
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveWorkspaceUri } from '../util/WorkspacePaths';
+import { describePathMiss } from './pathErrorHint';
 import { capResultText, MAX_READ_FILE_CHARS } from './resultCap';
 
 function notebookUri(path: string): vscode.Uri {
   return resolveWorkspaceUri(path);
+}
+
+/**
+ * Open a notebook, or say why it could not be opened in words the agent can act on.
+ *
+ * `openNotebookDocument` answers both mistakes with an internal string: a file that is not
+ * a notebook gets `Missing viewType for '<percent-encoded uri>'`, which names neither the
+ * type nor the tool to use instead, and a missing file gets a bare
+ * `Unable to resolve nonexistent file '…'` with no tool name on it (lab arm U5a,
+ * 2026-11-09). The first is decided from the path before the call; the second is handed to
+ * the same refusal every other file tool uses, so it names the base and `find_files`.
+ */
+export async function openNotebookOrExplain(
+  tool: 'read_notebook' | 'edit_notebook_cell',
+  requestedPath: string,
+  uri: vscode.Uri,
+): Promise<vscode.NotebookDocument> {
+  if (!/\.ipynb$/iu.test(uri.fsPath)) {
+    throw new Error(
+      `${tool}: "${requestedPath}" is not a notebook (.ipynb). Use read_file for a plain text file.`,
+    );
+  }
+  try {
+    return await vscode.workspace.openNotebookDocument(uri);
+  } catch (err) {
+    throw new Error(describePathMiss(tool, requestedPath, err));
+  }
 }
 
 export function makeReadNotebookTool(): RegisteredTool {
@@ -32,8 +60,11 @@ export function makeReadNotebookTool(): RegisteredTool {
     },
     permission: 'read',
     handler: async (args) => {
-      const document = await vscode.workspace.openNotebookDocument(
-        notebookUri(args['path'] as string),
+      const requestedPath = args['path'] as string;
+      const document = await openNotebookOrExplain(
+        'read_notebook',
+        requestedPath,
+        notebookUri(requestedPath),
       );
       const requested = args['cell_index'] as number | undefined;
       const cells =
@@ -77,7 +108,11 @@ export function makeEditNotebookCellTool(): RegisteredTool {
     mutation: { paths: (args) => [args['path'] as string], showDiff: false },
     handler: async (args) => {
       const uri = notebookUri(args['path'] as string);
-      const document = await vscode.workspace.openNotebookDocument(uri);
+      const document = await openNotebookOrExplain(
+        'edit_notebook_cell',
+        args['path'] as string,
+        uri,
+      );
       const index = args['cell_index'] as number;
       if (index >= document.cellCount) {
         throw new Error(

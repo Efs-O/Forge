@@ -122,13 +122,20 @@ export async function readRange(
   const start = Math.max(1, startLine ?? 1);
   const end = Math.min(lines.length, endLine ?? lines.length);
   if (start > lines.length) {
-    throw new Error(
-      `read_file: start_line ${start} is past the end of the file (${lines.length} lines).`,
-    );
+    // Prevention, not recovery: a resumed chunk read that runs past the end is the corpus's
+    // biggest burner, and the refusal cost a whole round to learn the one fact — the file's
+    // length. The note states it and the call succeeds; an inverted range below is still a
+    // genuine argument error and still throws.
+    return {
+      text:
+        `read_file: the file has ${lines.length} line(s), so there is nothing to read at ` +
+        `lines ${start}-${Math.max(start, endLine ?? start)}. You have reached the end.`,
+      totalLines,
+    };
   }
   if (start > end) {
     throw new Error(
-      `read_file: start_line ${start} is past end_line ${end} (file has ${lines.length} lines).`,
+      `read_file: start_line ${start} is past end_line ${end} — the last line is ${lines.length}.`,
     );
   }
   const selected = lines.slice(start - 1, end);

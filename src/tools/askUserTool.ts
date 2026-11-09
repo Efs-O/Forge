@@ -123,6 +123,47 @@ function questionPromptRepair(
   };
 }
 
+/**
+ * An option object with no `label` produced the one refusal in the lab that named nothing: the
+ * schema's own `ask_user questions[N].options[N] Invalid input` gave the model no key to fix, so it
+ * re-sent the same shape. Name the key and the path, the way the missing-`prompt` refusal above
+ * already does. A bare string option is legal, so only objects are judged.
+ */
+function missingOptionLabelRefusal(args: Record<string, unknown>): { refusal: string } | undefined {
+  const paths: string[] = [];
+  const checkOptions = (options: unknown, prefix: string): void => {
+    if (!Array.isArray(options)) return;
+    options.forEach((option, optionIndex) => {
+      if (
+        option !== null &&
+        typeof option === 'object' &&
+        !Array.isArray(option) &&
+        (option as Record<string, unknown>)['label'] === undefined
+      ) {
+        paths.push(`${prefix}.options[${optionIndex}]`);
+      }
+    });
+  };
+  checkOptions(args['options'], 'ask_user');
+  const questions = args['questions'];
+  if (Array.isArray(questions)) {
+    questions.forEach((question, questionIndex) => {
+      const nested =
+        question !== null && typeof question === 'object' && !Array.isArray(question)
+          ? (question as Record<string, unknown>)['options']
+          : undefined;
+      checkOptions(nested, `questions[${questionIndex}]`);
+    });
+  }
+  if (paths.length === 0) return undefined;
+  return {
+    refusal:
+      `ask_user ${paths.join(', ')} ${paths.length === 1 ? 'is' : 'are'} missing "label" — ` +
+      'an option object needs a "label" ("description", "exclusive" and "recommended" are optional). ' +
+      'Send an option as a plain string, or as {"label":"…","description":"…"}.',
+  };
+}
+
 /** Ask the user and wait for a response, using the shared question contract. */
 export function makeAskUserTool(
   questions: UserQuestionService,
@@ -203,6 +244,8 @@ export function makeAskUserTool(
       // refusal in the consecutive-failure streak that can strip a model's tools,
       // so a returned string would silently stop these calls from counting.
       if ('refusal' in call) throw new Error(call.refusal);
+      const labelRefusal = missingOptionLabelRefusal(call.args);
+      if (labelRefusal) throw new Error(labelRefusal.refusal);
       const parsed = askUserArgsSchema.parse(call.args);
       if (context?.conversationId && unattended.has(context.conversationId)) {
         return (

@@ -583,6 +583,48 @@ describe('ToolDispatch', () => {
     expect(structuredEdit.handler).toHaveBeenCalledOnce();
   });
 
+  it('snapshots and judges a write whose path ends in a space at the trimmed path', async () => {
+    // The gate, the checkpoint and the handler must all judge ONE path. Before the repair
+    // moved into ToolDispatch they read `"src/a.ts "` while the tool wrote `src/a.ts`, so
+    // Keep/Undo and the diff card could point at a file the edit never touched (U6b).
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: {
+          name: 'write_file',
+          description: 'Write a file',
+          parameters: {
+            type: 'object',
+            properties: {
+              path: { type: 'string', description: 'File path, absolute or workspace-relative.' },
+              content: { type: 'string' },
+            },
+          },
+        },
+      },
+      permission: 'write',
+      mutation: { paths: (args) => [args['path'] as string], showDiff: true },
+      handler: vi.fn().mockResolvedValue('written'),
+    });
+    const messages: Array<{ role: string; content: string }> = [];
+
+    await dispatch.dispatch(
+      [makeToolCall('write_file', { path: 'src/a.ts ', content: 'x' })],
+      allowed,
+      messages as never,
+    );
+
+    const snapshotted = (
+      checkpoints.snapshotBefore as unknown as { mock: { calls: string[][] } }
+    ).mock.calls.map((call) => call[0]);
+    expect(snapshotted).toEqual([path.join(WS, 'src/a.ts')]);
+    const handledPath = (
+      (toolRegistry.get('write_file')?.handler as unknown as { mock: { calls: Record<string, unknown>[][] } }).mock
+        .calls[0][0]['path'] as string
+    );
+    expect(handledPath).toBe('src/a.ts');
+  });
+
   it('turns a schema refusal into one plain line, not the JSON block Zod prints', async () => {
     // The one place a thrown tool error becomes the result string is this catch,
     // so the formatting belongs to the dispatcher and no tool has to word its

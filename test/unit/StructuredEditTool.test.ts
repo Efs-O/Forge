@@ -93,6 +93,7 @@ describe('apply_line_edits', () => {
       content: 'ONE\r\ntwo\r\nTHREE\r\n',
       replacedLines: 3,
       replacementLines: 2,
+      autoAligned: [],
     });
   });
 
@@ -139,17 +140,39 @@ describe('apply_line_edits', () => {
     ).toThrow('out-of-range');
   });
 
-  it('names the given and required line counts and the range when they disagree', () => {
+  it('corrects a miscounted end_line whose text matches at start_line, and refuses one that does not', () => {
+    // Prevention pass (2026-11-09): a miscount whose text matches at the named start is not a
+    // disagreement — the tool fixes its own argument. A miscount whose text does NOT match there
+    // still refuses, because which copy was meant is the caller's call.
+    const result = applyLineEditsToContent('a\nb\nc\nd\n', [
+      { start_line: 2, end_line: 4, expected_lines: ['b', 'c'], replacement_lines: ['B'] },
+    ]);
+    expect(result.content).toBe('a\nB\nd\n');
+    expect(result.replacedLines).toBe(2);
+    expect(result.autoAligned).toEqual([{ index: 1, startLine: 2, statedEnd: 4, actualEnd: 3 }]);
     expect(() =>
       applyLineEditsToContent('a\nb\nc\nd\n', [
-        { start_line: 2, end_line: 4, expected_lines: ['b', 'c'], replacement_lines: ['B'] },
+        { start_line: 1, end_line: 3, expected_lines: ['b', 'c'], replacement_lines: ['B'] },
       ]),
-    ).toThrow('operation 1 expected_lines has 2 line(s), but lines 2-4 are 3 line(s)');
-    expect(() =>
-      applyLineEditsToContent('a\nb\nc\nd\n', [
-        { start_line: 2, end_line: 4, expected_lines: ['b', 'c'], replacement_lines: ['B'] },
-      ]),
-    ).toThrow('Current file lines 2-4:\n2|b\n3|c\n4|d');
+    ).toThrow('expected_lines has 2 line(s), but lines 1-3 are 3 line(s)');
+  });
+
+  it('an empty expected_lines keeps the true count refusal, not a phantom alignment', () => {
+    // Claude review defect 2: `[]` matches every slice, so the aligner must not treat an empty
+    // block as a miscount — the count refusal is the honest answer.
+    let message = '';
+    try {
+      applyLineEditsToContent('a\nb\nc\n', [
+        { start_line: 1, end_line: 3, expected_lines: [], replacement_lines: ['x'] },
+      ]);
+    } catch (error) {
+      message = String((error as Error).message);
+    }
+    expect(message).toBe(
+      'apply_line_edits: operation 1 expected_lines has 0 line(s), but lines 1-3 are 3 line(s). ' +
+        'expected_lines must be exactly the current text of start_line through end_line, one entry ' +
+        'per line. Current file lines 1-3:\n1|a\n2|b\n3|c',
+    );
   });
 
   it('derives one omitted bound from expected_lines when dispatching the tool', async () => {

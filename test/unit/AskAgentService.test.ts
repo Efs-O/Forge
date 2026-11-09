@@ -103,6 +103,30 @@ describe('ask_agent session resolution', () => {
     expect(state.events).toContain('persist');
   });
 
+  // 2026-11-09: the header used to be a bare "[Forge ask]", and `forge.sh who`
+  // prints titles but no ids, so an agent that wanted to write back to the
+  // asking chat later spent turns finding it. The title stays; the id is added.
+  it('names the asking chat by title and id, with the command to reach it again', async () => {
+    const state = setup({ isLive: vi.fn(async () => true) });
+    state.conv.title = 'Design\n  chat';
+    state.conv.agentLinks = { claude: linked('claude') };
+    rebuildIndex([state.conv]);
+    await state.handler(
+      { agent: 'claude', message: 'Review this' },
+      {
+        conversation: state.conv,
+        checkpoint: state.checkpoint,
+        signal: new AbortController().signal,
+        workspaceRoot: 'C:/repo',
+        persistConversation: state.persistConversation,
+      },
+    );
+    const prompt = vi.mocked(state.runtime.sendLive).mock.calls[0]?.[2];
+    expect(prompt).toContain(`[Forge ask from chat "Design chat" · ${id}]`);
+    expect(prompt).toContain(`To message this chat again later: forge.sh say claude --to ${id}`);
+    expect(prompt).toContain('Review this');
+  });
+
   // 2026-11-06: a Codex thread Forge started is an `exec` thread, which the VS
   // Code Codex panel never lists, so opening the panel on it could only ever
   // time out — and while it was open the panel's app-server held that thread's

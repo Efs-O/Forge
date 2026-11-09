@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- A path argument that ends in a space is repaired instead of refused (2026-11-09, lab arm
+  U6b): `read_file`/`list_directory` were answering "nothing exists there" about a file that
+  exists, and the refusal then blamed the workspace root. `ToolDispatch` now trims trailing
+  whitespace from the path arguments a tool's own schema declares — `path`, `paths`, `cwd`,
+  `destination`, and any argument its description calls a path — before the approval
+  metadata, `mutation.paths` and the checkpoint snapshot read them, so the gate, the
+  snapshot and the handler all judge one path. The result carries
+  `Note: argument "path" ended with a space; trimmed it before running the tool.`
+- `read_notebook` and `edit_notebook_cell` now explain their own failures (2026-11-09, lab
+  arm U5a): a file that is not a notebook says so and points at `read_file` instead of
+  leaking `Missing viewType for 'file:///…%20…'`, and a missing file goes through the same
+  "nothing exists there" refusal every other file tool uses, which names the base it
+  resolved against and `find_files`.
+- Failing tool calls now teach the way the overnight lab asked for (2026-11-09):
+  `apply_line_edits` staleness names the lines the model's text actually moved to (or echoes
+  the current range), an out-of-range span names the file's length, `read_file` past the end
+  says "the last line is N", `edit_file` says the file may have changed since it was read,
+  `ask_user` names an option missing its `label`, and the boolean refusal advice says
+  "true or false" instead of only "false". A quoted `"true"`/`"false"` on a declared boolean
+  argument is now accepted instead of refused. The shell guard no longer mistakes a
+  PowerShell flag like `-Force` for a write destination under `~/.forge`.
 - message_chat budgets widened (owner, 2026-11-08): the send, idle-wake and
   new-chat caps now count a 30-minute window — 30 messages, 20 idle-chat wakes,
   and `permissions.chats.new_chats_per_hour` defaults to 100 (was 2, max 6, per

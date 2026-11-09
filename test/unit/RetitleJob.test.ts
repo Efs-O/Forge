@@ -77,6 +77,15 @@ describe('the candidate filter', () => {
     expect(titleSourceOf({ title: 'Tractor beam work' }, prompt)).toBe('user');
   });
 
+  it('recognizes old 48-unit prompt titles after the title limit grows', () => {
+    const firstLine = 'Investigate the archived conversation titles and remember the panel size';
+    const legacyTitle = `${firstLine.slice(0, 48)}…`;
+    expect(titleSourceOf({ title: legacyTitle }, firstLine)).toBe('prompt');
+    expect(titleSourceOf({ title: deriveTitle(firstLine) }, firstLine)).toBe('prompt');
+    expect(titleSourceOf({ title: legacyTitle, title_source: 'user' }, firstLine)).toBe('user');
+    expect(titleSourceOf({ title: legacyTitle, title_source: 'auto' }, firstLine)).toBe('auto');
+  });
+
   it('leaves a chat the job already named alone, so a run cannot loop', () => {
     expect(retitleSkipReason(record({ titleSource: 'auto' }), options)).toBe('already-auto-named');
   });

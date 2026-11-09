@@ -66,12 +66,35 @@ function description(request: AskAgentRequest, title: string): string {
   return heading.length > MAX_SUBJECT_CHARS ? `${heading.slice(0, MAX_SUBJECT_CHARS)}…` : heading;
 }
 
-function promptFor(request: AskAgentRequest, link: AgentLink, firstCodexAsk: boolean): string {
+/**
+ * The header names the asking chat by title and id. Without the id, an agent
+ * that wanted to message that chat again later (a follow-up, a correction) had
+ * to go looking for it: `forge.sh who` prints titles, not ids, and one session
+ * spent its turns finding the chat that had just asked it a question.
+ */
+function askHeader(request: AskAgentRequest, conversation: ConversationRuntime): string {
+  const title = conversation.title.replace(/\s+/gu, ' ').trim();
+  const shown = title.length > MAX_SUBJECT_CHARS ? `${title.slice(0, MAX_SUBJECT_CHARS)}…` : title;
+  return (
+    `[Forge ask from chat "${shown}" · ${conversation.id}]\n` +
+    `To message this chat again later: forge.sh say ${request.agent} --to ${conversation.id}`
+  );
+}
+
+function promptFor(
+  request: AskAgentRequest,
+  link: AgentLink,
+  firstCodexAsk: boolean,
+  conversation: ConversationRuntime,
+): string {
   const task = request.message.trim();
   const subject = request.subject?.trim();
   const body = subject ? `Subject: ${subject}\n\n${task}` : task;
   const titleLine = firstCodexAsk ? `${link.title}\n\n` : '';
-  return `${titleLine}[Forge ask]\n\n${body}\n\nReturn a concise answer for the Forge chat.`;
+  return (
+    `${titleLine}${askHeader(request, conversation)}\n\n${body}\n\n` +
+    'Return a concise answer for the Forge chat.'
+  );
 }
 
 function validateRequest(value: AskAgentRequest): AskAgentRequest {
@@ -283,7 +306,7 @@ async function ask(
       liveResult = await options.runtime.sendLive(
         agent,
         linked,
-        promptFor(request, linked, false),
+        promptFor(request, linked, false, context.conversation),
         context.signal,
         'ask',
         () => markAccepted(linked!),
@@ -311,7 +334,7 @@ async function ask(
           liveResult = await options.runtime.sendLive(
             agent,
             linked,
-            promptFor(request, linked, false),
+            promptFor(request, linked, false, context.conversation),
             context.signal,
             'ask',
             () => markAccepted(linked!),
@@ -341,7 +364,7 @@ async function ask(
       const resumed = await options.runtime.runHeadless({
         agent,
         link: linked,
-        prompt: promptFor(request, linked, false),
+        prompt: promptFor(request, linked, false, context.conversation),
         sessionTitle: linked.title,
         signal: context.signal,
         onAccepted: () => markAccepted(linked!),
@@ -401,7 +424,7 @@ async function ask(
   let acceptedId = initial?.sessionId;
   let sessionConfirmed = false;
   const firstCodexAsk = agent === 'codex' && !initial;
-  const prompt = promptFor(request, placeholder, firstCodexAsk);
+  const prompt = promptFor(request, placeholder, firstCodexAsk, context.conversation);
   const result = await options.runtime.runHeadless({
     agent,
     link: placeholder,

@@ -270,6 +270,23 @@ export function ownerOnlyStatementTargetFor(
       continue;
     }
     if (index === 0 || positions.skip.has(index)) continue;
+    // A bare PowerShell flag is not a destination — the T22 loop (lab 2026-11-08). But a flag can
+    // *carry* its destination (`Set-Content -Path:<file>`), and `forcedTargets` only extracts
+    // inline values for the copy programs (`shellWritePositions.ts`), so a colon value is judged
+    // here (Claude review 2026-11-09 item 3) — only when it looks like a path: `-Encoding:utf8`
+    // and `-Force:$true` are not, and resolving them against the folder put the T22 bug straight
+    // back through the colon.
+    if (/^-\p{L}/u.test(token)) {
+      const colon = token.indexOf(':');
+      if (colon === -1) continue;
+      const value = token.slice(colon + 1).replace(/^["']+|["']+$/gu, '');
+      if (!(/[\\/]/u.test(value) || /^(?:~|\$HOME|\$env:|[A-Za-z]:)/u.test(value))) continue;
+      const forced = tokenPathCandidate(value);
+      if (!forced || forced.includes('=')) continue;
+      const carried = ownerOnlyWriteTargetFor(forced, set, base);
+      if (carried) return { ...carried, supplied: value };
+      continue;
+    }
     const candidate = tokenPathCandidate(token);
     if (!candidate || candidate.includes('=')) continue;
     const hit = ownerOnlyWriteTargetFor(candidate, set, base);

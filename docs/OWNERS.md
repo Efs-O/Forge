@@ -583,6 +583,8 @@ overlaps with an existing owner, extend the owner instead.
 | `write_file` line-ending selection and result note | `src/tools/writeEol.ts`       |
 | `old_str` matching + line-ending handling + uniform indent shift | `src/tools/editMatch.ts`              |
 | Structured line-edit validation + tool     | `src/tools/structuredEditTool.ts`     |
+| Line-edit refusal texts (stale/moved/repeated) | `src/tools/structuredEditRefusals.ts` |
+| Trailing-whitespace repair of path arguments (`path`, `paths`, `cwd`) | `src/tools/pathArgTrim.ts` |
 | The file-length line a write result carries, and how its globs match | `src/tools/fileLengthWarning.ts` |
 | The "new problems after this edit" note a write result carries: before/after snapshot, settle wait, diff | `src/tools/editDiagnostics.ts` |
 | The VS Code-backed diagnostics source that note reads: the open that primes a closed file, the event, the workspace roots it will open inside | `src/tools/editDiagnosticsSource.ts` |

@@ -46,10 +46,10 @@ describe('isolated file and directory tool execution', () => {
     ).resolves.toBe('two\nthree');
     await expect(
       makeReadFileTool().handler({ path: 'nested/example.txt', start_line: 4, end_line: 2 }),
-    ).rejects.toThrow('start_line 4 is past the end of the file (3 lines)');
+    ).resolves.toContain('the file has 3 line(s)');
     await expect(
       makeReadFileTool().handler({ path: 'nested/example.txt', start_line: 4 }),
-    ).rejects.toThrow('start_line 4 is past the end of the file (3 lines)');
+    ).resolves.toContain('the file has 3 line(s)');
   });
 
   // Refusing reads outside the workspace bought nothing: list_directory and
@@ -133,11 +133,12 @@ describe('isolated file and directory tool execution', () => {
     await expect(makeReadFileTool().handler({})).rejects.toThrow(
       'neither path nor reads was given; minimal valid call: {"path":"src/a.ts"}',
     );
-    // A single read still behaves exactly as it did: the range errors are the
-    // same words, because the batching must not change what a lone read says.
+    // A single read still behaves exactly as it did, except the past-the-end range is now the
+    // length note instead of an error (prevention pass 2026-11-09); the batching must not change
+    // what a lone read says.
     await expect(
       makeReadFileTool().handler({ path: 'a.txt', start_line: 5 }),
-    ).rejects.toThrow('start_line 5 is past the end of the file');
+    ).resolves.toContain('the file has 1 line(s)');
   });
 
   it('a missing path in reads fails only its own section', async () => {

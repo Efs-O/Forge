@@ -65,7 +65,10 @@ function jsonTypeExample(type: string, schema: DeclaredProperty): string | undef
             : 0,
       );
     case 'boolean':
-      return 'false';
+      // Naming one example value used to be a trap: a model that meant `true` read "Resend the
+      // call with background as false" and obeyed it. One lab arm hit that four times and then
+      // gave up on background jobs altogether (T2 arm A2).
+      return 'true or false';
     case 'string':
       return '"text"';
     default:
@@ -226,6 +229,21 @@ export class ToolRegistry {
     const { name, parameters } = tool.definition.function;
     // JSON.parse can hand back `null` for a call whose arguments were "null".
     const present: Record<string, unknown> = typeof args === 'object' && args !== null ? args : {};
+    // A quoted boolean is the largest single refusal class we measured (11 hits in one clean
+    // window on `shell background` alone, and the same shape on `read_file numbered`), and it is
+    // never ambiguous: "true" and "false" are the only two spellings, and the property is declared
+    // boolean. Coerce it here — `present` is the live `args` object, so the handler receives the
+    // real boolean and the call simply works. Anything else ("True", "yes") stays a refusal.
+    if (typeof parameters.properties === 'object' && parameters.properties !== null) {
+      for (const [key, schema] of Object.entries(
+        parameters.properties as Record<string, DeclaredProperty>,
+      )) {
+        if (schema?.type !== 'boolean') continue;
+        const value = present[key];
+        if (value === 'true') present[key] = true;
+        else if (value === 'false') present[key] = false;
+      }
+    }
     const preApproval = tool.refuseBeforeApproval?.(present);
     if (preApproval) return preApproval;
     if (name === 'edit_file') {

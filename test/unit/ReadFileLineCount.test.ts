@@ -52,11 +52,15 @@ describe('read_file line count', () => {
     expect(await read({ path: target, numbered: true })).toBe('1|a\n2|b\n3|c');
   });
 
-  it('reports the real line count when a range runs past the end', async () => {
+  it('answers a past-the-end read with the file length instead of an error', async () => {
     const target = path.join(dir, 'three.ts');
     fs.writeFileSync(target, 'a\nb\nc\n');
-    await expect(read({ path: target, start_line: 4 })).rejects.toThrow(
-      'start_line 4 is past the end of the file (3 lines)',
+    // Lab T32/T33 (2026-11-09): `(3 lines)` read like a chunk boundary to models resuming a
+    // chunked read; then the owner's prevention pass (10:47) made the resume shape succeed with
+    // the one fact it needed — the length — instead of spending a round on a refusal.
+    await expect(read({ path: target, start_line: 4 })).resolves.toBe(
+      'read_file: the file has 3 line(s), so there is nothing to read at lines 4-4. You have '
+        + 'reached the end.',
     );
   });
 

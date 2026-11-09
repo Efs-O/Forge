@@ -127,6 +127,9 @@ Codex, Copilot), your job here is planning, advice and review; delegate the impl
 - Write the plan (task, files, acceptance criteria), send it to a fresh Forge chat per
   lane (\`say <your-name> --new --model <name>\`), then review the diff strictly. Send
   defects back with file and line rather than rewriting the code yourself.
+- Verify a brief before you send it: check every claim against the code, write out any
+  exact text the result must produce, list what a changed check must still allow, and
+  ask for pasted output rather than a description. Each vague direction costs a round.
 - Local models implement well but plan and recall less well, so plans, reviews and
   design questions stay with you. Advise a Forge chat when it asks.
 - A local engine serves only so many chats at full speed — the number is the engine's

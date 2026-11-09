@@ -142,8 +142,8 @@ for (const { sha, subject, body, author } of records) {
     if (!TYPE_RE.test(subject)) {
       problems.push(`${short}: subject must be \`type(scope): summary\` — got "${subject}"`);
     }
-    if (subject.length > 72) {
-      problems.push(`${short}: subject is ${String(subject.length)} chars, max 72 — "${subject}"`);
+    if (subject.length > 100) {
+      problems.push(`${short}: subject is ${String(subject.length)} chars, max 100 — "${subject}"`);
     }
     if (/[.]$/.test(subject)) problems.push(`${short}: subject ends with a period`);
   }

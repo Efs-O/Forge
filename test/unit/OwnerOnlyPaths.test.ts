@@ -217,6 +217,51 @@ describe('which write targets are owner-only', () => {
     expect(ownerOnlyWriteTargetFor('N:/Apps/Forge/.forge/config.yaml', noWorkspace)).toBeDefined();
   });
 
+  it('does not mistake a PowerShell flag for a destination (lab T22)', () => {
+    // Reproduced from the lab: a command run from inside `~/.forge` where a bare
+    // `-Force` resolved against the current folder, landed inside the owner-only
+    // root, and the refusal named the flag as the file it supposedly refused to
+    // change — which sent one chat into a 17-command re-spelling loop.
+    const forgeHome = `${HOME}/.forge`;
+    // The flag alone, judged from inside the root: skipped, so no hit.
+    expect(ownerOnlyStatementTargetFor(['Set-Content', '-Force'], set, forgeHome)).toBeUndefined();
+    // The real destination in the same shape is still caught: the flag is skipped, the path is not.
+    expect(
+      ownerOnlyStatementTargetFor(
+        ['Set-Content', '-Force', 'config.yaml'],
+        set,
+        forgeHome,
+      )?.target,
+    ).toContain('/.forge/config.yaml');
+    // Claude review 2026-11-09 item 3: in PowerShell the destination can sit *inside* the flag
+    // token (`-Path:<file>`), and skipping the whole token would let an owner-only write through.
+    // The bare-flag skip (T22) must stay; the colon form must still be judged.
+    expect(
+      ownerOnlyStatementTargetFor(
+        ['Set-Content', '-Path:C:/Users/someone/.forge/policy.yaml', 'x'],
+        set,
+        forgeHome,
+      )?.target,
+    ).toContain('/.forge/policy.yaml');
+    expect(
+      ownerOnlyStatementTargetFor(
+        ['Out-File', '-FilePath:C:/Users/someone/.forge/x.txt'],
+        set,
+        forgeHome,
+      )?.target,
+    ).toContain('/.forge/x.txt');
+    // Claude review on f6a977a9 item 2: a colon value that is not a path (`-Encoding:utf8`,
+    // `-Force:$true`) must be skipped exactly like the bare `-Force` above, not resolved against
+    // the current folder — and a real path after the colon is still judged even when the
+    // surrounding command is otherwise all flags.
+    expect(ownerOnlyStatementTargetFor(['Get-ChildItem', '-Force:$true'], set, forgeHome)).toBeUndefined();
+    expect(ownerOnlyStatementTargetFor(['Get-ChildItem', '-Filter:*.yaml'], set, forgeHome)).toBeUndefined();
+    expect(
+      ownerOnlyStatementTargetFor(['Set-Content', '-Encoding:utf8', 'config.yaml'], set, forgeHome)
+        ?.target,
+    ).toContain('/.forge/config.yaml');
+  });
+
   it('resolves a command against the folder it runs in, including a nested repo', () => {
     const nested = 'N:/Apps/Forge/threejs-game';
     const nestedSet = ownerOnlySetFor({ workspaceRoot: nested, ...win });
@@ -378,6 +423,11 @@ describe('the shell route onto Forge own configuration', () => {
       ['head -n 5 .forge/config.yaml', 'bash'],
       ['wc -l .forge/config.yaml', 'bash'],
       ['ls .forge', 'bash'],
+      // Lab T22: a piped read run from inside the root. Before the flag guard, the bare
+      // `-Force` resolved against the current folder and the refusal named the flag as the
+      // write target — a write-class shape; the read shape below was always let through.
+      ['Get-ChildItem -Force . | Measure-Object).Count', 'pwsh'],
+      ['Get-ChildItem -Force . | Select-Object -Expand Count', 'pwsh'],
     ];
     for (const [command, shell] of open) {
       const result = classifyShellCommand(command, shell, check);

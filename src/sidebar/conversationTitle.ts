@@ -8,7 +8,9 @@
  * take it without pulling the schema in behind it.
  */
 
-const TITLE_MAX_LEN = 48;
+const TITLE_MAX_LEN = 160;
+/** Titles saved before the wider sessions panel retained only this many units. */
+const LEGACY_TITLE_MAX_LEN = 48;
 
 /** The cap `deriveTitle` applies, in UTF-16 units. Exported because the retitle
  *  job refuses a model answer that would be cut anyway (`src/jobs/retitleRun.ts`). */
@@ -68,7 +70,12 @@ export function titleSourceOf(
   // cannot be read (a log-sourced archive row has no body).
   if (isUntitled(record.title)) return 'prompt';
   if (firstUserLine === undefined) return 'user';
-  return record.title === deriveTitle(firstUserLine) ? 'prompt' : 'user';
+  const line = firstUserLine.replace(/\s+/g, ' ').trim();
+  const legacyTitle =
+    line.length > LEGACY_TITLE_MAX_LEN ? `${line.slice(0, LEGACY_TITLE_MAX_LEN)}…` : line;
+  return record.title === deriveTitle(firstUserLine) || record.title === legacyTitle
+    ? 'prompt'
+    : 'user';
 }
 
 /**

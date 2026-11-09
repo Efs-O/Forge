@@ -7,7 +7,7 @@ Run this first; recovery_check.py and version_join.py read what it wrote.
 Shared argument handling is in session_scan_common.py.
 """
 
-import json, os, re, collections, time
+import json, os, re, sys, collections, time
 from session_scan_common import (
     parse,
     need_sessions,
@@ -69,7 +69,6 @@ def sig(t):
 
 
 rows = []
-SIGF = writer(opts.out, 'sig')
 counts = collections.Counter()
 sigc = collections.Counter()
 by_model = collections.Counter()
@@ -114,7 +113,11 @@ for path in session_files(opts.sessions):
         elif t == 'assistant':
             for c in (r.get('tool_calls') or []):
                 if not calls and len(rows) < 1:
-                    print('PROBE_CALL_KEYS', sorted(c.keys()), file=SIGF)
+                    # Debug probe only: it goes to stderr, never into an output file.
+                    # Writing it to the sig file used to eat that file's first line
+                    # (the handle stayed open, so its flush landed at position 0 after
+                    # the signature block had been written). Found by T4, 2026-11-08.
+                    print('PROBE_CALL_KEYS', sorted(c.keys()), file=sys.stderr)
                 cid = c.get('id')
                 args_json = c.get('arguments') or c.get('args') or c.get('input') or ''
                 if not isinstance(args_json, str):
@@ -204,7 +207,7 @@ print('FORGE_RULE_ALL', sum(forge_rule_all.values()), 'FORGE_RULE_PROD', sum(for
 print('TOP_TOOL_RESULTS:', toolres_total.most_common(12))
 print('BY_MODEL:', by_model.most_common(15))
 print('--- SIGNATURES ---')
-with writer(opts.out, 'sig', 'a') as f:
+with writer(opts.out, 'sig') as f:
     for (b, name, s), c in sigc.most_common(200):
         f.write('%4d  %-14s %-16s %s\n' % (c, b, name, s))
         if c >= 2:

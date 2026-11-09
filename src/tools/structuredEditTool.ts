@@ -4,6 +4,7 @@ import { defaultWorkspaceRoot, resolveRealWorkspacePath } from '../util/Workspac
 import { agentWriteOptions, delayedWriteNote, writeFileAtomic } from '../util/atomicWrite';
 import { withFileLengthWarning, type FileLengthWarningGetter } from './fileLengthWarning';
 import { NO_PROBLEM_WATCHER, withProblemNote, type ProblemWatcher } from './editDiagnostics';
+import { capAtLineBoundary, numberedBlock, throwStaleRefusal } from './structuredEditRefusals';
 
 const MAX_EDIT_OPERATIONS = 20;
 const MAX_LINES_PER_OPERATION = 500;
@@ -23,6 +24,9 @@ export interface LineEditResult {
   content: string;
   replacedLines: number;
   replacementLines: number;
+  /** Operations whose stated `end_line` miscounted `expected_lines` but whose text matched the
+   *  file exactly at the named `start_line` — the range was corrected and the edit applied. */
+  autoAligned: Array<{ index: number; startLine: number; statedEnd: number; actualEnd: number }>;
 }
 
 export function applyLineEditsToContent(
@@ -45,6 +49,29 @@ export function applyLineEditsToContent(
   const ordered = operations
     .map((operation, index) => ({ operation, index: index + 1 }))
     .sort((left, right) => left.operation.start_line - right.operation.start_line);
+  // Prevention, not recovery: a miscounted `end_line` whose text nevertheless matches the file at
+  // the named `start_line` is a miscount, not a disagreement — the tool corrects its own argument
+  // and says so, instead of refusing a call that could not have meant anything else. The match
+  // must be exact AT the stated start; a block that matches only somewhere else stays the refusal
+  // that names the lines, because then which copy was meant is genuinely the model's call.
+  const autoAligned: Array<{
+    index: number;
+    startLine: number;
+    statedEnd: number;
+    actualEnd: number;
+  }> = [];
+  for (const entry of ordered) {
+    const actualEnd = alignedEndLine(entry.operation, lines);
+    if (actualEnd !== undefined) {
+      autoAligned.push({
+        index: entry.index,
+        startLine: entry.operation.start_line,
+        statedEnd: entry.operation.end_line,
+        actualEnd,
+      });
+      entry.operation = { ...entry.operation, end_line: actualEnd };
+    }
+  }
   let previous: { operation: LineEditOperation; index: number } | undefined;
   let expectedChars = 0;
   let replacementChars = 0;
@@ -66,11 +93,7 @@ export function applyLineEditsToContent(
       throw new Error(`apply_line_edits: replacements exceed ${MAX_REPLACEMENT_CHARS} characters`);
     }
     const actual = lines.slice(operation.start_line - 1, operation.end_line);
-    if (!sameLines(actual, operation.expected_lines)) {
-      throw new Error(
-        `apply_line_edits: operation ${index} is stale; expected_lines do not match the current file`,
-      );
-    }
+    if (!sameLines(actual, operation.expected_lines)) throwStaleRefusal(operation, index, lines);
   }
 
   const updated = [...lines];
@@ -85,12 +108,13 @@ export function applyLineEditsToContent(
   if (result === content) throw new Error('apply_line_edits: operations would not change the file');
   return {
     content: result,
-    replacedLines: operations.reduce(
-      (total, operation) => total + operation.end_line - operation.start_line + 1,
+    replacedLines: ordered.reduce(
+      (total, entry) => total + entry.operation.end_line - entry.operation.start_line + 1,
       0,
     ),
-    replacementLines: operations.reduce(
-      (total, operation) => total + operation.replacement_lines.length,
+    autoAligned,
+    replacementLines: ordered.reduce(
+      (total, entry) => total + entry.operation.replacement_lines.length,
       0,
     ),
   };
@@ -213,6 +237,16 @@ export function makeApplyLineEditsTool(
         liftedFromOperations > 0
           ? `\nNo "path" at the top level: taken from the operations ("${suppliedPath}").`
           : '';
+      // Same honesty for the auto-aligned ranges: the model must know the tool moved its argument,
+      // so a corrected call still teaches the right shape next time.
+      const alignedNote = result.autoAligned
+        .map(
+          (a) =>
+            `\nNote: operation ${a.index} end_line ${a.statedEnd} did not match its expected_lines ` +
+            `count; applied at lines ${a.startLine}-${a.actualEnd} because ` +
+            'the text matched exactly at start_line.',
+        )
+        .join('');
       const note = watch ? await watch.settle(context?.abortSignal) : '';
       return withFileLengthWarning(
         withProblemNote(
@@ -222,7 +256,9 @@ export function makeApplyLineEditsTool(
             replacedLines: result.replacedLines,
             replacementLines: result.replacementLines,
             ...(contentionNote ? { saveNote: contentionNote } : {}),
-          }) + liftedNote,
+          }) +
+            liftedNote +
+            alignedNote,
           note,
         ),
         filePath,
@@ -359,23 +395,24 @@ function validateOperation(
     operation.end_line < operation.start_line ||
     operation.end_line > lineCount
   ) {
-    throw new Error(`apply_line_edits: operation ${index + 1} has an out-of-range line span`);
+    // Both lab reps of this refusal (T36) had to re-read the file, because it named neither the
+    // file's length nor a range that would have worked. Cheap to state, so state it.
+    throw new Error(
+      `apply_line_edits: operation ${index + 1} has an out-of-range line span; the file has ` +
+        `${lineCount} line(s), so a span must lie within 1-${lineCount}.`,
+    );
   }
   const expectedCount = operation.end_line - operation.start_line + 1;
   if (!validLineArray(operation.expected_lines) || !validLineArray(operation.replacement_lines)) {
     throw new Error(`apply_line_edits: operation ${index + 1} contains invalid lines`);
   }
   if (operation.expected_lines.length !== expectedCount) {
-    const current = lines
-      .slice(operation.start_line - 1, operation.end_line)
-      .map((line, offset) => `${operation.start_line + offset}|${line}`)
-      .join('\n');
-    const detail = ` Current file lines ${operation.start_line}-${operation.end_line}:\n${current}`;
+    const detail = numberedBlock(lines, operation.start_line, operation.end_line);
     const message =
       `apply_line_edits: operation ${index + 1} expected_lines has ${operation.expected_lines.length} ` +
       `line(s), but lines ${operation.start_line}-${operation.end_line} are ${expectedCount} line(s). ` +
       'expected_lines must be exactly the current text of start_line through end_line, one entry per line.';
-    throw new Error(message + detail.slice(0, Math.max(0, 1200 - message.length)));
+    throw new Error(message + capAtLineBoundary(detail, Math.max(0, 1200 - message.length)));
   }
   if (operation.replacement_lines.length > MAX_LINES_PER_OPERATION) {
     throw new Error(`apply_line_edits: operation ${index + 1} has too many replacement lines`);
@@ -391,6 +428,27 @@ function validLineArray(lines: readonly unknown[]): lines is readonly string[] {
 
 function sameLines(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((line, index) => line === right[index]);
+}
+
+/** The corrected `end_line` when an operation's stated span miscounts `expected_lines` but its
+ *  text matches the file exactly at the stated `start_line` — a miscount, not a disagreement.
+ *  Returns undefined when nothing is corrected: matching only elsewhere is left to the refusal
+ *  that names the lines, because which copy was meant is the caller's call, not the tool's. */
+function alignedEndLine(
+  operation: LineEditOperation,
+  lines: readonly string[],
+): number | undefined {
+  // An empty block matches every slice, and a start below 1 has no meaning — neither is a
+  // miscount to correct; both belong to the count refusal below validation.
+  if (operation.expected_lines.length === 0 || operation.start_line < 1) return undefined;
+  const end = operation.start_line - 1 + operation.expected_lines.length;
+  if (end - operation.start_line + 1 === operation.end_line - operation.start_line + 1) {
+    return undefined;
+  }
+  if (end > lines.length) return undefined;
+  return sameLines(lines.slice(operation.start_line - 1, end), operation.expected_lines)
+    ? end
+    : undefined;
 }
 
 function requireInteger(value: unknown, field: string): number {

@@ -7,6 +7,7 @@ Never deletes anything in the target. Files already in the target that are NOT p
 of the lab are left untouched. Print-only on error, exit 0 unless nothing copied at all.
 """
 
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -21,6 +22,34 @@ REPORT_DIRS = {"session-scan", "tool-tests"}
 REPORT_FILES = {"TOOL_TEST_LEDGER.md"}
 REPORT_PREFIXES = ("SESSION_SCAN_",)
 MAX_FILE_BYTES = 5_000_000
+# Never walked: junk, and the junk that lives inside a leftover CI worktree.
+PRUNE_DIRS = {"node_modules", "__pycache__", ".git", ".venv", "venv"}
+
+
+def _walk(root: Path):
+    """Yield files under root, pruning junk dirs and surviving an unreadable one.
+
+    rglob was replaced (2026-11-09 00:50) because a leftover CI worktree under
+    docs/reports holds a node_modules/.cache chain past the Windows path limit:
+    the walk itself raised OSError [WinError 1921] and killed the whole sync, so
+    nothing mirrored. A walk error on one directory must cost that directory only.
+    """
+    stack = [root]
+    while stack:
+        current = stack.pop()
+        try:
+            with os.scandir(current) as handle:
+                entries = list(handle)
+        except OSError as exc:
+            print(f"skip (unreadable dir): {current}: {exc}")
+            continue
+        for entry in entries:
+            path = Path(entry.path)
+            if entry.is_dir():
+                if entry.name not in PRUNE_DIRS:
+                    stack.append(path)
+            elif entry.is_file():
+                yield path
 
 
 def _allowed_reports(rel: Path) -> bool:
@@ -47,7 +76,7 @@ def main() -> int:
         if not src_root.is_dir():
             print(f"source missing, skipping: {src_root}")
             continue
-        for src in sorted(src_root.rglob("*")):
+        for src in sorted(_walk(src_root)):
             if not src.is_file():
                 continue
             if src.suffix.lower() in {".pyc"} or "__pycache__" in src.parts:

@@ -9,6 +9,7 @@ import type { CheckpointSession } from '../checkpoint/CheckpointStack';
 import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
 import type { ToolHandlerResult, ToolPermission } from '../tools/ToolRegistry';
 import { ToolRegistry } from '../tools/ToolRegistry';
+import { repairTrailingPathSpace, trailingPathSpaceNote } from '../tools/pathArgTrim';
 import { ToolFailureTracker } from '../tools/StripTools';
 import type { ToolBudget } from '../tools/ToolBudget';
 import type { DiffDecorations } from './DiffDecorations';
@@ -245,6 +246,15 @@ export class ToolDispatch {
           continue;
         }
 
+        // A path argument ending in whitespace is a stray space, not a filename
+        // (pathArgTrim.ts). Repair it here, before the approval metadata, `mutation.paths`
+        // and the checkpoint snapshot read `args`, so every gate and the handler judge the
+        // one path the tool will write. The repair is reported with the call's result.
+        const repairedPathArgs = repairTrailingPathSpace(
+          (reg.describe ? reg.describe() : reg.definition).function.parameters,
+          args,
+        );
+
         const approvalCache =
           internal?.cachedApproval ?? (await readToolApprovalMetadata(reg, args, convId));
         const {
@@ -314,6 +324,11 @@ export class ToolDispatch {
           ...(setPlan !== undefined ? { setPlan } : {}),
           ...(tellArrived !== undefined ? { tellArrived } : {}),
         });
+
+        // The repair is reported here, where the call's own result is in hand: a trim the
+        // model cannot see is a lie by omission, and on POSIX a trailing space is legal.
+        const pathNote = trailingPathSpaceNote(repairedPathArgs);
+        if (pathNote && typeof result === 'string') result = `${result}\n${pathNote}`;
 
         if (reg.mutation) {
           this.codeLens.markPending(mutationPaths);

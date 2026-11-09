@@ -34,6 +34,17 @@ describe('describePathMiss', () => {
     expect(describePathMiss('list_directory', 'src', enoent)).toContain('list_directory:');
   });
 
+  // VS Code's own file API words a miss differently, and `read_notebook` goes through it
+  // (lab arm U5a): the same miss must produce the same answer, not a raw internal string.
+  it('treats VS Code\'s "nonexistent file" wording as the same miss', () => {
+    const vscodeMiss = new Error(
+      "Unable to read file 'n:\\ws\\a\\b.ipynb' (Error: Unable to resolve nonexistent file 'n:\\ws\\a\\b.ipynb')",
+    );
+    const text = describePathMiss('read_notebook', 'a/b.ipynb', vscodeMiss);
+    expect(text.startsWith('read_notebook: nothing exists there.')).toBe(true);
+    expect(text).toContain('find_files');
+  });
+
   it('names directory-reading alternatives for read_file EISDIR errors', () => {
     const eisdir = new Error('EISDIR: illegal operation on a directory, read');
     const text = describePathMiss('read_file', 'docs/plans', eisdir);

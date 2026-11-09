@@ -307,7 +307,8 @@ export function makeEditFileTool(
         const which = edits.length === 1 ? '' : ` (all ${edits.length} edits)`;
         throw new Error(
           `edit_file: old_str not found in file${which} — the text must match exactly, ` +
-            'apart from line endings, which are ignored. No changes were written.' +
+            'apart from line endings, which are ignored. The file may have changed since you read ' +
+            'it. No changes were written.' +
             describeMisses(misses, edits.length),
         );
       }

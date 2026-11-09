@@ -64,9 +64,9 @@ describe('sessionTypes', () => {
 
   it('deriveTitle truncates long first lines', () => {
     expect(deriveTitle('hello')).toBe('hello');
-    const long = 'x'.repeat(60);
-    expect(deriveTitle(long)).toMatch(/…$/);
-    expect(deriveTitle(long).length).toBeLessThanOrEqual(49);
+    expect(deriveTitle('x'.repeat(60))).toBe('x'.repeat(60));
+    expect(deriveTitle('x'.repeat(160))).toBe('x'.repeat(160));
+    expect(deriveTitle('x'.repeat(161))).toBe(`${'x'.repeat(160)}…`);
   });
 
   it('deriveTitle falls back to the untitled placeholder on an empty line', () => {

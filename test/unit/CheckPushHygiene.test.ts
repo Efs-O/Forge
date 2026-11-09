@@ -63,7 +63,7 @@ describe('push hygiene gate', () => {
 
   it.each([
     ['a subject with no type', 'Save a file when it is locked', 'type(scope): summary'],
-    ['a 73-character subject', `fix(tools): ${'x'.repeat(70)}`, 'max 72'],
+    ['a 101-character subject', `fix(tools): ${'x'.repeat(89)}`, 'max 100'],
     ['a subject ending in a period', 'fix(tools): saves the file.', 'ends with a period'],
     ['work-in-progress anywhere', 'fix: wip the save path', 'work-in-progress'],
     ['a review-process subject', 'fix(tools): review fixes for the save path', 'names the process'],

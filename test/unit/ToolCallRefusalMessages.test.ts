@@ -122,25 +122,25 @@ describe('ToolRegistry.invalidArgs quoted-type refusals', () => {
 
   it('names the field and an unquoted JSON boolean example for "True"', () => {
     expect(registry.invalidArgs(execTool, { command: 'npx', background: 'True' })).toBe(
-      'Error: shell: "background" must be a JSON boolean, not a string. Resend the call with background as false.',
+      'Error: shell: "background" must be a JSON boolean, not a string. Resend the call with background as true or false.',
     );
   });
 
   it('refuses "False" as a string instead of accepting it', () => {
     expect(registry.invalidArgs(execTool, { command: 'npx', background: 'False' })).toBe(
-      'Error: shell: "background" must be a JSON boolean, not a string. Resend the call with background as false.',
+      'Error: shell: "background" must be a JSON boolean, not a string. Resend the call with background as true or false.',
     );
   });
 
   it('refuses other string spellings with the same required JSON shape', () => {
     expect(registry.invalidArgs(execTool, { command: 'npx', background: 'yes' })).toBe(
-      'Error: shell: "background" must be a JSON boolean, not a string. Resend the call with background as false.',
+      'Error: shell: "background" must be a JSON boolean, not a string. Resend the call with background as true or false.',
     );
   });
 
   it('names the actual JSON type when a number is sent for a boolean', () => {
     expect(registry.invalidArgs(execTool, { command: 'npx', background: 1 })).toBe(
-      'Error: shell: "background" must be a JSON boolean, not a number. Resend the call with background as false.',
+      'Error: shell: "background" must be a JSON boolean, not a number. Resend the call with background as true or false.',
     );
   });
 
@@ -156,7 +156,7 @@ describe('ToolRegistry.invalidArgs quoted-type refusals', () => {
     const tool = makeBoolTool('x'.repeat(220), { background: { type: 'boolean' } });
     expect(registry.invalidArgs(tool, { background: 'True' })).toBe(
       `Error: ${'x'.repeat(220)}: "background" must be a JSON boolean, not a string. ` +
-        'Resend the call with background as false.',
+        'Resend the call with background as true or false.',
     );
   });
 
@@ -346,8 +346,8 @@ describe('ToolRegistry.invalidArgs refuses quoted JSON types', () => {
   it('refuses quoted booleans using the JSON boolean example', () => {
     const tool = makeBoolTool('probe', { enabled: { type: 'boolean' } } as never);
     expect(registry.invalidArgs(tool, { enabled: 'True' })).toBe(
-      'Error: probe: "enabled" must be a JSON boolean, not a string. ' +
-        'Resend the call with enabled as false.',
+      'Error: probe: "enabled" must be a JSON boolean, not a string. '
+        + 'Resend the call with enabled as true or false.',
     );
   });
 
