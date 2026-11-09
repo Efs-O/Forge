@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.17.138
 
 - Clanker now answers every attended approval except destructive actions,
   Forge's own guard files, and data sent out after a secret read. Local secret
