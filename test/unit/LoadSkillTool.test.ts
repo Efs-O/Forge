@@ -214,6 +214,9 @@ describe('load_skill', () => {
       additionalProperties: false,
     });
     expect(tool.permission).toBe('read');
+    expect(fn.description).toBe(
+      'Open a catalog skill: returns its SKILL.md body and real script/reference paths. Skills are instruction files, not tools; load tools with load_tool_group. Run scripts with shell under the same approvals. config.json is not returned.',
+    );
     expect(fn.description.length).toBeLessThanOrEqual(320);
   });
 });

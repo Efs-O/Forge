@@ -308,34 +308,44 @@ export function peerPrompt(
 
 /** How a window is named in a refusal: the folder the caller can recognise, and
  *  the short id `list` prints for a window that would not answer. */
-function windowLabel(peer: PeerWindow): string {
+export function windowLabel(peer: PeerWindow): string {
   return `${folderName(peer.workspace)} (${peer.windowId.slice(0, 8)})`;
 }
 
-/** The window a `new` is aimed at: a folder's basename, a whole folder, or a
- *  full window id. No id prefix — `list` prints only the first eight characters
- *  of an id, and only for a window that would not answer, which is a window
- *  nothing can be aimed at; two ids sharing a prefix would otherwise look like
- *  one. Two matches is a refusal, not a guess: a chat opened in the wrong window
- *  is a paid turn nobody reads. */
+/** The label the reachable-window list prints and callers can pass back. */
+export function peerWindowListLabel(peer: PeerWindow): string {
+  return `${folderName(peer.workspace)} (${peer.workspace})`;
+}
+
+/** The window a `new` is aimed at: any name this tool prints, or the full id.
+ * A unique id prefix is accepted because refusals print one; ambiguity remains
+ * a refusal, never a guess that could open a paid turn in the wrong window. */
 export function matchPeerWindow(
   peers: PeerWindow[],
   wanted: string,
 ): { peer: PeerWindow } | { refusal: string } {
-  const needle = wanted
-    .trim()
-    .replace(/[\\/]+$/u, '')
-    .toLowerCase();
+  const normalize = (value: string): string =>
+    value
+      .trim()
+      .replace(/[\\/]+$/u, '')
+      .replace(/\\/gu, '/')
+      .toLowerCase();
+  const needle = normalize(wanted);
   if (!needle)
     return {
       refusal: 'Error: `window` needs a value: a folder name, a full folder, or a window id.',
     };
-  const matches = peers.filter(
-    (peer) =>
-      folderName(peer.workspace).toLowerCase() === needle ||
-      peer.workspace.toLowerCase() === needle ||
-      peer.windowId.toLowerCase() === needle,
-  );
+  const matches = peers.filter((peer) => {
+    const idPrefix = peer.windowId.slice(0, 8);
+    return [
+      folderName(peer.workspace),
+      peer.workspace,
+      peer.windowId,
+      idPrefix,
+      peerWindowListLabel(peer),
+      windowLabel(peer),
+    ].some((label) => normalize(label) === needle);
+  });
   if (matches.length === 1) return { peer: matches[0] as PeerWindow };
   if (matches.length === 0)
     return {
@@ -467,7 +477,7 @@ export function formatPeerSection(peers: PeerWindow[], unreachable: UnreachableW
   if (peers.length === 0 && unreachable.length === 0) return '';
   const lines: string[] = ['', 'Other windows:'];
   for (const peer of peers) {
-    lines.push(`${folderName(peer.workspace)} (${peer.workspace}) — ${peer.chats.length} chat(s):`);
+    lines.push(`${peerWindowListLabel(peer)} — ${peer.chats.length} chat(s):`);
     for (const chat of peer.chats) {
       const state = chat.closed ? 'closed' : chat.running ? 'running' : 'idle';
       const model = chat.model ? ` · ${chat.model}` : '';

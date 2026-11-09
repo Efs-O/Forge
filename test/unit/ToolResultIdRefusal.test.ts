@@ -32,4 +32,61 @@ describe('a tool_call_id that misses', () => {
     const hit = (await tool.handler({ tool_call_id: 'call-live' }, context)) as unknown as string;
     expect(hit).toContain('the live result text');
   });
+
+  it('resolves a unique truncated call ID and returns the canonical ID', async () => {
+    const tool = makeReadToolResultTool();
+    expect(await tool.handler({ tool_call_id: 'call-liv' }, context)).toBe(
+      'Tool result call-live, chars 0-20 of 20:\nthe live result text',
+    );
+  });
+});
+
+describe('read_tool_result shape recovery', () => {
+  it('reads the tool result named by message_index without a second lookup call', async () => {
+    const tool = makeReadToolResultTool();
+    expect(await tool.handler({ message_index: 1 }, context)).toBe(
+      'Tool result call-live, chars 0-20 of 20:\nthe live result text',
+    );
+  });
+
+  it('uses query when the model also supplies message_index as a search scope', async () => {
+    const tool = makeReadToolResultTool();
+    expect(await tool.handler({ query: 'live result', message_index: 1 }, context)).toBe(
+      'Search results for "live result" (newest first):\n' +
+        '[tool message_index 1, tool_call_id "call-live", character offset 4]\n' +
+        'the live result text',
+    );
+  });
+
+  it('caps an oversized max_matches request at ten results', async () => {
+    const manyMessages: ChatMessage[] = Array.from({ length: 11 }, (_unused, index) => ({
+      role: 'tool',
+      tool_call_id: `call-${index}`,
+      content: 'needle',
+    }));
+    const tool = makeReadToolResultTool();
+    const result = String(
+      await tool.handler(
+        { query: 'needle', max_matches: 20 },
+        { beforeMutate: () => undefined, conversationMessages: manyMessages },
+      ),
+    );
+    expect(result).not.toMatch(/^Error:/u);
+    expect(result).toContain('1 of 11 matching messages not shown');
+    expect(result).toContain('message_index 1');
+    expect(result).not.toContain('message_index 0');
+  });
+
+  it('states the full search modes and that message_index includes tool results', () => {
+    const fn = makeReadToolResultTool().definition.function;
+    expect(fn.description).toBe(
+      'Search and read earlier text in this conversation, including messages before a compaction. Use query for literal search, message_index for an exact conversation message (including tool results), or tool_call_id for an exact or unique-prefix ID.',
+    );
+    expect(fn.parameters?.properties['tool_call_id']?.description).toBe(
+      'Tool-result mode: exact ID or unique prefix (8+ characters).',
+    );
+    expect(fn.parameters?.properties['message_index']?.description).toBe(
+      'Exact-message mode: zero-based conversation message index, including tool results.',
+    );
+  });
 });

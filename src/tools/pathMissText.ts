@@ -18,6 +18,7 @@ export function formatPathMiss(
   requestedPath: string,
   err: unknown,
   workspaceRoot: string | undefined,
+  sameNamePath?: string,
 ): string {
   const message = err instanceof Error ? err.message : String(err);
   if (tool === 'read_file' && /\bEISDIR\b/u.test(message)) {
@@ -33,7 +34,7 @@ export function formatPathMiss(
     // the model to the wrong base (U16-08).
     return (
       `${tool}: nothing exists there. "${requestedPath}" is absolute, so it was used as given. ` +
-      `${message} Use find_files to locate it before retrying.`
+      `${message} ${sameNameHint(tool, sameNamePath)}Use find_files to locate it before retrying.`
     );
   }
   // Show the request and the resolution separately: seeing only one of them is
@@ -43,7 +44,12 @@ export function formatPathMiss(
     : `"${requestedPath}" resolved with no workspace folder open.`;
   return (
     `${tool}: nothing exists there. ${base} ${message} ` +
+    sameNameHint(tool, sameNamePath) +
     'The workspace root is often not the project root, so a path that looks right ' +
     'for the project can still miss. Use find_files to locate it before retrying.'
   );
+}
+
+function sameNameHint(tool: string, match: string | undefined): string {
+  return tool === 'read_file' && match ? `Did you mean "${match}"? ` : '';
 }

@@ -19,7 +19,10 @@ import {
   findPeerChat,
   folderName,
   matchPeerWindow,
+  peerWindowListLabel,
   peerContextFor,
+  formatPeerSection,
+  windowLabel,
   peerWindowTarget,
   postPeerMessage,
   type PeerWindow,
@@ -284,16 +287,34 @@ describe('the window a `new` is aimed at', () => {
   };
   const peerB: PeerWindow = { ...peerA, windowId: WINDOW_B, workspace: 'N:/other/repo-b' };
 
-  it('matches a folder basename, a full folder or a full window id, and nothing shorter', () => {
+  it('matches names and labels it prints, including a unique window id prefix', () => {
     expect(matchPeerWindow([peerA], 'repo-b')).toEqual({ peer: peerA });
     expect(matchPeerWindow([peerA], 'N:/repo-b')).toEqual({ peer: peerA });
     expect(matchPeerWindow([peerA], WINDOW_A)).toEqual({ peer: peerA });
     expect(matchPeerWindow([peerA], '  repo-b  ')).toEqual({ peer: peerA });
-    // `list` prints only the first eight characters of a window id, and only for
-    // a window that would not answer at all — so a prefix here is a guess.
-    expect(matchPeerWindow([peerA], WINDOW_A.slice(0, 8))).toMatchObject({
-      refusal: expect.stringContaining('no other Forge window matches'),
-    });
+    expect(matchPeerWindow([peerA], WINDOW_A.slice(0, 8))).toEqual({ peer: peerA });
+    expect(matchPeerWindow([peerA], peerWindowListLabel(peerA))).toEqual({ peer: peerA });
+    expect(matchPeerWindow([peerA], windowLabel(peerA))).toEqual({ peer: peerA });
+  });
+
+  it('round-trips every reachable list label and refusal window label', () => {
+    const peers = [peerA, { ...peerB, workspace: 'N:/repo-c' }];
+    const section = formatPeerSection(peers, []);
+    expect(section).toBe(
+      '\nOther windows:\nrepo-b (N:/repo-b) — 0 chat(s):\nrepo-c (N:/repo-c) — 0 chat(s):\n' +
+        'Address a chat in another window by its id; `#N` is this window only.',
+    );
+    const listLabels = section
+      .split('\n')
+      .filter((line) => line.endsWith(' — 0 chat(s):'))
+      .map((line) => line.slice(0, -' — 0 chat(s):'.length));
+    expect(listLabels).toEqual(peers.map(peerWindowListLabel));
+    for (const [index, peer] of peers.entries()) {
+      expect(matchPeerWindow(peers, listLabels[index] ?? '')).toEqual({ peer });
+      const refusalLabel = windowLabel(peer);
+      expect(refusalLabel).toBe(`${peer.workspace.endsWith('c') ? 'repo-c' : 'repo-b'} (${peer.windowId.slice(0, 8)})`);
+      expect(matchPeerWindow(peers, refusalLabel)).toEqual({ peer });
+    }
   });
 
   it('refuses a name that fits two windows, and one that fits none', () => {
@@ -304,6 +325,10 @@ describe('the window a `new` is aimed at', () => {
     expect(none).toMatchObject({ refusal: expect.stringContaining('no other Forge window') });
     // The refusal names what IS there, so the caller can pick from it.
     if ('refusal' in none) expect(none.refusal).toContain('repo-b');
+    const samePrefix = { ...peerB, windowId: `${WINDOW_A.slice(0, 8)}-other` };
+    expect(matchPeerWindow([peerA, samePrefix], WINDOW_A.slice(0, 8))).toMatchObject({
+      refusal: expect.stringContaining('matches more than one window'),
+    });
   });
 
   it('names a Windows-shaped folder by its basename on any platform', () => {

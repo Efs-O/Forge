@@ -284,6 +284,18 @@ export function isReadOnly(
   cdReadonly = false,
 ): boolean {
   if (tokens.length === 0) return true;
+  if (shell === 'bash') {
+    const assignments = tokens[0] === 'export' ? tokens.slice(1) : tokens;
+    if (
+      assignments.length > 0 &&
+      assignments.every((token) => /^[A-Za-z_][A-Za-z0-9_]*=/u.test(token))
+    )
+      return true;
+  } else if (/^\$[A-Za-z_][A-Za-z0-9_]*$/u.test(tokens[0] ?? '') && tokens[1] === '=') {
+    // PowerShell assignment expressions may invoke a read-only pipeline. Judge
+    // the command they assign, then let the normal pipeline pass judge its stages.
+    return tokens.length > 2 && isReadOnly(tokens.slice(2), shell, cdReadonly);
+  }
   const program = baseProgram(tokens[0] ?? '');
   if (DIRECTORY_CHANGES.has(program)) {
     // `cd` with more than one argument, or a computed one, is not a directory

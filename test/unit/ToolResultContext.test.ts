@@ -229,7 +229,7 @@ describe('read_tool_result', () => {
     expect(user).toContain('Message 0 (user)');
     expect(user).toContain('message b');
     expect(assistant).toContain('Assistant message body.');
-    expect(toolRow).toContain('tool_call_id "exact-tool-id"');
+    expect(toolRow).toBe('Tool result exact-tool-id, chars 0-11 of 11:\ntool output');
   });
 
   it('returns actionable validation errors naming all three modes', async () => {

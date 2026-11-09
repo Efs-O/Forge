@@ -36,6 +36,12 @@ export async function openNotebookOrExplain(
     if (/\b(?:ENOENT|nonexistent file)\b/u.test(message)) {
       throw new Error(describePathMiss(tool, requestedPath, err));
     }
+    if (/Assertion Failed:.*Argument is.*undefined.*null/iu.test(message)) {
+      throw new Error(
+        `${tool}: VS Code has no notebook provider for "${requestedPath}". ` +
+          'Enable an extension that supports .ipynb notebooks, or use read_file to inspect the notebook JSON.',
+      );
+    }
     throw new Error(
       `${tool} could not open ${requestedPath} as a notebook: VS Code said "${message}". ` +
         'The file must be a valid .ipynb (nbformat 4); read_file shows its JSON.',

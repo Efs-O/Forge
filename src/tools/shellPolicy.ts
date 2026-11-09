@@ -8,7 +8,9 @@ import {
   executableStatements,
   expandLiteralBashAssignments,
   extractCommandStrings,
+  isBashAssignmentOnly,
   isPurePwshExpression,
+  maskBashAssignmentSubstitutions,
 } from './shellCommandStrings';
 import { argumentLooksComputed, secretDeclineHint } from './secretPaths';
 import { secretReadInStatements } from './shellSecretReads';
@@ -198,7 +200,11 @@ function classifyShellCommandAtDepth(
   if (heredocs.unterminated)
     return { classification: 'refused', rule: openHeredocRule(heredocs.unterminated) };
   command = heredocs.command;
-  const parsed = parseCommand(command, shell);
+  const parsed = parseCommand(
+    shell === 'bash' ? maskBashAssignmentSubstitutions(command) : command,
+    shell,
+  );
+  const assignmentOnly = shell === 'bash' && isBashAssignmentOnly(command);
   const sourceStatements =
     shell === 'bash' ? expandLiteralBashAssignments(parsed.statements) : parsed.statements;
   const statements = executableStatements(sourceStatements);
@@ -350,9 +356,9 @@ function classifyShellCommandAtDepth(
       ? { classification: rule.class, rule }
       : {
           classification:
-            parsed.disqualifiesReadOnly ||
-            parsed.redirection ||
-            !isReadOnly(statement, shell, cdReadonly)
+            (parsed.disqualifiesReadOnly && !assignmentOnly) ||
+            parsed.redirects.length > 0 ||
+            (!assignmentOnly && !isReadOnly(statement, shell, cdReadonly))
               ? 'normal'
               : 'read_only',
         };
@@ -367,9 +373,6 @@ function classifyShellCommandAtDepth(
   const readsMetadataTargets = new Set<number>();
   for (let index = 0; index < parsed.separators.length; index += 1) {
     if (parsed.separators[index] !== 'pipe') continue;
-    // A listing's objects reach every later stage of the SAME pipeline, so the reader
-    // may sit behind `Select-Object -First 1`: walk forward while the separators stay
-    // pipes, and stop at a `&&` or `;`, which starts a different command.
     for (let stage = index + 1; stage < statements.length; stage += 1) {
       if (pipeTargetReadsContents(statements[stage] ?? [], shell)) {
         readsMetadataTargets.add(index);
@@ -385,14 +388,14 @@ function classifyShellCommandAtDepth(
   const readSecret =
     secretReadInStatements(statements, secretScan(check, false, readsMetadataTargets, shell))
       ?.pattern ?? strongest.readSecretIgnoringAllowList;
-  if (parsed.redirection && strongest.classification === 'read_only')
+  if (
+    (parsed.redirects.length > 0 || heredocs.bodies.length > 0) &&
+    strongest.classification === 'read_only'
+  )
     strongest = { classification: 'normal' };
-  // The owner guard, ahead of the secret gate: a command that both reads a
-  // secret and writes Forge's own config is refused outright, and a `refused`
-  // already won from a nested shell keeps its own, more specific rule.
   const ownerRule = ownerSet
     ? ownerOnlyShellRule({
-        statements,
+        statements: assignmentOnly ? [] : statements,
         shell,
         ...(check.cwd ? { cwd: check.cwd } : {}),
         cdReadonly,
@@ -411,9 +414,6 @@ function classifyShellCommandAtDepth(
     // run time, there is no file to name and the card stays unkeyable.
     secretApprovalFile = cardSecretRead?.file;
   }
-  // A read-only command whose PATH argument is built at run time cannot be
-  // judged by tokens at all, so it asks: `Get-Content ("~/.s" + "sh/id_rsa")`
-  // names no secret to this classifier, and neither does `cat $(printf …)`.
   if (
     strongest.classification === 'read_only' &&
     statements.some((statement) => argumentLooksComputed(statement))

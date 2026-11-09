@@ -2,6 +2,127 @@ import { baseProgram } from './shellCommandTokens';
 
 type NestedShellKind = 'bash' | 'pwsh';
 
+/** True for a bash command line containing only variable assignments. Values
+ *  may contain command substitutions, whose commands are classified separately. */
+export function isBashAssignmentOnly(command: string): boolean {
+  let index = 0;
+  const skipSpace = (): void => {
+    while (/\s/u.test(command[index] ?? '')) index += 1;
+  };
+  while (index < command.length) {
+    skipSpace();
+    if (command[index] === ';') {
+      index += 1;
+      skipSpace();
+    }
+    const assignment = /^[A-Za-z_][A-Za-z0-9_]*=/u.exec(command.slice(index));
+    if (!assignment) return false;
+    index += assignment[0].length;
+    const opening = command.slice(index, index + 2);
+    if (opening === '$(') {
+      let depth = 1;
+      index += 2;
+      let quote: 'single' | 'double' | undefined;
+      let escaped = false;
+      while (index < command.length && depth > 0) {
+        const char = command[index] ?? '';
+        if (escaped) escaped = false;
+        else if (char === '\\') escaped = true;
+        else if (quote === 'single') {
+          if (char === "'") quote = undefined;
+        } else if (quote === 'double') {
+          if (char === '"') quote = undefined;
+        } else if (char === "'") quote = 'single';
+        else if (char === '"') quote = 'double';
+        else if (char === '(') depth += 1;
+        else if (char === ')') depth -= 1;
+        index += 1;
+      }
+      if (depth !== 0) return false;
+    } else if (command[index] === '`') {
+      index += 1;
+      while (index < command.length && command[index] !== '`') index += 1;
+      if (command[index] !== '`') return false;
+      index += 1;
+    } else if (command[index] === "'" || command[index] === '"') {
+      const quote = command[index++];
+      while (index < command.length && command[index] !== quote) index += 1;
+      if (command[index] !== quote) return false;
+      index += 1;
+    } else {
+      while (index < command.length && !/[\s;]/u.test(command[index] ?? '')) index += 1;
+    }
+    skipSpace();
+    if (index < command.length && command[index] !== ';') return false;
+  }
+  return true;
+}
+
+/** Hide a substitution only when it supplies an assignment value; command
+ *  substitutions used as commands retain the parser's conservative behavior. */
+export function maskBashAssignmentSubstitutions(command: string): string {
+  let index = 0;
+  let result = '';
+  let statementStart = true;
+  while (index < command.length) {
+    if (statementStart) {
+      const whitespace = /^\s+/u.exec(command.slice(index))?.[0];
+      if (whitespace) {
+        result += whitespace;
+        index += whitespace.length;
+        continue;
+      }
+      if (command.startsWith('export ', index)) {
+        result += 'export ';
+        index += 'export '.length;
+        continue;
+      }
+      const assignment = /^[A-Za-z_][A-Za-z0-9_]*=/u.exec(command.slice(index));
+      if (assignment) {
+        result += assignment[0];
+        index += assignment[0].length;
+        if (command.startsWith('$(', index)) {
+          let depth = 1;
+          index += 2;
+          let quote: 'single' | 'double' | undefined;
+          let escaped = false;
+          while (index < command.length && depth > 0) {
+            const char = command[index] ?? '';
+            if (escaped) escaped = false;
+            else if (char === '\\') escaped = true;
+            else if (quote === 'single') {
+              if (char === "'") quote = undefined;
+            } else if (quote === 'double') {
+              if (char === '"') quote = undefined;
+            } else if (char === "'") quote = 'single';
+            else if (char === '"') quote = 'double';
+            else if (char === '(') depth += 1;
+            else if (char === ')') depth -= 1;
+            index += 1;
+          }
+          if (depth === 0) result += 'assignment_value';
+          else result += command.slice(index - 2);
+        } else if (command[index] === '`') {
+          index += 1;
+          while (index < command.length && command[index] !== '`') index += 1;
+          if (command[index] === '`') {
+            index += 1;
+            result += 'assignment_value';
+          }
+        }
+        statementStart = false;
+        continue;
+      }
+      statementStart = false;
+    }
+    const char = command[index] ?? '';
+    result += char;
+    index += 1;
+    if (char === ';' || char === '|') statementStart = true;
+  }
+  return result;
+}
+
 /** Expand only literal bash assignments for later statements on this command
  *  line. Runtime values remain opaque so the guards do not guess what the shell
  *  will compute. */

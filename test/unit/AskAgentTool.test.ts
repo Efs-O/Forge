@@ -83,13 +83,16 @@ describe('ask_agent request boundary', () => {
 
   it('tells the model the reply comes later and not to ask again', () => {
     const description = tool.definition.function.description;
+    expect(description).toBe(
+      'Ask the Claude, Codex, or Copilot session linked to this chat; a missing link creates one. Returns at once; reply arrives here as a message. Keep working; do not ask again. If blocked, end your turn; reply starts a new one. Do not edit files you asked it to change. For local/cloud models, use ask_local_agent.',
+    );
     expect(description).toContain(
-      'Ask the Claude, Codex, or Copilot session linked to this chat (a missing link creates one).',
+      'Ask the Claude, Codex, or Copilot session linked to this chat; a missing link creates one.',
     );
     expect(description).not.toContain('`claude` is Claude Code');
     expect(description).not.toContain('Codex CLI');
     expect(description).not.toContain('Copilot CLI');
-    expect(description).toContain('Returns at once; the reply arrives later as a message here');
+    expect(description).toContain('Returns at once; reply arrives here as a message');
     expect(description).toContain('do not ask again');
     const agent = tool.definition.function.parameters?.properties['agent'];
     expect(agent?.enum).toEqual(['claude', 'codex', 'copilot']);

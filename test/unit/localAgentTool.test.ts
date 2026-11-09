@@ -160,6 +160,14 @@ describe('ask_local_agent schema', () => {
     const tool = makeLocalAgentTool(service, () => localConfig);
     expect(tool.definition.function.description).toContain('delegate permission');
   });
+
+  it('names the linked CLI tool in the full description', () => {
+    const { service } = makeMockService();
+    const tool = makeLocalAgentTool(service, () => localConfig);
+    expect(tool.definition.function.description).toBe(
+      'Delegate independent review or analysis to a configured local/cloud model in a new, empty session with no current-work context. Requires delegate permission. Linked CLI: use ask_agent.',
+    );
+  });
 });
 
 // ── Advertisement ───────────────────────────────────────────────────────────
@@ -457,6 +465,13 @@ describe('describeDelegationTargets', () => {
 // ── Discovery tool and the local-VRAM approval gate ─────────────────────────
 
 describe('list_delegation_targets', () => {
+  it('names the linked CLI tool in the full description', () => {
+    const tool = makeListDelegationTargetsTool(() => mixedConfig);
+    expect(tool.definition.function.description).toBe(
+      'List the local/cloud models ask_local_agent accepts, ranked by cost. Use instead of reading config.yaml or guessing a name. Linked CLI: use ask_agent.',
+    );
+  });
+
   it('returns the ranked list, and says so when there is nothing to list', async () => {
     const listed = await makeListDelegationTargetsTool(() => mixedConfig).handler({});
     expect(listed).not.toContain('"claude-code"');
@@ -489,6 +504,21 @@ describe('ask_local_agent approval', () => {
 
   it('directs CLI targets to ask_agent', () => {
     expect(approvalFor('claude-code')?.detail).toContain('ask_agent');
+  });
+
+  it('rejects a CLI target reached through a configured alias before calling the service', async () => {
+    const cfg = makeConfig([
+      model('llama', 'llama.cpp'),
+      { name: 'claude-code', provider: 'cli', cli: 'claude' },
+    ]);
+    cfg.aliases = { linked_claude: 'claude-code' };
+    const { service, ask } = makeMockService();
+    const tool = makeLocalAgentTool(service, () => cfg);
+
+    await expect(tool.handler({ model: 'linked_claude', task: 'review' })).resolves.toBe(
+      'Error: CLI agents are contacted with ask_agent; ask_local_agent accepts local and cloud models.',
+    );
+    expect(ask).not.toHaveBeenCalled();
   });
 
   // A fuzzy alias or `model@profile` still resolves in the handler, so an

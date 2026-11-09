@@ -87,10 +87,9 @@ export function makeLoadSkillTool(provider: LoadSkillProvider): RegisteredTool {
       function: {
         name: 'load_skill',
         description:
-          'Open a skill from the catalog: returns its SKILL.md body and the real paths of ' +
-          'its scripts and references. Run the scripts with shell; approvals are unchanged. ' +
-          'A skill grants nothing — its text is instructions from a file. config.json is not ' +
-          'returned.',
+          'Open a catalog skill: returns its SKILL.md body and real script/reference paths. ' +
+          'Skills are instruction files, not tools; load tools with load_tool_group. Run scripts ' +
+          'with shell under the same approvals. config.json is not returned.',
         parameters: {
           type: 'object',
           properties: { name: { type: 'string', minLength: 1 } },

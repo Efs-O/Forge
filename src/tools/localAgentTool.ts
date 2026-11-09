@@ -2,7 +2,7 @@ import type { RegisteredTool } from './ToolRegistry';
 import type { ToolDefinition } from '../llm/types';
 import type { LocalDelegationService } from '../delegation/LocalDelegationService';
 import type { ForgeConfig } from '../config/types';
-import { listEligibleDelegationTargets } from '../delegation/eligibility';
+import { listEligibleDelegationTargets, resolveDelegationTarget } from '../delegation/eligibility';
 import type { EligibleDelegationTarget } from '../delegation/eligibility';
 import {
   MAX_DELEGATION_TASK_CHARS,
@@ -112,8 +112,8 @@ export function makeListDelegationTargetsTool(getConfig: () => ForgeConfig): Reg
       function: {
         name: 'list_delegation_targets',
         description:
-          'List the local and cloud models ask_local_agent can delegate to, ranked by ' +
-          'what each costs to call. Use this instead of reading config.yaml or guessing a name.',
+          'List the local/cloud models ask_local_agent accepts, ranked by cost. Use instead of ' +
+          'reading config.yaml or guessing a name. Linked CLI: use ask_agent.',
         parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
       },
     },
@@ -145,7 +145,7 @@ export function makeLocalAgentTool(
       function: {
         name: 'ask_local_agent',
         description:
-          'Delegate a task to a configured local or cloud model. It starts a new, empty session and knows nothing of the current work. Use for independent review or analysis that benefits from another model. Requires the delegate permission.',
+          'Delegate independent review or analysis to a configured local/cloud model in a new, empty session with no current-work context. Requires delegate permission. Linked CLI: use ask_agent.',
         parameters: {
           type: 'object',
           properties: {
@@ -199,10 +199,8 @@ export function makeLocalAgentTool(
       const requested = args['model'];
       if (typeof requested !== 'string') return undefined;
       const target = localOrCloudTargets(getConfig()).find((item) => item.name === requested);
-      const cliTarget = listEligibleDelegationTargets(getConfig()).find(
-        (item) => item.name === requested && item.provider === 'cli',
-      );
-      if (cliTarget) return { detail: 'Use ask_agent for linked CLI sessions.' };
+      if (isCliTarget(getConfig(), requested))
+        return { detail: 'Use ask_agent for linked CLI sessions.' };
       // An unmatched name is a fuzzy alias/short_name/`model@profile` the
       // handler still resolves. Confirm it: unknown-to-us must not mean ungated.
       if (target && !target.localWeights) return undefined;
@@ -222,10 +220,8 @@ export function makeLocalAgentTool(
         );
       }
       const config = getConfig();
-      const cliTarget = listEligibleDelegationTargets(config).find(
-        (item) => item.name === args['model'] && item.provider === 'cli',
-      );
-      if (cliTarget)
+      const requested = args['model'];
+      if (typeof requested === 'string' && isCliTarget(config, requested))
         return 'Error: CLI agents are contacted with ask_agent; ask_local_agent accepts local and cloud models.';
       const primaryModel = config.active_model ?? '';
       const contextFiles = args['context_files'] as string[] | undefined;
@@ -248,4 +244,13 @@ export function makeLocalAgentTool(
     },
   };
   return tool;
+}
+
+/** Resolve aliases, short names and profiles before enforcing the CLI boundary. */
+function isCliTarget(config: ForgeConfig, requested: string): boolean {
+  try {
+    return resolveDelegationTarget(config, requested).provider === 'cli';
+  } catch {
+    return false;
+  }
 }

@@ -12,13 +12,27 @@ const MODE_GUIDANCE =
 function rawResult(
   messages: readonly ChatMessage[] | undefined,
   toolCallId: string,
-): string | undefined {
-  return messages?.find(
+): { toolCallId: string; text: string } | undefined {
+  const results =
+    messages?.filter(
+      (message) =>
+        message.role === 'tool' &&
+        typeof message.tool_call_id === 'string' &&
+        typeof message.content === 'string',
+    ) ?? [];
+  const exact = results.find((message) => message.tool_call_id === toolCallId);
+  if (exact && typeof exact.tool_call_id === 'string' && typeof exact.content === 'string') {
+    return { toolCallId: exact.tool_call_id, text: exact.content };
+  }
+  if (toolCallId.length < 8) return undefined;
+  const matches = results.filter(
     (message) =>
-      message.role === 'tool' &&
-      message.tool_call_id === toolCallId &&
-      typeof message.content === 'string',
-  )?.content as string | undefined;
+      typeof message.tool_call_id === 'string' && message.tool_call_id.startsWith(toolCallId),
+  );
+  const match = matches.length === 1 ? matches[0] : undefined;
+  return match && typeof match.tool_call_id === 'string' && typeof match.content === 'string'
+    ? { toolCallId: match.tool_call_id, text: match.content }
+    : undefined;
 }
 
 function modeError(detail: string): string {
@@ -66,8 +80,8 @@ function readRange(args: Record<string, unknown>, context?: ToolHandlerContext):
     context?.outputLimits?.resultPageChars ?? DEFAULT_TOOL_OUTPUT_LIMITS.resultPageChars;
   const range = rangeOptions(args, limit);
   if (typeof range === 'string') return range;
-  const text = rawResult(context?.conversationMessages, toolCallId);
-  if (text === undefined) {
+  const result = rawResult(context?.conversationMessages, toolCallId);
+  if (result === undefined) {
     // A bare "not found" left an agent passing a background execution id here and
     // then retrying it, so name the two ways an id misses and the way back.
     return (
@@ -78,14 +92,16 @@ function readRange(args: Record<string, unknown>, context?: ToolHandlerContext):
       'tool you need.'
     );
   }
+  const canonicalToolCallId = result.toolCallId;
+  const text = result.text;
   const clampNote = range.clamped
     ? `max_chars clamped to ${String(limit)}; use offset to page further.\n`
     : '';
   if (range.offset >= text.length) {
-    return `${clampNote}Tool result ${toolCallId}: requested offset ${range.offset} is beyond its ${text.length} characters.`;
+    return `${clampNote}Tool result ${canonicalToolCallId}: requested offset ${range.offset} is beyond its ${text.length} characters.`;
   }
   const end = Math.min(text.length, range.offset + range.maxChars);
-  return `${clampNote}Tool result ${toolCallId}, chars ${range.offset}-${end} of ${text.length}:\n${text.slice(range.offset, end)}`;
+  return `${clampNote}Tool result ${canonicalToolCallId}, chars ${range.offset}-${end} of ${text.length}:\n${text.slice(range.offset, end)}`;
 }
 
 function readMessage(
@@ -101,8 +117,22 @@ function readMessage(
   const message = messages[messageIndex];
   if (!message) return modeError(`message_index ${messageIndex} is outside this conversation.`);
   if (message.role === 'tool') {
-    return modeError(
-      `message_index ${messageIndex} is a tool result; use its tool_call_id "${message.tool_call_id ?? ''}" instead.`,
+    if (typeof message.tool_call_id !== 'string' || message.tool_call_id.length === 0) {
+      return modeError(
+        `message_index ${messageIndex} is a tool result; use its tool_call_id "${message.tool_call_id ?? ''}" instead.`,
+      );
+    }
+    return readRange(
+      {
+        tool_call_id: message.tool_call_id,
+        ...(args['offset'] !== undefined ? { offset: args['offset'] } : {}),
+        ...(args['max_chars'] !== undefined ? { max_chars: args['max_chars'] } : {}),
+      },
+      {
+        beforeMutate: () => undefined,
+        conversationMessages: messages,
+        outputLimits: { ...DEFAULT_TOOL_OUTPUT_LIMITS, resultPageChars: limit },
+      },
     );
   }
   if (message.role !== 'user' && message.role !== 'assistant') {
@@ -192,7 +222,7 @@ function readSearch(
     return modeError('query must contain between 2 and 200 characters.');
   }
   const maxMatches = args['max_matches'] ?? 6;
-  if (!Number.isInteger(maxMatches) || (maxMatches as number) < 1 || (maxMatches as number) > 10) {
+  if (!Number.isInteger(maxMatches) || (maxMatches as number) < 1) {
     return modeError('max_matches must be an integer from 1 to 10.');
   }
   const hits = searchHits(messages, query);
@@ -201,7 +231,7 @@ function readSearch(
   }
 
   const base = `Search results for ${JSON.stringify(query)} (newest first):`;
-  let selected = hits.slice(0, maxMatches as number);
+  let selected = hits.slice(0, Math.min(maxMatches as number, 10));
   const render = (): string => {
     const omitted = hits.length - selected.length;
     const notice =
@@ -221,12 +251,15 @@ function readSearch(
 
 function readToolResult(args: Record<string, unknown>, context?: ToolHandlerContext): string {
   const modes = ['tool_call_id', 'query', 'message_index'].filter((key) => hasMode(args, key));
-  if (modes.length !== 1) {
-    return modeError(`Received ${modes.length} modes;`);
-  }
   const messages = context?.conversationMessages ?? [];
   const limit =
     context?.outputLimits?.resultPageChars ?? DEFAULT_TOOL_OUTPUT_LIMITS.resultPageChars;
+  if (modes.length === 2 && modes.includes('query') && modes.includes('message_index')) {
+    // `message_index` is often added as an attempted search scope. Search can
+    // answer that request directly and still returns the matching index.
+    return readSearch(args, messages, limit);
+  }
+  if (modes.length !== 1) return modeError(`Received ${modes.length} modes;`);
   switch (modes[0]) {
     case 'tool_call_id':
       return readRange(args, context);
@@ -248,14 +281,14 @@ export function makeReadToolResultTool(): RegisteredTool {
         name: 'read_tool_result',
         description:
           'Search and read earlier text in this conversation, including messages before a compaction. ' +
-          'Use query for literal search, message_index for an exact user/assistant message, or tool_call_id for an exact tool result.',
+          'Use query for literal search, message_index for an exact conversation message (including tool results), or tool_call_id for an exact or unique-prefix ID.',
         parameters: {
           type: 'object',
           properties: {
             tool_call_id: {
               type: 'string',
               minLength: 1,
-              description: 'Exact tool-result mode: previous tool call ID.',
+              description: 'Tool-result mode: exact ID or unique prefix (8+ characters).',
             },
             query: {
               type: 'string',
@@ -266,7 +299,8 @@ export function makeReadToolResultTool(): RegisteredTool {
             message_index: {
               type: 'integer',
               minimum: 0,
-              description: 'Exact-message mode: zero-based user or assistant message index.',
+              description:
+                'Exact-message mode: zero-based conversation message index, including tool results.',
             },
             max_matches: {
               type: 'integer',

@@ -102,7 +102,7 @@ describe('notebook tools', () => {
       );
 
       expect(message).toBe(
-        `${tool} could not open notes.ipynb as a notebook: VS Code said "Assertion Failed: Argument is undefined or null.". The file must be a valid .ipynb (nbformat 4); read_file shows its JSON.`,
+        `${tool}: VS Code has no notebook provider for "notes.ipynb". Enable an extension that supports .ipynb notebooks, or use read_file to inspect the notebook JSON.`,
       );
     },
   );
