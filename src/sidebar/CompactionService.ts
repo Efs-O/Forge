@@ -381,9 +381,9 @@ async function compactOnce(
       trigger,
       ...(metrics?.threshold !== undefined ? { threshold: metrics.threshold } : {}),
     });
+    deps.invalidateExactTokenBudget(conv);
     deps.persistSession();
     deps.postSessionSync();
-    deps.invalidateExactTokenBudget(conv);
     deps.postTokenBudget(conv);
     // The size at the cut, because nothing else can show it: the token bar has
     // just been reset to `0 / max` by invalidateExactTokenBudget above, so the

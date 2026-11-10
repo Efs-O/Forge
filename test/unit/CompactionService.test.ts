@@ -33,6 +33,7 @@ import {
   type CompactionFailureCategory,
 } from '../../src/sidebar/compactionFailure';
 import { opClearMessages } from '../../src/sidebar/ConversationOps';
+import { persistedToRuntime, runtimeToPersisted } from '../../src/sidebar/sessionPersistence';
 import {
   activateLazyGroup,
   isLazyGroupActive,
@@ -826,6 +827,7 @@ describe('runCompaction', () => {
     c.last_output_tokens = 1_200;
     const h = harness(c, async () => long('summary'));
     const rows: CompactionLogEntry[] = [];
+    let restored: ConversationRuntime | undefined;
     const deps: CompactionDeps = {
       ...h.deps,
       // The real wiring deletes both counters here. Doing the same in the test
@@ -837,6 +839,10 @@ describe('runCompaction', () => {
       },
       compactionMetrics: () => ({ max: 58_000, threshold: 0.8 }),
       logCompaction: (_target, entry) => rows.push(entry),
+      persistSession: () => {
+        const saved = runtimeToPersisted({ conversations: [c], history: [], activeConversationId: c.id });
+        restored = persistedToRuntime(saved.conversations[0]!);
+      },
     };
 
     expect(await runCompaction(deps, c.id, { auto: true, trigger: 'auto' })).toBe('compacted');
@@ -850,6 +856,10 @@ describe('runCompaction', () => {
       fromIndex: c.compaction?.fromIndex,
     });
     expect(rows[0]?.summaryChars).toBe(c.compaction?.summary.length);
+    expect(restored?.compaction?.summary).toBe(c.compaction?.summary);
+    expect(restored?.compaction?.resumeNote?.usedTokens).toBe(45_200);
+    expect(restored?.last_input_tokens).toBeUndefined();
+    expect(restored?.last_output_tokens).toBeUndefined();
   });
 
   it('records the mid-turn decision token count on the attempt start row', async () => {
