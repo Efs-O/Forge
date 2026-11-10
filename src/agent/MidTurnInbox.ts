@@ -75,6 +75,18 @@ export class MidTurnInbox {
     return this.take(conversationId);
   }
 
+  drainResult(conversationId: string): MidTurnDrainResult {
+    return {
+      messages: this.drain(conversationId).map((tell) => ({
+        role: 'user',
+        content: tell.text,
+        ...(tell.createdAt !== undefined ? { createdAt: tell.createdAt } : {}),
+        midTurn: true,
+        ...(tell.internal ? { internal: true } : {}),
+      })),
+    };
+  }
+
   /** Holds one tell for the turn after an interrupt; false once a drain has already taken it. */
   markSendNow(conversationId: string, id: string): boolean {
     const tell = this.pending.get(conversationId)?.find((candidate) => candidate.id === id);

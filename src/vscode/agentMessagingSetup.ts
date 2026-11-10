@@ -25,6 +25,7 @@ import { buildAgentRouteDeps } from './agentRouteDeps';
 import type { ForgeRequestOutcome } from '../sidebar/turnOutcome';
 import { subscribeConversationSettled } from '../sidebar/workerChatWake';
 import { getLogger } from '../util/logger';
+import { unattendedConversations } from '../sidebar/unattendedConversations';
 
 const log = getLogger();
 
@@ -47,8 +48,14 @@ export function createAgentBusMidTurnReplies(deps: {
   return {
     source: async (conversationId) => {
       const facade = deps.getFacade();
-      const claimed = deps.inbox.claimMidTurn(conversationId, (options) =>
-        busTarget(facade, options?.from, options?.targetConversationId),
+      const job = unattendedConversations.jobMeta(conversationId);
+      const claimed = deps.inbox.claimMidTurn(
+        conversationId,
+        (options) => busTarget(facade, options?.from, options?.targetConversationId),
+        {
+          unattended: unattendedConversations.has(conversationId),
+          ...(job ? { jobId: job.jobId } : {}),
+        },
       );
       const claimedReplies = claimed.flatMap((item) =>
         item.options?.sender ? [item.options] : [],
@@ -237,7 +244,25 @@ export function setupAgentMessaging(
   let tellSourceRegistered = false;
   const registerTellSource = (): void => {
     if (tellSourceRegistered) return;
-    getSidebar().tellDrain.registerSource('agent-bus', claimedReplies.source);
+    getSidebar().tellDrain.registerSource(
+      'agent-bus',
+      claimedReplies.source,
+      (conversationId, callback) => {
+        const facade = getSidebar().getHostFacade();
+        return inbox.onClaimableMidTurnAdded(
+          conversationId,
+          (options) => busTarget(facade, options?.from, options?.targetConversationId),
+          () => {
+            const job = unattendedConversations.jobMeta(conversationId);
+            return {
+              unattended: unattendedConversations.has(conversationId),
+              ...(job ? { jobId: job.jobId } : {}),
+            };
+          },
+          callback,
+        );
+      },
+    );
     tellSourceRegistered = true;
   };
   const routes = new AgentRoutes(

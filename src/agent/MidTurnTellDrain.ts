@@ -13,13 +13,55 @@
 import type { MidTurnDrainResult } from './MidTurnInbox';
 
 export type MidTurnTellSource = (conversationId: string) => Promise<MidTurnDrainResult>;
+export type MidTurnTellSubscription = (conversationId: string, callback: () => void) => () => void;
+
+interface RegisteredTellSource {
+  drain: MidTurnTellSource;
+  subscribe?: MidTurnTellSubscription;
+}
+
+interface ArrivalSubscription {
+  callback: () => void;
+  sources: Map<string, () => void>;
+  active: boolean;
+}
 
 export class MidTurnTellDrain {
-  private readonly sources = new Map<string, MidTurnTellSource>();
+  private readonly sources = new Map<string, RegisteredTellSource>();
+  private readonly arrivals = new Map<string, Set<ArrivalSubscription>>();
 
   /** Register (or replace) a named source. Registration order is drain order. */
-  registerSource(name: string, source: MidTurnTellSource): void {
-    this.sources.set(name, source);
+  registerSource(
+    name: string,
+    drain: MidTurnTellSource,
+    subscribe?: MidTurnTellSubscription,
+  ): void {
+    this.sources.set(name, { drain, ...(subscribe ? { subscribe } : {}) });
+    for (const [conversationId, subscriptions] of this.arrivals) {
+      for (const arrival of subscriptions) this.subscribeSource(name, conversationId, arrival);
+    }
+  }
+
+  /** Subscribe to every source, including sources registered later. */
+  onArrived(conversationId: string, callback: () => void): () => void {
+    const arrival: ArrivalSubscription = {
+      callback: () => {
+        if (arrival.active) callback();
+      },
+      sources: new Map(),
+      active: true,
+    };
+    const subscriptions = this.arrivals.get(conversationId) ?? new Set<ArrivalSubscription>();
+    subscriptions.add(arrival);
+    this.arrivals.set(conversationId, subscriptions);
+    for (const name of this.sources.keys()) this.subscribeSource(name, conversationId, arrival);
+    return () => {
+      arrival.active = false;
+      for (const unsubscribe of arrival.sources.values()) unsubscribe();
+      arrival.sources.clear();
+      subscriptions.delete(arrival);
+      if (subscriptions.size === 0) this.arrivals.delete(conversationId);
+    };
   }
 
   async drain(conversationId: string): Promise<MidTurnDrainResult> {
@@ -28,7 +70,7 @@ export class MidTurnTellDrain {
     let hasSourceError = false;
     for (const source of this.sources.values()) {
       try {
-        results.push(await source(conversationId));
+        results.push(await source.drain(conversationId));
       } catch (err) {
         // A failing source yields nothing, but messages already drained by the
         // earlier sources still reach the turn.
@@ -63,5 +105,21 @@ export class MidTurnTellDrain {
         if (hasSettlementError) throw settlementError;
       },
     };
+  }
+
+  private subscribeSource(
+    name: string,
+    conversationId: string,
+    arrival: ArrivalSubscription,
+  ): void {
+    if (arrival.sources.has(name)) arrival.sources.get(name)?.();
+    const source = this.sources.get(name);
+    if (!source?.subscribe) {
+      arrival.sources.delete(name);
+      return;
+    }
+    const unsubscribe = source.subscribe(conversationId, arrival.callback);
+    if (arrival.active) arrival.sources.set(name, unsubscribe);
+    else unsubscribe();
   }
 }

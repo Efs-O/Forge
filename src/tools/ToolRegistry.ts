@@ -272,8 +272,31 @@ export class ToolRegistry {
         (key) => !Object.hasOwn(advertisedProperties, key) && present[key] !== undefined,
       );
       if (unknown.length === 1) {
+        const key = unknown[0];
+        const value = present[key];
+        if (
+          typeof value === 'object' &&
+          value !== null &&
+          !Array.isArray(value) &&
+          (Object.getPrototypeOf(value) === Object.prototype ||
+            Object.getPrototypeOf(value) === null)
+        ) {
+          const innerKeys = Object.keys(value);
+          if (
+            innerKeys.length > 0 &&
+            innerKeys.every((innerKey) => Object.hasOwn(advertisedProperties, innerKey)) &&
+            innerKeys.every((innerKey) => !Object.hasOwn(present, innerKey))
+          ) {
+            const inner = innerKeys.join(', ');
+            return (
+              `Error: ${name}: unknown argument "${key}"; its value holds this tool's own arguments (${inner}), ` +
+              `which go at the top level, not inside "${key}". This tool takes: ${declaredKeys.join(', ')}. ` +
+              `Nothing ran. Resend the call with ${inner} moved out of "${key}".`
+            );
+          }
+        }
         return (
-          `Error: ${name}: unknown argument "${unknown[0]}"; this tool takes: ${declaredKeys.join(', ')}. ` +
+          `Error: ${name}: unknown argument "${key}"; this tool takes: ${declaredKeys.join(', ')}. ` +
           'Nothing ran. Resend the call without it, or use the argument that means what you intended.'
         );
       }

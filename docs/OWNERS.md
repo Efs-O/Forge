@@ -919,6 +919,8 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Claude session registry + peer-pipe delivery               | `src/agentBus/claudePeer.ts`                                   |
 | Claude delivery via a `claude -p` relay (opt-in)           | `src/agentBus/claudeRelay.ts`                                  |
 | Inbound agent messages → Forge turns (queue)               | `src/agentBus/agentInbox.ts`                                   |
+| Inbound queue mid-turn eligibility, release + arrival listeners | `src/agentBus/agentInboxMidTurn.ts`                          |
+| Inbound queue scan serialization and rescan scheduling      | `src/agentBus/agentInboxScanScheduler.ts`                     |
 | Which chat an inbound bus message lands in (sender affinity) | `src/agentBus/busTarget.ts`                                    |
 | Plain-text bus status, queue and transcript answers      | `src/agentBus/busStatusView.ts`                                |
 | `/agent/message` + `/agent/reply` routes, endpoint.json    | `src/backend/agentRoutes.ts`                                   |

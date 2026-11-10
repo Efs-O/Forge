@@ -67,6 +67,26 @@ function host(overrides: Partial<InboxHost> = {}): InboxHost & {
 }
 
 describe('AgentInbox', () => {
+  it('signals at subscription time for an already queued claimable message without claiming it', () => {
+    const h = host();
+    h.busy = true;
+    const inbox = new AgentInbox(h, 5);
+    inbox.accept('queued message', 'claude');
+    let arrived = 0;
+
+    const unsubscribe = inbox.onClaimableMidTurnAdded(
+      'chat',
+      () => 'chat',
+      () => ({ unattended: false }),
+      () => arrived++,
+    );
+
+    expect(arrived).toBe(1);
+    expect(inbox.pending).toBe(1);
+    unsubscribe();
+    inbox.dispose();
+  });
+
   it('a steer jumps the queue and runs as soon as the current turn ends', async () => {
     const h = host();
     const inbox = new AgentInbox(h, 5);
@@ -353,12 +373,12 @@ describe('AgentInbox', () => {
     const target = (options?: { from?: string }): string =>
       options?.from === 'claude' ? 'A' : 'B';
     // A turn that never ends would starve these; the next tool-round gap takes them.
-    expect(inbox.claimMidTurn('A', target)).toEqual([
+    expect(inbox.claimMidTurn('A', target, { unattended: false })).toEqual([
       { content: 'for A', options: { from: 'claude' } },
     ]);
-    expect(inbox.claimMidTurn('A', target)).toEqual([]);
+    expect(inbox.claimMidTurn('A', target, { unattended: false })).toEqual([]);
     expect(inbox.pending).toBe(5);
-    expect(inbox.claimMidTurn('B', target)).toEqual([
+    expect(inbox.claimMidTurn('B', target, { unattended: false })).toEqual([
       { content: 'for B', options: { from: 'codex' } },
     ]);
     await tick();
@@ -381,7 +401,7 @@ describe('AgentInbox', () => {
       pendingReplyId: 'reply-1',
     });
 
-    expect(inbox.claimMidTurn('chat', () => 'chat')).toEqual([
+    expect(inbox.claimMidTurn('chat', () => 'chat', { unattended: false })).toEqual([
       {
         content: '**Claude says:**\n\nreview this',
         options: { from: 'claude', sender, targetConversationId: 'chat', pendingReplyId: 'reply-1' },
@@ -393,11 +413,47 @@ describe('AgentInbox', () => {
   });
 
   it.each([
-    ['steer', {}, true],
-    ['--new', { newChat: true }, false],
-    ['--model', { model: 'qwen' }, false],
-    ['--unattended', { unattended: true }, false],
-  ] as const)('does not claim a sender message marked %s', (_flag, special, steer) => {
+    ['steer', {}, true, { unattended: false }, []],
+    ['--new', { newChat: true }, false, { unattended: true }, []],
+    ['--model', { model: 'qwen' }, false, { unattended: true }, []],
+    ['unattended item in attended turn', { unattended: true }, false, { unattended: false }, []],
+    ['unattended item with no job in a job turn', { unattended: true }, false, { unattended: true, jobId: 'A' }, []],
+    ['unattended item from job B in job A turn', { unattended: true, jobId: 'B' }, false, { unattended: true, jobId: 'A' }, []],
+    ['unattended item from job B in no-job turn', { unattended: true, jobId: 'B' }, false, { unattended: true }, []],
+    [
+      'unattended item in no-job unattended turn',
+      { unattended: true },
+      false,
+      { unattended: true },
+      [{
+        content: 'reply owed',
+        options: {
+          from: 'codex',
+          unattended: true,
+          sender: { kind: 'codex', sessionId: '00000000-0000-4000-8000-000000000072', title: 'Codex task' },
+          targetConversationId: 'chat',
+          pendingReplyId: 'reply-2',
+        },
+      }],
+    ],
+    [
+      'unattended item in same-job unattended turn',
+      { unattended: true, jobId: 'A' },
+      false,
+      { unattended: true, jobId: 'A' },
+      [{
+        content: 'reply owed',
+        options: {
+          from: 'codex',
+          unattended: true,
+          jobId: 'A',
+          sender: { kind: 'codex', sessionId: '00000000-0000-4000-8000-000000000072', title: 'Codex task' },
+          targetConversationId: 'chat',
+          pendingReplyId: 'reply-2',
+        },
+      }],
+    ],
+  ] as const)('claims sender message according to %s', (_case, special, steer, runningTurn, expected) => {
     const h = host();
     h.busy = true;
     const inbox = new AgentInbox(h, 5);
@@ -412,8 +468,8 @@ describe('AgentInbox', () => {
       pendingReplyId: 'reply-2',
     });
 
-    expect(inbox.claimMidTurn('chat', () => 'chat')).toEqual([]);
-    expect(inbox.pending).toBe(1);
+    expect(inbox.claimMidTurn('chat', () => 'chat', runningTurn)).toEqual(expected);
+    expect(inbox.pending).toBe(expected.length ? 0 : 1);
     inbox.dispose();
   });
 });

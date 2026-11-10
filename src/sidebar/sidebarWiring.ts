@@ -144,8 +144,9 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
   });
   const midTurnInbox = new MidTurnInbox();
   // One composer for every door. The sidebar inbox registers first so its tells
-  // drain ahead of any remote claim; the remote source is added by extension.ts
-  // once the RemoteRuntime's store and auth exist.
+  // drain ahead of any remote claim; the agent-bus source registers in
+  // agentMessagingSetup.ts, and the remote source is added by extension.ts once
+  // the RemoteRuntime's store and auth exist.
   const tellDrain = new MidTurnTellDrain();
   // Forge's own tell: one note per task once it has been running a long time.
   const elapsedTimeNote = new ElapsedTimeNote(
@@ -171,16 +172,10 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     undefined,
     parts.cliSessions,
   );
-  tellDrain.registerSource('sidebar', (conversationId) =>
-    Promise.resolve({
-      messages: midTurnInbox.drain(conversationId).map((tell) => ({
-        role: 'user',
-        content: tell.text,
-        ...(tell.createdAt !== undefined ? { createdAt: tell.createdAt } : {}),
-        midTurn: true,
-        ...(tell.internal ? { internal: true } : {}),
-      })),
-    }),
+  tellDrain.registerSource(
+    'sidebar',
+    (conversationId) => Promise.resolve(midTurnInbox.drainResult(conversationId)),
+    (conversationId, callback) => midTurnInbox.onAdded(conversationId, callback),
   );
   tellDrain.registerSource('elapsed-time', elapsedTimeNote.source);
   agentLoop.setMidTurnTells({
@@ -206,7 +201,7 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       }
       return drained;
     },
-    onTellArrived: (conversationId, callback) => midTurnInbox.onAdded(conversationId, callback),
+    onTellArrived: (conversationId, callback) => tellDrain.onArrived(conversationId, callback),
   });
 
   const budget = new ContextBudgetPublisher({

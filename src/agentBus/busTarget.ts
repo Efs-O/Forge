@@ -2,6 +2,15 @@ import type { ForgeHostStatus } from '../sidebar/ForgeHostFacade';
 import type { ForgeExchange } from '../sidebar/sessionProjections';
 import { parseForgeInboundPrompt } from './busContent';
 
+export interface ChatTargetSelection {
+  conversationId?: string;
+  toRunning?: boolean;
+}
+
+export type ChatTargetResult =
+  | { ok: true; conversationId: string; title: string }
+  | { ok: false; status?: 400 | 404 | 409; error: string };
+
 /** How many recent exchanges per conversation are searched for the sender. */
 export const BUS_TARGET_SCAN = 200;
 

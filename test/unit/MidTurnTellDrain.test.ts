@@ -71,4 +71,40 @@ describe('MidTurnTellDrain', () => {
       messages: [{ role: 'user', content: 'tell' }],
     });
   });
+
+  it('subscribes to a source registered later and unsubscribes every source', () => {
+    const drain = new MidTurnTellDrain();
+    const events: string[] = [];
+    let sidebarArrived: (() => void) | undefined;
+    const unsubscribe = drain.onArrived('chat', () => events.push('arrived'));
+
+    drain.registerSource(
+      'sidebar',
+      async () => ({ messages: [] }),
+      (_conversationId, callback) => {
+        sidebarArrived = callback;
+        return () => events.push('sidebar unsubscribed');
+      },
+    );
+    sidebarArrived?.();
+    expect(events).toEqual(['arrived']);
+
+    let busArrived: (() => void) | undefined;
+    drain.registerSource(
+      'agent-bus',
+      async () => ({ messages: [] }),
+      (_conversationId, callback) => {
+        busArrived = callback;
+        return () => events.push('bus unsubscribed');
+      },
+    );
+    busArrived?.();
+    expect(events).toEqual(['arrived', 'arrived']);
+
+    unsubscribe();
+    expect(events.slice(2)).toEqual(['sidebar unsubscribed', 'bus unsubscribed']);
+    sidebarArrived?.();
+    busArrived?.();
+    expect(events).toHaveLength(4);
+  });
 });

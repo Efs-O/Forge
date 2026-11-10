@@ -1,7 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { MidTurnInbox } from '../../src/agent/MidTurnInbox';
+import { MidTurnInbox, type MidTurnTell } from '../../src/agent/MidTurnInbox';
 
 describe('MidTurnInbox', () => {
+  it('maps drained tells to sidebar chat messages with only present metadata', () => {
+    const inbox = new (class extends MidTurnInbox {
+      override drain(_conversationId: string): MidTurnTell[] {
+        return [
+          { id: 'with-metadata', text: 'visible tell', createdAt: 123, internal: true },
+          { id: 'plain', text: 'plain tell' },
+        ];
+      }
+    })();
+
+    expect(inbox.drainResult('chat')).toEqual({
+      messages: [
+        { role: 'user', content: 'visible tell', createdAt: 123, midTurn: true, internal: true },
+        { role: 'user', content: 'plain tell', midTurn: true },
+      ],
+    });
+  });
+
   it('drains tells in arrival order and isolates conversations', () => {
     const inbox = new MidTurnInbox();
     inbox.add('one', { id: 'a', text: 'first' });

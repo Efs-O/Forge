@@ -117,6 +117,32 @@ describe('ToolRegistry.invalidArgs missing-argument refusal', () => {
 
 describe('ToolRegistry.invalidArgs unknown-argument refusal', () => {
   const registry = new ToolRegistry();
+  const fullSearchCode: RegisteredTool = {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'search_code',
+        description: 'Search source.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string' },
+            literal: { type: 'boolean' },
+            include: { type: 'string' },
+            output: { type: 'string' },
+            context: { type: 'number' },
+            ignore_case: { type: 'boolean' },
+            max_results: { type: 'number' },
+            offset: { type: 'number' },
+          },
+          required: ['query'],
+          additionalProperties: false,
+        },
+      },
+    },
+    permission: 'read',
+    handler: async () => 'unused',
+  };
 
   it('refuses one undeclared argument and lists keys in advertised schema order', () => {
     const searchCode: RegisteredTool = {
@@ -139,6 +165,40 @@ describe('ToolRegistry.invalidArgs unknown-argument refusal', () => {
     expect(registry.invalidArgs(searchCode, { query: 'needle', path: 'src' })).toBe(
       'Error: search_code: unknown argument "path"; this tool takes: query, include. ' +
         'Nothing ran. Resend the call without it, or use the argument that means what you intended.',
+    );
+  });
+
+  it('explains when an unknown key wraps the tool arguments', () => {
+    expect(
+      registry.invalidArgs(fullSearchCode, {
+        context: 0,
+        output: 'content',
+        queries: { query: 'sumPricesR4|totalPricesR4' },
+      }),
+    ).toBe(
+      'Error: search_code: unknown argument "queries"; its value holds this tool\'s own arguments (query), ' +
+        'which go at the top level, not inside "queries". This tool takes: query, literal, include, output, ' +
+        'context, ignore_case, max_results, offset. Nothing ran. Resend the call with query moved out of "queries".',
+    );
+  });
+
+  it('keeps the existing single-unknown refusal for other value shapes', () => {
+    const expected =
+      'Error: search_code: unknown argument "wrap"; this tool takes: query, literal, include, output, ' +
+      'context, ignore_case, max_results, offset. Nothing ran. Resend the call without it, or use the argument ' +
+      'that means what you intended.';
+    expect(registry.invalidArgs(fullSearchCode, { wrap: 'x' })).toBe(expected);
+    expect(registry.invalidArgs(fullSearchCode, { wrap: { query: 'x', bogus: 1 } })).toBe(expected);
+    expect(registry.invalidArgs(fullSearchCode, { wrap: {} })).toBe(expected);
+    expect(registry.invalidArgs(fullSearchCode, { wrap: ['query'] })).toBe(expected);
+    expect(registry.invalidArgs(fullSearchCode, { query: 'a', wrap: { query: 'b' } })).toBe(expected);
+  });
+
+  it('keeps the plural refusal when multiple unknown arguments include wrapped keys', () => {
+    expect(registry.invalidArgs(fullSearchCode, { wrap: { query: 'x' }, extra: true })).toBe(
+      'Error: search_code: unknown arguments "wrap", "extra"; this tool takes: query, literal, include, ' +
+        'output, context, ignore_case, max_results, offset. Nothing ran. Resend the call without them, or use the ' +
+        'arguments that mean what you intended.',
     );
   });
 

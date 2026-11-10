@@ -2,6 +2,13 @@ import { randomBytes } from 'crypto';
 import { getLogger } from '../util/logger';
 import type { AgentSenderMetadata } from '../agentLinks/chatAgentLinks';
 import { deliveredPrompt, type BusTurnEnd } from './agentInboxPrompt';
+import { AgentInboxMidTurn } from './agentInboxMidTurn';
+import { AgentInboxScanScheduler } from './agentInboxScanScheduler';
+import type {
+  ClaimedMidTurnMessage,
+  MidTurnQueueItem,
+  RunningTurnPolicy,
+} from './agentInboxMidTurn';
 
 // The prompt shapes live in `agentInboxPrompt.ts`; re-exported here so the
 // queue's own surface stays the one its eleven importers already reach.
@@ -44,19 +51,9 @@ export interface InboxMessageOptions {
   jobName?: string;
 }
 
-export interface ClaimedMidTurnMessage {
-  content: string;
-  options?: InboxMessageOptions;
-}
+export type { ClaimedMidTurnMessage, RunningTurnPolicy } from './agentInboxMidTurn';
 
-export interface ChatTargetSelection {
-  conversationId?: string;
-  toRunning?: boolean;
-}
-
-export type ChatTargetResult =
-  | { ok: true; conversationId: string; title: string }
-  | { ok: false; status?: 400 | 404 | 409; error: string };
+export type { ChatTargetSelection, ChatTargetResult } from './busTarget';
 
 export type ForgeSteerResult =
   | { steered: true; conversationId: string; title: string }
@@ -110,7 +107,7 @@ export interface InboxHost {
   onAgentTurnCancelled?(options: InboxMessageOptions): void | Promise<void>;
 }
 
-interface QueuedMessage {
+interface QueuedMessage extends MidTurnQueueItem {
   /** Returned to the sender so it can withdraw the message (`/agent/cancel`). */
   id: string;
   prompt: string;
@@ -126,7 +123,7 @@ interface QueuedMessage {
 }
 
 /** A queued message's options as the host sees them: with its sender. */
-function hostOptions(item: QueuedMessage | undefined): InboxMessageOptions | undefined {
+function hostOptions(item: MidTurnQueueItem | undefined): InboxMessageOptions | undefined {
   if (!item?.from) return item?.options;
   return { ...item.options, from: item.from };
 }
@@ -142,10 +139,13 @@ function hostOptions(item: QueuedMessage | undefined): InboxMessageOptions | und
  */
 export class AgentInbox {
   private readonly queue: QueuedMessage[] = [];
+  private readonly midTurn = new AgentInboxMidTurn();
+  private readonly scanScheduler = new AgentInboxScanScheduler(
+    () => this.disposed,
+    () => this.runScan(),
+  );
   /** Chats with a turn this inbox started that has not settled. */
   private readonly inFlight = new Set<string>();
-  private scanning = false;
-  private rescanRequested = false;
   private pollTimer: ReturnType<typeof setTimeout> | undefined;
   private disposed = false;
 
@@ -178,6 +178,7 @@ export class AgentInbox {
     };
     if (front) this.queue.unshift(item);
     else this.queue.push(item);
+    this.midTurn.signal(item, hostOptions);
     this.scheduleScan();
     return { position: front ? 1 : this.queue.length, id };
   }
@@ -214,6 +215,23 @@ export class AgentInbox {
     return this.queue.filter((item) => item.from === from).length;
   }
 
+  /** Signal claimable queued messages without claiming or removing them. */
+  onClaimableMidTurnAdded(
+    conversationId: string,
+    targetOf: (options?: InboxMessageOptions) => string,
+    runningTurn: () => RunningTurnPolicy,
+    callback: () => void,
+  ): () => void {
+    return this.midTurn.add(
+      conversationId,
+      targetOf,
+      runningTurn,
+      callback,
+      this.queue,
+      hostOptions,
+    );
+  }
+
   /**
    * Clear a `hold: true` message's hold so the drain may start it, and say
    * whether such a message was still queued. The route that accepted a steer
@@ -222,13 +240,7 @@ export class AgentInbox {
    * admission is a guaranteed withdrawal (`cancel` removes the held message).
    */
   release(id: string): boolean {
-    const item = this.queue.find((queued) => queued.id === id);
-    if (!item) return false;
-    if (item.hold) {
-      delete item.hold;
-      this.scheduleScan();
-    }
-    return true;
+    return this.midTurn.release(this.queue, id, hostOptions, () => this.scheduleScan());
   }
 
   /**
@@ -254,35 +266,36 @@ export class AgentInbox {
    * tool-round gap. Waiting for the turn to end starved a long agentic turn:
    * a refactor ran for hours as one turn and a message sat queued throughout,
    * while a Telegram or typed message reached it at the next round. A steer,
-   * `--new`, `--model` or `--unattended` message still needs a turn of its own
-   * and keeps waiting. A claimed sender carries its options so its pending
-   * reply can start here and settle when this chat's request chain ends.
-   * `targetOf` resolves the chat a message belongs in.
+   * `--new` or `--model` message still needs a turn of its own and keeps
+   * waiting, and a held message waits for its release. An `--unattended`
+   * message joins only a running turn that is itself unattended under the same
+   * job identity (both without a job, or the same `jobId`): merged into an
+   * attended turn, a dangerous tool would raise an approval card nobody
+   * answers, and merged into another job's turn it would run under that job's
+   * allow rules. A claimed sender carries its options so its pending reply can
+   * start here and settle when this chat's request chain ends. `targetOf`
+   * resolves the chat a message belongs in; `runningTurn` is that chat's
+   * unattended state.
    */
   claimMidTurn(
     conversationId: string,
     targetOf: (options?: InboxMessageOptions) => string,
+    runningTurn: RunningTurnPolicy,
   ): ClaimedMidTurnMessage[] {
-    const claimed: ClaimedMidTurnMessage[] = [];
-    for (let i = 0; i < this.queue.length; i++) {
-      const item = this.queue[i] as QueuedMessage;
-      if (item.steer || item.options?.newChat || item.options?.model || item.options?.unattended) {
-        continue;
-      }
-      const options = hostOptions(item);
-      if (targetOf(options) !== conversationId) continue;
-      claimed.push({
-        content: deliveredPrompt(item, Date.now()),
-        ...(options ? { options } : {}),
-      });
-      this.queue.splice(i--, 1);
-    }
-    return claimed;
+    return this.midTurn.claim(
+      this.queue,
+      conversationId,
+      targetOf,
+      runningTurn,
+      (item) => deliveredPrompt(item, Date.now()),
+      hostOptions,
+    );
   }
 
   dispose(): void {
     this.disposed = true;
     this.queue.length = 0;
+    this.midTurn.clear();
     if (this.pollTimer) {
       clearTimeout(this.pollTimer);
       this.pollTimer = undefined;
@@ -304,21 +317,7 @@ export class AgentInbox {
    * gets the pass it deserves (`rescanRequested`).
    */
   private scheduleScan(): void {
-    if (this.disposed) return;
-    if (this.scanning) {
-      this.rescanRequested = true;
-      return;
-    }
-    this.scanning = true;
-    try {
-      this.runScan();
-    } finally {
-      this.scanning = false;
-    }
-    if (this.rescanRequested) {
-      this.rescanRequested = false;
-      this.scheduleScan();
-    }
+    this.scanScheduler.schedule();
   }
 
   /**
