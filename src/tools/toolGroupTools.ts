@@ -12,13 +12,11 @@ import {
 /**
  * `load_tool_group` flips one per-conversation flag; the real schemas arrive
  * through the normal `tools` array on the next round, so this tool must never
- * restate them. Each group's job line is its discovery surface: a model looks
- * for what it needs to do, and a tool name does not always say that. Member
- * names are not listed — they cost 283 tokens on every request (measured on
- * Flash-Next, 2026-10-20) — so a purpose carries the verbs its tools did. A
- * model that already knows a name loses nothing: dispatch runs a registered
- * tool whether or not its group is loaded, a near-miss name gets ToolDispatch's
- * unloaded-group hint, and the load result names the members.
+ * restate them. Each line names its members after the purpose, so a model asked
+ * for a tool by name can find its group. A model that already knows a name
+ * loses nothing: dispatch runs a registered tool whether or not its group is
+ * loaded, a near-miss name gets ToolDispatch's unloaded-group hint, and the
+ * load result names the members too.
  * Keyed by `NATIVE_LAZY_GROUP_NAMES`, so a new group without one fails to
  * compile. Keep HalluScribe's measured history cue close to its original
  * wording: Qwen found that group unprompted with the longer phrase.
@@ -50,8 +48,9 @@ function describeGroups(): string {
   return lazyGroupNames()
     .map((group) => {
       const purpose = (GROUP_PURPOSE as Readonly<Record<string, string>>)[group];
-      // A group without a job line (an MCP server's) has only its names to show.
-      return `${group}: ${purpose ?? lazyGroupMembers(group).join(', ')}`;
+      const members = lazyGroupMembers(group).join(', ');
+      // MCP groups have no purpose line, so keep their existing names-only form.
+      return purpose ? `${group}: ${purpose} (${members})` : `${group}: ${members}`;
     })
     .join('\n');
 }

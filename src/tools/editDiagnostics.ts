@@ -189,7 +189,7 @@ export function makeProblemWatcher(deps: {
     let notPrimed: string | undefined;
     if (existedBefore) {
       try {
-        notPrimed = await source.ensureChecked(key);
+        notPrimed = await source.ensureChecked(writtenPath);
       } catch {
         // Priming is a bonus: the note reads whatever the service did report.
       }
@@ -214,12 +214,12 @@ export function makeProblemWatcher(deps: {
         // already opened is opened once, not twice.
         if (!beforeSeen && !existedBefore && fs.existsSync(writtenPath)) {
           try {
-            notPrimed ??= await source.ensureChecked(key);
+            notPrimed ??= await source.ensureChecked(writtenPath);
           } catch {
             // Same as before the write: a failed priming step fails nothing.
           }
         }
-        const language = source.languageOf?.(writtenPath) ?? source.languageOf?.(key);
+        const language = source.languageOf?.(writtenPath);
         if (language !== undefined && marks.has(language)) {
           // Nothing on this host reports on this kind of file, and this already
           // said so once: no wait, and no second hedge to read.

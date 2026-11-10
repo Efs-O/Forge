@@ -180,8 +180,8 @@ describe('lazy tool groups', () => {
     activateLazyGroup('conv-a', 'git');
     expect(hiddenLazyToolNames('conv-a')).not.toContain('git_read');
     expect(modelFacingTools(registry, 'conv-a')).toContain('git_read');
-    // The purpose line has to name the read verbs, because the group used to be
-    // described by its write tools alone and `git_read` was never in it.
+    // The purpose line carries the read verbs, and the member list names the
+    // exact tool that triggered this group lookup.
     expect(registry.get('load_tool_group')?.describe?.().function.description).toMatch(
       /git: [^\n]*(status|log|diff|blame|show)[^\n]*stage, commit[^\n]*shell runs git too/,
     );
@@ -206,8 +206,8 @@ describe('lazy tool groups', () => {
     );
 
     expect(result).toContain('enabled');
-    // The result names the members (the group list no longer does) but must
-    // not restate the schemas -- they arrive via `tools`.
+    // The result names the members but must not restate the schemas -- they
+    // arrive via `tools`.
     for (const name of HALLUSCRIBE_TOOLS) expect(result).toContain(name);
     expect(result).not.toMatch(/"type"|parameters|properties/u);
 
@@ -373,17 +373,16 @@ describe('lazy tool groups', () => {
       properties: { group: { enum: expect.arrayContaining(['memory', 'agents']) } },
     });
     expect(loader?.function.description).toContain(
-      'memory: remember, recall, forget notes kept across conversations\n',
+      'memory: remember, recall, forget notes kept across conversations (remember)\n',
     );
     expect(loader?.function.description).toContain(
-      'system: this PC: power, sleep/wake, status, llama.cpp',
+      'system: this PC: power, sleep/wake, status, llama.cpp (get_power_info, get_system_status, install_llamacpp)',
     );
-    // The media line must carry the verbs a coding conversation would search
-    // for, because member names no longer appear anywhere in the schema.
+    // The media line carries searchable verbs and the exact registered names.
     expect(loader?.function.description).toMatch(
       /media: [^\n]*(upscale|render|video|image search)[^\n]*send files/,
     );
-    expect(loader?.function.description).not.toContain('get_power_info');
+    expect(loader?.function.description).toContain('get_power_info');
     expect(loader?.function.description.split(/\s+/).length).toBeLessThanOrEqual(350);
     const staticDefinition = makeLoadToolGroupTool().definition;
     expect(staticDefinition.function.parameters).toMatchObject({
@@ -452,61 +451,6 @@ describe('lazy tool groups', () => {
     deactivateLazyGroups('conv-a');
     expect(isLazyGroupActive('conv-a', 'memory')).toBe(false);
     expect(hiddenLazyToolNames('conv-a', new Set(), new Set(['memory']))).toEqual(new Set());
-  });
-
-  // Member names cost 283 tokens per request on Flash-Next (2026-10-20); the
-  // load result names them instead, on the one round that needs them.
-  it('describes groups by purpose and names the members only when one loads', async () => {
-    const registry = new ToolRegistry();
-    registry.register(makeLoadToolGroupTool());
-    // `create_directory` was retired on 2026-10-29 (lane B item B3), so the two
-    // members this registry stands in for are ones that still exist.
-    for (const name of ['move_file', 'restore_file']) {
-      registry.register({
-        definition: {
-          type: 'function',
-          function: { name, description: '', parameters: { type: 'object' } },
-        },
-        permission: 'read',
-        handler: async () => 'ok',
-      });
-    }
-    const description = registry.get('load_tool_group')?.describe?.().function.description;
-    expect(description).toContain(
-      'files: move or rename a file, line-number edits, restore a file from a commit',
-    );
-    expect(description).not.toContain('restore_file');
-    const result = await registry.dispatch('load_tool_group', { group: 'files' }, ALL_PERMISSIONS, {
-      beforeMutate: () => undefined,
-      conversationId: 'conv-a',
-    });
-    expect(result).toBe(
-      'files tools enabled for this conversation: move_file, restore_file. ' +
-        'They are listed on the next step.',
-    );
-  });
-
-  it('gives every available group a purpose line, not only its member names', () => {
-    // A model looks for what it needs to do; render_html_to_image sat unfound
-    // in a group described by tool names alone (FORGE_TUNING_PLAN.md).
-    const registry = new ToolRegistry();
-    registry.register(makeLoadToolGroupTool());
-    for (const name of ['move_file', 'commit', 'wait', 'recall', 'view_image', 'read_notebook']) {
-      registry.register({
-        definition: {
-          type: 'function',
-          function: { name, description: '', parameters: { type: 'object' } },
-        },
-        permission: 'read',
-        handler: async () => 'ok',
-      });
-    }
-    const lines = (registry.get('load_tool_group')?.describe?.().function.description ?? '')
-      .split('\n')
-      .slice(1);
-    expect(lines).toHaveLength(6);
-    for (const line of lines) expect(line).toMatch(/^[a-z_]+: [^;]+$/);
-    expect(lines.join('\n')).not.toMatch(/move_file|read_notebook|tools:/);
   });
 
   it('appends the loaded schemas after the existing prefix, leaving it byte-identical', () => {

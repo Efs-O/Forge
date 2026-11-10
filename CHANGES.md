@@ -1,5 +1,10 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+- Edit diagnostics now open written files with their original path casing, so subsequent editor tools keep the real filename.
+- Lazy tool group descriptions now name each member so a tool requested by name, such as `format_file`, can be found in its group, with the schema budget raised for those names.
+
 ## 0.17.150
 
 - Unattended flagged-exit refusals no longer tell agents to approve a card that was never shown.

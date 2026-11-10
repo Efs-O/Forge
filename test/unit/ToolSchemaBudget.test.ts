@@ -121,8 +121,8 @@ import {
 // 2026-11-10: 65,243 (-31) after making remember's description optional and removing its cap.
 // 2026-11-10: 65,278 after restoring full message_chat routing guidance.
 // 2026-11-10: 65,567 with both merged.
-// 2026-11-10: 65,979 after clarifying include_ignored glob behavior; still under the ceiling.
-const MEASURED_CHARS = 65_979;
+// 2026-11-10: 67,121 after naming lazy-group members so tools can be found by name.
+const MEASURED_CHARS = 67_121;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.
@@ -141,9 +141,9 @@ const COMPUTER_USE_TOOLS_EXCLUDED_PENDING_DECISION = ['browser_', 'desktop_'] as
 // Raised to 65,000 for the optional `stage.cwd` argument (CHANGES.md Unreleased):
 // nested-repository paths can name their base, and the old budget had only
 // 21 chars of headroom.
-// 2026-11-10: raised to 66,000 for remember's optional-description contract and
-// the full message_chat routing guidance (peer id prefixes, omitted-`to` replies).
-const TOOL_SCHEMA_CHAR_BUDGET = 66_000;
+// 2026-11-10: raised to 68,000 because lazy-group member names are required for
+// a model to find a requested tool's group; measured schema is 67,121 chars.
+const TOOL_SCHEMA_CHAR_BUDGET = 68_000;
 
 const ALL_PERMISSIONS = new Set(ALL_TOOL_PERMISSIONS);
 
@@ -292,14 +292,14 @@ describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
     }
   });
 
-  // 450 while it listed every member; purposes alone measured ~304 on Flash-Next.
-  // The lower ceiling keeps a member list from creeping back unnoticed.
-  it('keeps load_tool_group discovery under 320 estimated tokens', () => {
+  // The purpose and member names together are ~519 estimated tokens for the
+  // maximal registry; the ceiling catches unintended description growth.
+  it('keeps load_tool_group discovery under 530 estimated tokens', () => {
     const registry = makeMaximalRegistry();
     const description = registry.get('load_tool_group')?.describe?.().function.description ?? '';
     // CI has no model tokenizer. Use the measured ~4.62 chars/token ratio
     // above, rounding up so this remains a conservative character gate.
-    expect(Math.ceil(description.length / 4.62)).toBeLessThanOrEqual(320);
+    expect(Math.ceil(description.length / 4.62)).toBeLessThanOrEqual(530);
   });
 
   it('keeps the 66-tool non-computer-use schema under the character budget', () => {

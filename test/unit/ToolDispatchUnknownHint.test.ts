@@ -183,8 +183,8 @@ describe('unknown tool name hints', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  // load_tool_group's description no longer lists member names, so a model
-  // that knows one must still be able to use it without loading the group.
+  // Exact-name dispatch remains supported when the group is unloaded; member
+  // names in the description also let models find those tools directly.
   it("runs an unloaded group's tool when called by its exact name", async () => {
     const registry = new ToolRegistry();
     const handler = vi.fn(async () => 'image');

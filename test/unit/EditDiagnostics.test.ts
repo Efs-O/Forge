@@ -27,6 +27,7 @@ import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
  */
 
 const FILE = '/workspace/src/a.ts';
+let platformBeforeCaseTest: PropertyDescriptor | undefined;
 
 function problem(line: number, overrides: Partial<ReportedProblem> = {}): ReportedProblem {
   return {
@@ -96,6 +97,44 @@ function watcherFor(
 
 afterEach(() => {
   vi.useRealTimers();
+  if (platformBeforeCaseTest !== undefined) {
+    Object.defineProperty(process, 'platform', platformBeforeCaseTest);
+    platformBeforeCaseTest = undefined;
+  }
+});
+
+describe('written path casing on Windows', () => {
+  it('opens existing and newly created files with their original path casing', async () => {
+    platformBeforeCaseTest = Object.getOwnPropertyDescriptor(process, 'platform');
+    if (!platformBeforeCaseTest?.configurable) {
+      throw new Error('process.platform cannot be stubbed');
+    }
+    Object.defineProperty(process, 'platform', { ...platformBeforeCaseTest, value: 'win32' });
+
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'Forge-Mixed-Case-'));
+    const existingPath = path.join(root, 'Notes-A1.ts');
+    const createdPath = path.join(root, 'Created-B2.ts');
+    try {
+      fs.writeFileSync(existingPath, 'const q = 1;\n');
+      const foldedPath = existingPath.toLowerCase();
+      const source = new FakeSource([[foldedPath, [problem(12)]]]);
+
+      const existingWatch = await watcherFor(source, { settle_ms: 0 })(existingPath)!;
+      expect(source.opened[0]).toBe(existingPath);
+      expect(source.opened).not.toContain(existingPath.toLowerCase());
+      source.setProblems(foldedPath, []);
+      expect(await existingWatch.settle()).toContain('1 problem this file had before is gone');
+
+      const createdWatch = await watcherFor(source, { settle_ms: 0 })(createdPath)!;
+      expect(source.opened).toHaveLength(1);
+      fs.writeFileSync(createdPath, 'const r = 2;\n');
+      await createdWatch.settle();
+      expect(source.opened[1]).toBe(createdPath);
+      expect(source.opened).not.toContain(createdPath.toLowerCase());
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('the note a write result appends', () => {
