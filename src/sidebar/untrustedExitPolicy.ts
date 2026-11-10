@@ -25,6 +25,7 @@
  * Chats with Clanker off and unattended runs retain their existing paths.
  */
 import { SECRET_TAINT_REFUSAL_REASON } from './toolApprovalOutcome';
+import type { ToolApprovalCallOptions } from './toolApprovalOutcome';
 import { hasConversationReadSecret, hasConversationReadUntrusted } from '../tools/exfilTaint';
 
 /** Which way a call leaves this machine. `none` is the common case, and the
@@ -94,10 +95,50 @@ export interface UntrustedExitVerdict {
   alternative?: string;
 }
 
+/** Card-only instruction appended to the attended flagged-exit reason. */
+export const FLAGGED_EXIT_CARD_SENTENCE =
+  ' Approve it, or the agent will report the step as not done.';
+
+/** Card-only instruction appended to the flagged-exit alternative. */
+export const FLAGGED_EXIT_CARD_CLAUSE = '; the owner approves this card when they return.';
+
 /** The way forward a flagged exit names, in the agent's own words. */
 export const FLAGGED_EXIT_ALTERNATIVE =
   'Ask the owner in your final reply, or do the step with a tool that does not ' +
-  'leave the machine; the owner approves this card when they return.';
+  'leave the machine' +
+  FLAGGED_EXIT_CARD_CLAUSE;
+
+/** Remove only card instructions from unattended taint-gate refusals. */
+export function unattendedFlaggedExitDetails(
+  options?: ToolApprovalCallOptions,
+  why = options?.cardReason,
+): { why?: string; alternative?: string } {
+  const withoutCardInstructions = (text: string) => {
+    if (options?.gateKind !== 'taintGate') return text;
+    if (text.endsWith(FLAGGED_EXIT_CARD_SENTENCE)) {
+      return text.slice(0, -FLAGGED_EXIT_CARD_SENTENCE.length);
+    }
+    if (text.endsWith(FLAGGED_EXIT_CARD_CLAUSE)) {
+      return text.slice(0, -FLAGGED_EXIT_CARD_CLAUSE.length);
+    }
+    return text;
+  };
+  return {
+    ...(why ? { why: withoutCardInstructions(why) } : {}),
+    ...(options?.alternative ? { alternative: withoutCardInstructions(options.alternative) } : {}),
+  };
+}
+
+/** Taint-gate refusal details use the flag carried by this conversation. */
+export function unattendedTaintGateDetails(
+  options: ToolApprovalCallOptions,
+  conversationId: string,
+): { why?: string; alternative?: string } {
+  return unattendedFlaggedExitDetails(
+    options,
+    refusalReasonForGate(conversationId, options.cardReason),
+  );
+}
 
 /**
  * The one sentence each flag carries when an autonomous run refuses an exit.
@@ -166,7 +207,7 @@ export function decideUntrustedExit(input: UntrustedExitInput): UntrustedExitVer
       gateKind: 'taintGate',
       cardReason:
         `This chat has read ${FLAG_LABELS[flaggedBy ?? 'content']} and this call ` +
-        `${label}. Approve it, or the agent will report the step as not done.`,
+        `${label}.${FLAGGED_EXIT_CARD_SENTENCE}`,
       alternative: FLAGGED_EXIT_ALTERNATIVE,
     };
   }

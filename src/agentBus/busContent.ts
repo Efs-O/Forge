@@ -70,7 +70,10 @@ work with \`send <name> forge\`; \`send\` to another agent remains a relay.
 \`say\` flags:
 - \`--unattended\`: nobody is watching; dangerous tools are refused at once with
   a reason instead of opening an approval card that would hang the turn, while
-  other confirmations are auto-approved as for a job run. \`ask_user\` is
+  any other action that needs approval is refused too unless its approval key is
+  listed in \`approvals.unattended_bus.allow\` in \`~/.forge/policy.yaml\` (the
+  refusal names the key); only a confirmation with no approval key is approved
+  automatically. \`ask_user\` is
   refused outright, and an ask to a Claude or Codex session is refused unless
   \`jobs.allow_cli_agents\` is true. Use it whenever the owner may be away.
 - \`--model <name>\` selects the model for this turn. An unknown name is refused

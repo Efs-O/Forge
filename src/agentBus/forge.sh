@@ -17,7 +17,7 @@
 #   forge.sh wait <your-name> [minutes]  block until your chat is idle with nothing queued (default 60 min, exit 124 on timeout)
 #   Agent sessions identify themselves from their kind-specific session environment variable.
 #   Every verb that knows your session identity follows that session's link to the Forge window holding it, so a second window being focused does not send your read somewhere else; who reads every live window.
-#   --unattended means nobody is watching: dangerous tools are refused, other confirmations are auto-approved, ask_user is refused, and a Claude/Codex ask is refused unless jobs.allow_cli_agents is true.
+#   --unattended means nobody is watching: dangerous tools are refused, any other action that needs approval is refused unless its approval key is in approvals.unattended_bus.allow in ~/.forge/policy.yaml (the refusal names the key), only a confirmation with no approval key is approved automatically, ask_user is refused, and a Claude/Codex ask is refused unless jobs.allow_cli_agents is true.
 #   A say to a busy chat is read at its next tool round; its answer arrives when the turn ends; use steer only to stop the current work.
 #   A say with --unattended, --model or --new needs its own turn, so it waits until the running turn ends.
 #   A say with --new opens that chat and names it before its first message runs, and the answer carries its conversation id: keep it, because a later --to needs it, and a refusal that names a chat id means that chat is already open and empty.

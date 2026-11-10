@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+- Unattended flagged-exit refusals no longer tell agents to approve a card that was never shown.
+
 ## 0.17.149
 
 - `search_code` can include gitignored files with `include_ignored: true`, while retaining Forge's search exclusions.

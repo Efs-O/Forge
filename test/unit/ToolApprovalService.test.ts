@@ -145,6 +145,69 @@ describe('ToolApprovalService', () => {
     }
   });
 
+  it('drops card-only instructions from unattended flagged-exit refusals', async () => {
+    const service = new ToolApprovalService(() => undefined, () => ({}) as never);
+    const marker = unattendedConversations.mark('flagged-exit-bus');
+    const cardReason =
+      'This chat has read outside content (a page, a search result or an MCP reply) and this call hands this message to a different chat. Approve it, or the agent will report the step as not done.';
+    const alternative =
+      'Ask the owner in your final reply, or do the step with a tool that does not leave the machine; the owner approves this card when they return.';
+    try {
+      const denied = service.request('message_chat', 'send', false, 'flagged-exit-bus', undefined, {
+        gateKind: 'taintGate',
+        policyAllowPath: 'approvals.unattended_bus.allow',
+        policyApprovalKey: 'cross_chat',
+        cardReason,
+        alternative,
+      });
+      const message = await denied.catch((error: Error) => error.message);
+      expect(message).toBe(
+        'unattended: approval key denied by policy: "message_chat". Add cross_chat to approvals.unattended_bus.allow in ~/.forge/policy.yaml. This chat has read outside content (a page, a search result or an MCP reply) and this call hands this message to a different chat. Use this instead: Ask the owner in your final reply, or do the step with a tool that does not leave the machine. Nobody is present to approve it, so do not retry it. Continue with safe steps or report the step as not done.',
+      );
+    } finally {
+      marker.dispose();
+    }
+  });
+
+  it('keeps the unattended new-host fetch refusal wording', async () => {
+    const service = new ToolApprovalService(() => undefined, () => ({}) as never);
+    const marker = unattendedConversations.mark('new-host-fetch-bus');
+    try {
+      const denied = service.request('web_fetch', 'GET https://example.com', false, 'new-host-fetch-bus', undefined, {
+        gateKind: 'ownerGate',
+        policyAllowPath: 'approvals.unattended_bus.allow',
+        policyApprovalKey: 'net:example.com',
+        cardReason: 'new host for this chat: example.com',
+      });
+      const message = await denied.catch((error: Error) => error.message);
+      expect(message).toBe(
+        'unattended: approval key denied by policy: "web_fetch". Add net:example.com to approvals.unattended_bus.allow in ~/.forge/policy.yaml. new host for this chat: example.com. Nobody is present to approve it, so do not retry it. Continue with safe steps or report the step as not done.',
+      );
+    } finally {
+      marker.dispose();
+    }
+  });
+
+  it('keeps the flagged-exit approval card wording in attended and Clanker chats', async () => {
+    const cardReason =
+      'This chat has read outside content (a page, a search result or an MCP reply) and this call hands this message to a different chat. Approve it, or the agent will report the step as not done.';
+    for (const clanker of [false, true]) {
+      const posted: HostToWebview[] = [];
+      const service = new ToolApprovalService((message) => posted.push(message), () => ({}) as never);
+      if (clanker) service.setClankerMode('flagged-exit-card', true);
+      const pending = service.request('message_chat', 'send', false, 'flagged-exit-card', undefined, {
+        gateKind: 'taintGate',
+        clankerStop: clanker,
+        cardReason,
+      });
+      const request = posted.find((message) => message.type === 'confirmRequest');
+      if (request?.type !== 'confirmRequest') throw new Error('confirmation was not posted');
+      expect(request.cardReason).toBe(cardReason);
+      service.resolve(request.id, 'decline');
+      await expect(pending).resolves.toBe('declined');
+    }
+  });
+
   it('auto-approves only the non-dangerous call in the registered conversation', async () => {
     const posted: HostToWebview[] = [];
     const service = new ToolApprovalService(

@@ -79,9 +79,12 @@ an empty \`who\` is normal before any session is linked.
   send it without \`--new\`. \`--to-running\`
   picks the currently running chat. \`--unattended\` means nobody is watching:
   dangerous tools are refused at once with a reason instead of opening an approval
-  card that would hang the turn, while other confirmations are auto-approved as
-  for a job run; use it whenever the owner may be away. A \`say\` to a busy chat is
-  read at its next tool round, and the answer arrives when that turn ends; one
+  card that would hang the turn; any other action that needs approval is refused
+  too unless its approval key is listed in \`approvals.unattended_bus.allow\` in
+  \`~/.forge/policy.yaml\` (the refusal names the key); only a confirmation with no
+  approval key is approved automatically. Use it whenever the owner may be away.
+  A \`say\` to a busy chat is read at its next tool round, and the answer arrives
+  when that turn ends; one
   with \`--unattended\`, \`--model\` or \`--new\` waits for that turn to end.
 - \`send <your-name> <to>\`: relay to another agent (\`<to>\` may be \`forge\` to target a
   Forge chat). \`send-file <your-name> --to <chat> <path> [--caption-file <file>]\`

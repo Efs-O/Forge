@@ -169,7 +169,9 @@ function decodedUserInfo(url: URL): string[] {
  * Stated limitation, not hidden: data split across many *short* labels
  * (`aHRl.bGxv.Mj34.collector.net`) is under both bars. It still gets a card — a
  * new host always does — but that card is the ordinary one an unattended run
- * approves, so the gap is for autonomous runs, not for a person reading it.
+ * refuses unless its `net:<host>` approval key is listed in
+ * `approvals.unattended_bus.allow` in `~/.forge/policy.yaml`, so the gap is for
+ * autonomous runs, not for a person reading it.
  */
 function hostnameEncodedChars(host: string): number {
   const labels = host.split('.');
@@ -226,8 +228,9 @@ export function encodedPayloadChars(url: URL): number {
 
 export interface FetchApproval {
   detail: string;
-  /** False for a host card: an unattended turn approves a brand-new host by itself,
-   *  which is what keeps a run from stalling on a page nobody asked for. */
+  /** False for a host card: `/clanker` approves a new host card automatically;
+   *  an unattended turn refuses it unless `net:<host>` is listed in
+   *  `approvals.unattended_bus.allow` in `~/.forge/policy.yaml`. */
   dangerous: boolean;
   /** What made this card exist. Absent when this object is only the card's TEXT
    *  (`cardTextOnly`): a chat that cards this fetch for a different reason knows
@@ -265,8 +268,9 @@ export interface FetchApproval {
  * allowed (an approved host with a 1,842-character base64 query is still a
  * secret on its way out); then the host rules.
  *
- * A new host is an ordinary, non-dangerous card, so `/clanker` and an unattended
- * turn approve it automatically and no gate in this plan stalls a run. A payload
+ * A new host is an ordinary, non-dangerous card, so `/clanker` approves it
+ * automatically; an unattended turn refuses it unless `net:<host>` is listed in
+ * `approvals.unattended_bus.allow` in `~/.forge/policy.yaml`. A payload
  * and a secret-tainted fetch are dangerous cards, which in an autonomous run are
  * refused at once — the payload as the owner's gate (`ownerGate`), the secret
  * read as the gate nothing but the owner may settle (`taintGate`).

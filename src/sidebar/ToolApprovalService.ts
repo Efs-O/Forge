@@ -21,7 +21,7 @@ import {
   type ToolApprovalCallOptions,
   type ToolApprovalOutcome,
 } from './toolApprovalOutcome';
-import { refusalReasonForGate } from './untrustedExitPolicy';
+import { unattendedFlaggedExitDetails, unattendedTaintGateDetails } from './untrustedExitPolicy';
 import { ApprovalTimeoutState } from './approvalTimeoutState';
 import { approvalEventForConversation } from './approvalEventLookup';
 import { readClankerModeAtApproval, type ChatClankerRecords } from './chatClanker';
@@ -200,8 +200,7 @@ export class ToolApprovalService {
           job: this.unattended.jobMeta(conversationId) !== undefined,
           allowPath: options.policyAllowPath,
           ...(options.policyApprovalKey ? { approvalKey: options.policyApprovalKey } : {}),
-          ...(options?.cardReason ? { why: options.cardReason } : {}),
-          ...(options?.alternative ? { alternative: options.alternative } : {}),
+          ...unattendedFlaggedExitDetails(options),
         }),
       );
     }
@@ -215,8 +214,7 @@ export class ToolApprovalService {
       return Promise.reject(
         new ToolApprovalPolicyDenied(toolName, {
           job: this.unattended.jobMeta(conversationId) !== undefined,
-          why: refusalReasonForGate(conversationId, options.cardReason),
-          ...(options.alternative ? { alternative: options.alternative } : {}),
+          ...unattendedTaintGateDetails(options, conversationId),
         }),
       );
     }

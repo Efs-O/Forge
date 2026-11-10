@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  FLAGGED_EXIT_CARD_SENTENCE,
+  EXIT_LABELS,
   UNTRUSTED_EXIT_REFUSAL_REASON,
   decideUntrustedExit,
   refusalReasonForGate,
@@ -33,6 +35,16 @@ function input(over: Record<string, unknown> = {}) {
 }
 
 describe('the card rule phase 4 put in place of "every write asks"', () => {
+  it('builds the attended flagged-exit card reason from its shared sentence', () => {
+    const baseSentence =
+      `This chat has read outside content (a page, a search result or an MCP reply) and this call ` +
+      `${EXIT_LABELS.cross_chat}.`;
+    const verdict = decideUntrustedExit(
+      input({ toolName: 'message_chat', reachesOut: 'cross_chat', untrustedContent: true }),
+    );
+    expect(verdict.cardReason).toBe(`${baseSentence}${FLAGGED_EXIT_CARD_SENTENCE}`);
+  });
+
   it('runs an ordinary write in a clean chat with no card', () => {
     expect(decideUntrustedExit(input()).card).toBe(false);
   });
@@ -57,7 +69,9 @@ describe('the card rule phase 4 put in place of "every write asks"', () => {
   });
 
   it('treats a chat that read a secret as needing the same egress rule', () => {
-    const verdict = decideUntrustedExit(input({ toolName: 'curl', reachesOut: 'network', readSecret: true }));
+    const verdict = decideUntrustedExit(
+      input({ toolName: 'curl', reachesOut: 'network', readSecret: true }),
+    );
     expect(verdict.card).toBe(true);
     expect(verdict.flaggedBy).toBe('secret');
     expect(verdict.cardReason).toContain('secret file');
@@ -65,11 +79,7 @@ describe('the card rule phase 4 put in place of "every write asks"', () => {
 
   it('keeps every gate card in both states', () => {
     for (const clean of [true, false]) {
-      for (const over of [
-        { dangerous: true },
-        { toolGate: true },
-        { outsideWorkspace: true },
-      ]) {
+      for (const over of [{ dangerous: true }, { toolGate: true }, { outsideWorkspace: true }]) {
         const flagged = clean ? {} : { untrustedContent: true };
         expect(decideUntrustedExit(input({ ...over, ...flagged })).card).toBe(true);
       }
@@ -196,7 +206,9 @@ describe('the flag survives a lost save, because the transcript still says it', 
     // The other half of the same mistake: answered with `web_fetch`, every row
     // looked untrusted, so the first fetch paid a taint-gate card instead of
     // running free.
-    expect(carriesUntrustedContent('clean-first-fetch', conversation, untrustedRegistry)).toBe(false);
+    expect(carriesUntrustedContent('clean-first-fetch', conversation, untrustedRegistry)).toBe(
+      false,
+    );
   });
 
   it('still flags a chat whose page row has been compacted away', () => {

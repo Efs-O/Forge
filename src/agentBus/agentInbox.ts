@@ -41,9 +41,12 @@ export interface InboxMessageOptions {
    *  still deciding on. */
   hold?: boolean;
   /**
-   * Nobody is watching this turn: dangerous tools are refused at once instead
-   * of raising an approval dialog that would hang it, and other confirmations
-   * are auto-approved — the same policy a job run gets.
+   * Nobody is watching this turn: dangerous tools are refused at once with a
+   * reason instead of raising an approval dialog that would hang it. Any other
+   * action that needs approval is refused unless its approval key is listed in
+   * `approvals.unattended_bus.allow` in `~/.forge/policy.yaml` (the refusal
+   * names the key); only a confirmation with no approval key is approved
+   * automatically.
    */
   unattended?: boolean;
   /** Job identity carried with an unattended peer-delivered turn. */
