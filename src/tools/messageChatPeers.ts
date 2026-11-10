@@ -181,20 +181,6 @@ export async function discoverPeers(
   return { peers, unreachable };
 }
 
-/** A peer chat by its full id. Never by title and never by `#N`: tab numbers are
- *  window-local, and title words would match a different chat in every window. */
-export function findPeerChat(
-  peers: PeerWindow[],
-  ref: string,
-): { peer: PeerWindow; chat: ChatsReportChat } | undefined {
-  const needle = ref.trim().toLowerCase();
-  for (const peer of peers) {
-    const chat = peer.chats.find((candidate) => candidate.id.toLowerCase() === needle);
-    if (chat) return { peer, chat };
-  }
-  return undefined;
-}
-
 /** The peer chat as a local `ChatRef`, so every existing guard runs on it as
  *  written. No position: a peer chat has no tab here. */
 export function peerChatRef(peer: PeerWindow, chat: ReadChat): PeerChatRef {
@@ -238,42 +224,6 @@ export async function refreshPeerChat(
   const chat = parsed.data.chats.find((candidate) => candidate.id.toLowerCase() === needle);
   if (!chat) return undefined;
   return peerChatRef({ ...peer, workspace: parsed.data.workspace }, chat);
-}
-
-/** A chat id, and nothing else: a UUID-shaped reference is the only thing that
- *  means the same thing in every window. `#N` is a tab number this window made
- *  up, and title words match different chats in different windows. */
-export const FULL_CHAT_ID = /^[0-9a-f][0-9a-f-]{7,}$/iu;
-
-/** What a peer lookup answers: the chat, the folder this window is open on (the
- *  peer prompt names it so the other window knows where the reply goes back to),
- *  or the note to append to the local refusal. */
-export type PeerTarget = { chat: PeerChatRef; selfWorkspace: string } | { note: string };
-
-/** A chat the caller named by full id, if another window holds it.
- *
- *  Local resolution always runs first — this is only reached once this window
- *  has said it does not know the id. A caller that named a full id while the bus
- *  is off here gets a note naming the switch, because "no chat matches" is not
- *  the whole truth in that case: the chat may well exist next door. */
-export async function resolvePeerTarget(
-  ref: string | undefined,
-  ctx: PeerContext | undefined,
-  list: typeof discoverPeers,
-  signal?: AbortSignal,
-): Promise<PeerTarget> {
-  const needle = ref?.trim() ?? '';
-  if (!FULL_CHAT_ID.test(needle)) return { note: '' };
-  if (!ctx) {
-    return {
-      note:
-        '\nNo other Forge window can be reached from here: set `agent_bus.enabled: true` ' +
-        'in .forge/config.yaml of both windows, or run this chat in the window that holds the chat.',
-    };
-  }
-  const found = findPeerChat((await list(ctx, signal)).peers, needle);
-  if (!found) return { note: '' };
-  return { chat: peerChatRef(found.peer, found.chat), selfWorkspace: ctx.workspaceRoot };
 }
 
 /** The `from` a peer request carries. The prefix keeps a chat's label out of the

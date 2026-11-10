@@ -4,6 +4,7 @@ import { CliAgentSession } from '../../src/agents/CliAgentSession';
 import {
   CliSessionCapacityError,
   CliSessionRegistry,
+  cliSessionRegistryFromConfig,
   type WarmCliSession,
 } from '../../src/agents/CliSessionRegistry';
 import type { CliAgentRunResult } from '../../src/agents/types';
@@ -37,6 +38,20 @@ function warmSession(dispose: () => Promise<void> = async () => {}): WarmCliSess
 }
 
 describe('CliSessionRegistry', () => {
+  it('builds from config values and registry defaults', () => {
+    const registryValues = (registry: CliSessionRegistry) =>
+      registry as unknown as { maxSessions: number; idleTimeoutMs: number };
+    const defaults = registryValues(cliSessionRegistryFromConfig({}));
+    expect(defaults.maxSessions).toBe(4);
+    expect(defaults.idleTimeoutMs).toBe(15 * 60 * 1000);
+
+    const configured = registryValues(
+      cliSessionRegistryFromConfig({ max_cli_agents: 7, cli_idle_timeout_ms: 2500 }),
+    );
+    expect(configured.maxSessions).toBe(7);
+    expect(configured.idleTimeoutMs).toBe(2500);
+  });
+
   it('isolates conversation/model pairs and evicts the LRU idle session', async () => {
     const created: CliAgentSession[] = [];
     const registry = new CliSessionRegistry(2, 60_000, (value) => {

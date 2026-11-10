@@ -36,6 +36,7 @@ import { formatCompactionResumeNote, type CompactionState } from './compactionTy
 import { compactionWindowStart } from './compactionWindow';
 import { shouldUsePlanUnchangedNote, TURN_CONTEXT_CLOSE } from './turnContextPlanDedup';
 import { isPlanFinished } from '../tools/planTools';
+import { renderMemoryIndexBlock } from '../tools/memoryTools';
 
 const OPEN = '[Forge turn context, as of this message]';
 
@@ -62,6 +63,8 @@ export interface TurnContextState {
   compactionResume?: string | undefined;
   /** FORGE.md changed since the system prompt was pinned (forgeInstructionsPin.ts). */
   forgeInstructionsNote?: string | undefined;
+  /** Workspace memory index, snapshotted only for a new chat's first turn. */
+  memoryIndex?: readonly string[] | undefined;
 }
 
 type TurnContextRenderState = TurnContextState & { planUnchanged?: boolean };
@@ -81,6 +84,8 @@ function renderTurnContext(state: TurnContextRenderState): string | undefined {
   if (state.unattended) parts.push(UNATTENDED_NOTE);
   if (state.compactionResume) parts.push(state.compactionResume);
   if (state.forgeInstructionsNote) parts.push(state.forgeInstructionsNote);
+  const memoryIndex = state.memoryIndex ? renderMemoryIndexBlock(state.memoryIndex) : undefined;
+  if (memoryIndex) parts.push(memoryIndex);
   const remote = renderRemoteReach(state.remoteChats);
   if (remote) parts.push(remote);
   const userTerminal = renderUserTerminalCommands(state.userTerminalCommands);
@@ -99,6 +104,19 @@ function renderTurnContext(state: TurnContextRenderState): string | undefined {
   }
   if (parts.length === 0) return undefined;
   return `${OPEN}\n${parts.join('\n\n')}\n${TURN_CONTEXT_CLOSE}`;
+}
+
+/** True only for the opening user turn of an uncompacted conversation. */
+export function isNewChatFirstTurn(
+  messages: readonly ChatMessage[],
+  compaction: CompactionState | undefined,
+): boolean {
+  if (compaction) return false;
+  let userTurns = 0;
+  for (const message of messages) {
+    if (message.role === 'user' && !message.midTurn) userTurns += 1;
+  }
+  return userTurns === 1;
 }
 
 /**

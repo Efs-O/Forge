@@ -19,7 +19,7 @@ import type { TurnLifecycle } from './TurnLifecycle';
 import { getLogger } from '../util/logger';
 import type { UserPromptOptions } from './transcriptMutations';
 import { isPlanFinished, renderPlan } from '../tools/planTools';
-import { injectTurnContext } from './turnContext';
+import { freezeTurnContext, injectTurnContext, isNewChatFirstTurn } from './turnContext';
 import type { ForgeTurnOutcome } from './turnOutcome';
 import { summarizeCliProgress, type AgentProgressEvent } from './AgentProgress';
 
@@ -30,6 +30,8 @@ export interface CliTurnContext {
   lifecycle: TurnLifecycle;
   events: SidebarProviderEvents;
   cliSessions: CliSessionRegistry;
+  /** Reads the current workspace memory index for a new chat's first turn. */
+  listMemoryLines?: () => readonly string[];
   cliDriver?: CliAgentDriver;
   getConfigPath?: () => string;
   /** Appends the user's message and titles the conversation on the first one. */
@@ -93,10 +95,19 @@ export async function runCliTurn(
     // latest user request.
     const planPrompt =
       conv.plan && !isPlanFinished(conv.plan.items) ? renderPlan(conv.plan.items) : undefined;
+    const memoryIndex = isNewChatFirstTurn(conv.messages, conv.compaction)
+      ? ctx.listMemoryLines?.()
+      : undefined;
+    if (memoryIndex?.length) {
+      freezeTurnContext(conv.messages, { plan: conv.plan, memoryIndex }, conv.compaction);
+    }
     const common = {
       prepared,
       model,
-      messages: injectTurnContext(conv.messages, { plan: conv.plan }),
+      messages: injectTurnContext(conv.messages, {
+        plan: conv.plan,
+        ...(memoryIndex?.length ? { memoryIndex } : {}),
+      }),
       ...(planPrompt ? { planPrompt } : {}),
       workspaceRoot: ctx.workspaceRoot,
       signal: ctrl.signal,

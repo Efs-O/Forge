@@ -1,5 +1,10 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+- `message_chat` accepts unique 8-character peer chat id prefixes; ambiguous prefixes name every matching chat and window.
+- Peer `send`, `steer` and `new` remember the sender chat in memory, so a chat with several idle local chats can reply without `to`.
+
 ## 0.17.144
 
 - Code intelligence and symbol rename explain which line and identifier a position selected when a provider has no answer.

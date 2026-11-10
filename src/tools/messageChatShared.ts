@@ -79,6 +79,7 @@ export interface MessageChatActionSidebar {
     | 'setConversationModel'
     | 'applyAutoTitle'
     | 'recentExchanges'
+    | 'getConversation'
     | 'clankerMode'
     | 'showConversationNotice'
   >;

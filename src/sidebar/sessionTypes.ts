@@ -359,6 +359,8 @@ export interface ConversationRuntime {
   agentLinks?: AgentLinks;
   /** Conversation id that opened this worker through message_chat new_chat. */
   opened_by?: string;
+  /** Latest cross-window chat that messaged this chat; intentionally session-only. */
+  latestPeerWriter?: { id: string; title: string };
   active_model?: string;
   /** Persistent external CLI sessions keyed by configured Forge model name. */
   cli_sessions?: Record<string, string>;

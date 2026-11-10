@@ -94,6 +94,17 @@ export function parseOriginConversation(fields: AgentRouteFields): string | unde
   return parsed.data;
 }
 
+/** Parse the peer chat that wrote this inbound message. */
+export function parseFromConversation(fields: AgentRouteFields): string | undefined {
+  const raw = fields['from_conversation'];
+  if (raw === undefined) return undefined;
+  const parsed = ConversationIdSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new AgentRouteHttpError(400, `from_conversation: ${zodMessage(parsed.error)}`);
+  }
+  return parsed.data;
+}
+
 /** A `conversation_id` a read route was handed: absent means "the chat this
  *  session last addressed" and is not an error; present but malformed is a 400
  *  naming the field, so a caller that mistypes an id reads its own answer

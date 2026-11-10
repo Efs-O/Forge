@@ -35,6 +35,11 @@ import type { RequestOfferedListener } from '../sessions/requestFingerprint';
 import type { RequestCapture } from '../sessions/requestStats';
 import type { QuestionWaitRunner } from '../tools/toolContract';
 
+export interface AgentLoopTurnDependencies {
+  cliSessions?: CliSessionRegistry;
+  listMemoryLines?: () => readonly string[];
+}
+
 export interface TurnServices {
   pool: IBackendPool;
   getConfig: () => ForgeConfig;
@@ -66,6 +71,8 @@ export interface TurnServices {
   /** Emits visible progress only; reasoning has no route into this seam. */
   emitAgentProgress: (event: AgentProgressEvent) => void;
   remoteReach?: (conversationId: string) => number;
+  /** Reads the current workspace memory index for a new chat's first turn. */
+  listMemoryLines?: () => readonly string[];
   /** Compacts between two rounds of a running turn; true when it did. */
   compactMidTurn?: (conv: ConversationRuntime, request: { exhausted: boolean }) => Promise<boolean>;
   /** Claims text tells (and queued remote requests) at the next safe tool-round gap. */

@@ -5,6 +5,7 @@ import {
 } from './CliAgentSession';
 import type { CliAgentRunResult } from './types';
 import { CodexAppServerSession } from './CodexAppServerSession';
+import type { ForgeConfig } from '../config/types';
 
 interface RegistryEntry {
   session: WarmCliSession;
@@ -28,6 +29,15 @@ export type CliSessionFactory = (options: CliAgentSessionOptions) => WarmCliSess
 
 export const DEFAULT_MAX_CLI_AGENTS = 4;
 export const DEFAULT_CLI_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+
+export function cliSessionRegistryFromConfig(
+  config: Pick<ForgeConfig, 'max_cli_agents' | 'cli_idle_timeout_ms'>,
+): CliSessionRegistry {
+  return new CliSessionRegistry(
+    config.max_cli_agents ?? DEFAULT_MAX_CLI_AGENTS,
+    config.cli_idle_timeout_ms ?? DEFAULT_CLI_IDLE_TIMEOUT_MS,
+  );
+}
 
 export class CliSessionCapacityError extends Error {
   constructor(maxSessions: number) {

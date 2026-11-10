@@ -31,19 +31,16 @@ import {
   unattendedConversations,
   type UnattendedJobMeta,
 } from '../sidebar/unattendedConversations';
-import { formatChatMessage, formatChatMirrorLine } from '../sidebar/chatMessageText';
+import { formatChatMirrorLine } from '../sidebar/chatMessageText';
 import {
   activeChatIds,
   chatRefs,
   closedChatHint,
   closedChatRefs,
-  formatChatId,
   formatChatList,
   formatChatName,
   resolveChatReference,
   resolveViewTarget,
-  type ChatRef,
-  type ChatReferenceResolution,
 } from './chatMessageResolver';
 import { peerNew, peerSend, peerSteer, peerView } from './messageChatPeerActions';
 import {
@@ -51,26 +48,16 @@ import {
   formatPeerSection,
   peerContextFor,
   peerWindowTarget,
-  resolvePeerTarget,
   type PeerChatRef,
   type PeerContext,
-  type PeerTarget,
 } from './messageChatPeers';
+import { resolvePeerTarget, type PeerTarget } from './messageChatPeerTarget';
 import { peerWorkerTitle, pickWorkerModel } from './messageChatNewChat';
+import { listRefusal, messageFrom } from './messageChatToolFormatting';
 
 /** The sidebar seam the tool dispatches through, re-exported so the tests and
  *  the wiring name it from the tool that uses it. */
 export type MessageChatSidebar = MessageChatActionSidebar;
-
-/** A refusal that also shows the caller the chats it can address instead. */
-function listRefusal(message: string, chats: ChatRef[], selfId: string): string {
-  return `${message}\n\n${formatChatList(chats, selfId)}`;
-}
-
-function messageFrom(sender: ChatRef, chats: ChatRef[], text: string): string {
-  const senderId = formatChatId(sender.id, chats);
-  return formatChatMessage(sender.title, senderId, text);
-}
 
 export function makeMessageChatTool(options: {
   getSidebar: () => MessageChatSidebar | undefined;
@@ -216,6 +203,7 @@ export function makeMessageChatTool(options: {
           selfId,
         );
       }
+      const latestPeerWriter = hostFacade.getConversation?.(selfId)?.latestPeerWriter;
 
       if (parsed.action === 'list') {
         if (parsed.to !== undefined || parsed.message !== undefined) {
@@ -265,25 +253,33 @@ export function makeMessageChatTool(options: {
         formatMirrorLine: formatChatMirrorLine,
       };
 
-      /** A chat id that is not open here may be open in a peer window. Only a
-       *  full id is looked up: `#N` and title words mean something different in
-       *  every window, and a wrong guess costs the owner a paid turn there. */
+      /** Only id references are portable across windows; tabs and titles are local. */
       const peerOf = (ref: string | undefined) =>
         resolvePeerTarget(ref, peerContext(), listPeers, context?.abortSignal);
+      const peerRefForOmitted = (ref: string | undefined): string | undefined =>
+        !ref?.trim() ? latestPeerWriter?.id : ref;
       /** The refusal for a `to` matched nowhere, plus what the other windows have
        *  to say about it — that it lives next door, or that this window cannot
        *  ask and which switch would let it. */
-      const unmatchedRefusal = async (
-        resolution: Extract<ChatReferenceResolution, { ok: false }>,
-        peer: PeerTarget,
-      ): Promise<string> =>
-        listRefusal(
-          `Error: ${resolution.reason}${closedChatHint(resolution, parsed.to, closed, selfId)}${
+      const unmatchedRefusal = async (peer: PeerTarget): Promise<string> => {
+        if ('refusal' in peer) return listRefusal(peer.refusal, chats, selfId);
+        const effectiveRef = peerRefForOmitted(parsed.to);
+        const actualResolution = resolveChatReference(effectiveRef, chats, selfId);
+        if (actualResolution.ok) {
+          return listRefusal(
+            `Error: "${actualResolution.chat.title}" is open here; pass its id or tab number with \`to\`.`,
+            chats,
+            selfId,
+          );
+        }
+        return listRefusal(
+          `Error: ${actualResolution.reason}${closedChatHint(actualResolution, effectiveRef, closed, selfId)}${
             'note' in peer ? peer.note : ''
           }`,
           chats,
           selfId,
         );
+      };
 
       /** What a peer action needs on top of the local context: the chat, the
        *  message and this window's folder (the prompt names it, so the other chat
@@ -379,15 +375,15 @@ export function makeMessageChatTool(options: {
         const steerMessage = parsed.message;
         const resolution = resolveChatReference(parsed.to, chats, selfId);
         if (!resolution.ok) {
-          // A full chat id this window does not know may be a peer chat: the steer
-          // goes over there, on that window's fresh report of the chat.
-          const peer = await peerOf(parsed.to);
+          // An id this window does not know may identify a peer chat; the steer
+          // goes there using that window's fresh report of the chat.
+          const peer = await peerOf(peerRefForOmitted(parsed.to));
           if ('chat' in peer)
             return await peerSteer({
               ...peerBase(peer.chat, peer.selfWorkspace, steerMessage),
               steerAction: actions.steer,
             });
-          return await unmatchedRefusal(resolution, peer);
+          return await unmatchedRefusal(peer);
         }
         const actionContext: MessageChatActionContext = {
           ...baseContext,
@@ -414,12 +410,12 @@ export function makeMessageChatTool(options: {
 
       const resolution = resolveChatReference(parsed.to, chats, selfId);
       if (!resolution.ok) {
-        // A full chat id this window does not know may belong to a peer window:
-        // the whole send goes over there, so no local guard or counter runs it.
-        const peer = await peerOf(parsed.to);
+        // An id this window does not know may identify a peer chat; no local
+        // guard or counter runs a message sent there.
+        const peer = await peerOf(peerRefForOmitted(parsed.to));
         if ('chat' in peer)
           return say(await peerSend(peerBase(peer.chat, peer.selfWorkspace, parsed.message)));
-        return say(await unmatchedRefusal(resolution, peer));
+        return say(await unmatchedRefusal(peer));
       }
       const target = resolution.chat;
       const sendLimit = messageChatSendLimit(window, !target.running);

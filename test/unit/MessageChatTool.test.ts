@@ -139,10 +139,9 @@ describe('message_chat tool contract and handler', () => {
         action: { type: 'string', enum: ['list', 'send', 'view'] },
         to: {
           type: 'string',
-          minLength: 1,
           maxLength: 200,
           description:
-            'Another chat only: use its chat id, its #N tab number from list, or words from its title. Never target this chat. A closed chat must be read with action: view.',
+            'Another chat only: use its chat id, its #N tab number from list, or words from its title. #N and title words reach only this window\'s chats; a chat in another window takes its id or a unique prefix of 8 or more characters. Never target this chat. A closed chat must be read with action: view.',
         },
         message: {
           type: 'string',

@@ -22,31 +22,26 @@ import { CapabilityCache } from './CapabilityCache';
 import { ToolDispatch, type OpenFileOptions } from './ToolDispatch';
 import { TurnLifecycle } from './TurnLifecycle';
 import { runCliTurn } from './CliTurn';
-import type { MidTurnTellServices, TurnServices } from './turnServices';
+import type { AgentLoopTurnDependencies, MidTurnTellServices, TurnServices } from './turnServices';
 import { buildTurnServices } from './turnServicesAssembly';
 import { runPromptToMarkdown, type PromptRunOptions } from './PromptRun';
 import { runCloudProviderTurn, runLocalProviderTurn } from './ProviderTurn';
 import type { ForgeTurnOutcome } from './turnOutcome';
 import type { DiffDecorations } from './DiffDecorations';
 import { ToolApprovalService } from './ToolApprovalService';
-import { clearConversationHostApprovals } from '../tools/fetchHostApprovals';
-import { clearChatRules, createChatRuleApproval } from './chatApprovalRules';
+import { createChatRuleApproval } from './chatApprovalRules';
 import { writeApprovalAlways } from './approvalPolicyRules';
 import { chatClankerRecords, clankerDefaultExpiryNotifier } from './chatClanker';
-import { clearConversationExfilState } from '../tools/exfilTaint';
 import { clearTrashRefusals } from '../tools/trashRefusal';
+import { disposeAgentConversation } from './agentConversationDisposal';
 import type { ApprovalDecision } from './approvalMessages';
 import type { ToolApprovalSink, ToolApprovalRequestEvent } from './ToolApprovalService';
 import { recordModelUsage } from './modelManager/usageTracker';
 import type { AgentProgressEvent, AgentProgressListener } from './AgentProgress';
 import { CliAgentDriver } from '../agents/CliAgentDriver';
+import { CliSessionRegistry, cliSessionRegistryFromConfig } from '../agents/CliSessionRegistry';
 import { ContactPromptGate } from './contactPrompt';
 import { AgentProgressBus } from './AgentProgressBus';
-import {
-  CliSessionRegistry,
-  DEFAULT_CLI_IDLE_TIMEOUT_MS,
-  DEFAULT_MAX_CLI_AGENTS,
-} from '../agents/CliSessionRegistry';
 const log = getLogger();
 
 export type { SidebarProviderEvents } from './providerEvents';
@@ -179,16 +174,10 @@ export class AgentLoop {
     workspaceRoot?: string,
     private readonly getConfigPath?: () => string,
     cliDriver?: CliAgentDriver,
-    cliSessions?: CliSessionRegistry,
+    turnDeps?: AgentLoopTurnDependencies,
   ) {
     this.workspaceRoot = workspaceRoot ?? forgeLoader?.root ?? '';
-    const config = getConfig();
-    this.cliSessions =
-      cliSessions ??
-      new CliSessionRegistry(
-        config.max_cli_agents ?? DEFAULT_MAX_CLI_AGENTS,
-        config.cli_idle_timeout_ms ?? DEFAULT_CLI_IDLE_TIMEOUT_MS,
-      );
+    this.cliSessions = turnDeps?.cliSessions ?? cliSessionRegistryFromConfig(getConfig());
     // Decision and storage share one key-rule seam beside the queue that settles clicks.
     const chatRuleApproval = createChatRuleApproval({
       getConfig,
@@ -267,6 +256,7 @@ export class AgentLoop {
       getToolsOfferedListener: () => this.onToolsOffered,
       getRequestStatsListener: () => this.onRequestStats,
       getRemoteReach: () => this.remoteReach,
+      ...(turnDeps?.listMemoryLines && { listMemoryLines: turnDeps.listMemoryLines }),
       getMidTurnCompactor: () => this.midTurnCompactor,
       getMidTurnTells: () => this.midTurnTells,
       warnOnce: (key, message) => this.warnOnce(key, message),
@@ -287,23 +277,13 @@ export class AgentLoop {
   }
 
   disposeConversation(id: string): Promise<void> {
-    this.approvals.cancelConversation(id);
-    this.approvals.clearConversationState(id);
-    // The secret flag, the approved hosts and phase 4's untrusted-content flag are
-    // chat-scoped like the chat itself: a new chat asks again, and a flag outliving
-    // its chat would gate the next one for a page it never read.
-    clearConversationHostApprovals(id);
-    clearConversationExfilState(id);
-    const conv = this.conversationLookup?.(id);
-    if (conv) {
-      // The chat's approval rules are chat-scoped like the hosts it approved: a
-      // deleted chat takes its record with it, and a rule outliving its chat would
-      // answer a card for a chat that never earned it.
-      clearChatRules(conv);
-      this.sessionTimer.disposeConversation(conv);
-    }
-    this.streamMeter.reset(id);
-    return this.cliSessions.disposeConversation(id);
+    return disposeAgentConversation(id, {
+      approvals: this.approvals,
+      lookup: (conversationId) => this.conversationLookup?.(conversationId),
+      sessionTimer: this.sessionTimer,
+      streamMeter: this.streamMeter,
+      cliSessions: this.cliSessions,
+    });
   }
 
   dispose(): Promise<void> {

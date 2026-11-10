@@ -208,6 +208,10 @@ export function buildAgentRouteDeps(hosts: AgentRouteDepsHosts): AgentRoutesDeps
     // Phase 4). An idle chat has nothing to interrupt.
     resolveChatTarget: (from, selection) =>
       resolveBusMessageTarget(getFacade(), from, selection, exchangeConversationFromLedger),
+    recordPeerWriter: (conversationId, writer) => {
+      const conversation = getFacade().getConversation(conversationId);
+      if (conversation) conversation.latestPeerWriter = writer;
+    },
     interruptForge: async (from, conversationId, expectedEpoch) =>
       interruptForgeForSender(getFacade(), from, conversationId, expectedEpoch),
     // A steer is refused before its message is queued, because a queued message

@@ -118,7 +118,10 @@ import {
 // on, so the ceiling prices the two gated actions and their `model`/`window`
 // fields as well as the ungated catalog. A window that enables them sits 21
 // chars under the ceiling; one that does not is what the older number measured.
-const MEASURED_CHARS = 64_995;
+// 2026-11-10: 65,243 (-31) after making remember's description optional and removing its cap.
+// 2026-11-10: 65,278 after restoring full message_chat routing guidance.
+// 2026-11-10: 65,567 with both merged.
+const MEASURED_CHARS = 65_567;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.
@@ -137,7 +140,9 @@ const COMPUTER_USE_TOOLS_EXCLUDED_PENDING_DECISION = ['browser_', 'desktop_'] as
 // Raised to 65,000 for the optional `stage.cwd` argument (CHANGES.md Unreleased):
 // nested-repository paths can name their base, and the old budget had only
 // 21 chars of headroom.
-const TOOL_SCHEMA_CHAR_BUDGET = 65_000;
+// 2026-11-10: raised to 66,000 for remember's optional-description contract and
+// the full message_chat routing guidance (peer id prefixes, omitted-`to` replies).
+const TOOL_SCHEMA_CHAR_BUDGET = 66_000;
 
 const ALL_PERMISSIONS = new Set(ALL_TOOL_PERMISSIONS);
 

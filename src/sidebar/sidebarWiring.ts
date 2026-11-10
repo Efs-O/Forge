@@ -24,6 +24,7 @@ import type { TemplateEngine } from '../llm/TemplateEngine';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 import type { CliSessionRegistry } from '../agents/CliSessionRegistry';
 import { AgentLoop, type SidebarProviderEvents } from './AgentLoop';
+import { makeAgentLoopTurnDependencies } from './turnServicesAssembly';
 import { SlashCommandHandler } from './SlashCommandHandler';
 import { wireTurnMirror } from './turnMirrorWiring';
 import { runMidTurnCompaction, type CompactionDeps } from './CompactionService';
@@ -56,6 +57,7 @@ import { createConversationEvictionSignals } from './conversationEvictionSignals
 import type { ConversationRetentionScheduler } from './ConversationRetentionScheduler';
 import { wireConversationTabs } from './conversationTabsWiring';
 import { withResumedRunReconciliation } from '../jobs/resumedRun';
+import { wireMidTurnTells } from './midTurnTellWiring';
 /** What the provider lends its collaborators. */
 export interface SidebarHost {
   getConfig: () => ForgeConfig;
@@ -143,10 +145,6 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     secrets: parts.secrets,
   });
   const midTurnInbox = new MidTurnInbox();
-  // One composer for every door. The sidebar inbox registers first so its tells
-  // drain ahead of any remote claim; the agent-bus source registers in
-  // agentMessagingSetup.ts, and the remote source is added by extension.ts once
-  // the RemoteRuntime's store and auth exist.
   const tellDrain = new MidTurnTellDrain();
   // Forge's own tell: one note per task once it has been running a long time.
   const elapsedTimeNote = new ElapsedTimeNote(
@@ -170,38 +168,14 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
     parts.workspaceRoot,
     parts.getConfigPath,
     undefined,
-    parts.cliSessions,
+    makeAgentLoopTurnDependencies(parts.workspaceState, parts.cliSessions),
   );
-  tellDrain.registerSource(
-    'sidebar',
-    (conversationId) => Promise.resolve(midTurnInbox.drainResult(conversationId)),
-    (conversationId, callback) => midTurnInbox.onAdded(conversationId, callback),
-  );
-  tellDrain.registerSource('elapsed-time', elapsedTimeNote.source);
-  agentLoop.setMidTurnTells({
-    onTaskStart: (conversationId) => elapsedTimeNote.taskStarted(conversationId),
-    // `set_checkin`'s route to the clock. Bound per conversation by ModelTurn,
-    // so the tool itself never handles a conversation id.
-    setCheckin: (conversationId, minutes, byThen) =>
-      elapsedTimeNote.setCheckin(conversationId, minutes, byThen),
-    drainTells: async (conversationId) => {
-      const drained = await tellDrain.drain(conversationId);
-      // A streaming chat ignores host syncs, so a tell (a Telegram one above
-      // all) was invisible in the sidebar until the turn ended. Show it now.
-      for (const tell of drained.messages) {
-        if (typeof tell.content !== 'string') continue;
-        if (tell.internal) continue;
-        host.post({
-          type: 'userPrompt',
-          text: tell.content,
-          ...(tell.createdAt !== undefined ? { createdAt: tell.createdAt } : {}),
-          conversationId,
-          midTurn: true,
-        });
-      }
-      return drained;
-    },
-    onTellArrived: (conversationId, callback) => tellDrain.onArrived(conversationId, callback),
+  wireMidTurnTells({
+    tellDrain,
+    midTurnInbox,
+    elapsedTimeNote,
+    post: host.post,
+    setMidTurnTells: (services) => agentLoop.setMidTurnTells(services),
   });
 
   const budget = new ContextBudgetPublisher({

@@ -5,11 +5,7 @@ import type { ForgeConfig } from '../config/types';
 import { BackendPool } from '../backend/BackendPool';
 import type { ControlServer } from '../backend/ControlServer';
 import { EmbeddingBackend } from '../backend/EmbeddingBackend';
-import {
-  CliSessionRegistry,
-  DEFAULT_CLI_IDLE_TIMEOUT_MS,
-  DEFAULT_MAX_CLI_AGENTS,
-} from '../agents/CliSessionRegistry';
+import { CliSessionRegistry, cliSessionRegistryFromConfig } from '../agents/CliSessionRegistry';
 import { LocalDelegationService } from '../delegation/LocalDelegationService';
 import { IndexManager } from '../search/IndexManager';
 import { createSkillsService } from '../skills/createSkillsService';
@@ -100,10 +96,7 @@ export function setupToolActivation(options: ToolActivationOptions): ToolActivat
     ? workspaceIdFor(workspaceRoot)
     : createHash('sha256').update(`no-workspace:${activeConfigPath}`).digest('hex');
   // Selected CLI chat models own resumable sessions; CLI delegation is one-shot.
-  const cliSessions = new CliSessionRegistry(
-    config.max_cli_agents ?? DEFAULT_MAX_CLI_AGENTS,
-    config.cli_idle_timeout_ms ?? DEFAULT_CLI_IDLE_TIMEOUT_MS,
-  );
+  const cliSessions = cliSessionRegistryFromConfig(config);
   const delegationService = new LocalDelegationService({
     getConfig,
     backendPool: pool,

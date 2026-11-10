@@ -350,6 +350,11 @@ describe('auth and limits', () => {
     expect((await post('/agent/message?from=%3Cscript%3E', 'hi')).status).toBe(400);
     expect((await post('/agent/message', 'hi')).status).toBe(400);
     expect((await post('/agent/message?from=x', '   ')).status).toBe(400);
+    const badPeerOrigin = await post('/agent/message?from=x&from_conversation=bad%2Fid', 'hi');
+    expect(badPeerOrigin.status).toBe(400);
+    expect(badPeerOrigin.body).toEqual({
+      error: 'from_conversation: message: must be 1-128 chars: letters, digits, . _ -',
+    });
     expect((await post('/agent/reply?id=..%2Fx', 'hi')).status).toBe(400);
     expect((await post('/agent/message', '{', { type: 'application/json' })).status).toBe(400);
   });
@@ -361,6 +366,37 @@ describe('auth and limits', () => {
 });
 
 describe('routes', () => {
+  it('records a peer writer only against the accepted destination chat', async () => {
+    routes.dispose();
+    const recordPeerWriter = vi.fn();
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: {
+        accept: (_prompt, _from, _front, _options) => ({ position: 1, id: 'peer-message' }),
+        cancel: () => 0,
+        release: () => true,
+      },
+      resolveChatTarget: (_from, selection) =>
+        selection.conversationId
+          ? { ok: true, conversationId: selection.conversationId, title: 'Receiver' }
+          : { ok: false, status: 404, error: 'no selected conversation' },
+      recordPeerWriter,
+      token: TOKEN,
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+
+    const response = await post(
+      '/agent/message?from=peer%20Sender&conversation_id=receiver-chat&from_conversation=sender-chat',
+      'A reply target.',
+    );
+    expect(response.status).toBe(202);
+    expect(recordPeerWriter).toHaveBeenCalledWith('receiver-chat', {
+      id: 'sender-chat',
+      title: 'peer Sender',
+    });
+  });
+
   it('refuses a --new at an unrecoverable cap with 409 and the reasons, queueing nothing', async () => {
     // The lie this closes: the route used to answer 202 for a message `drain()`
     // could never deliver, because the 202 is the last thing the caller sees.

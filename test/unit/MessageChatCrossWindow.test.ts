@@ -42,7 +42,7 @@ function defaultChats(): ChatsReportChat[] {
   ];
 }
 
-function hostStatus(localRunning = false): ForgeHostStatus {
+function hostStatus(localRunning = false, localOtherCount = 1): ForgeHostStatus {
   const conversation = (id: string, title: string): ForgeConversationSummary => ({
     id,
     title,
@@ -56,7 +56,12 @@ function hostStatus(localRunning = false): ForgeHostStatus {
   });
   return {
     activeConversationId: 'sender',
-    conversations: [conversation('sender', 'Sender'), conversation('other', 'Local worker')],
+    conversations: [
+      conversation('sender', 'Sender'),
+      ...Array.from({ length: localOtherCount }, (_, index) =>
+        conversation(index === 0 ? 'other' : `other-${index + 1}`, `Local worker ${index + 1}`),
+      ),
+    ],
     requestChains: [],
     // A test that steers a chat in THIS window needs one that is mid-turn, so the
     // local read has a real chat list behind it.
@@ -69,6 +74,8 @@ function hostStatus(localRunning = false): ForgeHostStatus {
 function makeSidebar(
   clanker = false,
   localRunning = false,
+  localOtherCount = 1,
+  latestPeerWriter?: { id: string; title: string },
 ): MessageChatSidebar & {
   deliverChatMessage: ReturnType<typeof vi.fn>;
   emitHostActivity: ReturnType<typeof vi.fn>;
@@ -91,7 +98,8 @@ function makeSidebar(
   );
   return {
     getHostFacade: () => ({
-      status: () => hostStatus(localRunning),
+      status: () => hostStatus(localRunning, localOtherCount),
+      getConversation: () => (latestPeerWriter ? { latestPeerWriter } : undefined),
       emitHostActivity,
       chatCapBlockers: () => [],
       createConversation,
@@ -217,9 +225,16 @@ function makeCrossTool(
     busRoot?: string;
     /** One chat in THIS window is mid-turn, for a steer that reads this window. */
     localRunning?: boolean;
+    localOtherCount?: number;
+    latestPeerWriter?: { id: string; title: string };
   } = {},
 ) {
-  const sidebar = makeSidebar(options.clanker === true, options.localRunning === true);
+  const sidebar = makeSidebar(
+    options.clanker === true,
+    options.localRunning === true,
+    options.localOtherCount ?? 1,
+    options.latestPeerWriter,
+  );
   const chats = options.chats ?? defaultChats();
   const tool = makeMessageChatTool({
     getSidebar: () => sidebar,
@@ -276,12 +291,16 @@ describe('message_chat send to a chat in another window', () => {
     expect(post.path).toBe('/agent/message');
     // The chat id is the whole point: without it the receiving window would
     // route by sender name and could interrupt somebody else's turn.
-    expect(post.query).toEqual({ conversation_id: IDLE, from: 'peer Sender' });
+    expect(post.query).toEqual({
+      conversation_id: IDLE,
+      from_conversation: 'sender',
+      from: 'peer Sender',
+    });
     expect(post.auth).toBe('Bearer peer-token');
     // The prompt names the sender and its chat id, so the reply comes back to
     // this chat even after this window reloads under a new window id.
     expect(post.body).toContain('From Forge chat "Sender" (sender) in repo-a.');
-    expect(post.body).toContain(`Reply with message_chat {"action":"send","to":"sender"}`);
+    expect(post.body).toContain(`Reply with message_chat {"action":"send","to":"sender"}.`);
     expect(post.body).toContain('Run the eval.');
     // The sender's own transcript sees it go out; the receiving window mirrors
     // the inbound side itself.
@@ -476,6 +495,116 @@ describe('message_chat send to a chat in another window', () => {
     expect(refused).toContain('agent_bus.enabled: true');
     expect(received).toHaveLength(0);
   });
+
+  it('resolves a unique 8-character peer id prefix', async () => {
+    const { tool } = makeCrossTool();
+    expect(String(await tool.handler({ action: 'send', to: IDLE.slice(0, 8), message: 'Prefix.' }, context))).toContain('Queued in N:/repo-b');
+    expect(received.find((entry) => entry.method === 'POST')?.query).toEqual({
+      conversation_id: IDLE,
+      from_conversation: 'sender',
+      from: 'peer Sender',
+    });
+  });
+
+  it('refuses a shared peer id prefix with the exact peer list and local chat list', async () => {
+    const first = 'aaaa1111-1111-4111-8111-111111111111';
+    const second = 'aaaa1111-2222-4222-8222-222222222222';
+    const peers = [
+      { ...peerWindow([chat(first, 'One')]), windowId: '11111111-1111-4111-8111-111111111111', workspace: 'N:/one' },
+      { ...peerWindow([chat(second, 'Two')]), windowId: '22222222-2222-4222-8222-222222222222', workspace: 'N:/two' },
+    ];
+    const { tool } = makeCrossTool({ peers: () => peers });
+    const result = String(await tool.handler({ action: 'send', to: 'aaaa1111', message: 'Ambiguous.' }, context));
+    expect(result).toBe(
+      'Error: "aaaa1111" starts the id of more than one chat in other windows: ' +
+        `${first} in one (11111111); ${second} in two (22222222). Pass the full id.\n\n` +
+        'Chats in this window (you are #1):\n#1 · Sender · idle · strata-flash · id sender ← you\n' +
+        '#2 · Local worker 1 · idle · strata-flash · id other\n' +
+        'send: {"action":"send","to":"#2","message":"…"} — or omit "to" to reach the only other running chat.',
+    );
+    expect(received).toHaveLength(0);
+  });
+
+  it('keeps a 7-character peer prefix and local-only references out of peer windows', async () => {
+    const { tool, sidebar } = makeCrossTool();
+    await tool.handler({ action: 'send', to: IDLE.slice(0, 7), message: 'Short.' }, context);
+    await tool.handler({ action: 'send', to: '#2', message: 'Local.' }, context);
+    await tool.handler({ action: 'send', to: 'Worker', message: 'Title.' }, context);
+    expect(received).toHaveLength(0);
+    expect(sidebar.deliverChatMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('answers a recorded peer writer when local omitted resolution refuses', async () => {
+    const { tool } = makeCrossTool({
+      localOtherCount: 6,
+      latestPeerWriter: { id: IDLE, title: 'Worker' },
+    });
+    expect(String(await tool.handler({ action: 'send', message: 'Reply.' }, context))).toContain('Queued in N:/repo-b');
+    expect(received.find((entry) => entry.method === 'POST')?.query).toEqual({
+      conversation_id: IDLE,
+      from_conversation: 'sender',
+      from: 'peer Sender',
+    });
+  });
+
+  it('treats blank to like omitted for a recorded peer writer', async () => {
+    const { tool } = makeCrossTool({
+      localOtherCount: 6,
+      latestPeerWriter: { id: IDLE, title: 'Worker' },
+    });
+    expect(String(await tool.handler({ action: 'send', to: '', message: 'Blank to.' }, context))).toContain('Queued in N:/repo-b');
+    expect(received[0]?.query).toEqual({
+      conversation_id: IDLE,
+      from_conversation: 'sender',
+      from: 'peer Sender',
+    });
+  });
+
+  it('prefers the unique running local chat over a recorded peer writer', async () => {
+    const { tool, sidebar } = makeCrossTool({
+      localRunning: true,
+      latestPeerWriter: { id: IDLE, title: 'Worker' },
+    });
+    await tool.handler({ action: 'send', message: 'Local reply.' }, context);
+    expect(sidebar.deliverChatMessage).toHaveBeenCalledTimes(1);
+    expect(received).toHaveLength(0);
+  });
+
+  it('refuses an unreachable recorded peer writer exactly like its full id', async () => {
+    const { tool } = makeCrossTool({
+      localOtherCount: 6,
+      latestPeerWriter: { id: IDLE, title: 'Worker' },
+      peers: () => [],
+    });
+    expect(String(await tool.handler({ action: 'send', message: 'Reply.' }, context))).toBe(
+      `Error: No open chat matches "${IDLE}". Choose a chat by its id, tab number (#N), or title words.\n\n` +
+        'Chats in this window (you are #1):\n' +
+        '#1 · Sender · idle · strata-flash · id sender ← you\n' +
+        '#2 · Local worker 1 · idle · strata-flash · id other\n' +
+        '#3 · Local worker 2 · idle · strata-flash · id other-2\n' +
+        '#4 · Local worker 3 · idle · strata-flash · id other-3\n' +
+        '#5 · Local worker 4 · idle · strata-flash · id other-4\n' +
+        '#6 · Local worker 5 · idle · strata-flash · id other-5\n' +
+        '#7 · Local worker 6 · idle · strata-flash · id other-6\n' +
+        'send: {"action":"send","to":"#2","message":"…"} — or omit "to" to reach the only other running chat.',
+    );
+  });
+
+  it('uses a recorded peer writer for omitted steer after local omission refuses', async () => {
+    reply = { status: 202, body: '{"steered":false,"reason":"idle"}' };
+    const { tool } = makeCrossTool({
+      steer: true,
+      localOtherCount: 6,
+      latestPeerWriter: { id: IDLE, title: 'Worker' },
+    });
+    expect(String(await tool.handler({ action: 'steer', message: 'Continue.' }, context))).toContain('Steered "Worker"');
+    expect(received.find((entry) => entry.method === 'POST')?.query).toEqual({
+      conversation_id: IDLE,
+      from_conversation: 'sender',
+      from: 'peer Sender',
+      priority: 'steer',
+    });
+  });
 });
 describe('message_chat steer to a chat in another window', () => {
   const steer = async (
@@ -497,8 +626,13 @@ describe('message_chat steer to a chat in another window', () => {
     expect(posts()).toHaveLength(1);
     // `priority=steer` is what makes the other window stop its turn; the chat id
     // is what makes sure it is THIS chat whose turn it stops.
-    expect(posts()[0]!.query['priority']).toBe('steer');
-    expect(posts()[0]!.query['conversation_id']).toBe(RUNNING);
+    expect(posts()[0]!.query).toEqual({
+      conversation_id: RUNNING,
+      from_conversation: 'sender',
+      from: 'peer Sender',
+      priority: 'steer',
+      steer_epoch: '5',
+    });
     // The chain this decision was read against travels with it, so the receiving
     // window can refuse rather than interrupt work this window never saw.
     expect(posts()[0]!.query['steer_epoch']).toBe('5');
@@ -767,6 +901,7 @@ describe('message_chat new in another window', () => {
     // name the chat before its first message runs.
     expect(sent?.query).toEqual({
       new_chat: 'true',
+      from_conversation: 'sender',
       model: 'strata-flash',
       title: 'Sender: Open the phase.',
       from: 'peer Sender',
@@ -787,6 +922,7 @@ describe('message_chat new in another window', () => {
       await tool.handler({ action: 'send', to: IDLE, message: 'Send this.' }, context);
       expect(posts()[0]?.query).toEqual({
         conversation_id: IDLE,
+        from_conversation: 'sender',
         from: 'peer Sender',
         unattended: 'true',
         job_id: 'nightly-job',
@@ -796,6 +932,7 @@ describe('message_chat new in another window', () => {
       await tool.handler({ action: 'new', window: 'repo-b', message: 'Open this.' }, context);
       expect(posts()[1]?.query).toEqual({
         new_chat: 'true',
+        from_conversation: 'sender',
         from: 'peer Sender',
         model: 'strata-flash',
         title: 'Sender: Open this.',

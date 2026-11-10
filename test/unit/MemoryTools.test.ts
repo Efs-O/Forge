@@ -3,6 +3,7 @@ import type * as vscode from 'vscode';
 import {
   listMemoryKeys,
   makeForgetTool,
+  makeListMemoriesTool,
   makeRecallTool,
   makeRememberTool,
 } from '../../src/tools/memoryTools';
@@ -37,14 +38,15 @@ describe('workspace memory lifecycle', () => {
     const recall = makeRecallTool(m.state);
     const forgot = vi.fn();
     const forget = makeForgetTool(m.state, forgot);
-    await remember.handler({ key: 'one', value: 'old' });
-    await remember.handler({ key: 'one', value: 'new' });
-    await remember.handler({ key: 'two', value: 'kept' });
+    await remember.handler({ key: 'one', value: 'old', description: 'old desc' });
+    await remember.handler({ key: 'one', value: 'new', description: 'new desc' });
+    await remember.handler({ key: 'two', value: 'kept', description: 'kept desc' });
     expect(listMemoryKeys(m.state)).toEqual(['one', 'two']);
     expect(await recall.handler({ key: 'one' })).toBe('new');
     expect(await forget.handler({ key: 'one' })).toBe('Forgot "one".');
     expect(await forget.handler({ key: 'one' })).toBe('Memory "one" was already absent.');
     expect(listMemoryKeys(m.state)).toEqual(['two']);
+    expect(await makeListMemoriesTool(m.state).handler({})).toBe('- two: kept desc');
     expect(await recall.handler({ key: 'one' })).toBe('(not found)');
     expect(forgot).toHaveBeenCalledWith('one');
   });
@@ -53,8 +55,8 @@ describe('workspace memory lifecycle', () => {
     const m = memory();
     const remember = makeRememberTool(m.state);
     await Promise.all([
-      remember.handler({ key: 'alpha', value: 'a' }),
-      remember.handler({ key: 'beta', value: 'b' }),
+      remember.handler({ key: 'alpha', value: 'a', description: 'alpha desc' }),
+      remember.handler({ key: 'beta', value: 'b', description: 'beta desc' }),
     ]);
     expect(listMemoryKeys(m.state)).toEqual(['alpha', 'beta']);
   });
@@ -71,10 +73,10 @@ describe('workspace memory lifecycle', () => {
     const m = memory();
     const remember = makeRememberTool(m.state);
     m.failNext(2);
-    await expect(remember.handler({ key: 'alpha', value: 'a' })).rejects.toThrow('storage failed');
+    await expect(remember.handler({ key: 'alpha', value: 'a', description: 'desc' })).rejects.toThrow('storage failed');
     expect(m.data.get('forge.memory.__keys__')).toEqual(['alpha']);
     expect(listMemoryKeys(m.state)).toEqual([]);
-    await remember.handler({ key: 'alpha', value: 'a' });
+    await remember.handler({ key: 'alpha', value: 'a', description: 'desc' });
     expect(listMemoryKeys(m.state)).toEqual(['alpha']);
   });
 
@@ -110,5 +112,80 @@ describe('workspace memory lifecycle', () => {
   it('marks workspace memory deletion as a Clanker stop', () => {
     const forget = makeForgetTool(memory().state);
     expect(forget.approval?.({ key: 'old-note' })?.clankerStop).toBe(true);
+  });
+
+  it('stores trimmed descriptions and lists described and legacy memories oldest first', async () => {
+    const key = 'legacy';
+    const m = memory({
+      'forge.memory.__keys__': [key],
+      [`forge.memory.${key}`]: 'old value',
+    });
+    const remember = makeRememberTool(m.state);
+    await remember.handler({ key: 'new', value: 'value', description: '  short note  ' });
+    expect(await makeListMemoriesTool(m.state).handler({})).toBe('- legacy\n- new: short note');
+    await remember.handler({ key: 'new', value: 'updated', description: 'replacement' });
+    expect(await makeListMemoriesTool(m.state).handler({})).toBe('- legacy\n- new: replacement');
+  });
+
+  it('remembers without a description and lists only its key', async () => {
+    const m = memory();
+    const remember = makeRememberTool(m.state);
+    expect(await remember.handler({ key: 'k', value: 'saved' })).toBe(
+      'Remembered. Without a description, new chats list only the key; call remember again with a description to add one.',
+    );
+    expect(await makeListMemoriesTool(m.state).handler({})).toBe('- k');
+  });
+
+  it('shows only the first line of a two-line description', async () => {
+    const m = memory();
+    await makeRememberTool(m.state).handler({
+      key: 'k',
+      value: 'saved',
+      description: 'first line\nsecond line',
+    });
+    expect(await makeListMemoriesTool(m.state).handler({})).toBe('- k: first line');
+  });
+
+  it('clips a long description in the index while keeping the stored value intact', async () => {
+    const m = memory();
+    const description = 'x'.repeat(250);
+    await makeRememberTool(m.state).handler({ key: 'k', value: 'saved', description });
+    expect(await makeListMemoriesTool(m.state).handler({})).toBe(`- k: ${'x'.repeat(200)}…`);
+    expect(m.data.get('forge.memory.__descriptions__')).toEqual({ k: description });
+  });
+
+  it('removes an old description when a blank one replaces it', async () => {
+    const m = memory();
+    const remember = makeRememberTool(m.state);
+    await remember.handler({ key: 'k', value: 'old', description: 'old description' });
+    expect(await remember.handler({ key: 'k', value: 'new', description: '   ' })).toBe(
+      'Remembered. Without a description, new chats list only the key; call remember again with a description to add one.',
+    );
+    expect(await makeListMemoriesTool(m.state).handler({})).toBe('- k');
+  });
+
+  it('removes descriptions when forgetting and refuses the descriptions index as a key', async () => {
+    const m = memory();
+    const remember = makeRememberTool(m.state);
+    await remember.handler({ key: 'note', value: 'v', description: 'first' });
+    await makeForgetTool(m.state).handler({ key: 'note' });
+    await remember.handler({ key: 'note', value: 'v2', description: 'second' });
+    expect(await makeListMemoriesTool(m.state).handler({})).toBe('- note: second');
+    await expect(
+      remember.handler({ key: '__descriptions__', value: 'v', description: 'd' }),
+    ).rejects.toThrow('__keys__ or __descriptions__');
+  });
+
+  it('publishes the exact schema description and tool description', () => {
+    const remember = makeRememberTool(memory().state);
+    const fn = remember.definition.function;
+    expect(fn.description).toBe(
+      'Store a decision or pending state that must survive context compaction or help a later chat. Use it for anything not already in FORGE.md or the files that you would have to re-derive. Every new chat in this workspace starts with the stored keys and their descriptions, and the keys are listed back to you after every compaction. Overwrites an existing key and its description.',
+    );
+    expect(fn.parameters.properties.description.description).toBe(
+      'One line saying what this memory holds. Every new chat in this workspace starts with the list of keys and these descriptions.',
+    );
+    expect(fn.parameters.required).toEqual(['key', 'value']);
+    expect(fn.parameters.additionalProperties).toBe(false);
   });
 });

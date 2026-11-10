@@ -16,7 +16,6 @@ import { writeWindowEndpoint } from '../../src/agentBus/windowEndpoints';
 import {
   chatLabel,
   discoverPeers,
-  findPeerChat,
   folderName,
   matchPeerWindow,
   peerWindowListLabel,
@@ -27,6 +26,7 @@ import {
   postPeerMessage,
   type PeerWindow,
 } from '../../src/tools/messageChatPeers';
+import { findPeerChat } from '../../src/tools/messageChatPeerTarget';
 
 const TOKEN = 'a'.repeat(32);
 const WINDOW_A = '11111111-1111-4111-8111-111111111111';
@@ -120,18 +120,20 @@ describe('peer discovery', () => {
     expect(peers).toEqual([]);
   });
 
-  it('matches a peer chat only by its full id', async () => {
+  it('matches a peer chat by its full id or an 8-character prefix', async () => {
     report = {
       windowId: WINDOW_A,
       workspace: 'N:/repo-a',
       models: [],
       chats: [
-        { id: 'chat-1', title: 'Worker', running: false, closed: false, awaitingApproval: false },
+        { id: 'aaaa1111-1111-4111-8111-111111111111', title: 'Worker', running: false, closed: false, awaitingApproval: false },
       ],
     };
     const { peers } = await discoverPeers({ ...ctx, busRoot });
-    const found = findPeerChat(peers, 'chat-1');
+    const found = findPeerChat(peers, 'aaaa1111-1111-4111-8111-111111111111');
     expect(found?.chat.title).toBe('Worker');
+    expect(findPeerChat(peers, 'AAAA1111')).toMatchObject({ chat: { id: 'aaaa1111-1111-4111-8111-111111111111' } });
+    expect(findPeerChat(peers, 'aaaa111')).toBeUndefined();
     expect(findPeerChat(peers, 'worker')).toBeUndefined();
     expect(findPeerChat(peers, '#1')).toBeUndefined();
   });

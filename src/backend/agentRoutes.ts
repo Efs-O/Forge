@@ -17,7 +17,11 @@ import {
   requireText,
   type AgentRouteFields as Fields,
 } from './agentRouteFields';
-import { parseAgentMessageOptions, parseOriginConversation } from './agentMessageOptions';
+import {
+  parseAgentMessageOptions,
+  parseFromConversation,
+  parseOriginConversation,
+} from './agentMessageOptions';
 import { getLogger } from '../util/logger';
 import { dispatchAgentRelay } from './agentRelayDispatch';
 import { handleAgentRemoteSessionRoute } from './agentRemoteSessionRoute';
@@ -323,6 +327,7 @@ export class AgentRoutes {
         typeof fields['steer_epoch'] === 'string' ? fields['steer_epoch'].trim() : '';
       if (steerForge && steerEpochField !== '' && !Number.isInteger(Number(steerEpochField)))
         throw new HttpError(400, 'steer_epoch must be an integer when it is sent');
+      const fromConversation = parseFromConversation(fields);
       const admission = await admitInboundMessage({
         from,
         ...(declaredSender ? { sender: declaredSender } : {}),
@@ -389,6 +394,9 @@ export class AgentRoutes {
         );
       }
       const { position: queued, id } = accepted;
+      if (fromConversation && target) {
+        this.deps.recordPeerWriter?.(target.conversationId, { id: fromConversation, title: from });
+      }
       if (steerForge) {
         let outcome: Awaited<ReturnType<NonNullable<typeof this.deps.interruptForge>>>;
         try {

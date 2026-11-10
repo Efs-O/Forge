@@ -30,7 +30,7 @@ export const MESSAGE_CHAT_MESSAGE_PART_CHARS = 10_000;
 export const requestShapeSchema = z
   .object({
     action: z.string().min(1),
-    to: z.string().min(1).max(200).optional(),
+    to: z.string().max(200).optional(),
     message: z.string().min(1).max(MESSAGE_CHAT_MESSAGE_MAX_CHARS).optional(),
     model: z.string().min(1).max(200).optional(),
     /** Which OTHER window a `new` should open its chat in. Not a blob: it is
@@ -133,7 +133,7 @@ export function messageChatDefinition(flags: MessageChatActionFlags): Registered
     function: {
       name: 'message_chat',
       description:
-        "Message another Forge chat. `to` is a chat id, `#N` from `list`, or words from the chat's title — `#N` and title words mean this window's chats; a chat in another Forge window on this machine takes its id only. Omit `to` to reach the other chat when exactly one other chat is running (or open). No `list` needed first. A running chat reads it at its next tool round; an idle chat starts a turn. Replies arrive the same way. `list`: show the chats, including other windows'." +
+        "Message another Forge chat. `to` is a chat id, `#N` from `list`, or words from the chat's title — `#N` and title words mean this window's chats; a chat in another Forge window on this machine takes its id, or its first 8 or more characters when no other chat's id starts the same way. Omit `to` to reach the other chat when exactly one other chat is running (or open); otherwise an omitted `to` answers the chat in another window that last wrote to this one. No `list` needed first. A running chat reads it at its next tool round; an idle chat starts a turn. Replies arrive the same way. `list`: show the chats, including other windows'." +
         ' `action` defaults to `send` when a `message` is given, so a message alone is enough.' +
         (additions.length > 0 ? ` ${additions.join(' ')}` : ''),
       parameters: {
@@ -142,10 +142,9 @@ export function messageChatDefinition(flags: MessageChatActionFlags): Registered
           action: { type: 'string', enum: actions },
           to: {
             type: 'string',
-            minLength: 1,
             maxLength: 200,
             description:
-              'Another chat only: use its chat id, its #N tab number from list, or words from its title. Never target this chat. A closed chat must be read with action: view.',
+              "Another chat only: use its chat id, its #N tab number from list, or words from its title. #N and title words reach only this window's chats; a chat in another window takes its id or a unique prefix of 8 or more characters. Never target this chat. A closed chat must be read with action: view.",
           },
           message: {
             type: 'string',

@@ -32,7 +32,11 @@ import { deriveStaticCapabilities } from '../config/ConfigResolver';
 import { applyToolCalls } from './transcriptMutations';
 import { mirrorLiveSessionAnswers } from './liveSessionMirror';
 import { extractToolDetail } from './toolSummary';
-import { freezeTurnContextAndConsumeResumeNote, type TurnContextState } from './turnContext';
+import {
+  freezeTurnContextAndConsumeResumeNote,
+  isNewChatFirstTurn,
+  type TurnContextState,
+} from './turnContext';
 import { pinForgeInstructions } from './forgeInstructionsPin';
 import { formatCompactionResumeNote } from './compactionTypes';
 import { terminalCommandTracker } from '../tools/TerminalCommandTracker';
@@ -106,6 +110,8 @@ export interface ModelTurnContext {
   streamMeter?: LiveStreamMeter;
   /** Remote chats bound to a conversation. Absent when no transport is live. */
   remoteReach?: (conversationId: string) => number;
+  /** Reads the current workspace memory index for a new chat's first turn. */
+  listMemoryLines?: () => readonly string[];
   compactMidTurn?: (conv: ConversationRuntime, request: { exhausted: boolean }) => Promise<boolean>;
   drainTells?: (conversationId: string) => Promise<MidTurnDrainResult>;
   onTellArrived?: (conversationId: string, callback: () => void) => () => void;
@@ -243,6 +249,9 @@ export async function runModelTurn(
   const userTerminalCommands = terminalCommandTracker.recentUserCommands();
   const terminalCwd = userTerminalCommands.length > 0 ? activeTerminalCwd() : undefined;
   const instructions = pinForgeInstructions(conv, ctx.forgeLoader?.instructionsFor(activeFile));
+  const memoryIndex = isNewChatFirstTurn(conv.messages, conv.compaction)
+    ? ctx.listMemoryLines?.()
+    : undefined;
   const turnContext: TurnContextState = {
     ...(instructions.note ? { forgeInstructionsNote: instructions.note } : {}),
     activeFile,
@@ -256,6 +265,7 @@ export async function runModelTurn(
     ...(remoteChats > 0 ? { remoteChats } : {}),
     ...(unattended ? { unattended } : {}),
     compactionResume: formatCompactionResumeNote(conv.compaction?.resumeNote),
+    ...(memoryIndex && memoryIndex.length > 0 ? { memoryIndex } : {}),
   };
   freezeTurnContextAndConsumeResumeNote(conv.messages, turnContext, conv.compaction);
   const workspaceIsProjectRoot = ctx.forgeLoader?.root

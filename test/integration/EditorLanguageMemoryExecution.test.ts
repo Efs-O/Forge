@@ -294,8 +294,14 @@ describe('isolated editor, language, search, and memory tool execution', () => {
       get: (key: string) => values.get(key),
       update: async (key: string, value: unknown) => void values.set(key, value),
     } as unknown as vscode.Memento;
-    await makeRememberTool(state).handler({ key: 'decision', value: 'keep local' });
+    await makeRememberTool(state).handler({
+      key: 'decision',
+      value: 'keep local',
+      description: 'Keep the local copy.',
+    });
     await expect(makeRecallTool(state).handler({ key: 'decision' })).resolves.toBe('keep local');
-    await expect(makeListMemoriesTool(state).handler({})).resolves.toBe('decision');
+    await expect(makeListMemoriesTool(state).handler({})).resolves.toBe(
+      '- decision: Keep the local copy.',
+    );
   });
 });

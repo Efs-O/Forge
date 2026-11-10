@@ -167,6 +167,7 @@ export async function peerSend(input: PeerActionContext): Promise<string> {
     // window would fall back to routing by sender name.
     {
       conversation_id: target.id,
+      from_conversation: input.selfId,
       from: chatLabel(sender.title),
       ...peerUnattendedFields(input),
     },
@@ -263,6 +264,7 @@ export async function peerSteer(input: PeerSteerContext): Promise<string> {
         // makes sure it is THIS chat whose turn it stops.
         {
           conversation_id: conversationId,
+          from_conversation: input.selfId,
           from: chatLabel(sender.title),
           priority: 'steer',
           // The chain this decision was made against. The receiving window
@@ -388,6 +390,7 @@ export async function peerNew(input: PeerNewContext): Promise<string> {
       // One call, one worker: the receiving window opens the chat, pins it and
       // queues this text as its first message, then answers with its id.
       new_chat: 'true',
+      from_conversation: input.selfId,
       from: chatLabel(sender.title),
       ...peerUnattendedFields(input),
       ...(model ? { model } : {}),

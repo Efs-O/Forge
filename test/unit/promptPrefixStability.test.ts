@@ -20,6 +20,7 @@ import {
   injectTurnContext,
   freezeTurnContext,
   freezeTurnContextAndConsumeResumeNote,
+  isNewChatFirstTurn,
 } from '../../src/sidebar/turnContext';
 import {
   expandOrphanPlanMarkers,
@@ -27,6 +28,7 @@ import {
 } from '../../src/sidebar/turnContextPlanDedup';
 import { slimPersistMessages, chatMessagesFromSlim } from '../../src/sidebar/sessionTypes';
 import { PLAN_GUIDANCE, PLAN_UNCHANGED_NOTE, renderPlan } from '../../src/tools/planTools';
+import { renderMemoryIndexBlock } from '../../src/tools/memoryTools';
 import { annotateRereads } from '../../src/agent/staleReadSupersede';
 import { nudgeTruncatedResults } from '../../src/agent/truncatedResultNudge';
 import { stampToolResultClocks } from '../../src/agent/toolResultClock';
@@ -821,6 +823,50 @@ describe('injectTurnContext with frozen blocks', () => {
     // A standalone user message should appear after the system message.
     expect(out[1]?.role).toBe('user');
     expect(out[1]?.content).toContain('[Forge turn context, as of this message]');
+  });
+});
+
+describe('first-turn workspace memory index', () => {
+  it('freezes the exact index on a new chat first turn and omits it on later turns', () => {
+    const messages: ChatMessage[] = [{ role: 'user', content: 'hello' }];
+    const firstIndex = ['- older: first note', '- newest: second note'];
+    expect(isNewChatFirstTurn(messages, undefined)).toBe(true);
+    freezeTurnContext(messages, { memoryIndex: firstIndex });
+    const first = injectTurnContext(messages, { memoryIndex: firstIndex });
+    const firstContent = first[0]?.content;
+    expect(firstContent).toBe(
+      '[Forge turn context, as of this message]\n' +
+        'Stored memories in this workspace (saved with `remember`; call `recall` with a key for its full value):\n' +
+        '- newest: second note\n' +
+        '- older: first note\n' +
+        '[/Forge turn context]\n\nhello',
+    );
+
+    messages.push({ role: 'assistant', content: 'ack' }, { role: 'user', content: 'next' });
+    const updatedIndex = [...firstIndex, '- saved-later: added between turns'];
+    expect(isNewChatFirstTurn(messages, undefined)).toBe(false);
+    freezeTurnContext(messages, {});
+    const later = injectTurnContext(messages, {});
+    expect(later[0]?.content).toBe(firstContent);
+    expect(later[2]?.content).toBe('next');
+    expect(JSON.stringify(later)).not.toContain(updatedIndex[2]);
+  });
+
+  it('adds no block for an empty index or a chat resumed from compaction', () => {
+    const messages: ChatMessage[] = [{ role: 'user', content: 'hello' }];
+    expect(renderMemoryIndexBlock([])).toBeUndefined();
+    expect(injectTurnContext(messages, { memoryIndex: [] })).toBe(messages);
+    expect(isNewChatFirstTurn(messages, { summary: 'prior work', fromIndex: 0 })).toBe(false);
+  });
+
+  it('shows only the newest 30 lines and reports the omitted count', () => {
+    const lines = Array.from({ length: 31 }, (_, i) => `- k${i + 1}: d${i + 1}`);
+    const rendered = renderMemoryIndexBlock(lines);
+    expect(rendered).toBe(
+      'Stored memories in this workspace (saved with `remember`; call `recall` with a key for its full value):\n' +
+        Array.from({ length: 30 }, (_, i) => `- k${31 - i}: d${31 - i}`).join('\n') +
+        '\n1 more not shown; `list_memories` lists them all.',
+    );
   });
 });
 

@@ -956,13 +956,18 @@ describe('closing a chat drops what belonged to it', () => {
   });
 
   it('clears the hosts it approved and the secret-read flag', async () => {
+    const conversation = makeConversation();
+    conversation.id = 'conv-close';
+    conversation.latestPeerWriter = { id: 'peer-chat', title: 'peer Worker' };
     const loop = makeLoop(makePool(), makeConfig());
+    loop.setConversationLookup((id) => (id === conversation.id ? conversation : undefined));
     markHostApproved('conv-close', 'pypi.org');
     markConversationReadSecret('conv-close');
     expect(approvedHostsFor('conv-close')).toEqual(['pypi.org']);
     await loop.disposeConversation('conv-close');
     expect(approvedHostsFor('conv-close')).toEqual([]);
     expect(hasConversationReadSecret('conv-close')).toBe(false);
+    expect(conversation.latestPeerWriter).toBeUndefined();
   });
 });
 

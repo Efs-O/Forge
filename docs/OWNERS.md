@@ -34,6 +34,7 @@ overlaps with an existing owner, extend the owner instead.
 | Grouped activity row component                       | `webview-ui/src/components/ActivityGroup.tsx` |
 | Sidebar host->webview event contract                 | `src/sidebar/providerEvents.ts`          |
 | Sidebar collaborator construction                    | `src/sidebar/sidebarWiring.ts`           |
+| Sidebar inbox and elapsed-time tell composition | `src/sidebar/midTurnTellWiring.ts` |
 | Conversation eviction gate (signals, refusal labels) | `src/sidebar/evictionGate.ts`            |
 | Chat inactivity timestamp, Keep open and nearest-deadline scheduler | `src/sidebar/ConversationRetentionScheduler.ts` |
 | Final eligibility revalidation and persistence-checked idle archive | `src/sidebar/ConversationTabRetention.ts` |
@@ -174,6 +175,10 @@ overlaps with an existing owner, extend the owner instead.
 | Effective llama.cpp request-slot count shared by pool and chat mode | `src/backend/parallelCapacity.ts` |
 | `message_chat` reference resolution and chat-list formatting | `src/tools/chatMessageResolver.ts` |
 | `message_chat` peer windows: discovery, chat lists, limits, window/chat matching | `src/tools/messageChatPeers.ts` |
+| `message_chat` cross-window chat-id prefix resolution and ambiguity | `src/tools/messageChatPeerTarget.ts` |
+| `message_chat` refusal and local message formatting | `src/tools/messageChatToolFormatting.ts` |
+| Conversation runtime and persisted schema | `src/sidebar/sessionTypes.ts` |
+| Per-conversation AgentLoop disposal and runtime-state cleanup | `src/sidebar/agentConversationDisposal.ts` |
 | `message_chat` cross-window send/steer/new/view | `src/tools/messageChatPeerActions.ts` |
 | Bounded peer HTTP transport (one deadline, uncertain answers) | `src/agentBus/peerHttp.ts` |
 | This window's own bus identity (window id, bus root) | `src/agentBus/selfWindow.ts` |
@@ -456,7 +461,7 @@ overlaps with an existing owner, extend the owner instead.
 | Localhost control-server session statistics (`GET /stats`) | `src/backend/controlStats.ts`          |
 | Control-server load/capacity/unload               | `src/backend/ControlModelLifecycle.ts` |
 | Control-server HTTP/serialization helpers         | `src/backend/controlHttp.ts`           |
-| `/agent/message` option and origin-chat validation | `src/backend/agentMessageOptions.ts`    |
+| `/agent/message` option, origin-chat and peer-writer id validation | `src/backend/agentMessageOptions.ts`    |
 | `/models` catalog contract + availability         | `src/backend/ControlModelCatalog.ts`   |
 | Control-server discovery records (LOCALAPPDATA)   | `src/backend/ControlServerRegistry.ts` |
 | Machine-wide llama.cpp runtime discovery + leases | `src/backend/SharedRuntimeRegistry.ts` |

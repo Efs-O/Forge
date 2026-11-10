@@ -136,6 +136,8 @@ export interface AgentRoutesDeps {
   reloadWindow?: () => Promise<void>;
   /** Resolve the Forge chat that will receive an accepted agent message. */
   resolveChatTarget?: (from: string, selection: ChatTargetSelection) => ChatTargetResult;
+  /** Record a peer chat writer on the accepted destination conversation. */
+  recordPeerWriter?: (conversationId: string, writer: { id: string; title: string }) => void;
   /**
    * `forge.sh who` — read-only projection of agent sessions linked to chats.
    * Absent ⇒ `GET /agent/who` is 404.

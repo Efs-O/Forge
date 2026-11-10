@@ -33,7 +33,8 @@ import type { AttachmentData } from './messageBridge';
 import type { UserPromptOptions } from './transcriptMutations';
 import { applyUsage } from './transcriptMutations';
 import { makeRunModelTurn } from './turnServices';
-import type { TurnServices, MidTurnTellServices } from './turnServices';
+import type { AgentLoopTurnDependencies, TurnServices, MidTurnTellServices } from './turnServices';
+import { listMemoryLines } from '../tools/memoryTools';
 import { runModelTurn } from './ModelTurn';
 
 /**
@@ -68,6 +69,7 @@ export interface TurnServicesAssembly {
   getRequestStatsListener: () => TurnServices['onRequestStats'];
   /** Registered after construction and only while a transport is running. */
   getRemoteReach: () => ((conversationId: string) => number) | undefined;
+  listMemoryLines?: () => readonly string[];
   getMidTurnCompactor: () => TurnServices['compactMidTurn'];
   getMidTurnTells: () => MidTurnTellServices | undefined;
   warnOnce: (key: string, message: string) => void;
@@ -80,6 +82,17 @@ export interface TurnServicesAssembly {
     options?: UserPromptOptions,
   ) => void;
   waitForCancelledTurns: () => Promise<void>;
+}
+
+/** Build the first-turn memory reader beside the other turn-service wiring. */
+export function makeAgentLoopTurnDependencies(
+  workspaceState: vscode.Memento,
+  cliSessions: CliSessionRegistry | undefined,
+): AgentLoopTurnDependencies {
+  return {
+    ...(cliSessions ? { cliSessions } : {}),
+    listMemoryLines: () => listMemoryLines(workspaceState),
+  };
 }
 
 /**
@@ -124,6 +137,7 @@ export function buildTurnServices(d: TurnServicesAssembly): TurnServices {
     // Wrapped, not snapshotted, for the reason above: the probe is
     // registered after construction and only while a transport is running.
     remoteReach: (conversationId) => d.getRemoteReach()?.(conversationId) ?? 0,
+    ...(d.listMemoryLines ? { listMemoryLines: d.listMemoryLines } : {}),
     compactMidTurn: (conv, request) =>
       d.getMidTurnCompactor()?.(conv, request) ?? Promise.resolve(false),
     drainTells: (id) => d.getMidTurnTells()?.drainTells(id) ?? Promise.resolve({ messages: [] }),
