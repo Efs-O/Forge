@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.17.144
 
 - Code intelligence and symbol rename explain which line and identifier a position selected when a provider has no answer.
 - Code intelligence prints symbol locations as zero-based line and character coordinates that can be passed back as inputs.
