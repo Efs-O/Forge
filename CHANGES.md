@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.17.148
 
 - Declared boolean tool arguments accept case-insensitive `true` and `false` strings without trimming.
 
