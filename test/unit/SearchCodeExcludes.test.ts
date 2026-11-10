@@ -92,6 +92,49 @@ describe('searchCodeRgArgs', () => {
     expect(argsFor()).not.toContain('--ignore-case');
   });
 
+  it('keeps the complete default glob argv free of --no-ignore-vcs', () => {
+    expect(argsFor()).toEqual([
+      '--json',
+      '--line-number',
+      '--with-filename',
+      '--context',
+      '2',
+      '--hidden',
+      '--glob',
+      '**/*',
+      ...SEARCH_EXCLUDES.flatMap((glob) => ['--glob', glob]),
+      '--regexp',
+      'needle',
+      '.',
+    ]);
+  });
+
+  it('adds one --no-ignore-vcs for a glob only when include_ignored is true', () => {
+    expect(argsFor({ include: 'src/**/*.ts', includeIgnored: true })).toEqual([
+      '--json',
+      '--line-number',
+      '--with-filename',
+      '--context',
+      '2',
+      '--hidden',
+      '--glob',
+      'src/**/*.ts',
+      ...SEARCH_EXCLUDES.flatMap((glob) => ['--glob', glob]),
+      '--no-ignore-vcs',
+      '--regexp',
+      'needle',
+      '.',
+    ]);
+  });
+
+  it('keeps tool exclusions and emits exactly one ignore override for named directories', () => {
+    for (const includeIgnored of [false, true]) {
+      const args = argsFor({ include: 'src', includeIgnored });
+      expect(args.filter((arg) => arg === '--no-ignore-vcs')).toHaveLength(1);
+      expect(args).toContain('!**/node_modules/**');
+    }
+  });
+
   it('sends --fixed-strings for a literal query and plain regex otherwise', () => {
     expect(argsFor({ literal: true })).toContain('--fixed-strings');
     expect(argsFor()).not.toContain('--fixed-strings');

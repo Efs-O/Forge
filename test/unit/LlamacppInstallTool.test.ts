@@ -99,7 +99,9 @@ describe('findFreePort', () => {
 
 describe('gitignoredNote', () => {
   it('explains the gitignore skip for a glob', () => {
-    expect(gitignoredNote('**/*.yaml')).toMatch(/Globs skip gitignored files/);
+    expect(gitignoredNote('**/*.yaml')).toBe(
+      ' A glob can skip gitignored files; pass an exact file or folder path, or set include_ignored: true.',
+    );
   });
 
   it('says nothing for an exact path', () => {

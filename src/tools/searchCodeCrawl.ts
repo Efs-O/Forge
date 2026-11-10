@@ -84,6 +84,8 @@ export interface SearchCodeOptions {
   /** Context lines the caller asked for; `searchCodeRgArgs` may still send 0. */
   context: number;
   ignoreCase: boolean;
+  /** Search paths ignored by VCS ignore files, while keeping tool exclusions. */
+  includeIgnored?: boolean;
 }
 
 /**
@@ -96,7 +98,8 @@ export interface SearchCodeOptions {
  * modes, where every context line ripgrep prints would be thrown away.
  */
 export function searchCodeRgArgs(options: SearchCodeOptions, scope: SearchCodeScope): string[] {
-  const { query, literal, context, ignoreCase, output } = options;
+  const { query, literal, context, ignoreCase, output, includeIgnored } = options;
+  const scopeArgs = rgScopeArgs(scope);
   return [
     '--json',
     ...(literal ? ['--fixed-strings'] : []),
@@ -110,7 +113,8 @@ export function searchCodeRgArgs(options: SearchCodeOptions, scope: SearchCodeSc
     '--hidden',
     // The ignore-file decision and the noise-directory decision are separate;
     // `rgScopeArgs` is the single owner of both (audit F1, 2026-10-03).
-    ...rgScopeArgs(scope),
+    ...scopeArgs,
+    ...(includeIgnored && !scopeArgs.includes('--no-ignore-vcs') ? ['--no-ignore-vcs'] : []),
     // Behind --regexp, so a query like `--new` is the pattern, not a flag rg refuses.
     '--regexp',
     query,

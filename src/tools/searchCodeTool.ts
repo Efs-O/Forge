@@ -22,7 +22,7 @@ import { secretPatternForArgument, secretPatternForTaint } from './secretPaths';
 import { markConversationReadSecret } from './exfilTaint';
 import { resolveWorkspacePath } from '../util/WorkspacePaths';
 import { DEFAULT_TOOL_OUTPUT_LIMITS } from './toolOutputLimits';
-import { SEARCH_EXCLUDES } from './searchScope';
+import { isGlobInclude, SEARCH_EXCLUDES } from './searchScope';
 import {
   renderSearchCodeCounts,
   renderSearchCodeMatches,
@@ -34,7 +34,7 @@ import { searchWorkspaceText, type SearchCodeFound } from './searchCodeCrawl';
 import { resolveRipgrep, type RipgrepResolution } from './RipgrepResolver';
 import { capResultText } from './resultCap';
 import { MAX_SEARCH_RESULT_CHARS } from './searchSnippet';
-import { gitignoredNote, missingIncludeNote } from './dirTools';
+import { missingIncludeNote } from './dirTools';
 
 export { SNIPPETS_PER_FILE_LIMIT } from './searchCodeCrawl';
 
@@ -96,8 +96,9 @@ export function makeSearchCodeTool(
           'workspace. Relative includes are rooted at the workspace; absolute globs are rooted ' +
           'at the path before the first wildcard. output:"files" lists matching paths only, ' +
           '"count" gives per-file match counts, "content" (the default) shows match lines with ' +
-          'context. A result that could not show every matching file names the offset to call ' +
-          'next. Ripgrep regex does not support lookaround or backreferences.',
+          'context. Set include_ignored to search files excluded by workspace gitignore rules. ' +
+          'A result that could not show every matching file names the offset to call next. ' +
+          'Ripgrep regex does not support lookaround or backreferences.',
         parameters: {
           type: 'object',
           properties: {
@@ -133,6 +134,11 @@ export function makeSearchCodeTool(
               type: 'boolean',
               description: 'Match the query case-insensitively (default false).',
             },
+            include_ignored: {
+              type: 'boolean',
+              description:
+                "Also search files the workspace .gitignore excludes (default false). A broad glob such as **/* can already reach gitignored files; set this to be sure. The tool's own exclusions (.git, node_modules, dist, out, and Forge's embeddings index, session logs and remote inbox) still apply.",
+            },
             max_results: {
               type: 'integer',
               description:
@@ -162,6 +168,7 @@ export function makeSearchCodeTool(
       const output = outputModeOf(args['output']);
       const contextLines = boundedInt(args['context'], DEFAULT_CONTEXT_LINES, 0, MAX_CONTEXT_LINES);
       const ignoreCase = args['ignore_case'] === true;
+      const includeIgnored = args['include_ignored'] === true;
 
       let found: SearchCodeFound;
       try {
@@ -175,6 +182,7 @@ export function makeSearchCodeTool(
             output,
             context: contextLines,
             ignoreCase,
+            includeIgnored,
           },
           resolveCommand(),
           context?.abortSignal,
@@ -213,18 +221,15 @@ export function makeSearchCodeTool(
       if (crawled.length === 0) {
         const includeNote = missingIncludeNote(include, rootDir);
         if (includeNote) skipNotes.push(`[${includeNote.trimStart()}]`);
-        else
+        else if (isGlobInclude(include)) {
+          const excludes = SEARCH_EXCLUDES.map((glob) => '`' + glob + '`').join(', ');
+          const toolExcludes = `The tool ${includeIgnored ? 'still' : 'also'} keeps ${excludes} out of a crawl — name the file or folder in full in \`include\` to search inside one.`;
           skipNotes.push(
-            gitignoredNote(
-              include,
-              false,
-              [
-                'the tool also keeps',
-                SEARCH_EXCLUDES.map((glob) => '`' + glob + '`').join(', '),
-                'out of a crawl — name the file or folder in full in `include` to search inside one',
-              ].join(' '),
-            ),
+            includeIgnored
+              ? ` Gitignored files were searched. ${toolExcludes}`
+              : ` A glob can skip gitignored files; set include_ignored: true to search them. ${toolExcludes}`,
           );
+        }
         const mode = literal ? 'plain-text' : 'ripgrep-regex';
         const scopeNote = path.isAbsolute(include)
           ? ' (absolute include paths are searched from their named path)'

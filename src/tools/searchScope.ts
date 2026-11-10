@@ -9,6 +9,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+/** The one definition of a glob include, shared by search and path handling. */
+export function isGlobInclude(include: string): boolean {
+  return /[*?[\]{}!]/u.test(include);
+}
+
 /**
  * Globs must be recursive to match below the search root. Bare `.git/**` is
  * anchored to that root, so it excluded only a top-level `.git` and happily
@@ -50,7 +55,7 @@ export const SEARCH_EXCLUDES = [
  * search drowning in build output.
  */
 export function namedExistingPath(glob: string, root: string): string | undefined {
-  if (/[*?[\]{}!]/u.test(glob)) return undefined;
+  if (isGlobInclude(glob)) return undefined;
   // A leading "-" would reach ripgrep as a flag, not a path.
   if (glob.startsWith('-')) return undefined;
   const resolved = path.resolve(root, glob);
@@ -211,7 +216,7 @@ export function resolveSearchCodeScope(include: string, workspaceRoot: string): 
   }
 
   const absolute = path.resolve(include);
-  if (!/[*?[\]{}!]/u.test(absolute)) {
+  if (!isGlobInclude(absolute)) {
     let stat: fs.Stats;
     try {
       stat = fs.statSync(absolute);
@@ -228,7 +233,7 @@ export function resolveSearchCodeScope(include: string, workspaceRoot: string): 
 
   const parsed = path.parse(absolute);
   const segments = absolute.slice(parsed.root.length).split(path.sep);
-  const wildcardIndex = segments.findIndex((segment) => /[*?[\]{}!]/u.test(segment));
+  const wildcardIndex = segments.findIndex(isGlobInclude);
   const target = path.join(parsed.root, ...segments.slice(0, wildcardIndex));
   // A wildcard in the first segment would otherwise hand ripgrep the whole
   // drive: `N:\*` derives the root `N:\`, and `--hidden` then crawls every

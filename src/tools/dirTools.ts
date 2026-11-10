@@ -10,10 +10,10 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveRipgrep, type RipgrepResolution } from './RipgrepResolver';
-import { namedExistingPath, namedPathScope, rgScopeArgs } from './searchScope';
+import { isGlobInclude, namedExistingPath, namedPathScope, rgScopeArgs } from './searchScope';
 
 /**
- * A glob search skips files the workspace's `.gitignore` excludes; only an
+ * A glob search can skip files the workspace's `.gitignore` excludes; only an
  * exact existing path gets `--no-ignore-vcs` (see `namedExistingPath`). That is
  * how `.forge/config.yaml` — gitignored, and the file edited most — came back
  * "no matches" three times in one session for text it plainly held, and the
@@ -24,9 +24,9 @@ export function gitignoredNote(
   includeIgnored = false,
   fix = 'pass an exact file or folder path, or set include_ignored: true',
 ): string {
-  if (!/[*?[\]{}!]/u.test(glob)) return '';
+  if (!isGlobInclude(glob)) return '';
   if (includeIgnored) return '';
-  return ` Globs skip gitignored files; ${fix}.`;
+  return ` A glob can skip gitignored files; ${fix}.`;
 }
 
 /**
@@ -40,8 +40,7 @@ export function gitignoredNote(
  * was not, because they have two different fixes.
  */
 export function missingIncludeNote(include: string, workspaceRoot: string): string | undefined {
-  if (/[*?[\]{}!]/u.test(include) || include.startsWith('-') || include.trim() === '')
-    return undefined;
+  if (isGlobInclude(include) || include.startsWith('-') || include.trim() === '') return undefined;
   if (path.isAbsolute(include)) return undefined; // the scope resolver already refused it
   const resolved = path.resolve(workspaceRoot, include);
   const inside = path.relative(workspaceRoot, resolved);

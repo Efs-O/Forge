@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+- `search_code` can include gitignored files with `include_ignored: true`, while retaining Forge's search exclusions.
+
 ## 0.17.148
 
 - Declared boolean tool arguments accept case-insensitive `true` and `false` strings without trimming.

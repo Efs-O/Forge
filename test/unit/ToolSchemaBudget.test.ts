@@ -121,7 +121,8 @@ import {
 // 2026-11-10: 65,243 (-31) after making remember's description optional and removing its cap.
 // 2026-11-10: 65,278 after restoring full message_chat routing guidance.
 // 2026-11-10: 65,567 with both merged.
-const MEASURED_CHARS = 65_567;
+// 2026-11-10: 65,979 after clarifying include_ignored glob behavior; still under the ceiling.
+const MEASURED_CHARS = 65_979;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.
