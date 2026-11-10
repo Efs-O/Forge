@@ -1,5 +1,10 @@
 # Forge — Recent Changes
 
+## 0.17.146
+
+- Compaction clears outdated context token counts before saving the chat, so reloading no longer restores a full-context reading that blocks new messages.
+- Reloading repairs stale token counts in older saved chats whose compaction already covers the entire transcript.
+
 ## 0.17.145
 
 - Every new chat starts with the workspace's memory index: each `remember` key with its one-line description.
