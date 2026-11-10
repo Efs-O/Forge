@@ -7,6 +7,7 @@ import { rebuildIndex } from '../agentLinks/chatAgentLinks';
 import type { HistoryArchive } from './HistoryArchive';
 import { persistedRetentionState, runtimeRetentionState } from './conversationRetentionState';
 import { seedChatHostApprovals } from './chatApprovalRules';
+import { opResetReportedContext } from './ConversationOps';
 import { openConversationsPersistenceFor, persistMemento } from './openConversationsPersistence';
 import { copyQuestionRecords } from './sessionQuestionRecords';
 import { armNewConversationByDefault } from './chatClanker';
@@ -174,6 +175,9 @@ export function persistedToRuntime(p: ConversationPersisted): ConversationRuntim
     ...(p.clanker !== undefined ? { clanker: p.clanker } : {}),
     ...(p.clankerSource !== undefined ? { clankerSource: p.clankerSource } : {}),
   };
+  // Older builds saved before clearing usage. With the cut at the transcript
+  // end, no later model response could have measured the compacted context.
+  if (p.compaction?.fromIndex === p.messages.length) opResetReportedContext(conversation);
   seedChatHostApprovals(conversation);
   return conversation;
 }

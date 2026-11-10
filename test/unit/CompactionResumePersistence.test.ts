@@ -4,6 +4,28 @@ import { compactionPersistedSchema } from '../../src/sidebar/compactionPersisted
 import type { ConversationRuntime, SidebarRuntime } from '../../src/sidebar/sessionTypes';
 
 describe('persisted compaction resume note', () => {
+  it.each([false, true])('repairs stale usage only with no post-cut response (later=%s)', (later) => {
+    const conversation: ConversationRuntime = {
+      id: 'stale', title: 'Stale', createdAt: 1, updatedAt: 1,
+      messages: [
+        { role: 'user', content: 'task' },
+        { role: 'assistant', content: 'old answer' },
+        ...(later ? [{ role: 'assistant' as const, content: 'new answer' }] : []),
+      ],
+      compaction: { summary: 'kept summary', fromIndex: 2 },
+      last_input_tokens: 257_057, last_output_tokens: 649,
+      input_tokens: 500_000, output_tokens: 2_000,
+    };
+    const saved = runtimeToPersisted({ conversations: [conversation], history: [] }).conversations[0]!;
+    const restored = persistedToRuntime(saved);
+    expect(restored.last_input_tokens).toBe(later ? 257_057 : undefined);
+    expect(restored.last_output_tokens).toBe(later ? 649 : undefined);
+    expect(restored.input_tokens).toBe(500_000);
+    expect(restored.output_tokens).toBe(2_000);
+    expect(restored.compaction).toEqual(conversation.compaction);
+    expect(restored.messages).toEqual(conversation.messages);
+  });
+
   it('round-trips the note and still parses older records without it', () => {
     const resumeNote = { generation: 2, usedTokens: 1_200, maxTokens: 8_192 };
     const conversation: ConversationRuntime = {
