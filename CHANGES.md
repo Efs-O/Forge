@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.17.152
 
 - Code action refusals now name applicable titles, and cold files briefly wait for diagnostics before requesting quick fixes.
 - Semantic searches now refresh indexed files changed on disk outside VS Code before returning results.
