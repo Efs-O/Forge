@@ -11,13 +11,19 @@ import {
   chatClankerOn,
   chatClankerRecords,
   clearChatClanker,
+  armNewConversationByDefault,
+  clankerDefaultNotice,
+  CLANKER_DEFAULT_EXPIRED_NOTICE,
+  reconcileClankerDefault,
 } from '../../src/sidebar/chatClanker';
 import {
   loadSidebarSession,
   persistedToRuntime,
   runtimeToPersisted,
 } from '../../src/sidebar/sessionPersistence';
-import { openConversationSignature } from '../../src/sidebar/openConversationsPersistence';
+import { isMinimalV1, openConversationSignature } from '../../src/sidebar/openConversationsPersistence';
+import { displayTranscriptRows } from '../../src/sidebar/sessionProjections';
+import { summarizeConversation } from '../../src/sidebar/hostConversationSummary';
 import {
   conversationPersistedSchema,
   type ConversationRuntime,
@@ -146,5 +152,115 @@ describe('the pair the approval queue reads and writes through', () => {
     // Written as `false`, not deleted, so the signature sees the change and the save
     // that follows `/clear` cannot skip the flag.
     expect(conv.clanker).toBe(false);
+  });
+});
+
+describe('the owner-set expiring Clanker default', () => {
+  const future = '2026-11-11T08:00';
+  const creationNotice =
+    'Clanker is on by default until 2026-11-11 08:00 (policy.yaml clanker.default_on_until). Its three stops still hold: destructive actions, Forge guard files, a secret read followed by egress. Turn it off here with /clanker.';
+  const expiredNotice =
+    "Clanker's default from policy.yaml has ended, so this chat is gated again. Turn it back on with /clanker.";
+
+  it('arms only newly created chats while the deadline is in the future and persists its source', () => {
+    const created = conversation('new');
+    const existing = conversation('old');
+    expect(armNewConversationByDefault(created, future, Date.parse('2026-11-10T00:00'))).toBe(creationNotice);
+    expect(clankerDefaultNotice(future)).toBe(creationNotice);
+    expect(created.clanker).toBe(true);
+    expect(created.clankerSource).toBe('policy-default');
+    expect(created.messages).toEqual([]);
+    expect(
+      displayTranscriptRows(
+        created.messages,
+        created.displayDiffs,
+        created.compaction,
+        created.displayQuestionRecords,
+        created.displayNotices,
+      )[0]?.content,
+    ).toBe(creationNotice);
+    expect(summarizeConversation(created, false, 0)).toMatchObject({
+      clanker: true,
+      clankerSource: 'policy-default',
+    });
+    expect(existing.clanker).toBeUndefined();
+    const persisted = runtimeToPersisted(
+      { activeConversationId: created.id, conversations: [created], history: [] },
+      { withHistory: false },
+    );
+    expect(persisted.conversations[0]?.clankerSource).toBe('policy-default');
+    expect(persistedToRuntime(persisted.conversations[0]!).clankerSource).toBe('policy-default');
+    expect(persisted.conversations[0]?.display_notices?.[0]?.message).toBe(creationNotice);
+    expect(persistedToRuntime(persisted.conversations[0]!).displayNotices?.[0]?.message).toBe(creationNotice);
+    expect(isMinimalV1(persisted)).toBe(true);
+  });
+
+  it('leaves new chats gated when the key is absent or already expired', () => {
+    const absent = conversation('absent');
+    const past = conversation('past');
+    expect(armNewConversationByDefault(absent, undefined, Date.now())).toBeUndefined();
+    expect(armNewConversationByDefault(past, '2026-11-09T08:00', Date.parse('2026-11-09T08:00'))).toBeUndefined();
+    expect(absent.clanker).toBeUndefined();
+    expect(past.clanker).toBeUndefined();
+  });
+
+  it('arms the fresh startup session too, while leaving restored sessions alone', () => {
+    const fresh = loadSidebarSession(
+      fakeMemento({}) as never,
+      undefined,
+      { models: [], active_model: null, clanker: { default_on_until: future } },
+    );
+    expect(fresh.conversations[0]?.clanker).toBe(true);
+    expect(fresh.conversations[0]?.clankerSource).toBe('policy-default');
+    expect(fresh.conversations[0]?.messages).toEqual([]);
+    expect(fresh.conversations[0]?.displayNotices?.[0]?.message).toBe(creationNotice);
+
+    const prior = conversation('prior');
+    const persisted = runtimeToPersisted(
+      { activeConversationId: prior.id, conversations: [prior], history: [] },
+      { withHistory: false },
+    );
+    const workspace = fakeMemento({ 'forge.conversations.v1': persisted });
+    const restored = loadSidebarSession(
+      workspace as never,
+      undefined,
+      { models: [], active_model: null, clanker: { default_on_until: future } },
+    );
+    expect(restored.conversations[0]?.clanker).toBeUndefined();
+  });
+
+  it('disarms only a default-sourced chat at expiry or policy removal and returns one notice', () => {
+    expect(reconcileClankerDefault(true, 'policy-default', future, Date.parse(future))).toEqual({
+      clanker: false,
+      source: undefined,
+      notice: expiredNotice,
+    });
+    expect(reconcileClankerDefault(true, 'policy-default', undefined, Date.now()).notice).toBe(expiredNotice);
+    expect(reconcileClankerDefault(true, undefined, undefined, Date.now())).toEqual({
+      clanker: true,
+      source: undefined,
+    });
+    expect(CLANKER_DEFAULT_EXPIRED_NOTICE).toBe(expiredNotice);
+  });
+
+  it('persists one expiry notice and clears the provenance marker atomically', () => {
+    const conv = conversation('expired', true);
+    conv.clankerSource = 'policy-default';
+    const records = chatClankerRecords(() => conv);
+    expect(records.expirePolicyDefault(conv.id, expiredNotice)).toBe(true);
+    expect(records.expirePolicyDefault(conv.id, expiredNotice)).toBe(false);
+    expect(conv.clanker).toBe(false);
+    expect(conv.clankerSource).toBeUndefined();
+    expect(conv.messages).toEqual([]);
+    expect(conv.displayNotices?.map((notice) => notice.message)).toEqual([expiredNotice]);
+    expect(
+      displayTranscriptRows(
+        conv.messages,
+        conv.displayDiffs,
+        conv.compaction,
+        conv.displayQuestionRecords,
+        conv.displayNotices,
+      )[0]?.content,
+    ).toBe(expiredNotice);
   });
 });

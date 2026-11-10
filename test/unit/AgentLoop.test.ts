@@ -27,6 +27,7 @@ import {
   hasConversationReadSecret,
   markConversationReadSecret,
 } from '../../src/tools/exfilTaint';
+import { armNewConversationByDefault } from '../../src/sidebar/chatClanker';
 
 const FAKE_CLAUDE_CLI = fakeClaudeCli();
 
@@ -254,6 +255,49 @@ describe('AgentLoop', () => {
     // Every compaction resume prompt then looked user-authored, and the
     // verbatim user-request block replayed it back as an instruction.
     expect(conv.messages[0]?.internal).toBe(true);
+  });
+
+  it('keeps the policy-default notice out of the exact model request messages', async () => {
+    const config = makeConfig();
+    config.models[0]!.system_prompt = 'test system prompt';
+    config.models[0]!.system_prompt_mode = 'replace';
+    const conv = makeConversation();
+    const notice = armNewConversationByDefault(conv, '2999-01-01T00:00', Date.now());
+    const requests: unknown[][] = [];
+    streamModelChatCompletion.mockImplementation(
+      (
+        _baseUrl: string,
+        request: unknown,
+        _model: ModelConfig,
+        handlers: {
+          onDone: (reason: string | null) => void;
+          onToolCalls: (calls: unknown[] | null) => void;
+        },
+      ) => {
+        requests.push((request as { messages: unknown[] }).messages);
+        handlers.onToolCalls(null);
+        handlers.onDone('stop');
+        return Promise.resolve();
+      },
+    );
+    const loop = makeLoop(makePool(), config);
+
+    await loop.runTurn(conv, config.models[0]!, 'student prompt');
+
+    expect(notice).toBe(
+      'Clanker is on by default until 2999-01-01 00:00 (policy.yaml clanker.default_on_until). Its three stops still hold: destructive actions, Forge guard files, a secret read followed by egress. Turn it off here with /clanker.',
+    );
+    expect(requests).toEqual([
+      [
+        { role: 'system', content: 'test system prompt' },
+        {
+          role: 'user',
+          content: expect.stringMatching(/student prompt$/u),
+          createdAt: expect.any(Number),
+          turnContext: expect.any(String),
+        },
+      ],
+    ]);
   });
 
   it('leaves a prompt the user typed unmarked', async () => {

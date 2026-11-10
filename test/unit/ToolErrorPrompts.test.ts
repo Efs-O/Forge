@@ -1,10 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { describePathMiss } from '../../src/tools/pathErrorHint';
 import { formatPathMiss } from '../../src/tools/pathMissText';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { workspace } from '../support/vscode';
+import * as vscode from '../support/vscode';
+import { resolveRipgrep } from '../../src/tools/RipgrepResolver';
+import { resolveLiveAppRoot } from '../live/liveModelHarness';
 
 /**
  * These assert the *text the model receives*, which is the highest-salience
@@ -14,6 +17,13 @@ import { workspace } from '../support/vscode';
  */
 
 describe('describePathMiss', () => {
+  const bundledRg = resolveRipgrep(resolveLiveAppRoot());
+  const realRg = fs.existsSync(bundledRg.command) ? bundledRg : undefined;
+  const previousAppRoot = vscode.env.appRoot;
+
+  afterEach(() => {
+    vscode.env.appRoot = previousAppRoot;
+  });
   const enoent = new Error("ENOENT: no such file or directory, open 'n:\\ws\\a\\b.ts'");
 
   // Acceptance #6 and #7 -- both tools share this helper.
@@ -46,9 +56,10 @@ describe('describePathMiss', () => {
     );
   });
 
-  it('gets a same-name suggestion from a real ripgrep workspace crawl', () => {
+  it.skipIf(realRg === undefined)('gets a same-name suggestion from a real ripgrep workspace crawl', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-readfile-suggestion-'));
     const previous = workspace.workspaceFolders;
+    vscode.env.appRoot = resolveLiveAppRoot();
     fs.mkdirSync(path.join(root, 'scripts', 'lab-sync'), { recursive: true });
     fs.writeFileSync(path.join(root, 'scripts', 'lab-sync', 'logscan.py'), 'pass\n');
     workspace.workspaceFolders = [{ uri: { fsPath: root } }];

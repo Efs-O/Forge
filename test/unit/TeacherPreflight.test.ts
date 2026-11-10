@@ -17,6 +17,9 @@ import {
 } from '../../src/tools/messageChatPeers';
 import { makeReadFileTool } from '../../src/tools/readFileTool';
 import { workspace } from '../support/vscode';
+import * as vscode from '../support/vscode';
+import { resolveRipgrep } from '../../src/tools/RipgrepResolver';
+import { resolveLiveAppRoot } from '../live/liveModelHarness';
 
 const shell = {
   home: 'C:/Users/efso office',
@@ -34,10 +37,15 @@ const allowedBash = [
 ];
 
 let previousWorkspace = workspace.workspaceFolders;
+let previousAppRoot = vscode.env.appRoot;
 let tempWorkspace: string | undefined;
+
+const bundledRg = resolveRipgrep(resolveLiveAppRoot());
+const realRg = fs.existsSync(bundledRg.command) ? bundledRg : undefined;
 
 afterEach(() => {
   workspace.workspaceFolders = previousWorkspace;
+  vscode.env.appRoot = previousAppRoot;
   if (tempWorkspace) fs.rmSync(tempWorkspace, { recursive: true, force: true });
   tempWorkspace = undefined;
 });
@@ -134,9 +142,11 @@ describe('teacher preflight', () => {
     });
   });
 
-  it('resolves read_file against the workspace and suggests a unique real ripgrep match', async () => {
+  it.skipIf(realRg === undefined)('resolves read_file against the workspace and suggests a unique real ripgrep match', async () => {
     tempWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-teacher-preflight-'));
     previousWorkspace = workspace.workspaceFolders;
+    previousAppRoot = vscode.env.appRoot;
+    vscode.env.appRoot = resolveLiveAppRoot();
     workspace.workspaceFolders = [{ uri: { fsPath: tempWorkspace } }];
     const actual = path.join(tempWorkspace, 'scripts', 'lab-sync', 'logscan.py');
     fs.mkdirSync(path.dirname(actual), { recursive: true });

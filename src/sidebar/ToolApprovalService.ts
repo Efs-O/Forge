@@ -24,6 +24,7 @@ import {
 import { refusalReasonForGate } from './untrustedExitPolicy';
 import { ApprovalTimeoutState } from './approvalTimeoutState';
 import { approvalEventForConversation } from './approvalEventLookup';
+import { readClankerModeAtApproval, type ChatClankerRecords } from './chatClanker';
 
 /**
  * The card contract lives in `toolApprovalEvents.ts` — the webview bridge, the
@@ -72,10 +73,7 @@ export class ToolApprovalService {
     /** Conversation records behind this window's chats. Read to answer for chats
      *  this queue has not seen, and written so toggles survive reloads. Absent means
      *  no records are loaded — the shape a test that arms one chat replaces. */
-    private readonly chatRecords?: {
-      read: (conversationId: string) => boolean | undefined;
-      write: (conversationId: string, on: boolean) => void;
-    },
+    private readonly chatRecords?: ChatClankerRecords,
     /** The chat rules' write half (`chatApprovalRules.ts`'s `allow`): what an
      *  "Allow for this chat" answer stores, plus the save that carries it. Absent
      *  means this window has nowhere to store a chat rule — the shape a window that
@@ -83,6 +81,11 @@ export class ToolApprovalService {
      */
     private readonly chatRuleAllow?: ChatRuleApproval['allow'],
     private readonly chatRuleAlways?: (keys: readonly string[]) => AlwaysApprovalWriteResult,
+    private readonly getClankerDefaultUntil: () => string | undefined = () => undefined,
+    private readonly onClankerDefaultExpired: (
+      conversationId: string,
+      notice: string,
+    ) => void = () => undefined,
   ) {}
 
   addSink(sink: ToolApprovalSink): { dispose(): void } {
@@ -142,13 +145,6 @@ export class ToolApprovalService {
     this.clankerFlags.delete(conversationId);
   }
 
-  /**
-   * Sole writer of one chat's Clanker flag. It announces the value it ends with to
-   * that chat: a remote `/clanker` changes the same gate the composer in that tab
-   * advertises, and a banner that still reads "gated" while writes land unconfirmed
-   * is the worse half of the bug. Setting it to what it already is announces
-   * nothing, because there is nothing for the tab to see change.
-   */
   setClankerMode(conversationId: string, enabled: boolean): void {
     const current = this.getClankerMode(conversationId);
     if (current === enabled) return;
@@ -160,16 +156,22 @@ export class ToolApprovalService {
     this.post({ type: 'clankerChanged', enabled, conversationId });
   }
 
-  /** This chat's Clanker mode — its own, never another tab's. The chat's record wins
-   *  over the cache, because the record is the one copy everything else reads: a
-   *  `/clear` that empties the chat clears the flag in its record, and a queue that
-   *  answered from a stale cache would keep running calls the cleared chat no longer
-   *  earned. The cache is what lets a window with no conversation records loaded —
-   *  a test, or a chat this window cannot see — still arm and answer.
-   */
   getClankerMode(conversationId: string): boolean {
-    const stored = this.chatRecords?.read(conversationId);
-    return stored ?? this.clankerFlags.get(conversationId) ?? false;
+    return this.chatRecords?.read(conversationId) ?? this.clankerFlags.get(conversationId) ?? false;
+  }
+
+  getClankerModeForApproval(conversationId: string): boolean {
+    if (!this.chatRecords) return this.clankerFlags.get(conversationId) ?? false;
+    return (
+      readClankerModeAtApproval(
+        this.chatRecords,
+        conversationId,
+        this.getClankerDefaultUntil(),
+        Date.now(),
+        this.clankerFlags.get(conversationId),
+        this.onClankerDefaultExpired,
+      ) ?? false
+    );
   }
 
   toggleClankerMode(conversationId: string): boolean {
@@ -187,6 +189,7 @@ export class ToolApprovalService {
     options?: ToolApprovalCallOptions,
   ): Promise<ToolApprovalOutcome> {
     if (signal?.aborted) return Promise.resolve('declined');
+    const clankerEnabled = conversationId ? this.getClankerModeForApproval(conversationId) : false;
     if (conversationId) {
       const timedOut = this.timeouts.timedOutResult(conversationId);
       if (timedOut) return Promise.resolve(timedOut);
@@ -241,7 +244,7 @@ export class ToolApprovalService {
       conversationId &&
       options?.clankerStop !== true &&
       options?.gateKind !== 'denyList' &&
-      this.getClankerMode(conversationId)
+      clankerEnabled
     ) {
       this.autoApproved({
         toolName,

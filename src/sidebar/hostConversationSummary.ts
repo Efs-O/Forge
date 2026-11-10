@@ -29,5 +29,7 @@ export function summarizeConversation(
     toolCallCount: conv.tool_call_count ?? 0,
     compactCount: conv.compaction?.generation ?? 0,
     activeMs,
+    clanker: conv.clanker === true,
+    ...(conv.clankerSource ? { clankerSource: conv.clankerSource } : {}),
   };
 }

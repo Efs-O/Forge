@@ -42,6 +42,10 @@ export interface ForgeConversationSummary {
    * approval waits excluded, the running turn included.
    */
   activeMs: number;
+  /** Whether this chat currently runs with Clanker enabled. */
+  clanker: boolean;
+  /** Present when the active Clanker state came from the policy default. */
+  clankerSource?: 'policy-default';
 }
 
 export interface ForgeHostStatus {

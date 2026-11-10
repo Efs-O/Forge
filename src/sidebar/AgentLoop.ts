@@ -32,7 +32,7 @@ import { ToolApprovalService } from './ToolApprovalService';
 import { clearConversationHostApprovals } from '../tools/fetchHostApprovals';
 import { clearChatRules, createChatRuleApproval } from './chatApprovalRules';
 import { writeApprovalAlways } from './approvalPolicyRules';
-import { chatClankerRecords } from './chatClanker';
+import { chatClankerRecords, clankerDefaultExpiryNotifier } from './chatClanker';
 import { clearConversationExfilState } from '../tools/exfilTaint';
 import { clearTrashRefusals } from '../tools/trashRefusal';
 import type { ApprovalDecision } from './approvalMessages';
@@ -195,7 +195,7 @@ export class AgentLoop {
       ...(this.workspaceRoot ? { workspaceRoot: this.workspaceRoot } : {}),
       ...(this.getConfigPath ? { configPath: this.getConfigPath() } : {}),
       // The same reader the queue uses, so the seam and the queue cannot disagree.
-      clankerMode: (conversationId) => this.approvals.getClankerMode(conversationId),
+      clankerMode: (conversationId) => this.approvals.getClankerModeForApproval(conversationId),
       recordAutoGate: (event) => this.approvals.autoApproved(event),
       lookup: (conversationId) => this.conversationLookup?.(conversationId),
       persist: (conversationId) => this.onTranscriptChanged?.(conversationId),
@@ -206,12 +206,13 @@ export class AgentLoop {
       getView,
       undefined,
       () => getConfig().permissions?.approval_timeout_minutes,
-      // Clanker's durable home is the chat's own record; see `chatClanker.ts`.
       chatClankerRecords((conversationId) => this.conversationLookup?.(conversationId)),
       // An "Allow for this chat" answer writes through this queue alone, so a phone
       // click and a sidebar click cannot store different rules for the same card.
       chatRuleApproval.allow,
       chatRuleApproval.always,
+      () => getConfig().clanker?.default_on_until,
+      clankerDefaultExpiryNotifier(post, this.onTranscriptChanged),
     );
     this.approvals.setApprovalLifecycle(
       (convId) => this.sessionTimer.pauseApproval(convId),

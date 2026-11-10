@@ -76,6 +76,11 @@ export type PersistedRow =
       agentSender?: AgentSenderMetadata | undefined;
     }
   | {
+      role: 'system';
+      content: string;
+      createdAt?: number;
+    }
+  | {
       role: 'tool';
       content: string;
       toolName: string;
@@ -145,7 +150,8 @@ export function mergeSyncedMessages(
           ...(m.source ? { compactionSource: m.source } : {}),
         }
       : {}),
-    ...((m.role === 'user' || m.role === 'assistant') && m.createdAt !== undefined
+    ...((m.role === 'user' || m.role === 'assistant' || m.role === 'system') &&
+    m.createdAt !== undefined
       ? { createdAt: m.createdAt }
       : {}),
     ...((m.role === 'user' || m.role === 'assistant') && m.reasoning !== undefined

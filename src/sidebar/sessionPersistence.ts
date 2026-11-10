@@ -1,4 +1,5 @@
 import type { Memento } from 'vscode';
+import type { ForgeConfig } from '../config/types';
 import { repairInterruptedToolCalls } from './interruptedToolCalls';
 import type { CompactionState } from './compactionTypes';
 import type { ForgeInstructionsPin } from './forgeInstructionsPin';
@@ -8,6 +9,7 @@ import { persistedRetentionState, runtimeRetentionState } from './conversationRe
 import { seedChatHostApprovals } from './chatApprovalRules';
 import { openConversationsPersistenceFor, persistMemento } from './openConversationsPersistence';
 import { copyQuestionRecords } from './sessionQuestionRecords';
+import { armNewConversationByDefault } from './chatClanker';
 import {
   ACTIVE_ID_KEY,
   HISTORY_KEY_LEGACY,
@@ -119,12 +121,14 @@ function copyCompaction(compaction: {
   };
 }
 
-export function createDefaultSession(): SidebarRuntime {
+export function createDefaultSession(defaultOnUntil?: string): SidebarRuntime {
   const id = newConversationId();
   const now = Date.now();
+  const conversation = emptyConversation(id, now);
+  armNewConversationByDefault(conversation, defaultOnUntil, now);
   return {
     activeConversationId: id,
-    conversations: [emptyConversation(id, now)],
+    conversations: [conversation],
     history: [],
   };
 }
@@ -154,6 +158,9 @@ export function persistedToRuntime(p: ConversationPersisted): ConversationRuntim
     ...(p.display_question_records !== undefined
       ? { displayQuestionRecords: copyQuestionRecords(p.display_question_records) }
       : {}),
+    ...(p.display_notices !== undefined
+      ? { displayNotices: p.display_notices.map((notice) => ({ ...notice })) }
+      : {}),
     ...(p.active_time_ms !== undefined ? { active_time_ms: p.active_time_ms } : {}),
     ...(p.active_started_at !== undefined ? { active_started_at: p.active_started_at } : {}),
     ...(p.input_tokens !== undefined ? { input_tokens: p.input_tokens } : {}),
@@ -165,6 +172,7 @@ export function persistedToRuntime(p: ConversationPersisted): ConversationRuntim
     ...(p.untrusted_since_ms !== undefined ? { untrusted_since_ms: p.untrusted_since_ms } : {}),
     ...(p.approval_rules !== undefined ? { approval_rules: [...(p.approval_rules ?? [])] } : {}),
     ...(p.clanker !== undefined ? { clanker: p.clanker } : {}),
+    ...(p.clankerSource !== undefined ? { clankerSource: p.clankerSource } : {}),
   };
   seedChatHostApprovals(conversation);
   return conversation;
@@ -203,6 +211,9 @@ function conversationToPersisted(c: ConversationRuntime): ConversationPersisted 
     ...(c.displayQuestionRecords !== undefined
       ? { display_question_records: copyQuestionRecords(c.displayQuestionRecords) }
       : {}),
+    ...(c.displayNotices !== undefined
+      ? { display_notices: c.displayNotices.map((notice) => ({ ...notice })) }
+      : {}),
     ...(c.active_time_ms !== undefined ? { active_time_ms: c.active_time_ms } : {}),
     ...(c.active_started_at !== undefined ? { active_started_at: c.active_started_at } : {}),
     ...(c.input_tokens !== undefined ? { input_tokens: c.input_tokens } : {}),
@@ -214,6 +225,7 @@ function conversationToPersisted(c: ConversationRuntime): ConversationPersisted 
     ...(c.untrusted_since_ms !== undefined ? { untrusted_since_ms: c.untrusted_since_ms } : {}),
     ...(c.approval_rules !== undefined ? { approval_rules: [...(c.approval_rules ?? [])] } : {}),
     ...(c.clanker !== undefined ? { clanker: c.clanker } : {}),
+    ...(c.clankerSource !== undefined ? { clankerSource: c.clankerSource } : {}),
   };
 }
 
@@ -291,7 +303,9 @@ function migrateLegacyHistory(
 export function loadSidebarSession(
   workspaceState: Memento,
   archive?: HistoryArchive,
+  config?: ForgeConfig,
 ): SidebarRuntime {
+  const defaultOnUntil = config?.clanker?.default_on_until;
   const openPersistence = openConversationsPersistenceFor(
     workspaceState,
     archive?.openConversations,
@@ -307,7 +321,8 @@ export function loadSidebarSession(
   const d = loaded.v1;
   if (loaded.hasSession) {
     const conversations = loaded.conversations.map(persistedToRuntime);
-    if (conversations.length === 0) conversations.push(...createDefaultSession().conversations);
+    if (conversations.length === 0)
+      conversations.push(...createDefaultSession(defaultOnUntil).conversations);
     // The pointer key wins when it still names an open conversation: a tab
     // switch writes only that, so the blob's own `activeConversationId` can be
     // several switches stale. Absent (records written before the split) or
@@ -355,7 +370,7 @@ export function loadSidebarSession(
     return indexSession(migrated, archive);
   }
 
-  const session = createDefaultSession();
+  const session = createDefaultSession(defaultOnUntil);
   session.history = (archive?.load() ?? []).map(persistedToRuntime);
   archive?.overflow.list([
     ...session.conversations.map((conversation) => conversation.id),

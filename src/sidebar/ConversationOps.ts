@@ -267,6 +267,7 @@ export function opClearMessages(conv: ConversationRuntime): void {
   delete conv.compaction;
   conv.displayDiffs = [];
   delete conv.displayQuestionRecords;
+  delete conv.displayNotices;
   conv.title = UNTITLED_TITLE;
   conv.updatedAt = Date.now();
   opResetReportedContext(conv);

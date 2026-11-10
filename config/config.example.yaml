@@ -92,6 +92,9 @@ permissions:
 
 # Owner-only approval policy lives in `~/.forge/policy.yaml`, not config.yaml.
 # approvals:
+# Owner-only policy.yaml setting for the default Clanker mode on new chats:
+# clanker:
+#   default_on_until: "2026-11-11T08:00"
 
 # Persistent agent jobs (docs/JOBS.md). The setup wizard turns the scheduler on
 # for a new install; a config without a `jobs:` block has no scheduler. With no

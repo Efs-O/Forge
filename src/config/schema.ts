@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ClankerPolicySchema } from './clankerPolicySchema';
 import { isAbsolute } from 'path';
 import { CacheTypeSchema, GroupSchema } from './schemaShared';
 import { VoiceConfigSchema, validateVoiceConfig } from './voiceSchema';
@@ -180,9 +181,8 @@ const ApprovalsConfigSchema = z
 export const ForgeConfigShape = {
   models: z.array(ModelConfigSchema).default([]),
   active_model: ActiveModelSchema.default(null),
-  // F7 addition
+  clanker: ClankerPolicySchema,
   groups: z.record(z.string(), GroupSchema).optional(),
-  // F6 additions
   defaults: ProfileSchema.partial().extend({ tool_groups: ToolGroupsSchema.optional() }).optional(),
   profiles: z.record(z.string(), ProfileSchema).optional(),
   aliases: z.record(z.string(), z.string().min(1)).optional(),

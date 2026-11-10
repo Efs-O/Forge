@@ -90,6 +90,11 @@ export type DisplayPersistMessage =
       attachments?: ChatAttachmentRef[];
     }
   | {
+      role: 'system';
+      content: string;
+      createdAt?: number;
+    }
+  | {
       role: 'tool';
       content: string;
       toolName: string;
@@ -126,6 +131,13 @@ export interface ConversationDisplayQuestionRecord {
   record: QuestionAnswerRecord;
 }
 
+/** Durable status rows shown in the transcript without entering model history. */
+export type ConversationDisplayNotice = {
+  message: string;
+  createdAt: number;
+  messageIndex: number;
+};
+
 const diffLineSchema = z.object({
   kind: z.enum(['context', 'added', 'removed']),
   text: z.string(),
@@ -148,6 +160,11 @@ const displayDiffSchema = z.object({
 const displayQuestionRecordSchema = z.object({
   toolCallId: z.string().min(1),
   record: questionAnswerRecordSchema,
+});
+const displayNoticeSchema = z.object({
+  message: z.string(),
+  createdAt: z.number().int(),
+  messageIndex: z.number().int().min(0),
 });
 
 const log = getLogger();
@@ -245,6 +262,8 @@ export const conversationPersistedBaseSchema = z.object({
   display_diffs: z.array(displayDiffSchema).optional(),
   /** Read-only question cards, separate from the compact model-facing turns. */
   display_question_records: z.array(z.unknown()).optional(),
+  /** Durable status rows, separate from model-facing messages. */
+  display_notices: z.array(displayNoticeSchema).optional(),
   // Active-agent-time tracking. Optional so pre-existing records parse unchanged.
   active_time_ms: z.number().int().min(0).optional(),
   active_started_at: z.number().int().optional(),
@@ -281,24 +300,28 @@ export const conversationPersistedBaseSchema = z.object({
    * off after this update — the safer side of a mode that skips confirmations.
    */
   clanker: z.boolean().optional(),
+  /** Provenance for expiring owner policy defaults; old records omit it. */
+  clankerSource: z.literal('policy-default').optional(),
 });
 
 export type ConversationPersisted = Omit<
   z.infer<typeof conversationPersistedBaseSchema>,
-  'display_question_records'
+  'display_question_records' | 'display_notices'
 > & {
   display_question_records?: ConversationDisplayQuestionRecord[];
+  display_notices?: ConversationDisplayNotice[];
 };
 
 export const conversationPersistedSchema = conversationPersistedBaseSchema.transform(
   (conversation): ConversationPersisted => {
-    const { display_question_records: records, ...body } = conversation;
-    return records === undefined
-      ? body
-      : {
-          ...body,
-          display_question_records: validDisplayQuestionRecords(conversation.id, records),
-        };
+    const { display_question_records: records, display_notices: notices, ...body } = conversation;
+    return {
+      ...body,
+      ...(records !== undefined
+        ? { display_question_records: validDisplayQuestionRecords(conversation.id, records) }
+        : {}),
+      ...(notices !== undefined ? { display_notices: notices } : {}),
+    };
   },
 );
 
@@ -378,6 +401,8 @@ export interface ConversationRuntime {
   displayDiffs?: ConversationDisplayDiff[];
   /** Durable transcript records keyed by the ask_user tool call id. */
   displayQuestionRecords?: ConversationDisplayQuestionRecord[];
+  /** Durable status rows, deliberately absent from LLM messages. */
+  displayNotices?: ConversationDisplayNotice[];
   /**
    * Set once the user has been told this conversation lost images to a reload.
    *
@@ -447,6 +472,7 @@ export interface ConversationRuntime {
    * outlives the shortcut they also have.
    */
   clanker?: boolean;
+  clankerSource?: 'policy-default';
 }
 
 export interface SidebarRuntime {

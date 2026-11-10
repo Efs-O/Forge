@@ -16,6 +16,7 @@ import type { CompactionDividerMessage, SessionHistoryMeta, SessionTabMeta } fro
 import type { CompactionDivider, CompactionState } from './compactionTypes';
 import type {
   ConversationDisplayDiff,
+  ConversationDisplayNotice,
   ConversationDisplayQuestionRecord,
   ConversationRuntime,
   DisplayPersistMessage,
@@ -64,13 +65,14 @@ export function displayTranscriptRows(
   displayDiffs: ConversationDisplayDiff[] = [],
   compaction?: Pick<CompactionState, 'fromIndex' | 'generation' | 'dividers'>,
   questionRecords: ConversationDisplayQuestionRecord[] = [],
+  notices: ConversationDisplayNotice[] = [],
 ): DisplayTranscriptRow[] {
   const dividers = compaction?.dividers?.length
     ? compaction.dividers
     : compaction
       ? [{ generation: compaction.generation ?? 1, fromIndex: compaction.fromIndex }]
       : [];
-  return buildDisplayTranscriptRows(messages, displayDiffs, dividers, questionRecords);
+  return buildDisplayTranscriptRows(messages, displayDiffs, dividers, questionRecords, notices);
 }
 
 function buildDisplayTranscriptRows(
@@ -78,6 +80,7 @@ function buildDisplayTranscriptRows(
   displayDiffs: ConversationDisplayDiff[],
   dividers: CompactionDivider[],
   questionRecords: ConversationDisplayQuestionRecord[] = [],
+  notices: ConversationDisplayNotice[] = [],
 ): DisplayTranscriptRow[] {
   const out: DisplayTranscriptRow[] = [];
   const diffsByToolCall = new Map<string, ConversationDisplayDiff[]>();
@@ -86,6 +89,13 @@ function buildDisplayTranscriptRows(
     questionRecords.map(({ toolCallId, record }) => [toolCallId, record]),
   );
   const dividersByIndex = new Map<number, CompactionDivider[]>();
+  const noticesByIndex = new Map<number, ConversationDisplayNotice[]>();
+  for (const notice of notices) {
+    const index = Math.min(messages.length, Math.max(0, notice.messageIndex));
+    const atIndex = noticesByIndex.get(index);
+    if (atIndex) atIndex.push(notice);
+    else noticesByIndex.set(index, [notice]);
+  }
   for (const divider of dividers) {
     const index = Math.min(messages.length, Math.max(0, divider.fromIndex));
     const atIndex = dividersByIndex.get(index);
@@ -101,6 +111,9 @@ function buildDisplayTranscriptRows(
     else diffsByToolCall.set(diff.toolCallId, [diff]);
   }
   for (let index = 0; index <= messages.length; index++) {
+    for (const notice of noticesByIndex.get(index) ?? []) {
+      out.push({ role: 'system', content: notice.message, createdAt: notice.createdAt });
+    }
     for (const divider of dividersByIndex.get(index) ?? []) {
       out.push({
         role: 'compaction',
@@ -308,6 +321,7 @@ export function displayTranscriptRowsById(
       c.displayDiffs,
       c.compaction,
       c.displayQuestionRecords,
+      c.displayNotices,
     );
   }
   return out;

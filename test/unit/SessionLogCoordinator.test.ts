@@ -5,6 +5,7 @@ import type { ChatMessage } from '../../src/llm/types';
 import type { ForgeConfig } from '../../src/config/types';
 import type { ConversationRuntime, SidebarRuntime } from '../../src/sidebar/sessionTypes';
 import type { RequestCapture } from '../../src/sessions/requestStats';
+import { armNewConversationByDefault } from '../../src/sidebar/chatClanker';
 
 const { fakeHome } = vi.hoisted(() => {
   const nodeFs = require('fs') as typeof import('fs');
@@ -72,6 +73,16 @@ describe('SessionLogCoordinator settled transcript flushes', () => {
     coordinator.flushSessionLog(conversation.id, true);
 
     expect(messagesFromLog(conversation.id).map((row) => row['role'])).toEqual(['user']);
+  });
+
+  it('does not create a session log for a policy-default chat with no user messages', () => {
+    const { coordinator, conversation } = runtime([]);
+    armNewConversationByDefault(conversation, '2999-01-01T00:00', Date.now());
+
+    coordinator.flushSessionLog(conversation.id);
+
+    expect(conversation.messages).toEqual([]);
+    expect(fs.existsSync(path.join(fakeHome.dir, '.forge', 'sessions', `${conversation.id}.jsonl`))).toBe(false);
   });
 
   it('keeps a trailing assistant tool call in the settled flush', () => {

@@ -54,6 +54,7 @@ const OPEN_SIGNATURE_FIELDS = [
   'plan',
   'display_diffs',
   'display_question_records',
+  'display_notices',
   'active_time_ms',
   'active_started_at',
   'input_tokens',
@@ -68,6 +69,7 @@ const OPEN_SIGNATURE_FIELDS = [
   'untrusted_since_ms',
   'approval_rules',
   'clanker',
+  'clankerSource',
 ] as const;
 
 /** No persisted field currently relies on an `updatedAt`-only classification. */
@@ -99,6 +101,7 @@ function signatureFor(
   conversation: SignatureInput,
   displayDiffs: unknown,
   displayQuestionRecords: unknown,
+  displayNotices: unknown,
   forgeInstructionsPin: unknown,
 ): string {
   const historySignature = `${conversation.updatedAt}:${conversation.title}:${conversation.messages.length}:${JSON.stringify(conversation.agentLinks ?? {})}`;
@@ -123,6 +126,7 @@ function signatureFor(
     conversation.plan ?? null,
     displayDiffs ?? null,
     displayQuestionRecords ?? null,
+    displayNotices ?? null,
     conversation.active_time_ms ?? null,
     conversation.active_started_at ?? null,
     conversation.input_tokens ?? null,
@@ -150,6 +154,7 @@ function signatureFor(
     // record by a toggle that changes no message, and a save that skipped it would
     // let a reload forget which chat the owner armed — or keep one they cleared.
     conversation.clanker ?? null,
+    conversation.clankerSource ?? null,
   ]);
 }
 
@@ -158,6 +163,7 @@ export function openConversationSignature(conversation: ConversationRuntime): st
     conversation,
     conversation.displayDiffs,
     conversation.displayQuestionRecords,
+    conversation.displayNotices,
     conversation.forgeInstructionsPin,
   );
 }
@@ -167,6 +173,7 @@ function persistedOpenConversationSignature(conversation: ConversationPersisted)
     conversation,
     conversation.display_diffs,
     conversation.display_question_records,
+    conversation.display_notices,
     conversation.forge_instructions_pin,
   );
 }
@@ -205,7 +212,7 @@ export interface OpenConversationsLoad {
   inlineHistory: ConversationPersisted[];
 }
 
-function isMinimalV1(session: SidebarSessionPersisted | undefined): boolean {
+export function isMinimalV1(session: SidebarSessionPersisted | undefined): boolean {
   return Boolean(
     session &&
     session.conversations.length === 1 &&

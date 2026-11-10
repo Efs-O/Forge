@@ -82,6 +82,30 @@ permissions:
     expect(config.permissions?.fs?.write).toBe(true);
   });
 
+  it('loads the owner-set Clanker default and rejects invalid values with the key and value', () => {
+    const { configDir, policyPath } = pair(BASE_CONFIG, 'clanker:\n  default_on_until: "2026-11-11T08:00"\n');
+    expect(loadConfig(configDir, { policyPath }).clanker?.default_on_until).toBe('2026-11-11T08:00');
+
+    const invalid = pair(BASE_CONFIG, 'clanker:\n  default_on_until: "not-a-date"\n');
+    expect(() => loadConfig(invalid.configDir, { policyPath: invalid.policyPath })).toThrow(
+      /clanker\.default_on_until.*not-a-date/u,
+    );
+  });
+
+  it('refuses clanker.default_on_until in config.yaml once the owner policy file exists', () => {
+    const { configDir, policyPath } = pair(
+      `${BASE_CONFIG}clanker:\n  default_on_until: "2026-11-11T08:00"\n`,
+      '# policy file exists\n',
+    );
+    try {
+      loadConfig(configDir, { policyPath });
+      throw new Error('expected loadConfig to throw');
+    } catch (err) {
+      expect((err as Error).message).toContain('policy key');
+      expect((err as Error).message).toContain('clanker');
+    }
+  });
+
   it('still accepts a policy key from config.yaml while there is no policy file', () => {
     // The un-migrated state has to keep loading, or a fresh install cannot start and
     // an owner who has not run the command yet finds Forge refusing to read their

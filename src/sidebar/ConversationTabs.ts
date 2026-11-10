@@ -48,6 +48,7 @@ import { deleteRequestDumps } from '../sessions/requestDump';
 import { confirmDraftClose, confirmDraftDeletion } from './conversationDraftDisposition';
 import { resetConversationTabApprovals } from './ConversationTabApprovals';
 import { repostPendingCheckpoint } from './ConversationTabCheckpoints';
+import { armConversationWithPolicyDefault, armRemovedChat } from './chatClanker';
 
 const log = getLogger();
 
@@ -106,7 +107,7 @@ export class ConversationTabs {
       sidebar.activeConversationId = conv.id;
     }
     if (!conv) {
-      const fresh = createDefaultSession();
+      const fresh = createDefaultSession(this.deps.getConfig().clanker?.default_on_until);
       this.deps.setSidebar(fresh);
       this.deps.persistSession();
       conv = fresh.conversations[0];
@@ -140,8 +141,9 @@ export class ConversationTabs {
       void vscode.window.showWarningMessage(chatCapMessage(this.capBlockers()));
       return undefined;
     }
-    this.deps.setSidebar(result.sidebar);
     const created = result.sidebar.conversations.find((conv) => conv.id === result.newId);
+    armConversationWithPolicyDefault(created, this.deps.getConfig().clanker?.default_on_until);
+    this.deps.setSidebar(result.sidebar);
     this.deps.retention.refresh();
     if (options.activate === false) {
       this.deps.persistSession();
@@ -228,8 +230,11 @@ export class ConversationTabs {
     await this.deps.agentLoop.stopStreamingIfNeeded(id);
     await this.deps.agentLoop.disposeConversation(id);
     await this.deps.checkpoints.disposeConversation(id);
+    const wasSoleOpenChat = this.deps.getSidebar().conversations.length === 1;
     const result = opCloseConversation(this.deps.getSidebar(), id);
     if (!result) return;
+    const defaultOnUntil = this.deps.getConfig().clanker?.default_on_until;
+    armRemovedChat(result.sidebar, id, wasSoleOpenChat, defaultOnUntil);
     forgetIfDropped(id, result.sidebar);
     this.deps.setSidebar(result.sidebar);
     this.deps.failureTracker.reset(id);
@@ -329,6 +334,9 @@ export class ConversationTabs {
     }
     const result = opDeleteConversation(sidebar, id);
     if (!('ok' in result)) return;
+    const defaultOnUntil = this.deps.getConfig().clanker?.default_on_until;
+    const wasSoleOpenChat = conversation !== undefined && sidebar.conversations.length === 1;
+    armRemovedChat(result.sidebar, id, wasSoleOpenChat, defaultOnUntil);
     await deleteRequestDumps(id);
     this.deps.archivedSessions?.purge(id);
     deactivateLazyGroups(id);
