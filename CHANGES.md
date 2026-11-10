@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.17.150
 
 - Unattended flagged-exit refusals no longer tell agents to approve a card that was never shown.
 
