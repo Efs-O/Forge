@@ -12,7 +12,7 @@ import { agentDisplayName } from '../agentLinks/chatAgentLinks';
 import { INBOX_CAP } from './agentInbox';
 
 /** Longest text a single message into Forge may carry. */
-export const MAX_INBOUND_CHARS = 8000;
+export const MAX_INBOUND_CHARS = 16_000;
 
 /**
  * The client any agent with bash uses to reach Forge. Bash, because Claude

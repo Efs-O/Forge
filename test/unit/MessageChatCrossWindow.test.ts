@@ -324,22 +324,22 @@ describe('message_chat send to a chat in another window', () => {
   it('refuses an oversize message before asking the peer at all', async () => {
     const { tool } = makeCrossTool();
     const result = String(
-      await tool.handler({ action: 'send', to: IDLE, message: 'x'.repeat(8001) }, context),
+      await tool.handler({ action: 'send', to: IDLE, message: 'x'.repeat(16_000) }, context),
     );
-    expect(result).toContain('fits 8000 characters in total');
+    expect(result).toContain('fits 16000 characters in total');
     expect(result).toContain('nothing was queued and no counter was used');
     expect(received).toHaveLength(0);
   });
 
   it('counts the sender header against the bus cap, to the character', async () => {
     const { tool } = makeCrossTool();
-    // One character in, and the recorded body says exactly how much of the 8,000
+    // One character in, and the recorded body says exactly how much of the 16,000
     // the header takes up — the budget the refusal has to quote.
     expect(
       String(await tool.handler({ action: 'send', to: IDLE, message: 'a' }, context)),
     ).toContain('Queued in');
-    const budget = 8000 - (received[0]!.body.length - 1);
-    expect(budget).toBeGreaterThan(7000);
+    const budget = 16_000 - (received[0]!.body.length - 1);
+    expect(budget).toBeGreaterThan(15_000);
     expect(received).toHaveLength(1);
     // Exactly the budget fits; one character more is refused before a socket.
     expect(

@@ -1,5 +1,11 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+- Code action refusals now name applicable titles, and cold files briefly wait for diagnostics before requesting quick fixes.
+- Semantic searches now refresh indexed files changed on disk outside VS Code before returning results.
+- Raised the agent bus and `message_chat` message limits to 16,000 characters so long briefs can be sent directly.
+
 ## 0.17.151
 
 - Edit diagnostics now open written files with their original path casing, so subsequent editor tools keep the real filename.

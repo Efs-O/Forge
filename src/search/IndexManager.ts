@@ -11,6 +11,7 @@ import { DEFAULT_PROMPT_STYLE, type EmbeddingPromptStyle } from './embeddingProm
 import { DEFAULT_EMBEDDING_WINDOW } from './embeddingBudget';
 import type { SearchChunk, SearchHit, SearchIndexFile, SearchResultSummary } from './types';
 
+// Bump to 6: file metadata enables searches to detect edits made outside VS Code.
 // Bump to 5: the fit pass now measures the FORMATTED text with the server's
 // EXACT tokenizer (via /tokenize), not a chars-per-token estimate. The estimate
 // undercounted dense content (minified JS, base64, CJK via byte fallback), so a
@@ -18,7 +19,7 @@ import type { SearchChunk, SearchHit, SearchIndexFile, SearchResultSummary } fro
 // ran — the recurring "input too large" 500. Chunk boundaries change and a
 // one-time rebuild is required. (v4 measured the formatted text with the
 // estimate; v3 added the char-split fallback for over-long single lines.)
-const INDEX_VERSION = 5;
+const INDEX_VERSION = 6;
 const DEFAULT_INCLUDE_GLOBS = ['**/*'];
 const DEFAULT_EXCLUDE_GLOBS = [
   '**/node_modules/**',
@@ -76,6 +77,10 @@ export class IndexManager {
     if (!normalized) return;
     this.dirtyPaths.delete(normalized);
     if (!this.index) return;
+    if (this.index.files && normalized in this.index.files) {
+      delete this.index.files[normalized];
+      this.pendingSave = true;
+    }
     const before = this.index.chunks.length;
     this.index.chunks = this.index.chunks.filter((chunk) => chunk.path !== normalized);
     if (this.index.chunks.length !== before) this.pendingSave = true;
@@ -89,8 +94,11 @@ export class IndexManager {
       // read before the save: only the marks made before it starts are covered.
       const covered = this.takeDirtyPaths();
       let chunks: SearchChunk[];
+      let files: SearchIndexFile['files'];
       try {
-        chunks = await this.buildChunksForPaths(await this.findWorkspaceFiles());
+        const paths = await this.findWorkspaceFiles();
+        files = await this.statFiles(paths);
+        chunks = await this.buildChunksForPaths(paths);
       } catch (error) {
         this.restoreDirtyPaths(covered);
         throw error;
@@ -104,6 +112,7 @@ export class IndexManager {
         maxFileSizeKb: this.maxFileSizeKb(),
         promptStyle: this.promptStyle(),
         builtAt: Date.now(),
+        files,
         chunks,
       };
       this.indexLoaded = true;
@@ -124,10 +133,11 @@ export class IndexManager {
       await this.ensureIndexReady();
       if (!this.index) return [];
 
+      await this.refreshFileFreshness();
       if (this.dirtyPaths.size > 0) {
         await this.refreshDirtyPaths();
-        if (this.pendingSave) await this.saveIndex();
       }
+      if (this.pendingSave) await this.saveIndex();
 
       const queryEmbedding = await this.client.embedQuery(query);
       const scopedPaths = scopeGlob ? await this.findScopedPaths(scopeGlob) : null;
@@ -167,6 +177,7 @@ export class IndexManager {
     if (dirty.length === 0) return;
 
     let replacements: SearchChunk[];
+    const fileMetadata = await this.statFiles(dirty);
     try {
       replacements = await this.buildChunksForPaths(dirty);
     } catch (error) {
@@ -188,8 +199,56 @@ export class IndexManager {
     }
 
     this.index.chunks = nextChunks;
+    this.index.files ??= {};
+    for (const relPath of dirty) {
+      const metadata = fileMetadata[relPath];
+      if (metadata) this.index.files[relPath] = metadata;
+      else delete this.index.files[relPath];
+    }
     this.index.builtAt = Date.now();
     this.pendingSave = true;
+  }
+
+  private async refreshFileFreshness(): Promise<void> {
+    if (!this.index) return;
+    const paths = await this.findWorkspaceFiles();
+    const listed = new Set(paths);
+    const files = this.index.files ?? {};
+    const tracked = new Set([
+      ...Object.keys(files),
+      ...this.index.chunks.map((chunk) => chunk.path),
+    ]);
+
+    for (const relPath of tracked) {
+      if (!listed.has(relPath)) this.removePath(path.join(this.workspaceRoot(), relPath));
+    }
+
+    const metadata = await this.statFiles(paths);
+    for (const relPath of paths) {
+      const current = metadata[relPath];
+      if (!current) {
+        this.removePath(path.join(this.workspaceRoot(), relPath));
+        continue;
+      }
+      const previous = files[relPath];
+      if (!previous || previous.mtimeMs !== current.mtimeMs || previous.size !== current.size) {
+        this.markDirty(path.join(this.workspaceRoot(), relPath));
+      }
+    }
+  }
+
+  private async statFiles(relativePaths: string[]): Promise<SearchIndexFile['files']> {
+    const entries = await Promise.all(
+      relativePaths.map(async (relPath) => {
+        try {
+          const stat = await fs.stat(path.join(this.workspaceRoot(), relPath));
+          return [relPath, { mtimeMs: stat.mtimeMs, size: stat.size }] as const;
+        } catch {
+          return null;
+        }
+      }),
+    );
+    return Object.fromEntries(entries.filter((entry) => entry !== null));
   }
 
   /** Empties the set BEFORE the embedding await, so a file saved during it is

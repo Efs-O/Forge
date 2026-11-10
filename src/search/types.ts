@@ -26,8 +26,9 @@ export interface SearchIndexFile {
    *      (via /tokenize), not a chars-per-token estimate. The estimate
    *      undercounted dense content, so a chunk estimated to fit overflowed the
    *      physical batch once the real tokenizer ran.
+   * 6 — track file mtime and size so searches refresh files changed outside VS Code.
    */
-  version: 5;
+  version: 6;
   workspaceRoot: string;
   modelPath: string;
   includeGlobs: string[];
@@ -40,6 +41,7 @@ export interface SearchIndexFile {
    */
   promptStyle: EmbeddingPromptStyle;
   builtAt: number;
+  files: Record<string, { mtimeMs: number; size: number }>;
   chunks: SearchChunk[];
 }
 

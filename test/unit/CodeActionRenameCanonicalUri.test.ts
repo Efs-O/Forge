@@ -5,6 +5,11 @@ const mocks = vi.hoisted(() => {
   return {
     canonicalUri,
     openTextDocument: vi.fn(),
+    textDocuments: [] as Array<{ uri: typeof canonicalUri }>,
+    getDiagnostics: vi.fn(),
+    onDidChangeDiagnostics: vi.fn(),
+    diagnosticListener: undefined as ((event: { uris: Array<{ toString(): string }> }) => void) | undefined,
+    disposeDiagnosticsListener: vi.fn(),
     executeCommand: vi.fn(),
     applyAndSaveWorkspaceEdit: vi.fn(),
     describePosition: vi.fn(),
@@ -29,13 +34,17 @@ vi.mock('vscode', () => {
     Position,
     Range,
     Uri,
-    workspace: { openTextDocument: mocks.openTextDocument },
+    workspace: { openTextDocument: mocks.openTextDocument, textDocuments: mocks.textDocuments },
     commands: { executeCommand: mocks.executeCommand },
+    languages: {
+      getDiagnostics: mocks.getDiagnostics,
+      onDidChangeDiagnostics: mocks.onDidChangeDiagnostics,
+    },
   };
 });
 
 vi.mock('../../src/util/WorkspacePaths', () => ({
-  resolveWorkspaceUri: (path: string) => ({ scheme: 'file', fsPath: path }),
+  resolveWorkspaceUri: (_path: string) => mocks.canonicalUri,
   resolveRealWorkspacePath: async (path: string) => `N:\\workspace\\${path}`,
 }));
 
@@ -65,6 +74,7 @@ vi.mock('../../src/tools/symbolSearch', () => ({
 }));
 
 import * as vscode from 'vscode';
+import { makeApplyCodeActionTool } from '../../src/tools/codeActionTools';
 import { makeCodeIntelTool } from '../../src/tools/codeIntelTool';
 import { makeRenameSymbolTool } from '../../src/tools/fileEditTools';
 
@@ -78,6 +88,12 @@ describe('language-service tools pass the opened document URI', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.openTextDocument.mockImplementation(async (uri: unknown) => ({ uri }));
+    mocks.textDocuments.splice(0, mocks.textDocuments.length, { uri: mocks.canonicalUri });
+    mocks.getDiagnostics.mockReturnValue([]);
+    mocks.onDidChangeDiagnostics.mockImplementation((listener: typeof mocks.diagnosticListener) => {
+      mocks.diagnosticListener = listener ?? undefined;
+      return { dispose: mocks.disposeDiagnosticsListener };
+    });
     mocks.executeCommand.mockResolvedValue(undefined);
     mocks.applyAndSaveWorkspaceEdit.mockResolvedValue(undefined);
     mocks.describePosition.mockImplementation(async (_uri, position, displayPath) => ({
@@ -113,6 +129,147 @@ describe('language-service tools pass the opened document URI', () => {
     ).toBe(
       'code_intel code_actions failed at src/file.ts:0:16 (zero-based): VS Code said "Illegal argument". Check the position is on code (read_file the line), or use code_intel diagnostics to see what the language server reports for this file.',
     );
+  });
+
+  it('waits for diagnostics on a cold file before requesting code actions', async () => {
+    mocks.textDocuments.splice(0);
+    mocks.getDiagnostics.mockReturnValue([]);
+    mocks.executeCommand.mockResolvedValue([{ title: 'Add declaration' }]);
+    const request = makeCodeIntelTool().handler({
+      operation: 'code_actions',
+      path: 'src/file.ts',
+      line: 0,
+      character: 16,
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mocks.executeCommand).not.toHaveBeenCalled();
+    mocks.diagnosticListener?.({ uris: [{ toString: () => 'file:///other.ts' }] });
+    expect(mocks.executeCommand).not.toHaveBeenCalled();
+    mocks.diagnosticListener?.({ uris: [mocks.canonicalUri] });
+
+    await expect(request).resolves.toBe('{"actions":[{"title":"Add declaration","has_edit":false}]}');
+    expect(mocks.executeCommand).toHaveBeenCalledOnce();
+    expect(mocks.disposeDiagnosticsListener).toHaveBeenCalledOnce();
+  });
+
+  it('adds the cold-file note after diagnostics wait timeout and disposes the listener', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.textDocuments.splice(0);
+      mocks.getDiagnostics.mockReturnValue([]);
+      mocks.executeCommand.mockResolvedValue([{ title: 'Move to file' }]);
+      const request = makeCodeIntelTool().handler({
+        operation: 'code_actions',
+        path: 'src/file.ts',
+        line: 0,
+        character: 16,
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(mocks.executeCommand).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      await expect(request).resolves.toBe(
+        '{"actions":[{"title":"Move to file","has_edit":false}],"note":"No problems are reported for this file yet, so quick fixes (such as adding a missing import) may be missing. If you expect one, open_file the file and ask again."}',
+      );
+      expect(mocks.disposeDiagnosticsListener).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not wait or add a note for an already-open file', async () => {
+    mocks.executeCommand.mockResolvedValue([{ title: 'Fix typo' }]);
+
+    await expect(
+      makeCodeIntelTool().handler({
+        operation: 'code_actions',
+        path: 'src/file.ts',
+        line: 0,
+        character: 16,
+      }),
+    ).resolves.toBe('{"actions":[{"title":"Fix typo","has_edit":false}]}');
+    expect(mocks.onDidChangeDiagnostics).not.toHaveBeenCalled();
+  });
+
+  it('lists only applicable titles in provider order when an apply title is unmatched', async () => {
+    mocks.executeCommand.mockResolvedValue([
+      { title: 'First fix', edit: {} },
+      { title: 'Disabled fix', edit: {}, disabled: { reason: 'Unavailable' } },
+      { title: 'Run command', edit: {}, command: { command: 'extension.run' } },
+      { title: 'Second fix', edit: {} },
+      { title: 'First fix', edit: {} },
+    ]);
+
+    await expect(
+      errorFrom(
+        makeApplyCodeActionTool().handler(
+          { path: 'src/file.ts', line: 3, character: 4, title: 'Guessed title' },
+          { beforeMutate: vi.fn() },
+        ),
+      ),
+    ).resolves.toBe(
+      'apply_code_action: no current action titled "Guessed title" at src/file.ts:3:4 (zero-based). Actions it can apply there now: "First fix", "Second fix". Pass one of these titles exactly, or make the change with edit_file.',
+    );
+  });
+
+  it('names the empty actionable set when an apply title is unmatched', async () => {
+    mocks.executeCommand.mockResolvedValue([
+      { title: 'Disabled fix', edit: {}, disabled: { reason: 'Unavailable' } },
+      { title: 'Run command', command: { command: 'extension.run' } },
+    ]);
+
+    await expect(
+      errorFrom(
+        makeApplyCodeActionTool().handler(
+          { path: 'src/file.ts', line: 3, character: 4, title: 'Guessed title' },
+          { beforeMutate: vi.fn() },
+        ),
+      ),
+    ).resolves.toBe(
+      'apply_code_action: no current action titled "Guessed title" at src/file.ts:3:4 (zero-based), and no action it can apply is offered there now. Make the change with edit_file.',
+    );
+  });
+
+  it('preserves the refusal for disabled and command-backed matching actions', async () => {
+    const tool = makeApplyCodeActionTool();
+    mocks.executeCommand.mockResolvedValue([
+      { title: 'Disabled fix', disabled: { reason: 'Unavailable' } },
+    ]);
+    await expect(
+      errorFrom(
+        tool.handler(
+          { path: 'src/file.ts', line: 3, character: 4, title: 'Disabled fix' },
+          { beforeMutate: vi.fn() },
+        ),
+      ),
+    ).resolves.toBe('apply_code_action: Unavailable');
+
+    mocks.executeCommand.mockResolvedValue([
+      { title: 'Run command', edit: {}, command: { command: 'extension.run' } },
+    ]);
+    await expect(
+      errorFrom(
+        tool.handler(
+          { path: 'src/file.ts', line: 3, character: 4, title: 'Run command' },
+          { beforeMutate: vi.fn() },
+        ),
+      ),
+    ).resolves.toBe('apply_code_action: this action is not a workspace-edit-only action.');
+  });
+
+  it('applies a matching workspace-edit action', async () => {
+    mocks.executeCommand.mockResolvedValue([{ title: 'Apply fix', edit: {} }]);
+
+    await expect(
+      makeApplyCodeActionTool().handler(
+        { path: 'src/file.ts', line: 3, character: 4, title: 'Apply fix' },
+        { beforeMutate: vi.fn() },
+      ),
+    ).resolves.toBe('Applied code action: Apply fix');
+    expect(mocks.applyAndSaveWorkspaceEdit).toHaveBeenCalledOnce();
   });
 
   it('calls the rename provider with the canonical document URI and succeeds', async () => {

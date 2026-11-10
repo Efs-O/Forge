@@ -149,7 +149,7 @@ export function makeMessageChatTool(options: {
       // The length refusal has to be actionable. "Shorten it and resend" gives a
       // model no target, and a worker's report is long by nature — one chat tried
       // a 5,495-character report five times and was refused every time. Parts are
-      // counted against 10,000 rather than the 12,000 cap, so a part that is
+      // counted against 10,000 rather than the 16,000 cap, so a part that is
       // re-measured by eye still fits, and one throw replaces five retries.
       const rawMessage = effectiveArgs['message'];
       if (typeof rawMessage === 'string' && rawMessage.length > MESSAGE_CHAT_MESSAGE_MAX_CHARS) {

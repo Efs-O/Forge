@@ -173,7 +173,7 @@ describe('ensureBus', () => {
   });
 
   it('ships a README with the size limit filled in', () => {
-    expect(BUS_README).toContain('at most\n8000 characters');
+    expect(BUS_README).toContain('at most\n16000 characters');
   });
 });
 

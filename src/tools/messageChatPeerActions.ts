@@ -10,8 +10,9 @@
  * wakes on a neighbour's chats has five left here too.
  *
  * What is genuinely different, and stated in each action below:
- * - the bus will not carry more than `PEER_MESSAGE_LIMIT` characters, which is
- *   less than a local message may be, so the refusal happens before any request;
+ * - the bus will not carry more than `PEER_MESSAGE_LIMIT` characters total,
+ *   including the sender header, so a local-limit message may be refused before
+ *   any request;
  * - a 202 means "queued", never "a turn started": the receiving window admits it
  *   on its own schedule, so there is nothing to wait for and nothing to retry;
  * - the request always names its chat by id, because a peer request that relied

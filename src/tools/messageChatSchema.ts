@@ -16,12 +16,12 @@ import type { RegisteredTool } from './ToolRegistry';
 
 /** How long one `message_chat` message may be. It was 4,000 with no recorded
  *  reason, and a worker's final report is long by nature: one chat tried to send
- *  a 5,495-character report five times and was refused every time. 12,000 is the
+ *  a 5,495-character report five times and was refused every time. 16,000 is the
  *  cap, and `MESSAGE_CHAT_MESSAGE_PART_CHARS` is what the refusal counts parts
  *  against, so a part a model measures by eye still fits under it. The number is
  *  in the description as well as the schema, because a model that cannot see the
  *  limit cannot plan around it. */
-export const MESSAGE_CHAT_MESSAGE_MAX_CHARS = 12_000;
+export const MESSAGE_CHAT_MESSAGE_MAX_CHARS = 16_000;
 export const MESSAGE_CHAT_MESSAGE_PART_CHARS = 10_000;
 
 /** Every field `message_chat` accepts, whatever the flags currently advertise.

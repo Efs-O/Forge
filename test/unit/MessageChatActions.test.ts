@@ -27,9 +27,9 @@ const L1_DISABLED_DEFINITION = {
         message: {
           type: 'string',
           minLength: 1,
-          maxLength: 12000,
+          maxLength: 16000,
           description:
-            "Write it as you would to a coworker: first person, call the other chat 'you', no formalities, no reports about yourself in the third person. At most 12,000 characters; send a longer message in parts.",
+            "Write it as you would to a coworker: first person, call the other chat 'you', no formalities, no reports about yourself in the third person. At most 16,000 characters; send a longer message in parts.",
         },
       },
       // No field is required now: a message alone is a send (lane 5 phase 5.4).

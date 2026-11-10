@@ -345,8 +345,10 @@ describe('auth and limits', () => {
   });
 
   it('rejects an oversized text, a bad sender and a bad id with 400', async () => {
-    expect((await post('/agent/message?from=x', 'a'.repeat(8001))).status).toBe(400);
-    expect((await post('/agent/message?from=x', 'a'.repeat(8000))).status).toBe(202);
+    const oversized = await post('/agent/message?from=x', 'a'.repeat(16_001));
+    expect(oversized.status).toBe(400);
+    expect(oversized.body).toEqual({ error: 'text is 16001 chars; the limit is 16000' });
+    expect((await post('/agent/message?from=x', 'a'.repeat(16_000))).status).toBe(202);
     expect((await post('/agent/message?from=%3Cscript%3E', 'hi')).status).toBe(400);
     expect((await post('/agent/message', 'hi')).status).toBe(400);
     expect((await post('/agent/message?from=x', '   ')).status).toBe(400);

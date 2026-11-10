@@ -146,9 +146,9 @@ describe('message_chat tool contract and handler', () => {
         message: {
           type: 'string',
           minLength: 1,
-          maxLength: 12000,
+          maxLength: 16000,
           description:
-            "Write it as you would to a coworker: first person, call the other chat 'you', no formalities, no reports about yourself in the third person. At most 12,000 characters; send a longer message in parts.",
+            "Write it as you would to a coworker: first person, call the other chat 'you', no formalities, no reports about yourself in the third person. At most 16,000 characters; send a longer message in parts.",
         },
       },
       required: [],
@@ -170,11 +170,11 @@ describe('message_chat tool contract and handler', () => {
 
   it('refuses an oversize message by counting its parts, not by saying shorten it', async () => {
     const { tool, sidebar } = makeTool(hostStatus({ running: ['running'] }));
-    const message = 'x'.repeat(12_500);
+    const message = 'x'.repeat(16_500);
     await expect(
       tool.handler({ action: 'send', to: 'running', message }, context()),
     ).rejects.toThrow(
-      'message_chat message is 12500 characters; the limit is 12000. Send it as 2 messages.',
+      'message_chat message is 16500 characters; the limit is 16000. Send it as 2 messages.',
     );
     // Refused before anything was routed, so a refused retry costs nothing.
     expect(sidebar.deliverChatMessage).not.toHaveBeenCalled();
@@ -182,7 +182,7 @@ describe('message_chat tool contract and handler', () => {
 
   it('accepts a message the old 4,000 cap refused', async () => {
     const { tool, sidebar } = makeTool(hostStatus({ running: ['running'] }));
-    const message = 'x'.repeat(11_000);
+    const message = 'x'.repeat(15_000);
     expect(message.length).toBeGreaterThan(4000);
     const result = String(
       await tool.handler({ action: 'send', to: 'running', message }, context()),
