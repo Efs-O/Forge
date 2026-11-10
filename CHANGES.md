@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.17.154
 
 - apply_code_action now applies TypeScript quick fixes such as "Add import", and code_intel lists "applies" so the agent sees beforehand which actions it can apply.
 
