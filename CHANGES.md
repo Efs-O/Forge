@@ -1,7 +1,9 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.17.145
 
+- Every new chat starts with the workspace's memory index: each `remember` key with its one-line description.
+- `remember` works without a description: new chats then list only the key, and the answer says how to add one.
 - `message_chat` accepts unique 8-character peer chat id prefixes; ambiguous prefixes name every matching chat and window.
 - Peer `send`, `steer` and `new` remember the sender chat in memory, so a chat with several idle local chats can reply without `to`.
 
