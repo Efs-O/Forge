@@ -233,7 +233,7 @@ describe('lab-measured refusal texts', () => {
     }
   });
 
-  it('a quoted boolean is accepted for a declared boolean argument, and the refusal stops naming one value', () => {
+  it('quoted booleans are accepted case-insensitively for declared boolean arguments', () => {
     const registry = new ToolRegistry();
     const tool: RegisteredTool = {
       definition: {
@@ -251,16 +251,24 @@ describe('lab-measured refusal texts', () => {
       handler: async () => 'ok',
     };
     registry.register(tool);
-    // The call that used to be refused: `"true"` where the schema says boolean.
-    const args = { background: 'true' };
-    expect(registry.invalidArgs(tool, args)).toBeUndefined();
-    expect(args.background).toBe(true);
-    // An unambiguous-but-not-a-boolean spelling is still refused, and no longer tells the model
-    // to resend with `false` when it may have meant `true`.
-    const refusal = registry.invalidArgs(tool, { background: 'True' });
-    expect(refusal).toMatch(/must be a JSON boolean/);
-    expect(refusal).toContain('as true or false');
-    expect(refusal).not.toMatch(/as false\.$/u);
+    for (const [spelling, expected] of [
+      ['true', true],
+      ['True', true],
+      ['TRUE', true],
+      ['false', false],
+      ['False', false],
+      ['FALSE', false],
+    ] as const) {
+      const args = { background: spelling };
+      expect(registry.invalidArgs(tool, args)).toBeUndefined();
+      expect(args.background).toBe(expected);
+    }
+    const stringArgs = { background: 'true', label: 'True' };
+    expect(registry.invalidArgs(tool, stringArgs)).toBeUndefined();
+    expect(stringArgs).toEqual({ background: true, label: 'True' });
+    expect(registry.invalidArgs(tool, { background: 'yes' })).toBe(
+      'Error: coerce_probe: "background" must be a JSON boolean, not a string. Resend the call with background as true or false.',
+    );
   });
 
   it('ask_user names the option that has no label instead of a bare "Invalid input"', async () => {

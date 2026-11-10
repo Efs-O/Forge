@@ -235,17 +235,21 @@ export class ToolRegistry {
     const present: Record<string, unknown> = typeof args === 'object' && args !== null ? args : {};
     // A quoted boolean is the largest single refusal class we measured (11 hits in one clean
     // window on `shell background` alone, and the same shape on `read_file numbered`), and it is
-    // never ambiguous: "true" and "false" are the only two spellings, and the property is declared
+    // never ambiguous: its lowercase form is "true" or "false", and the property is declared
     // boolean. Coerce it here — `present` is the live `args` object, so the handler receives the
-    // real boolean and the call simply works. Anything else ("True", "yes") stays a refusal.
+    // real boolean and the call simply works. Case is ignored because the 0.17.147 lab refused
+    // `search_code` `ignore_case: "True"` (Python's spelling) twice. No trimming: anything else
+    // (" true", "yes", "1") stays a refusal.
     if (typeof parameters.properties === 'object' && parameters.properties !== null) {
       for (const [key, schema] of Object.entries(
         parameters.properties as Record<string, DeclaredProperty>,
       )) {
         if (schema?.type !== 'boolean') continue;
         const value = present[key];
-        if (value === 'true') present[key] = true;
-        else if (value === 'false') present[key] = false;
+        if (typeof value !== 'string') continue;
+        const lowercase = value.toLowerCase();
+        if (lowercase === 'true') present[key] = true;
+        else if (lowercase === 'false') present[key] = false;
       }
     }
     const preApproval = tool.refuseBeforeApproval?.(present, context);

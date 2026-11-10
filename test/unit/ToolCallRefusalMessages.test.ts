@@ -257,14 +257,28 @@ describe('ToolRegistry.invalidArgs quoted-type refusals', () => {
     notify_on_exit: { type: 'boolean' },
   });
 
-  it('names the field and an unquoted JSON boolean example for "True"', () => {
-    expect(registry.invalidArgs(execTool, { command: 'npx', background: 'True' })).toBe(
-      'Error: shell: "background" must be a JSON boolean, not a string. Resend the call with background as true or false.',
-    );
+  it('accepts "True" as a declared boolean', () => {
+    const args = { command: 'npx', background: 'True' };
+    expect(registry.invalidArgs(execTool, args)).toBeUndefined();
+    expect(args).toEqual({ command: 'npx', background: true });
   });
 
-  it('refuses "False" as a string instead of accepting it', () => {
-    expect(registry.invalidArgs(execTool, { command: 'npx', background: 'False' })).toBe(
+  it('accepts "False" as a declared boolean', () => {
+    const args = { command: 'npx', background: 'False' };
+    expect(registry.invalidArgs(execTool, args)).toBeUndefined();
+    expect(args).toEqual({ command: 'npx', background: false });
+  });
+
+  it.each([
+    ['yes', 'yes'],
+    ['no', 'no'],
+    ['one', '1'],
+    ['zero', '0'],
+    ['leading space', ' true'],
+    ['trailing space', 'true '],
+    ['empty string', ''],
+  ])('refuses %s for a declared boolean', (_label, value) => {
+    expect(registry.invalidArgs(execTool, { command: 'npx', background: value })).toBe(
       'Error: shell: "background" must be a JSON boolean, not a string. Resend the call with background as true or false.',
     );
   });
@@ -282,8 +296,10 @@ describe('ToolRegistry.invalidArgs quoted-type refusals', () => {
   });
 
   it('refuses the first wrong field and lets a corrected retry expose the next one', () => {
-    const args = { command: 'npx', background: 'True', notify_on_exit: 'False' };
-    expect(registry.invalidArgs(execTool, args)).toContain('"background" must be a JSON boolean');
+    const args = { command: 'npx', background: 'yes', notify_on_exit: 'no' };
+    expect(registry.invalidArgs(execTool, args)).toBe(
+      'Error: shell: "background" must be a JSON boolean, not a string. Resend the call with background as true or false.',
+    );
     expect(registry.invalidArgs(execTool, { ...args, background: false })).toContain(
       '"notify_on_exit" must be a JSON boolean',
     );
@@ -291,7 +307,7 @@ describe('ToolRegistry.invalidArgs quoted-type refusals', () => {
 
   it('does not cap or replace the source correction message for long tool names', () => {
     const tool = makeBoolTool('x'.repeat(220), { background: { type: 'boolean' } });
-    expect(registry.invalidArgs(tool, { background: 'True' })).toBe(
+    expect(registry.invalidArgs(tool, { background: 'yes' })).toBe(
       `Error: ${'x'.repeat(220)}: "background" must be a JSON boolean, not a string. ` +
         'Resend the call with background as true or false.',
     );
@@ -480,9 +496,9 @@ describe('ToolRegistry.invalidArgs refuses quoted JSON types', () => {
     );
   });
 
-  it('refuses quoted booleans using the JSON boolean example', () => {
+  it('refuses quoted non-boolean strings using the JSON boolean example', () => {
     const tool = makeBoolTool('probe', { enabled: { type: 'boolean' } } as never);
-    expect(registry.invalidArgs(tool, { enabled: 'True' })).toBe(
+    expect(registry.invalidArgs(tool, { enabled: 'yes' })).toBe(
       'Error: probe: "enabled" must be a JSON boolean, not a string. ' +
         'Resend the call with enabled as true or false.',
     );
@@ -736,7 +752,7 @@ describe('a refusal before the handler runs is recorded as a failure', () => {
   });
 
   it.each([
-    ['a quoted boolean', { enabled: 'True' }],
+    ['a quoted invalid boolean string', { enabled: 'yes' }],
     ['an integer outside the declared range', { count: 9 }],
     ['a fractional integer', { count: 1.5 }],
   ])('marks %s failed for the row, the stats and the ledger', (_label, args) => {

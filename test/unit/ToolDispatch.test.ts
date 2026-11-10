@@ -190,6 +190,44 @@ describe('ToolDispatch', () => {
     expect(messages[0].tool_call_id).toBe('call-read_file');
   });
 
+  it('dispatches a Python-spelled search_code boolean to the handler as a boolean', async () => {
+    const handler = vi.fn().mockResolvedValue('matches');
+    toolRegistry.register({
+      definition: {
+        type: 'function',
+        function: {
+          name: 'search_code',
+          description: 'Search code',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string' },
+              output: { type: 'string' },
+              ignore_case: { type: 'boolean' },
+            },
+            required: ['query', 'output', 'ignore_case'],
+          },
+        },
+      },
+      permission: 'read',
+      handler,
+    });
+
+    const call = makeToolCall('search_code', {
+      output: 'count',
+      query: 'harborLanternF1',
+      ignore_case: 'True',
+    });
+    await dispatch.dispatch([call], allowed, []);
+
+    expect(handler).toHaveBeenCalledOnce();
+    expect(handler.mock.calls[0]?.[0]).toEqual({
+      output: 'count',
+      query: 'harborLanternF1',
+      ignore_case: true,
+    });
+  });
+
   it('attributes a malformed-arguments failure to the conversation', async () => {
     // record() with no id piled every chat's failures into one shared bucket,
     // so one bad model disabled tool calling in tabs it never touched.
@@ -1173,7 +1211,7 @@ describe('ToolDispatch', () => {
     malformed.function.arguments = '{broken';
     const notAnObject = makeToolCall('probe', {});
     notAnObject.function.arguments = '[]';
-    const quotedBoolean = makeToolCall('probe', { enabled: 'True' });
+    const quotedBoolean = makeToolCall('probe', { enabled: 'yes' });
     const parserRefusal = makeToolCall('__tool_call_error__', {
       __error: 'tool call: the "name" form is not accepted.',
     });

@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+- Declared boolean tool arguments accept case-insensitive `true` and `false` strings without trimming.
+
 ## 0.17.147
 
 - Invalid tool-argument JSON refusals now explain the parser-specific cause, including leaked tool-call markup inside an unclosed string.
