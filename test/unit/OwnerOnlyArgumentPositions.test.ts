@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ownerOnlySetFor, type OwnerOnlySet } from '../../src/tools/ownerPaths';
+import { ownerOnlyInstruction, ownerOnlySetFor, type OwnerOnlySet } from '../../src/tools/ownerPaths';
 import { classifyShellCommand } from '../../src/tools/shellPolicy';
 import { isReadOnly } from '../../src/tools/shellReadOnlyRules';
 
@@ -214,6 +214,52 @@ describe('a script run by an interpreter', () => {
     expect(judged('python ~/.forge/skills/a.py --dest ~/.forge/out', 'bash')).toBe('refused');
     expect(judged('python ~/.forge/skills/a.py ~/.forge/out/next', 'bash')).toBe('refused');
     expect(judged('node ~/.forge/skills/a.js --out ~/.forge/out', 'bash')).toBe('refused');
+  });
+
+  it('names an unjudgeable script argument while preserving write wording and allowed reads', () => {
+    const scriptCases = [
+      ['python x.py ~/.forge/policy.yaml', 'x.py', '~/.forge/policy.yaml'],
+      [
+        'node tool.js C:/Users/someone/.forge/sessions/a.jsonl',
+        'tool.js',
+        'C:/Users/someone/.forge/sessions/a.jsonl',
+      ],
+      ['bash run.sh ~/.forge/config.yaml', 'run.sh', '~/.forge/config.yaml'],
+      ['pwsh -File run.ps1 ~/.forge/config.yaml', 'run.ps1', '~/.forge/config.yaml'],
+    ] as const;
+    for (const [command, script, supplied] of scriptCases) {
+      const result = classifyShellCommand(command, 'bash', check);
+      expect(result.classification, command).toBe('refused');
+      expect(result.rule?.gateKind, command).toBe('ownerGate');
+      expect(result.rule?.description, command).toBe(
+        `cannot tell whether \`${script}\` changes Forge's own files (${supplied})`,
+      );
+      expect(result.rule?.alternative, command).toBe(
+        "Nothing was seen writing that file, but what a script does with its arguments cannot be judged, so a path inside Forge's own files passed to a script is treated as a change. To give the script the file, copy it out first with `cp <path> <a folder in the workspace>` (a copy source is not a change) and pass the copy. " +
+          ownerOnlyInstruction(),
+      );
+    }
+
+    for (const command of [
+      'echo x > ~/.forge/policy.yaml',
+      'rm ~/.forge/sessions/a.jsonl',
+      'mv ~/.forge/a ~/b',
+    ]) {
+      const result = classifyShellCommand(command, 'bash', check);
+      expect(result.classification, command).toBe('refused');
+      expect(result.rule?.description, command).toBe(
+        `refuses to change Forge's own files (${command.includes('>') ? '~/.forge/policy.yaml' : command.includes('sessions') ? '~/.forge/sessions/a.jsonl' : '~/.forge/a'})`,
+      );
+    }
+
+    for (const command of [
+      'python ~/.forge/skills/hf-download/scripts/hf_parallel_dl.py REPO --dest N:/x',
+      'cp ~/.forge/sessions/a.jsonl N:/x/',
+      'python -c "print(1)"',
+      'cat ~/.forge/sessions/a.jsonl',
+    ]) {
+      expect(classifyShellCommand(command, 'bash', check).classification, command).not.toBe('refused');
+    }
   });
 });
 

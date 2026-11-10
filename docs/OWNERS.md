@@ -650,6 +650,7 @@ overlaps with an existing owner, extend the owner instead.
 | Static native lazy group names             | `src/config/toolGroupNames.ts`        |
 | Tool-result size capping                   | `src/tools/resultCap.ts`              |
 | Bundled ripgrep executable resolution      | `src/tools/RipgrepResolver.ts`        |
+| Language-server project priming and identifier text search | `src/tools/symbolSearch.ts` |
 | Local agent delegation tool                | `src/tools/localAgentTool.ts`         |
 | `list_delegation_targets` + target ranking | `src/tools/localAgentTool.ts`         |
 | Delegation target VRAM classification      | `src/delegation/eligibility.ts`       |

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveWorkspaceUri } from '../util/WorkspacePaths';
+import { primeSymbolAtPosition } from './symbolSearch';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -98,6 +99,70 @@ function locationToString(loc: vscode.Location | vscode.LocationLink): string {
   const range = link.targetSelectionRange ?? link.targetRange ?? plain.range;
   if (!uri || !range) return '(location unavailable)';
   return `${vscode.workspace.asRelativePath(uri)}:${range.start.line + 1}:${range.start.character + 1}`;
+}
+
+function missingTextSearchFiles(
+  result: readonly (vscode.Location | vscode.LocationLink)[] | undefined,
+  searched: readonly string[],
+): string[] {
+  const reported = new Set(
+    (result ?? []).map((location) => {
+      const link = location as vscode.LocationLink;
+      const plain = location as vscode.Location;
+      return pathKey(vscode.workspace.asRelativePath(link.targetUri ?? plain.uri));
+    }),
+  );
+  return searched
+    .map((file) => vscode.workspace.asRelativePath(vscode.Uri.file(file)).replace(/\\/gu, '/'))
+    .filter((file) => !reported.has(pathKey(file)))
+    .sort();
+}
+
+function pathKey(value: string): string {
+  return value.replace(/\\/gu, '/').toLowerCase();
+}
+
+function referencesTextNote(name: string, missing: readonly string[]): string {
+  return missing.length
+    ? `\n\nNote: a text search also finds \`${name}\` in ${missing.length} file(s) the language server did not report: ${missing.join(', ')}. The language server may still be loading this project; ask again in a few seconds, or check those files with search_code.`
+    : '';
+}
+
+const HOVER_LOADING_NOTE =
+  '\n\nNote: `(loading...)` means the language server has not finished loading this project, so this answer may lack types. Ask again in a few seconds.';
+
+function hoverText(result: vscode.Hover[] | undefined): string {
+  if (!result?.length) return 'No hover information available.';
+  const parts: string[] = [];
+  for (const hover of result) {
+    for (const content of hover.contents) {
+      if (typeof content === 'string') parts.push(content);
+      else if ('value' in content) parts.push(content.value);
+    }
+  }
+  return parts.join('\n\n') || 'No hover content.';
+}
+
+async function hoverWithLoadingRetry(uri: vscode.Uri, position: vscode.Position): Promise<string> {
+  let answer = hoverText(
+    await vscode.commands.executeCommand<vscode.Hover[] | undefined>(
+      'vscode.executeHoverProvider',
+      uri,
+      position,
+    ),
+  );
+  for (const delay of [250, 500, 1000, 2000, 4000]) {
+    if (!answer.includes('(loading...)')) return answer;
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    answer = hoverText(
+      await vscode.commands.executeCommand<vscode.Hover[] | undefined>(
+        'vscode.executeHoverProvider',
+        uri,
+        position,
+      ),
+    );
+  }
+  return answer.includes('(loading...)') ? `${answer}${HOVER_LOADING_NOTE}` : answer;
 }
 
 // ── Diagnostics handler ────────────────────────────────────────────────────────
@@ -265,23 +330,7 @@ export function makeGetHoverTool(): RegisteredTool {
     handler: async (args) => {
       const uri = await openForAnalysis(args['path'] as string);
       const position = new vscode.Position(args['line'] as number, args['character'] as number);
-      const result = await vscode.commands.executeCommand<vscode.Hover[] | undefined>(
-        'vscode.executeHoverProvider',
-        uri,
-        position,
-      );
-      if (!result?.length) return 'No hover information available.';
-      const parts: string[] = [];
-      for (const hover of result) {
-        for (const content of hover.contents) {
-          if (typeof content === 'string') {
-            parts.push(content);
-          } else if ('value' in content) {
-            parts.push(content.value);
-          }
-        }
-      }
-      return parts.join('\n\n') || 'No hover content.';
+      return hoverWithLoadingRetry(uri, position);
     },
   };
 }
@@ -311,6 +360,7 @@ export function makeGoToDefinitionTool(): RegisteredTool {
     handler: async (args) => {
       const uri = await openForAnalysis(args['path'] as string);
       const position = new vscode.Position(args['line'] as number, args['character'] as number);
+      await primeSymbolAtPosition(uri, position);
       const result = await vscode.commands.executeCommand<
         Array<vscode.Location | vscode.LocationLink> | undefined
       >('vscode.executeDefinitionProvider', uri, position);
@@ -345,13 +395,18 @@ export function makeFindReferencesTool(): RegisteredTool {
     handler: async (args) => {
       const uri = await openForAnalysis(args['path'] as string);
       const position = new vscode.Position(args['line'] as number, args['character'] as number);
+      const primed = await primeSymbolAtPosition(uri, position);
       const result = await vscode.commands.executeCommand<vscode.Location[] | undefined>(
         'vscode.executeReferenceProvider',
         uri,
         position,
       );
-      if (!result?.length) return 'No references found.';
-      return result.slice(0, 50).map(locationToString).join('\n');
+      const answer = result?.length
+        ? result.slice(0, 50).map(locationToString).join('\n')
+        : 'No references found.';
+      return (
+        answer + referencesTextNote(primed.name ?? '', missingTextSearchFiles(result, primed.files))
+      );
     },
   };
 }
@@ -394,6 +449,7 @@ export function makeFindImplementationsTool(): RegisteredTool {
     handler: async (args) => {
       const uri = await openForAnalysis(args['path'] as string);
       const position = new vscode.Position(args['line'] as number, args['character'] as number);
+      await primeSymbolAtPosition(uri, position);
       const result = await vscode.commands.executeCommand<
         Array<vscode.Location | vscode.LocationLink> | undefined
       >('vscode.executeImplementationProvider', uri, position);

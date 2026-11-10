@@ -50,6 +50,8 @@ export interface NonWritePositions {
   readonly skip: ReadonlySet<number>;
   /** Token index → the destination text written inline inside it. */
   readonly forcedTargets: ReadonlyMap<number, string>;
+  /** Index of a recognized script file, when this command runs one. */
+  scriptIndex?: number;
 }
 
 /**
@@ -86,27 +88,32 @@ export interface NonWritePositions {
 export function nonWriteArguments(tokens: readonly string[]): NonWritePositions {
   const skip = new Set<number>();
   const forcedTargets = new Map<number, string>();
-  const positions = { skip, forcedTargets };
+  const positions: NonWritePositions = { skip, forcedTargets };
   const program = baseProgram(tokens[0] ?? '');
   if (program === '&') {
     if (tokens.length > 1) skip.add(1);
     return positions;
   }
   if (SHELLS.has(program)) {
-    firstScriptOrCodeArgument(tokens, skip, new Set(['-c']));
+    const scriptIndex = firstScriptOrCodeArgument(tokens, skip, new Set(['-c']));
+    if (scriptIndex !== undefined) positions.scriptIndex = scriptIndex;
     return positions;
   }
   if (program === 'pwsh' || program === 'powershell') {
     const fileFlag = tokens.findIndex((token, index) => index > 0 && /^-(?:file|f)$/iu.test(token));
-    if (fileFlag > 0 && fileFlag + 1 < tokens.length) skip.add(fileFlag + 1);
+    if (fileFlag > 0 && fileFlag + 1 < tokens.length) {
+      skip.add(fileFlag + 1);
+      positions.scriptIndex = fileFlag + 1;
+    }
     return positions;
   }
   if (INTERPRETERS.has(program)) {
-    firstScriptOrCodeArgument(
+    const scriptIndex = firstScriptOrCodeArgument(
       tokens,
       skip,
       program === 'node' ? NODE_CODE_FLAGS : PYTHON_CODE_FLAGS,
     );
+    if (scriptIndex !== undefined) positions.scriptIndex = scriptIndex;
     return positions;
   }
   if (COPY_PROGRAMS.has(program)) {
@@ -182,19 +189,20 @@ function firstScriptOrCodeArgument(
   tokens: readonly string[],
   skip: Set<number>,
   codeFlags: ReadonlySet<string>,
-): void {
+): number | undefined {
   for (let index = 1; index < tokens.length; index += 1) {
     const token = (tokens[index] ?? '').toLowerCase();
     if (codeFlags.has(token) || token === '-m') {
       skip.add(index + 1);
-      return;
+      return undefined;
     }
     if (token === '--') {
       if (index + 1 < tokens.length) skip.add(index + 1);
-      return;
+      return index + 1 < tokens.length ? index + 1 : undefined;
     }
     if (token.startsWith('-')) continue;
     skip.add(index);
-    return;
+    return index;
   }
+  return undefined;
 }

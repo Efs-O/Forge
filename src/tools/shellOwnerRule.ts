@@ -8,10 +8,9 @@
  * deserves. This file answers one narrower question with four possible answers:
  * does any part of this line touch Forge's own files, and if so, is it a change
  * to them, a write that only reaches them because a `cd` moved it, or nothing
- * that was ever classed as a change at all. The three wordings are the reason
- * this is its own file: a refusal that says "refuses to change" about a command
- * that changed nothing is the defect that made an agent believe a read of its
- * own session logs had been refused.
+ * that was ever classed as a change at all. A script argument is another fact:
+ * nothing was seen writing the path, but a token check cannot judge what the
+ * script does with it.
  *
  * The read-from-write decision is NOT here: `shellReadOnlyRules.ts` owns it, and
  * this file asks that table whether a statement reads. A second table of writing
@@ -114,13 +113,24 @@ export function ownerOnlyShellRule(input: OwnerOnlyShellRuleInput): ShellTokenRu
   /** A statement the read-only table classed as a write, or a `>` whose target
    *  is inside a root from the start: the command IS changing that path, so
    *  "refuses to change" is what happened, and the refusal says it. */
-  const ruleFor = (hit: OwnerOnlyHit): ShellTokenRule => ({
-    match: () => true,
-    description: `refuses to change Forge's own files (${hit.supplied})`,
-    alternative: ownerOnlyInstruction(),
-    class: 'refused',
-    gateKind: 'ownerGate',
-  });
+  const ruleFor = (hit: OwnerOnlyHit): ShellTokenRule =>
+    hit.scriptToken
+      ? {
+          match: () => true,
+          description: `cannot tell whether \`${hit.scriptToken}\` changes Forge's own files (${hit.supplied})`,
+          alternative:
+            "Nothing was seen writing that file, but what a script does with its arguments cannot be judged, so a path inside Forge's own files passed to a script is treated as a change. To give the script the file, copy it out first with `cp <path> <a folder in the workspace>` (a copy source is not a change) and pass the copy. " +
+            ownerOnlyInstruction(),
+          class: 'refused',
+          gateKind: 'ownerGate',
+        }
+      : {
+          match: () => true,
+          description: `refuses to change Forge's own files (${hit.supplied})`,
+          alternative: ownerOnlyInstruction(),
+          class: 'refused',
+          gateKind: 'ownerGate',
+        };
   /** A `>` that only lands inside Forge's own files because a `cd` earlier in
    *  the line moved it. It is still a change, so the words say change — and say
    *  which part of the line did it, because the `cd` alone looks harmless. */

@@ -78,6 +78,8 @@ export interface OwnerOnlyHit {
   target: string;
   /** The owner-only root the target is equal to, or strictly inside. */
   root: string;
+  /** Script whose later argument hit an owner-only path, if any. */
+  scriptToken?: string;
 }
 
 /** What one window refuses writes onto. */
@@ -250,8 +252,7 @@ function matchOwnerOnlyRootOnDisk(target: string, set: OwnerOnlySet): string | u
  * the path inside a longer name. The program token is skipped — `Add-Content` is
  * judged by its arguments, not by itself — and an `NAME=value` argument is a
  * variable assignment, not a path (`env FOO=.forge/config.yaml` changes nothing).
- * Beyond those, `nonWriteArguments` below skips the positions that hold code to
- * run or the source side of a copy, because a path there is being read.
+ * `nonWriteArguments` skips code positions and copy sources because those are read.
  */
 export function ownerOnlyStatementTargetFor(
   tokens: readonly string[],
@@ -259,23 +260,23 @@ export function ownerOnlyStatementTargetFor(
   base?: string,
 ): OwnerOnlyHit | undefined {
   const positions = nonWriteArguments(tokens);
+  const decorate = (hit: OwnerOnlyHit, index: number): OwnerOnlyHit =>
+    positions.scriptIndex !== undefined && index > positions.scriptIndex
+      ? { ...hit, scriptToken: tokens[positions.scriptIndex] }
+      : hit;
   for (const [index, token] of tokens.entries()) {
-    // An inline `--target-directory=X` or `-Destination:X` names the destination,
-    // and the `NAME=value` rule below would skip the whole token, so its value is
-    // judged from the text `nonWriteArguments` pulled out of it.
+    // Inline `--target-directory=X` / `-Destination:X` carries the destination;
+    // judge that extracted value before the NAME=value skip below.
     const forced = positions.forcedTargets.get(index);
     if (forced !== undefined) {
       const hit = ownerOnlyWriteTargetFor(forced, set, base);
-      if (hit) return { ...hit, supplied: forced };
+      if (hit) return decorate({ ...hit, supplied: forced }, index);
       continue;
     }
     if (index === 0 || positions.skip.has(index)) continue;
-    // A bare PowerShell flag is not a destination — the T22 loop (lab 2026-11-08). But a flag can
-    // *carry* its destination (`Set-Content -Path:<file>`), and `forcedTargets` only extracts
-    // inline values for the copy programs (`shellWritePositions.ts`), so a colon value is judged
-    // here (Claude review 2026-11-09 item 3) — only when it looks like a path: `-Encoding:utf8`
-    // and `-Force:$true` are not, and resolving them against the folder put the T22 bug straight
-    // back through the colon.
+    // A bare PowerShell flag is not a destination (T22, 2026-11-08), but a flag
+    // can carry one (`Set-Content -Path:<file>`). Only path-shaped colon values
+    // are judged here; `-Encoding:utf8` and `-Force:$true` are not paths.
     if (/^-\p{L}/u.test(token)) {
       const colon = token.indexOf(':');
       if (colon === -1) continue;
@@ -284,13 +285,13 @@ export function ownerOnlyStatementTargetFor(
       const forced = tokenPathCandidate(value);
       if (!forced || forced.includes('=')) continue;
       const carried = ownerOnlyWriteTargetFor(forced, set, base);
-      if (carried) return { ...carried, supplied: value };
+      if (carried) return decorate({ ...carried, supplied: value }, index);
       continue;
     }
     const candidate = tokenPathCandidate(token);
     if (!candidate || candidate.includes('=')) continue;
     const hit = ownerOnlyWriteTargetFor(candidate, set, base);
-    if (hit) return hit;
+    if (hit) return decorate(hit, index);
   }
   return undefined;
 }

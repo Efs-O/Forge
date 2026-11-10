@@ -55,6 +55,10 @@ vi.mock('../../src/tools/lspTools', () => ({
   makeGetWorkspaceSymbolsTool: () => ({ handler: vi.fn() }),
   makeGoToDefinitionTool: () => ({ handler: vi.fn() }),
 }));
+vi.mock('../../src/tools/symbolSearch', () => ({
+  primeSymbolAtPosition: vi.fn(async () => ({ files: [] })),
+  remainingSymbolFiles: vi.fn(async () => []),
+}));
 
 import * as vscode from 'vscode';
 import { makeCodeIntelTool } from '../../src/tools/codeIntelTool';

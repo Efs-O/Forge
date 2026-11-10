@@ -7,6 +7,7 @@ import { resolveRealWorkspacePath, resolveWorkspacePath } from '../util/Workspac
 import { commonFolderOf } from '../sidebar/approvalKeyGrammar';
 import { diagnoseTrashRefusal, forgetTrashRefusal, rememberTrashRefusal } from './trashRefusal';
 import { applyAndSaveWorkspaceEdit } from './workspaceEditApply';
+import { primeSymbolAtPosition, remainingSymbolFiles } from './symbolSearch';
 
 /** Join a result line to its optional follow-up sentence. */
 function withWarning(result: string, warning: string): string {
@@ -425,6 +426,7 @@ export function makeRenameSymbolTool(
       const line = args['line'] as number;
       const character = args['character'] as number;
       const position = new vscode.Position(line, character);
+      const primed = await primeSymbolAtPosition(uri, position);
 
       let edit: vscode.WorkspaceEdit | undefined;
       try {
@@ -445,7 +447,14 @@ export function makeRenameSymbolTool(
 
       if (!edit) throw new Error('rename_symbol: no rename provider available for this file type');
       await applyAndSaveWorkspaceEdit('rename_symbol', edit, extraRoots(), context);
-      return `Renamed to ${newName}`;
+      const remaining = primed.name ? await remainingSymbolFiles(primed.name) : [];
+      const files = remaining
+        .map((file) => vscode.workspace.asRelativePath(vscode.Uri.file(file)).replace(/\\/gu, '/'))
+        .sort();
+      const note = files.length
+        ? `\n\nNote: a text search still finds \`${primed.name}\` in ${files.length} file(s) after the rename: ${files.join(', ')}. Check them with search_code; they may be comments or strings, or files the language server had not loaded.`
+        : '';
+      return `Renamed to ${newName}${note}`;
     },
   };
 }
