@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+- apply_code_action now applies TypeScript quick fixes such as "Add import", and code_intel lists "applies" so the agent sees beforehand which actions it can apply.
+
 ## 0.17.153
 
 - Code search skips files whose first 8000 bytes contain a NUL byte, preventing PDFs and other binary data from entering the text index.

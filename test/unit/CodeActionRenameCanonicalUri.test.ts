@@ -134,7 +134,7 @@ describe('language-service tools pass the opened document URI', () => {
 
     await expect(
       makeCodeIntelTool().handler({ operation: 'code_actions', path: 'src/file.ts', line: 0, character: 16 }),
-    ).resolves.toBe('{"actions":[{"title":"Fix typo","has_edit":false}]}');
+    ).resolves.toBe('{"actions":[{"title":"Fix typo","applies":false}]}');
     expect(mocks.executeCommand).toHaveBeenCalledWith(
       'vscode.executeCodeActionProvider',
       mocks.canonicalUri,
@@ -176,7 +176,7 @@ describe('language-service tools pass the opened document URI', () => {
     expect(mocks.executeCommand).not.toHaveBeenCalled();
     mocks.diagnosticListener?.({ uris: [mocks.canonicalUri] });
 
-    await expect(request).resolves.toBe('{"actions":[{"title":"Add declaration","has_edit":false}]}');
+    await expect(request).resolves.toBe('{"actions":[{"title":"Add declaration","applies":false}]}');
     expect(mocks.executeCommand).toHaveBeenCalledOnce();
     expect(mocks.disposeDiagnosticsListener).toHaveBeenCalledOnce();
     expect(mocks.showTextDocument).toHaveBeenCalledWith(
@@ -205,7 +205,7 @@ describe('language-service tools pass the opened document URI', () => {
       await vi.advanceTimersByTimeAsync(4_000);
 
       await expect(request).resolves.toBe(
-        '{"actions":[{"title":"Move to file","has_edit":false}],"note":"No problems are reported for this file even after Forge opened it in an editor tab and waited 4 s, so quick fixes (such as adding a missing import) may be missing. Ask again in a few seconds, or make the change with edit_file."}',
+        '{"actions":[{"title":"Move to file","applies":false}],"note":"No problems are reported for this file even after Forge opened it in an editor tab and waited 4 s, so quick fixes (such as adding a missing import) may be missing. Ask again in a few seconds, or make the change with edit_file."}',
       );
       expect(mocks.disposeDiagnosticsListener).toHaveBeenCalledOnce();
       expect(mocks.showTextDocument).toHaveBeenCalledOnce();
@@ -226,7 +226,7 @@ describe('language-service tools pass the opened document URI', () => {
         line: 0,
         character: 16,
       }),
-    ).resolves.toBe('{"actions":[{"title":"Fix typo","has_edit":false}]}');
+    ).resolves.toBe('{"actions":[{"title":"Fix typo","applies":false}]}');
     expect(mocks.onDidChangeDiagnostics).not.toHaveBeenCalled();
     expect(mocks.showTextDocument).not.toHaveBeenCalled();
     expect(mocks.closeTab).not.toHaveBeenCalled();
@@ -290,6 +290,112 @@ describe('language-service tools pass the opened document URI', () => {
     );
   });
 
+  it('lists and applies a TypeScript bookkeeping command by applying only its edit', async () => {
+    const action = {
+      title: 'Add import from "./math-B1"',
+      kind: { value: 'quickfix' },
+      edit: { changes: {} },
+      command: {
+        command: '_typescript.applyCodeActionCommand',
+        title: '',
+        arguments: [{ action: { description: 'Add import' } }],
+      },
+    };
+    mocks.executeCommand.mockResolvedValue([action]);
+
+    await expect(
+      makeCodeIntelTool().handler({ operation: 'code_actions', path: 'src/file.ts', line: 0, character: 0 }),
+    ).resolves.toBe(
+      '{"actions":[{"title":"Add import from \\"./math-B1\\"","kind":"quickfix","applies":true}]}',
+    );
+    await expect(
+      makeApplyCodeActionTool().handler(
+        { path: 'src/file.ts', line: 0, character: 0, title: action.title },
+        { beforeMutate: vi.fn() },
+      ),
+    ).resolves.toBe('Applied code action: Add import from "./math-B1"');
+    expect(mocks.applyAndSaveWorkspaceEdit).toHaveBeenCalledWith(
+      'apply_code_action',
+      action.edit,
+      [],
+      expect.anything(),
+    );
+    expect(
+      mocks.executeCommand.mock.calls.some(([command]) => command === '_typescript.applyCodeActionCommand'),
+    ).toBe(false);
+  });
+
+  it('lists and refuses a TypeScript command that contains additional commands', async () => {
+    const action = {
+      title: 'Add import and install types',
+      edit: {},
+      command: {
+        command: '_typescript.applyCodeActionCommand',
+        title: '',
+        arguments: [{ action: { commands: [{}] } }],
+      },
+    };
+    mocks.executeCommand.mockResolvedValue([action]);
+
+    await expect(
+      makeCodeIntelTool().handler({ operation: 'code_actions', path: 'src/file.ts', line: 0, character: 0 }),
+    ).resolves.toBe(
+      '{"actions":[{"title":"Add import and install types","applies":false}]}',
+    );
+    await expect(
+      errorFrom(
+        makeApplyCodeActionTool().handler(
+          { path: 'src/file.ts', line: 0, character: 0, title: action.title },
+          { beforeMutate: vi.fn() },
+        ),
+      ),
+    ).resolves.toBe(
+      'apply_code_action: "Add import and install types" runs the VS Code command _typescript.applyCodeActionCommand, which Forge does not run. Make the change with edit_file.',
+    );
+  });
+
+  it('refuses an action with an unsupported VS Code command', async () => {
+    mocks.executeCommand.mockResolvedValue([
+      { title: 'Copilot fix', edit: {}, command: { command: 'github.copilot.fix', title: '' } },
+    ]);
+
+    await expect(
+      errorFrom(
+        makeApplyCodeActionTool().handler(
+          { path: 'src/file.ts', line: 0, character: 0, title: 'Copilot fix' },
+          { beforeMutate: vi.fn() },
+        ),
+      ),
+    ).resolves.toBe(
+      'apply_code_action: "Copilot fix" runs the VS Code command github.copilot.fix, which Forge does not run. Make the change with edit_file.',
+    );
+  });
+
+  it('offers a TypeScript import title when the requested title is not current', async () => {
+    mocks.executeCommand.mockResolvedValue([
+      {
+        title: 'Add import from "./math-B1"',
+        edit: {},
+        command: {
+          command: '_typescript.applyCodeActionCommand',
+          title: '',
+          arguments: [{ action: { description: 'Add import' } }],
+        },
+      },
+    ]);
+
+    await expect(
+      errorFrom(
+        makeApplyCodeActionTool().handler(
+          { path: 'src/file.ts', line: 3, character: 4, title: 'Guessed title' },
+          { beforeMutate: vi.fn() },
+        ),
+      ),
+    ).resolves.toBe(
+      'apply_code_action: no current action titled "Guessed title" at src/file.ts:3:4 (zero-based). Actions it can apply there now: "Add import from "./math-B1"". Pass one of these titles exactly, or make the change with edit_file.',
+    );
+  });
+
   it('names the empty actionable set when an apply title is unmatched', async () => {
     mocks.executeCommand.mockResolvedValue([
       { title: 'Disabled fix', edit: {}, disabled: { reason: 'Unavailable' } },
@@ -332,7 +438,9 @@ describe('language-service tools pass the opened document URI', () => {
           { beforeMutate: vi.fn() },
         ),
       ),
-    ).resolves.toBe('apply_code_action: this action is not a workspace-edit-only action.');
+    ).resolves.toBe(
+      'apply_code_action: "Run command" runs the VS Code command extension.run, which Forge does not run. Make the change with edit_file.',
+    );
   });
 
   it('applies a matching workspace-edit action', async () => {

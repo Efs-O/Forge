@@ -7,7 +7,7 @@ interface ListedCodeAction {
   title: string;
   kind?: string;
   disabled?: string;
-  has_edit: boolean;
+  applies: boolean;
 }
 
 interface CodeActionsResult {
@@ -23,6 +23,26 @@ export interface DiagnosticsReadyResult<T> {
 }
 
 const DIAGNOSTICS_WAIT_MS = 4_000;
+
+function isBookkeepingOnlyCommand(command: vscode.Command | undefined): boolean {
+  if (!command) return true;
+  if (command.command !== '_typescript.applyCodeActionCommand') return false;
+
+  const payload = command.arguments?.[0] as { action?: { commands?: unknown } } | undefined;
+  const commands = payload?.action?.commands;
+  return commands === undefined || (Array.isArray(commands) && commands.length === 0);
+}
+
+/** Whether Forge can safely apply an action by applying its WorkspaceEdit alone. */
+function codeActionApplies(
+  action: vscode.CodeAction,
+): action is vscode.CodeAction & { edit: vscode.WorkspaceEdit } {
+  return (
+    action.edit !== undefined &&
+    action.disabled === undefined &&
+    isBookkeepingOnlyCommand(action.command)
+  );
+}
 
 async function waitForDiagnostics(uri: vscode.Uri): Promise<boolean> {
   return new Promise((resolve, reject) => {
@@ -153,7 +173,7 @@ export async function getCodeActions(args: Record<string, unknown>): Promise<str
     title: action.title,
     ...(action.kind ? { kind: action.kind.value } : {}),
     ...(action.disabled ? { disabled: action.disabled.reason } : {}),
-    has_edit: action.edit !== undefined,
+    applies: codeActionApplies(action),
   }));
   return JSON.stringify({
     actions: listed,
@@ -165,7 +185,7 @@ export async function getCodeActions(args: Record<string, unknown>): Promise<str
   });
 }
 
-/** Applies only code actions represented as a WorkspaceEdit; arbitrary commands stay out of scope. */
+/** Applies code actions as WorkspaceEdits without executing provider commands. */
 export function makeApplyCodeActionTool(
   extraRoots: () => readonly string[] = () => [],
 ): RegisteredTool {
@@ -176,7 +196,7 @@ export function makeApplyCodeActionTool(
         name: 'apply_code_action',
         description:
           'Apply an editable LSP code action identified by its exact title at a zero-based position. ' +
-          'Use code_intel with operation "code_actions" first. Actions that require an arbitrary VS Code command are refused.',
+          'Use code_intel with operation "code_actions" first. Only actions that code_intel lists with "applies": true can be applied.',
         parameters: {
           type: 'object',
           properties: {
@@ -210,13 +230,7 @@ export function makeApplyCodeActionTool(
           const action = actions.find((candidate) => candidate.title === args['title']);
           if (!action) {
             const applicableTitles = [
-              ...new Set(
-                actions
-                  .filter(
-                    (candidate) => candidate.edit && !candidate.command && !candidate.disabled,
-                  )
-                  .map((candidate) => candidate.title),
-              ),
+              ...new Set(actions.filter(codeActionApplies).map((candidate) => candidate.title)),
             ];
             const location = `${args['path'] as string}:${args['line'] as number}:${args['character'] as number} (zero-based)`;
             if (applicableTitles.length) {
@@ -230,8 +244,15 @@ export function makeApplyCodeActionTool(
             );
           }
           if (action.disabled) throw new Error(`apply_code_action: ${action.disabled.reason}`);
-          if (!action.edit || action.command) {
-            throw new Error('apply_code_action: this action is not a workspace-edit-only action.');
+          if (!codeActionApplies(action)) {
+            if (action.command && !isBookkeepingOnlyCommand(action.command)) {
+              throw new Error(
+                `apply_code_action: "${action.title}" runs the VS Code command ${action.command.command}, which Forge does not run. Make the change with edit_file.`,
+              );
+            }
+            throw new Error(
+              `apply_code_action: "${action.title}" carries no edit. Make the change with edit_file.`,
+            );
           }
           await applyAndSaveWorkspaceEdit('apply_code_action', action.edit, extraRoots(), context);
         },

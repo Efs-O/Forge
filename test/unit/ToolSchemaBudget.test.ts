@@ -124,7 +124,8 @@ import {
 // 2026-11-10: 67,121 after naming lazy-group members so tools can be found by name.
 // 2026-11-10: 67,593 after documenting consistent cwd and file path resolution for Git tools.
 // 2026-11-10: 67,814 (+221) after the shell description says when and how to elevate on Windows.
-const MEASURED_CHARS = 67_814;
+// 2026-11-11: 67,825 (+11) after clarifying which code actions can be applied.
+const MEASURED_CHARS = 67_825;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.
