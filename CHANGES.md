@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.17.153
 
 - Code search skips files whose first 8000 bytes contain a NUL byte, preventing PDFs and other binary data from entering the text index.
 - `message_chat` now explains when a target resembles a chat id but has an invalid format.
