@@ -73,6 +73,15 @@ function makeToolCall(name: string, args: Record<string, unknown>): ToolCall {
   };
 }
 
+function parserMessage(raw: string): string {
+  try {
+    JSON.parse(raw);
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  throw new Error('Expected invalid JSON');
+}
+
 describe('resolveToolPath', () => {
   it('returns absolute paths unchanged', () => {
     const abs = path.resolve('/absolute/path/file.ts');
@@ -1051,7 +1060,7 @@ describe('ToolDispatch', () => {
     expect(failureTracker.record).not.toHaveBeenCalled();
   });
 
-  it('refuses malformed JSON with the parser error and literal-backslash correction', async () => {
+  it('refuses malformed JSON with the parser error and a complete-object correction', async () => {
     toolRegistry.register({
       definition: {
         type: 'function',
@@ -1077,7 +1086,10 @@ describe('ToolDispatch', () => {
     expect(failureTracker.record).toHaveBeenCalled();
     expect(call.function.arguments).toBe(raw);
     expect(transcript[0]?.tool_calls?.[0]?.function.arguments).toBe(raw);
-    expect(transcript[1]?.content).toMatch(/^Error: read_file: the arguments are not valid JSON \(.+\)\. Write each literal backslash as \\ and resend\.$/u);
+    expect(transcript[1]?.content).toBe(
+      `Error: read_file: the arguments are not valid JSON (${parserMessage(raw)}). ` +
+        'Resend the arguments as one complete JSON object.',
+    );
   });
 
   it('refuses invalid escapes and asks for literal backslashes to be escaped', async () => {
@@ -1109,8 +1121,10 @@ describe('ToolDispatch', () => {
     await dispatch.dispatch([call], allowed, transcript);
 
     expect(handler).not.toHaveBeenCalled();
-    expect(transcript[1]?.content).toContain('read_file: the arguments are not valid JSON');
-    expect(transcript[1]?.content).toContain('Write each literal backslash as');
+    expect(transcript[1]?.content).toBe(
+      `Error: read_file: the arguments are not valid JSON (${parserMessage(raw)}). ` +
+        'Write each literal backslash as \\\\ and resend.',
+    );
     expect(failureTracker.record).toHaveBeenCalled();
   });
 

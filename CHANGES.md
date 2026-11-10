@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+- Invalid tool-argument JSON refusals now explain the parser-specific cause, including leaked tool-call markup inside an unclosed string.
+
 ## 0.17.146
 
 - Compaction clears outdated context token counts before saving the chat, so reloading no longer restores a full-context reading that blocks new messages.
