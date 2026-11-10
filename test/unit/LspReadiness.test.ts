@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   openTextDocument: vi.fn(),
   executeCommand: vi.fn(),
   primeSymbolAtPosition: vi.fn(),
+  describePosition: vi.fn(),
   remainingSymbolFiles: vi.fn(),
   applyAndSaveWorkspaceEdit: vi.fn(),
 }));
@@ -28,6 +29,7 @@ vi.mock('../../src/util/WorkspacePaths', () => ({
 }));
 
 vi.mock('../../src/tools/symbolSearch', () => ({
+  describePosition: mocks.describePosition,
   primeSymbolAtPosition: mocks.primeSymbolAtPosition,
   remainingSymbolFiles: mocks.remainingSymbolFiles,
 }));
@@ -55,6 +57,12 @@ describe('language-server readiness reporting', () => {
     vi.clearAllMocks();
     mocks.openTextDocument.mockImplementation(async (uri: unknown) => ({ uri }));
     mocks.primeSymbolAtPosition.mockResolvedValue({ name: 'sumPricesR1', files: [] });
+    mocks.describePosition.mockImplementation(async (_uri, position, displayPath) => ({
+      word: 'sumPricesR1',
+      lineText: 'export function sumPricesR1(items: number[]): number {',
+      label: `${displayPath} line ${position.line} character ${position.character} (zero-based)`,
+      lineCount: 42,
+    }));
     mocks.remainingSymbolFiles.mockResolvedValue([]);
     mocks.applyAndSaveWorkspaceEdit.mockResolvedValue(undefined);
     mocks.executeCommand.mockResolvedValue(undefined);
@@ -118,12 +126,12 @@ describe('language-server readiness reporting', () => {
     ]);
     const oneMissing = await makeFindReferencesTool().handler(baseArgs);
     expect(oneMissing).toBe(
-      'scratch/a.ts:2:3\n\nNote: a text search also finds `sumPricesR1` in 1 file(s) the language server did not report: scratch/z.ts. The language server may still be loading this project; ask again in a few seconds, or check those files with search_code.',
+      'scratch/a.ts:1:2\n\nPositions are zero-based line:character, the same as the line and character inputs.\n\nNote: a text search also finds `sumPricesR1` in 1 file(s) the language server did not report: scratch/z.ts. The language server may still be loading this project; ask again in a few seconds, or check those files with search_code.',
     );
 
     mocks.executeCommand.mockResolvedValue(undefined);
     await expect(makeFindReferencesTool().handler(baseArgs)).resolves.toBe(
-      'No references found.\n\nNote: a text search also finds `sumPricesR1` in 2 file(s) the language server did not report: scratch/a.ts, scratch/z.ts. The language server may still be loading this project; ask again in a few seconds, or check those files with search_code.',
+      'No references found for `sumPricesR1` at src/math.ts line 0 character 12 (zero-based). That line reads: `export function sumPricesR1(items: number[]): number {`. If `sumPricesR1` is not the symbol you meant (for example a word in a comment or a string), point line and character at the symbol\'s name.\n\nNote: a text search also finds `sumPricesR1` in 2 file(s) the language server did not report: scratch/a.ts, scratch/z.ts. The language server may still be loading this project; ask again in a few seconds, or check those files with search_code.',
     );
   });
 

@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 
+const lspMocks = vi.hoisted(() => ({
+  describePosition: vi.fn(),
+  primeSymbolAtPosition: vi.fn(),
+}));
+
 vi.mock('vscode', () => ({
   window: {
     activeTextEditor: undefined as unknown,
@@ -9,7 +14,12 @@ vi.mock('vscode', () => ({
   workspace: {
     workspaceFolders: [{ uri: { fsPath: '/ws' } }],
     asRelativePath: (u: { fsPath: string }) => u.fsPath.replace(/^\/ws\//, ''),
-    openTextDocument: async () => undefined,
+    openTextDocument: async () => ({
+      lineCount: 42,
+      lineAt: () => ({ text: '' }),
+      getWordRangeAtPosition: () => undefined,
+      getText: () => '',
+    }),
   },
   commands: { executeCommand: vi.fn() },
   Position: class {
@@ -19,6 +29,11 @@ vi.mock('vscode', () => ({
     ) {}
   },
   Uri: { file: (p: string) => ({ fsPath: p }) },
+}));
+
+vi.mock('../../src/tools/symbolSearch', () => ({
+  describePosition: lspMocks.describePosition,
+  primeSymbolAtPosition: lspMocks.primeSymbolAtPosition,
 }));
 
 import { makeGetEditorContextTool } from '../../src/tools/builtinTools';
@@ -89,6 +104,16 @@ describe('get_editor_context', () => {
 });
 
 describe('find_implementations', () => {
+  beforeEach(() => {
+    lspMocks.describePosition.mockImplementation(async (_uri, position, displayPath) => ({
+      word: 'app',
+      lineText: 'const app = 1;',
+      label: `${displayPath} line ${position.line} character ${position.character} (zero-based)`,
+      lineCount: 42,
+    }));
+    lspMocks.primeSymbolAtPosition.mockResolvedValue({ name: 'app', files: [] });
+  });
+
   it('renders LocationLink results, which the provider may return instead of Location', async () => {
     vi.mocked(vscode.commands.executeCommand).mockResolvedValue([
       { targetUri: { fsPath: '/ws/src/impl.ts' }, targetRange: { start: { line: 7, character: 2 } } },
@@ -103,7 +128,9 @@ describe('find_implementations', () => {
       expect.anything(),
       expect.anything(),
     );
-    expect(out).toBe('src/impl.ts:8:3');
+    expect(out).toBe(
+      'src/impl.ts:7:2\n\nPositions are zero-based line:character, the same as the line and character inputs.',
+    );
   });
 
   it('says so when nothing implements the symbol', async () => {
@@ -113,6 +140,8 @@ describe('find_implementations', () => {
       line: 1,
       character: 1,
     })) as string;
-    expect(out).toBe('No implementations found.');
+    expect(out).toBe(
+      "No implementations found for `app` at src/app.ts line 1 character 1 (zero-based). That line reads: `const app = 1;`. If `app` is not the symbol you meant (for example a word in a comment or a string), point line and character at the symbol's name.",
+    );
   });
 });

@@ -219,22 +219,29 @@ describe('definition location rendering', () => {
       line: 0,
       character: 13,
     });
-    expect(String(out)).toContain('Game.js:1:14');
+    expect(String(out)).toBe(
+      'Game.js:0:13\n\nPositions are zero-based line:character, the same as the line and character inputs.',
+    );
   });
 
   it('still renders a plain Location', async () => {
+    fs.writeFileSync(path.join(root, 'Game.js'), '// header\n\nexport class Game {}\n', 'utf8');
     vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue([
       { uri: vscode.Uri.file(path.join(root, 'Game.js')), range: range(2, 5) },
     ]);
-    const out = await makeCodeIntelTool().handler({ operation: 'definition', path: 'Game.js', line: 2, character: 5 });
-    expect(String(out)).toContain('Game.js:3:6');
+    const out = await makeCodeIntelTool().handler({ operation: 'definition', path: 'Game.js', line: 2, character: 7 });
+    expect(String(out)).toBe(
+      'Game.js:2:5\n\nPositions are zero-based line:character, the same as the line and character inputs.',
+    );
   });
 
   it('reports no definition rather than throwing', async () => {
     vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue([]);
     await expect(
       makeCodeIntelTool().handler({ operation: 'definition', path: 'Game.js', line: 0, character: 0 }),
-    ).resolves.toBe('No definition found.');
+    ).resolves.toBe(
+      "No definition found for `export` at Game.js line 0 character 0 (zero-based). That line reads: `export class Game {}`. If `export` is not the symbol you meant (for example a word in a comment or a string), point line and character at the symbol's name.",
+    );
   });
 });
 

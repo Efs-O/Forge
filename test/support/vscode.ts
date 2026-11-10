@@ -71,14 +71,46 @@ export const workspace = {
     const root = workspace.workspaceFolders[0]?.uri.fsPath;
     return root ? path.relative(root, uri.fsPath).replace(/\\/g, '/') : uri.fsPath;
   },
-  openTextDocument: async (uri: { fsPath: string }) => ({
-    uri,
-    // Real documents report a line count, and open_file clamps a requested
-    // line against it. Without one here the stub would hand back NaN and the
-    // clamp would go untested.
-    lineCount: 1,
-    save: async () => true,
-  }),
+  openTextDocument: async (uri: { fsPath: string }) => {
+    let text = '';
+    try {
+      text = await fs.readFile(uri.fsPath, 'utf8');
+    } catch {
+      // Most tests use an in-memory URI without a backing file.
+    }
+    const lines = text.split(/\r?\n/u);
+    return {
+      uri,
+      lineCount: lines.length,
+      lineAt: (line: number) => ({ text: lines[line] ?? '' }),
+      getWordRangeAtPosition: (position: { line: number; character: number }) => {
+        const sourceLine = lines[position.line] ?? '';
+        const match = [...sourceLine.matchAll(/[\p{L}\p{N}_$]+/gu)].find((word) => {
+          const start = word.index ?? 0;
+          return start <= position.character && position.character < start + word[0].length;
+        });
+        if (!match) return undefined;
+        const start = match.index ?? 0;
+        return {
+          start: { line: position.line, character: start },
+          end: { line: position.line, character: start + match[0].length },
+        };
+      },
+      getText: (range: {
+        start: { line: number; character: number };
+        end: { line: number; character: number };
+      }) => {
+        if (range.start.line === range.end.line) {
+          return (lines[range.start.line] ?? '').slice(range.start.character, range.end.character);
+        }
+        return '';
+      },
+      // Real documents report a line count, and open_file clamps a requested
+      // line against it. Without one here the stub would hand back NaN and the
+      // clamp would go untested.
+      save: async () => true,
+    };
+  },
   applyEdit: async () => true,
   createFileSystemWatcher: () => ({
     onDidChange: () => undefined,

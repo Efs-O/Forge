@@ -7,7 +7,8 @@ import { resolveRealWorkspacePath, resolveWorkspacePath } from '../util/Workspac
 import { commonFolderOf } from '../sidebar/approvalKeyGrammar';
 import { diagnoseTrashRefusal, forgetTrashRefusal, rememberTrashRefusal } from './trashRefusal';
 import { applyAndSaveWorkspaceEdit } from './workspaceEditApply';
-import { primeSymbolAtPosition, remainingSymbolFiles } from './symbolSearch';
+import { noSymbolMessage } from './lspFormat';
+import { describePosition, primeSymbolAtPosition, remainingSymbolFiles } from './symbolSearch';
 
 /** Join a result line to its optional follow-up sentence. */
 function withWarning(result: string, warning: string): string {
@@ -400,7 +401,10 @@ export function makeRenameSymbolTool(
           type: 'object',
           properties: {
             path: { type: 'string', description: 'File path (absolute or workspace-relative).' },
-            line: { type: 'integer', description: 'Zero-based line number of the symbol.' },
+            line: {
+              type: 'integer',
+              description: 'Zero-based line number (the first line of the file is 0).',
+            },
             character: {
               type: 'integer',
               description: 'Zero-based character offset of the symbol.',
@@ -426,6 +430,10 @@ export function makeRenameSymbolTool(
       const line = args['line'] as number;
       const character = args['character'] as number;
       const position = new vscode.Position(line, character);
+      const description = await describePosition(uri, position, filePath);
+      if (!description.word) {
+        throw new Error(`rename_symbol: ${noSymbolMessage(description, position)}`);
+      }
       const primed = await primeSymbolAtPosition(uri, position);
 
       let edit: vscode.WorkspaceEdit | undefined;

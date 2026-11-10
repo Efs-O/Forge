@@ -10,6 +10,13 @@ export interface PrimedSymbol {
   files: string[];
 }
 
+export interface PositionDescription {
+  word?: string;
+  lineText: string;
+  label: string;
+  lineCount: number;
+}
+
 /** Select the identifier TypeScript associates with a cursor position. */
 function wordRangeAtPosition(
   document: vscode.TextDocument,
@@ -35,6 +42,23 @@ function wordRangeAtPosition(
     return undefined;
   }
   return document.getWordRangeAtPosition(position);
+}
+
+/** Describe the source line and identifier selected by a tool position. */
+export async function describePosition(
+  uri: vscode.Uri,
+  position: vscode.Position,
+  displayPath: string,
+): Promise<PositionDescription> {
+  const document = await vscode.workspace.openTextDocument(uri);
+  const label = `${displayPath} line ${position.line} character ${position.character} (zero-based)`;
+  if (position.line < 0 || position.line >= document.lineCount) {
+    return { lineText: '', label, lineCount: document.lineCount };
+  }
+  const lineText = document.lineAt(position.line).text.trimEnd();
+  const range = wordRangeAtPosition(document, position);
+  const word = range ? document.getText(range) : undefined;
+  return { ...(word ? { word } : {}), lineText, label, lineCount: document.lineCount };
 }
 
 /** Search with search_code's ripgrep executable and ignore policy. */

@@ -7,6 +7,9 @@ const mocks = vi.hoisted(() => {
     openTextDocument: vi.fn(),
     executeCommand: vi.fn(),
     applyAndSaveWorkspaceEdit: vi.fn(),
+    describePosition: vi.fn(),
+    primeSymbolAtPosition: vi.fn(async () => ({ name: 'sumPricesC1', files: [] })),
+    remainingSymbolFiles: vi.fn(async () => []),
   };
 });
 
@@ -56,8 +59,9 @@ vi.mock('../../src/tools/lspTools', () => ({
   makeGoToDefinitionTool: () => ({ handler: vi.fn() }),
 }));
 vi.mock('../../src/tools/symbolSearch', () => ({
-  primeSymbolAtPosition: vi.fn(async () => ({ files: [] })),
-  remainingSymbolFiles: vi.fn(async () => []),
+  describePosition: mocks.describePosition,
+  primeSymbolAtPosition: mocks.primeSymbolAtPosition,
+  remainingSymbolFiles: mocks.remainingSymbolFiles,
 }));
 
 import * as vscode from 'vscode';
@@ -76,6 +80,12 @@ describe('language-service tools pass the opened document URI', () => {
     mocks.openTextDocument.mockImplementation(async (uri: unknown) => ({ uri }));
     mocks.executeCommand.mockResolvedValue(undefined);
     mocks.applyAndSaveWorkspaceEdit.mockResolvedValue(undefined);
+    mocks.describePosition.mockImplementation(async (_uri, position, displayPath) => ({
+      word: 'sumPricesC1',
+      lineText: 'export function sumPricesC1(items: number[]): number {',
+      label: `${displayPath} line ${position.line} character ${position.character} (zero-based)`,
+      lineCount: 4,
+    }));
   });
 
   it('calls the code action provider with the canonical document URI and a zero-width range', async () => {
@@ -122,6 +132,45 @@ describe('language-service tools pass the opened document URI', () => {
       new vscode.Position(0, 16),
       'renamedThing',
     );
+  });
+
+  it('renames the fixture symbol at line 1 character 16', async () => {
+    const edit = { entries: () => [] };
+    mocks.openTextDocument.mockResolvedValue({ uri: mocks.canonicalUri });
+    mocks.executeCommand.mockResolvedValue(edit);
+
+    await expect(
+      makeRenameSymbolTool().handler(
+        { path: 'src/file.ts', line: 1, character: 16, new_name: 'sumPricesNew' },
+        { beforeMutate: vi.fn() },
+      ),
+    ).resolves.toBe('Renamed to sumPricesNew');
+    expect(mocks.executeCommand).toHaveBeenCalledWith(
+      'vscode.executeDocumentRenameProvider',
+      mocks.canonicalUri,
+      new vscode.Position(1, 16),
+      'sumPricesNew',
+    );
+  });
+
+  it('refuses a position with no symbol before calling the rename provider', async () => {
+    mocks.describePosition.mockResolvedValue({
+      lineText: '// Lab fixture s15c-r1 - do not delete.',
+      label: 'src/file.ts line 0 character 0 (zero-based)',
+      lineCount: 4,
+    });
+
+    expect(
+      await errorFrom(
+        makeRenameSymbolTool().handler(
+          { path: 'src/file.ts', line: 0, character: 0, new_name: 'sumPricesNew' },
+          { beforeMutate: vi.fn() },
+        ),
+      ),
+    ).toBe(
+      "rename_symbol: No symbol at src/file.ts line 0 character 0 (zero-based). That line reads: `// Lab fixture s15c-r1 - do not delete.`. Point line and character at the symbol's name. The first line of a file is line 0; document_symbols lists each symbol's zero-based line and character.",
+    );
+    expect(mocks.executeCommand).not.toHaveBeenCalled();
   });
 
   it('reports the complete actionable rename error', async () => {

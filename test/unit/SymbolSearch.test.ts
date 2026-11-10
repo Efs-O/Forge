@@ -14,13 +14,15 @@ vi.mock('vscode', () => ({
   env: { appRoot: undefined },
 }));
 
-import { primeSymbolAtPosition } from '../../src/tools/symbolSearch';
+import { describePosition, primeSymbolAtPosition } from '../../src/tools/symbolSearch';
 
 const declaration = 'export function sumPricesR1(items: number[]): number {';
 
-function documentForLine(text: string) {
-  const rangeAt = (character: number) => {
-    const words = [...text.matchAll(/[\p{L}\p{N}_$]+/gu)];
+function documentForText(text: string) {
+  const lines = text.split(/\r?\n/u);
+  const rangeAt = (lineNumber: number, character: number) => {
+    const line = lines[lineNumber] ?? '';
+    const words = [...line.matchAll(/[\p{L}\p{N}_$]+/gu)];
     const containing = words.find((word) => {
       const start = word.index ?? 0;
       return start <= character && character < start + word[0].length;
@@ -29,15 +31,32 @@ function documentForLine(text: string) {
     const word = containing ?? ending;
     if (!word) return undefined;
     const start = word.index ?? 0;
-    return { start: { character: start }, end: { character: start + word[0].length } };
+    return {
+      start: { line: lineNumber, character: start },
+      end: { line: lineNumber, character: start + word[0].length },
+    };
   };
   return {
-    lineAt: () => ({ text }),
-    getWordRangeAtPosition: (position: { character: number }) => rangeAt(position.character),
-    getText: (range: { start: { character: number }; end: { character: number } }) =>
-      text.slice(range.start.character, range.end.character),
+    lineCount: lines.length,
+    lineAt: (lineNumber: number) => ({ text: lines[lineNumber] ?? '' }),
+    getWordRangeAtPosition: (position: { line: number; character: number }) =>
+      rangeAt(position.line, position.character),
+    getText: (range: {
+      start: { line: number; character: number };
+      end: { character: number };
+    }) => (lines[range.start.line] ?? '').slice(range.start.character, range.end.character),
   };
 }
+
+function documentForLine(text: string) {
+  return documentForText(text);
+}
+
+const positionFixture =
+  '// Lab fixture s15c-r1 - do not delete.\n' +
+  'export function sumPricesC1(items: number[]): number {\n' +
+  '  return items.reduce((total, item) => total + item, 0);\n' +
+  '}';
 
 describe('language-server project priming', () => {
   beforeEach(() => {
@@ -110,5 +129,34 @@ describe('language-server project priming', () => {
       ),
     ).resolves.toEqual({ files: [] });
     expect(search).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [1, 15, 'sumPricesC1'],
+    [1, 16, 'sumPricesC1'],
+    [1, 20, 'sumPricesC1'],
+    [1, 27, 'sumPricesC1'],
+    [0, 0, undefined],
+    [0, 3, 'Lab'],
+    [9, 0, undefined],
+  ] as const)('describes line %s character %s as %s', async (line, character, word) => {
+    mocks.openTextDocument.mockResolvedValue(documentForText(positionFixture));
+    await expect(
+      describePosition(
+        { fsPath: 'N:/workspace/fixture.ts' } as never,
+        { line, character } as never,
+        'fixture.ts',
+      ),
+    ).resolves.toEqual({
+      ...(word ? { word } : {}),
+      lineText:
+        line === 0
+          ? '// Lab fixture s15c-r1 - do not delete.'
+          : line === 1
+            ? 'export function sumPricesC1(items: number[]): number {'
+            : '',
+      label: `fixture.ts line ${line} character ${character} (zero-based)`,
+      lineCount: 4,
+    });
   });
 });

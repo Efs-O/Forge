@@ -1,7 +1,14 @@
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveWorkspaceUri } from '../util/WorkspacePaths';
-import { primeSymbolAtPosition } from './symbolSearch';
+import { describePosition, primeSymbolAtPosition } from './symbolSearch';
+import {
+  formatLocationResults,
+  formatSymbolTree,
+  formatWorkspaceSymbols,
+  noSymbolMessage,
+  POSITION_NOTE,
+} from './lspFormat';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -77,28 +84,11 @@ export function formatDiagnosticLine(
   );
 }
 
-function symbolKindLabel(k: vscode.SymbolKind): string {
-  return vscode.SymbolKind[k] ?? String(k);
-}
-
-/**
- * Renders either shape a definition/reference provider can return.
- *
- * `executeDefinitionProvider` is typed as returning `Location[]`, but VS Code
- * lets a provider answer with `LocationLink[]` instead — and the JavaScript/
- * TypeScript server does. Those carry `targetUri`/`targetRange` and no `range`
- * at all, so reading `loc.range.start` threw
- * "Cannot read properties of undefined (reading 'start')" and definition lookup
- * failed on every JS file. The references handler was unaffected because the
- * references provider does return plain Locations.
- */
-function locationToString(loc: vscode.Location | vscode.LocationLink): string {
-  const link = loc as vscode.LocationLink;
-  const plain = loc as vscode.Location;
-  const uri = link.targetUri ?? plain.uri;
-  const range = link.targetSelectionRange ?? link.targetRange ?? plain.range;
-  if (!uri || !range) return '(location unavailable)';
-  return `${vscode.workspace.asRelativePath(uri)}:${range.start.line + 1}:${range.start.character + 1}`;
+function noProviderAnswer(
+  kind: 'references' | 'definition' | 'implementations' | 'hover information',
+  description: Awaited<ReturnType<typeof describePosition>>,
+): string {
+  return `No ${kind} found for \`${description.word}\` at ${description.label}. That line reads: \`${description.lineText}\`. If \`${description.word}\` is not the symbol you meant (for example a word in a comment or a string), point line and character at the symbol's name.`;
 }
 
 function missingTextSearchFiles(
@@ -132,7 +122,7 @@ const HOVER_LOADING_NOTE =
   '\n\nNote: `(loading...)` means the language server has not finished loading this project, so this answer may lack types. Ask again in a few seconds.';
 
 function hoverText(result: vscode.Hover[] | undefined): string {
-  if (!result?.length) return 'No hover information available.';
+  if (!result?.length) return '';
   const parts: string[] = [];
   for (const hover of result) {
     for (const content of hover.contents) {
@@ -140,7 +130,7 @@ function hoverText(result: vscode.Hover[] | undefined): string {
       else if ('value' in content) parts.push(content.value);
     }
   }
-  return parts.join('\n\n') || 'No hover content.';
+  return parts.join('\n\n');
 }
 
 async function hoverWithLoadingRetry(uri: vscode.Uri, position: vscode.Position): Promise<string> {
@@ -222,19 +212,6 @@ export function makeGetDiagnosticsTool(): RegisteredTool {
 
 // ── Document symbols handler ───────────────────────────────────────────────────
 
-function formatSymbolTree(symbols: vscode.DocumentSymbol[], indent = 0): string[] {
-  const lines: string[] = [];
-  for (const sym of symbols) {
-    lines.push(
-      `${'  '.repeat(indent)}${symbolKindLabel(sym.kind)} ${sym.name} (line ${sym.range.start.line + 1})`,
-    );
-    if (sym.children?.length) {
-      lines.push(...formatSymbolTree(sym.children, indent + 1));
-    }
-  }
-  return lines;
-}
-
 export function makeGetDocumentSymbolsTool(): RegisteredTool {
   return {
     definition: {
@@ -263,7 +240,7 @@ export function makeGetDocumentSymbolsTool(): RegisteredTool {
       );
       context?.abortSignal?.throwIfAborted();
       if (!result?.length) return 'No symbols found.';
-      return formatSymbolTree(result).join('\n');
+      return `${formatSymbolTree(result).join('\n')}\n\n${POSITION_NOTE}`;
     },
   };
 }
@@ -295,12 +272,7 @@ export function makeGetWorkspaceSymbolsTool(): RegisteredTool {
         query,
       );
       if (!result?.length) return 'No symbols found.';
-      return result
-        .map(
-          (s) =>
-            `${symbolKindLabel(s.kind)} ${s.name} — ${vscode.workspace.asRelativePath(s.location.uri)}:${s.location.range.start.line + 1}`,
-        )
-        .join('\n');
+      return formatWorkspaceSymbols(result);
     },
   };
 }
@@ -328,9 +300,13 @@ export function makeGetHoverTool(): RegisteredTool {
     },
     permission: 'read',
     handler: async (args) => {
-      const uri = await openForAnalysis(args['path'] as string);
+      const displayPath = args['path'] as string;
+      const uri = await openForAnalysis(displayPath);
       const position = new vscode.Position(args['line'] as number, args['character'] as number);
-      return hoverWithLoadingRetry(uri, position);
+      const description = await describePosition(uri, position, displayPath);
+      if (!description.word) return noSymbolMessage(description, position);
+      const answer = await hoverWithLoadingRetry(uri, position);
+      return answer || noProviderAnswer('hover information', description);
     },
   };
 }
@@ -358,14 +334,17 @@ export function makeGoToDefinitionTool(): RegisteredTool {
     },
     permission: 'read',
     handler: async (args) => {
-      const uri = await openForAnalysis(args['path'] as string);
+      const displayPath = args['path'] as string;
+      const uri = await openForAnalysis(displayPath);
       const position = new vscode.Position(args['line'] as number, args['character'] as number);
+      const description = await describePosition(uri, position, displayPath);
+      if (!description.word) return noSymbolMessage(description, position);
       await primeSymbolAtPosition(uri, position);
       const result = await vscode.commands.executeCommand<
         Array<vscode.Location | vscode.LocationLink> | undefined
       >('vscode.executeDefinitionProvider', uri, position);
-      if (!result?.length) return 'No definition found.';
-      return result.map(locationToString).join('\n');
+      if (!result?.length) return noProviderAnswer('definition', description);
+      return formatLocationResults(result);
     },
   };
 }
@@ -393,8 +372,11 @@ export function makeFindReferencesTool(): RegisteredTool {
     },
     permission: 'read',
     handler: async (args) => {
-      const uri = await openForAnalysis(args['path'] as string);
+      const displayPath = args['path'] as string;
+      const uri = await openForAnalysis(displayPath);
       const position = new vscode.Position(args['line'] as number, args['character'] as number);
+      const description = await describePosition(uri, position, displayPath);
+      if (!description.word) return noSymbolMessage(description, position);
       const primed = await primeSymbolAtPosition(uri, position);
       const result = await vscode.commands.executeCommand<vscode.Location[] | undefined>(
         'vscode.executeReferenceProvider',
@@ -402,8 +384,8 @@ export function makeFindReferencesTool(): RegisteredTool {
         position,
       );
       const answer = result?.length
-        ? result.slice(0, 50).map(locationToString).join('\n')
-        : 'No references found.';
+        ? formatLocationResults(result.slice(0, 50))
+        : noProviderAnswer('references', description);
       return (
         answer + referencesTextNote(primed.name ?? '', missingTextSearchFiles(result, primed.files))
       );
@@ -421,7 +403,7 @@ export function makeFindReferencesTool(): RegisteredTool {
  * rows the reader wanted. The implementation provider returns only those.
  *
  * Like the definition provider, this one may answer with LocationLink[] rather
- * than the Location[] its type claims, so it goes through locationToString.
+ * than the Location[] its type claims, so it goes through formatLocationResults.
  */
 export function makeFindImplementationsTool(): RegisteredTool {
   return {
@@ -447,14 +429,17 @@ export function makeFindImplementationsTool(): RegisteredTool {
     },
     permission: 'read',
     handler: async (args) => {
-      const uri = await openForAnalysis(args['path'] as string);
+      const displayPath = args['path'] as string;
+      const uri = await openForAnalysis(displayPath);
       const position = new vscode.Position(args['line'] as number, args['character'] as number);
+      const description = await describePosition(uri, position, displayPath);
+      if (!description.word) return noSymbolMessage(description, position);
       await primeSymbolAtPosition(uri, position);
       const result = await vscode.commands.executeCommand<
         Array<vscode.Location | vscode.LocationLink> | undefined
       >('vscode.executeImplementationProvider', uri, position);
-      if (!result?.length) return 'No implementations found.';
-      return result.slice(0, 50).map(locationToString).join('\n');
+      if (!result?.length) return noProviderAnswer('implementations', description);
+      return formatLocationResults(result.slice(0, 50));
     },
   };
 }

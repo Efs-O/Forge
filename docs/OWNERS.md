@@ -632,6 +632,7 @@ overlaps with an existing owner, extend the owner instead.
 | SSRF primitives + pinned-agent factory shared by `web_fetch` and the render-html preview | `src/tools/webFetchSsrf.ts` |
 | Bounded streamed response text reader (shared web and jobs fetch) | `src/util/readTextCapped.ts` |
 | LSP provider handlers dispatched by `code_intel`, and the `path:line: severity code: message` spelling both diagnostics readers share | `src/tools/lspTools.ts` |
+| LSP location and symbol-result formatting | `src/tools/lspFormat.ts` |
 | In-memory workspace memory tool            | `src/tools/memoryTools.ts`            |
 | UX tools (show_diff, open_file)            | `src/tools/uxTools.ts`                |
 | Power tools (sleep, wake timer, WoL info)  | `src/tools/powerTools.ts`             |

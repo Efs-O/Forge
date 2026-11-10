@@ -83,14 +83,18 @@ export function makeCodeIntelTool(): RegisteredTool {
                 'implementations',
                 'code_actions',
               ],
-              description: 'Which code intelligence operation to run.',
+              description: 'Code intelligence operation.',
             },
             path: {
               type: 'string',
               description:
                 'diagnostics: File path (absolute or workspace-relative). Omit for all workspace diagnostics. document_symbols, hover, definition, references, implementations: File path (absolute or workspace-relative). code_actions: File path, absolute or workspace-relative. Relative paths resolve against the first workspace folder; the repo you are working in may be nested inside it.',
             },
-            line: { type: 'integer', minimum: 0, description: 'Zero-based line number.' },
+            line: {
+              type: 'integer',
+              minimum: 0,
+              description: 'Zero-based line number (the first line of the file is 0).',
+            },
             character: { type: 'integer', minimum: 0, description: 'Zero-based character offset.' },
             query: { type: 'string', description: 'Symbol name query.' },
           },

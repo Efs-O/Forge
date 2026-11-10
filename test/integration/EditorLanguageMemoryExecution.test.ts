@@ -86,6 +86,7 @@ describe('isolated editor, language, search, and memory tool execution', () => {
               name: 'sample',
               kind: vscode.SymbolKind.Variable,
               range: new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 6)),
+              selectionRange: new vscode.Range(new vscode.Position(0, 6), new vscode.Position(0, 12)),
               children: [],
             },
           ];
@@ -118,10 +119,14 @@ describe('isolated editor, language, search, and memory tool execution', () => {
 
     await expect(
       makeCodeIntelTool().handler({ operation: 'document_symbols', path: 'sample.ts' }),
-    ).resolves.toContain('Variable sample (line 1)');
+    ).resolves.toBe(
+      'Variable sample (line 0, character 6)\n\nPositions are zero-based line:character, the same as the line and character inputs.',
+    );
     await expect(
       makeCodeIntelTool().handler({ operation: 'workspace_symbols', query: 'sample' }),
-    ).resolves.toContain('Variable sample — sample.ts:1');
+    ).resolves.toBe(
+      'Variable sample — sample.ts:0:0\n\nPositions are zero-based line:character, the same as the line and character inputs.',
+    );
     await expect(
       makeCodeIntelTool().handler({ operation: 'hover', path: 'sample.ts', line: 0, character: 1 }),
     ).resolves.toBe('const sample: 1');
@@ -132,7 +137,9 @@ describe('isolated editor, language, search, and memory tool execution', () => {
         line: 0,
         character: 1,
       }),
-    ).resolves.toBe('sample.ts:1:1');
+    ).resolves.toBe(
+      'sample.ts:0:0\n\nPositions are zero-based line:character, the same as the line and character inputs.',
+    );
     await expect(
       makeCodeIntelTool().handler({
         operation: 'references',
@@ -140,7 +147,9 @@ describe('isolated editor, language, search, and memory tool execution', () => {
         line: 0,
         character: 1,
       }),
-    ).resolves.toBe('sample.ts:1:1');
+    ).resolves.toBe(
+      'sample.ts:0:0\n\nPositions are zero-based line:character, the same as the line and character inputs.',
+    );
   });
 
   it('executes controlled diff, prompt, notification, clipboard, and URL handlers', async () => {
@@ -208,7 +217,7 @@ describe('isolated editor, language, search, and memory tool execution', () => {
       'Opened sample.ts in the editor at line 1.',
     );
     await expect(makeOpenFileTool().handler({ path: 'sample.ts', line: 900 })).resolves.toBe(
-      'line 900 is past the end of the file (1 lines); opened at line 1.',
+      'line 900 is past the end of the file (2 lines); opened at line 2.',
     );
     expect(show).toHaveBeenCalledTimes(2);
   });
@@ -223,7 +232,18 @@ describe('isolated editor, language, search, and memory tool execution', () => {
   it('executes rename through a disposable VS Code adapter and saves the change', async () => {
     const save = vi.fn().mockResolvedValue(true);
     // The fake document carries a version the fake applyEdit advances.
-    const doc = { uri: vscode.Uri.file(path.join(root, 'sample.ts')), save, version: 1 };
+    const doc = {
+      uri: vscode.Uri.file(path.join(root, 'sample.ts')),
+      save,
+      version: 1,
+      lineCount: 1,
+      lineAt: () => ({ text: 'const sample = 1;' }),
+      getWordRangeAtPosition: () => ({
+        start: new vscode.Position(0, 6),
+        end: new vscode.Position(0, 12),
+      }),
+      getText: () => 'sample',
+    };
     vi.spyOn(vscode.workspace, 'openTextDocument').mockResolvedValue(doc as never);
     const workspaceEdit = {
       entries: () => [[vscode.Uri.file(path.join(root, 'sample.ts')), []]],
@@ -242,10 +262,12 @@ describe('isolated editor, language, search, and memory tool execution', () => {
     const beforeMutate = vi.fn();
     await expect(
       makeRenameSymbolTool().handler(
-        { path: 'sample.ts', line: 0, character: 1, new_name: 'renamed' },
+        { path: 'sample.ts', line: 0, character: 7, new_name: 'renamed' },
         { beforeMutate },
       ),
-    ).resolves.toBe('Renamed to renamed');
+    ).resolves.toBe(
+      'Renamed to renamed\n\nNote: a text search still finds `sample` in 1 file(s) after the rename: sample.ts. Check them with search_code; they may be comments or strings, or files the language server had not loaded.',
+    );
     expect(beforeMutate).toHaveBeenCalledWith([path.join(root, 'sample.ts')]);
     expect(apply).toHaveBeenCalledWith(workspaceEdit);
     // The rename is saved so the disk checkpoint, and Undo, cover it (U15-02).
@@ -259,7 +281,7 @@ describe('isolated editor, language, search, and memory tool execution', () => {
     apply.mockClear();
     await expect(
       makeRenameSymbolTool().handler(
-        { path: 'sample.ts', line: 0, character: 1, new_name: 'renamed' },
+        { path: 'sample.ts', line: 0, character: 7, new_name: 'renamed' },
         { beforeMutate },
       ),
     ).rejects.toThrow();
