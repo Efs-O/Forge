@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.17.151
 
 - Edit diagnostics now open written files with their original path casing, so subsequent editor tools keep the real filename.
 - Lazy tool group descriptions now name each member so a tool requested by name, such as `format_file`, can be found in its group, with the schema budget raised for those names.
