@@ -1,5 +1,15 @@
 # Forge — Recent Changes
 
+## 0.17.143
+
+- A call whose arguments were wrapped in an unknown key (`{"queries": {"query": "x"}}`) is still
+  refused, but the refusal now says the value holds the tool's own arguments and to move them to
+  the top level, instead of telling the model to resend without the key.
+- A message from another agent to an unattended chat that is running an unattended turn of the
+  same job joins that turn at its next tool round instead of waiting for the turn to end. It is
+  still never merged into an attended turn or another job's turn.
+- `wait` now ends early when an agent-bus message arrives for the chat, not only for a typed one.
+
 ## 0.17.142
 
 - `code_intel` (references, definition, implementations) and `rename_symbol` first open every
