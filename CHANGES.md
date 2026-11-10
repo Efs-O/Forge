@@ -1,5 +1,21 @@
 # Forge — Recent Changes
 
+## 0.17.141
+
+- `read_file` on a path that does not exist now suggests the one workspace file with the same
+  name, when exactly one exists (found with the bundled ripgrep).
+- `message_chat new` accepts every window label it prints itself: the folder name, the full
+  path, the window id or its 8-character prefix.
+- The shell guard judges a `name=$(…)` assignment by the command inside it, so a read-only
+  `f=$(ls … | head -1)` is no longer refused; a real write into Forge's own files still is.
+- `read_tool_result` accepts the id prefixes and tool-row message indexes it prints, and caps
+  `max_matches` at 10.
+- `ask_local_agent` refuses Claude and Codex targets (aliases included) and names `ask_agent`;
+  the `load_skill` and notebook descriptions and errors say what to use instead.
+- Temporary, for the tool audit: `~/.forge/policy.yaml` can set `clanker.default_on_until` so new
+  chats start with Clanker on until that time. The notice is shown in the chat but never sent to
+  the model. This will be removed before the next public release.
+
 ## 0.17.140
 
 - A tool given a file that does not exist answers "nothing exists there", with the base the path
