@@ -11,12 +11,14 @@ import { RemoteContactStore } from './RemoteContactStore';
 import { ContactInstructionsLoader } from './ContactInstructionsLoader';
 import { TelegramContactService } from './TelegramContactService';
 import { RemoteLeaseError, RemoteTransportLease } from './RemoteTransportLease';
+import { clearOwnReloadReservation, reservedForAnotherWorkspace } from './remoteReloadReservation';
 import type { RemoteChannel, RemoteRuntimeOptions } from './types';
 import { RemoteAuditLog } from './RemoteAuditLog';
 import { subscribeHostToRemote, type HostSubscriptions } from './remoteHostSubscriptions';
 import { JobOutboxWatcher } from './JobOutboxWatcher';
 import { deliverOwnerNotification } from './ownerNotification';
 import { defaultOutboxDir } from '../jobs/JobOutbox';
+import { getLogger } from '../util/logger';
 import {
   buildRemoteControllerOptions,
   type RemoteControllerOptionsDeps,
@@ -134,9 +136,20 @@ export class RemoteTransportManager {
       );
       return;
     }
+    const leaseDirectory = path.join(this.options.storageDirectory, 'remote-leases');
+    const reservation = await reservedForAnotherWorkspace(
+      leaseDirectory,
+      channelName,
+      this.options.workspaceId,
+    );
+    if (reservation) {
+      throw new RemoteLeaseError(
+        `Forge lease "${channelName}" is held for a window that is reloading (until ${new Date(reservation.expiresAt).toISOString()}).`,
+      );
+    }
     await this.store.reconcileDeadClaims();
     const lease = await RemoteTransportLease.acquire({
-      directory: path.join(this.options.storageDirectory, 'remote-leases'),
+      directory: leaseDirectory,
       key: channelName,
       workspaceId: this.options.workspaceId,
       instanceId: this.instanceId,
@@ -149,6 +162,13 @@ export class RemoteTransportManager {
         );
       },
     });
+    await clearOwnReloadReservation(leaseDirectory, channelName, this.options.workspaceId).catch(
+      (err: unknown) => {
+        getLogger().warn(
+          `[remote] could not clear the Telegram reload reservation: ${String(err)}`,
+        );
+      },
+    );
     this.store.setClaimOwner(channelName, lease.claimIdentity());
     let voice: VoiceBridgeBundle | undefined;
     const abort = new AbortController();

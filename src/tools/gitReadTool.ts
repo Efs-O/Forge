@@ -88,7 +88,7 @@ export function makeGitReadTool(
             cwd: {
               type: 'string',
               description:
-                'Workspace-relative directory or file used to select the repository. Required when multiple repositories are open. cwd selects the repository; file paths select the containing repository. Relative paths resolve against the first workspace folder; the repo you are working in may be nested inside it.',
+                'Directory (or file) that selects the repository: absolute, or relative to the workspace root. Required when multiple repositories are open; the repo you are working in may be nested inside the workspace.',
             },
             ref: {
               type: 'string',
@@ -98,7 +98,7 @@ export function makeGitReadTool(
             path: {
               type: 'string',
               description:
-                'blame: File path (absolute or workspace-relative). diff: Limit diff to this file path. Optional.',
+                'blame: the file. diff: limits the diff to this file; optional. Absolute, or relative: with cwd, relative to cwd, and a path that already starts with cwd is read from the workspace root.',
             },
             max_entries: { type: 'integer', description: 'Max commits to return. Default 20.' },
             branch: { type: 'string', description: 'Branch or ref to log. Optional.' },

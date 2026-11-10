@@ -1,5 +1,15 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+- Code search skips files whose first 8000 bytes contain a NUL byte, preventing PDFs and other binary data from entering the text index.
+- `message_chat` now explains when a target resembles a chat id but has an invalid format.
+- Code intelligence now opens cold files in a background tab so TypeScript diagnostics and quick fixes can load before results are read.
+- Telegram `/reload` reserves the chat for the restarting window until it reacquires the lease.
+- Git tools now resolve cwd and file paths consistently across nested repositories, preventing wrong-repository results and pathspec failures.
+- After an elevated shell command, the note now tells the agent to batch admin steps into one script, keep its log readable, and grant service rights once, so the owner sees fewer admin prompts.
+- On Windows, the shell tool description now says when to elevate and how to keep it to one admin prompt, so the agent gets it right before the first prompt.
+
 ## 0.17.152
 
 - Code action refusals now name applicable titles, and cold files briefly wait for diagnostics before requesting quick fixes.

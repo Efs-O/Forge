@@ -187,6 +187,9 @@ function definition(windows: boolean, shell: ShellKind): ToolDefinition {
         ' Search or filter many files in ONE command (rg, globs, pipes), not one call per file. Destructive commands require approval; unsafe commands are refused.' +
         (windows && shell === 'bash'
           ? " bash's /tmp is not where node or other Windows programs look for /tmp: put scratch files in a workspace-relative directory."
+          : '') +
+        (windows
+          ? ' Admin (UAC) prompts need the owner at the PC: elevate only for drivers, services, HKLM or Program Files, put every admin step in one script, and have it log to the workspace or C:\\Users\\Public, never C:\\Windows\\Temp.'
           : ''),
       parameters: {
         type: 'object',

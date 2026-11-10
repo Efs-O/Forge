@@ -3,22 +3,54 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   openTextDocument: vi.fn(),
   executeCommand: vi.fn(),
+  getDiagnostics: vi.fn(),
+  onDidChangeDiagnostics: vi.fn(),
+  diagnosticListener: undefined as ((event: { uris: Array<{ toString(): string }> }) => void) | undefined,
+  hostHasTabApi: false,
+  tabs: [] as Array<{ input: { uri: { toString(): string } } }>,
+  showTextDocument: vi.fn(),
+  closeTab: vi.fn(),
 }));
 
-vi.mock('vscode', () => ({
-  Position: class Position {
-    constructor(readonly line: number, readonly character: number) {}
-  },
-  workspace: {
-    openTextDocument: mocks.openTextDocument,
-    asRelativePath: (uri: { fsPath: string }) => uri.fsPath.replace('N:/workspace/', ''),
-  },
-  commands: { executeCommand: mocks.executeCommand },
-  SymbolKind: { 11: 'Function' },
-}));
+vi.mock('vscode', () => {
+  class TabInputText {
+    constructor(readonly uri: { toString(): string }) {}
+  }
+  return {
+    Position: class Position {
+      constructor(readonly line: number, readonly character: number) {}
+    },
+    TabInputText,
+    ViewColumn: { Active: -1 },
+    window: {
+      get tabGroups() {
+        return mocks.hostHasTabApi ? {
+          get all() { return [{ tabs: mocks.tabs }]; },
+          close: mocks.closeTab,
+        } : undefined;
+      },
+      showTextDocument: mocks.showTextDocument,
+    },
+    workspace: {
+      openTextDocument: mocks.openTextDocument,
+      asRelativePath: (uri: { fsPath: string }) => uri.fsPath.replace('N:/workspace/', ''),
+    },
+    languages: {
+      getDiagnostics: mocks.getDiagnostics,
+      onDidChangeDiagnostics: mocks.onDidChangeDiagnostics,
+    },
+    commands: { executeCommand: mocks.executeCommand },
+    SymbolKind: { 11: 'Function' },
+    DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
+  };
+});
 
 vi.mock('../../src/util/WorkspacePaths', () => ({
-  resolveWorkspaceUri: (file: string) => ({ fsPath: `N:/workspace/${file}` }),
+  resolveWorkspaceUri: (file: string) => {
+    const uri = { fsPath: `N:/workspace/${file}` };
+    Object.defineProperty(uri, 'toString', { value: () => `file:///N:/workspace/${file}` });
+    return uri;
+  },
 }));
 
 vi.mock('../../src/tools/symbolSearch', async (importOriginal) => {
@@ -32,6 +64,7 @@ vi.mock('../../src/tools/symbolSearch', async (importOriginal) => {
   };
 });
 import { makeCodeIntelTool } from '../../src/tools/codeIntelTool';
+import * as vscode from 'vscode';
 import {
   makeFindImplementationsTool,
   makeFindReferencesTool,
@@ -57,7 +90,20 @@ describe('code_intel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.executeCommand.mockResolvedValue(undefined);
-    mocks.openTextDocument.mockImplementation(async () => sourceDocument(positionFixture));
+    mocks.getDiagnostics.mockReturnValue([]);
+    mocks.hostHasTabApi = false;
+    mocks.tabs.splice(0);
+    mocks.showTextDocument.mockImplementation(async (document: { uri: { toString(): string } }) => {
+      const tab = { input: new (vscode.TabInputText as unknown as new (uri: { toString(): string }) => object)(document.uri) };
+      mocks.tabs.push(tab as typeof mocks.tabs[number]);
+      return { document };
+    });
+    mocks.openTextDocument.mockImplementation(async (uri: unknown) => ({ ...sourceDocument(positionFixture), uri, isDirty: false }));
+    mocks.closeTab.mockClear();
+    mocks.onDidChangeDiagnostics.mockImplementation((listener: typeof mocks.diagnosticListener) => {
+      mocks.diagnosticListener = listener ?? undefined;
+      return { dispose: vi.fn() };
+    });
   });
 
   it('advertises one strict operation-enum schema', () => {
@@ -114,6 +160,51 @@ describe('code_intel', () => {
       'No symbol at fixture.ts line 9 character 0 (zero-based): the file has 4 lines, numbered 0 to 3.',
     );
     expect(mocks.executeCommand).not.toHaveBeenCalled();
+  });
+
+  it('gives the exact path diagnostic timeout note after opening a tab', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.hostHasTabApi = true;
+      const request = makeCodeIntelTool().handler({ operation: 'diagnostics', path: 'fixture.ts' });
+      await Promise.resolve();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(4_000);
+      await expect(request).resolves.toBe(
+        "No diagnostics reported for fixture.ts after Forge opened it in an editor tab and waited 4 s. If you expect errors, ask again in a few seconds or run the project's type checker with shell.",
+      );
+      expect(mocks.showTextDocument).toHaveBeenCalledOnce();
+      expect(mocks.closeTab).toHaveBeenCalledWith(mocks.tabs[0], true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('formats existing path diagnostics and leaves an existing tab alone', async () => {
+    mocks.hostHasTabApi = true;
+    const uri = { toString: () => 'file:///N:/workspace/fixture.ts' };
+    mocks.tabs.push({ input: new (vscode.TabInputText as unknown as new (uri: typeof uri) => object)(uri) as typeof mocks.tabs[number]['input'] });
+    mocks.getDiagnostics.mockReturnValue([{
+      range: { start: { line: 2 } },
+      severity: vscode.DiagnosticSeverity.Error,
+      code: 'TS2307',
+      message: 'Cannot find module',
+    }]);
+    await expect(makeCodeIntelTool().handler({ operation: 'diagnostics', path: 'fixture.ts' })).resolves.toBe(
+      'fixture.ts:3: error TS2307: Cannot find module',
+    );
+    expect(mocks.showTextDocument).not.toHaveBeenCalled();
+    expect(mocks.closeTab).not.toHaveBeenCalled();
+  });
+
+  it('keeps the stub-host diagnostics behavior when tab APIs are absent', async () => {
+    mocks.hostHasTabApi = false;
+    await expect(makeCodeIntelTool().handler({ operation: 'diagnostics', path: 'fixture.ts' })).resolves.toBe(
+      'No diagnostics found.',
+    );
+    expect(mocks.openTextDocument).toHaveBeenCalledOnce();
+    expect(mocks.showTextDocument).not.toHaveBeenCalled();
+    expect(mocks.closeTab).not.toHaveBeenCalled();
   });
 
   it.each([

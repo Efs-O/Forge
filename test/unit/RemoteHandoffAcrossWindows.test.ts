@@ -18,9 +18,17 @@ import { FakeRemoteChannel } from '../../src/remote/FakeRemoteChannel';
 import { RemoteHandoffCoordinator } from '../../src/remote/RemoteHandoffCoordinator';
 import { RemoteRequestStore } from '../../src/remote/RemoteRequestStore';
 import { RemoteRuntime } from '../../src/remote/RemoteRuntime';
-import { claimWorkspaceArrivals, createAnnounceGate } from '../../src/remote/remoteWorkspaceSwitch';
+import {
+  claimWorkspaceArrivals,
+  comeBackIntoService,
+  createAnnounceGate,
+} from '../../src/remote/remoteWorkspaceSwitch';
 import { RemoteTransportLease } from '../../src/remote/RemoteTransportLease';
 import { RemoteTransportManager } from '../../src/remote/RemoteTransportManager';
+import {
+  RELOAD_RESERVATION_MS,
+  writeReloadReservation,
+} from '../../src/remote/remoteReloadReservation';
 import { workspaceIdFor } from '../../src/remote/RemoteWorkspaceHandoff';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
 
@@ -127,6 +135,94 @@ function runtime(
 // audit validation) a 2 s deadline missed a handoff that did arrive. A lost
 // handoff never arrives at all, so a longer deadline hides no race.
 describe('workspace handoff between two live windows', { timeout: 30_000 }, () => {
+  it('refuses a live reservation before reconciling or acquiring the lease', async () => {
+    const directory = await storageDirectory();
+    const leaseDirectory = path.join(directory, 'remote-leases');
+    await writeReloadReservation(leaseDirectory, 'telegram', 'workspace-x');
+    const { expiresAt } = JSON.parse(
+      await fs.readFile(path.join(leaseDirectory, 'telegram.reload-reservation.json'), 'utf8'),
+    ) as { expiresAt: number };
+    const reconcile = vi.spyOn(RemoteRequestStore.prototype, 'reconcileDeadClaims');
+    const acquire = vi.spyOn(RemoteTransportLease, 'acquire');
+    const target = runtime(directory, new FakeRemoteChannel(), { workspaceId: 'workspace-y' });
+
+    try {
+      let refusal = '';
+      try {
+        await target.applyConfig(config());
+      } catch (error) {
+        refusal = error instanceof Error ? error.message : String(error);
+      }
+      expect(refusal).toBe(
+        `Forge lease "telegram" is held for a window that is reloading (until ${new Date(expiresAt).toISOString()}).`,
+      );
+      expect(reconcile).not.toHaveBeenCalled();
+      expect(acquire).not.toHaveBeenCalled();
+    } finally {
+      reconcile.mockRestore();
+      acquire.mockRestore();
+      await target.dispose();
+    }
+  });
+
+  it('lets the reserving workspace acquire and clears its reservation', async () => {
+    const directory = await storageDirectory();
+    const leaseDirectory = path.join(directory, 'remote-leases');
+    await writeReloadReservation(leaseDirectory, 'telegram', 'workspace');
+    const target = runtime(directory, new FakeRemoteChannel());
+
+    try {
+      await target.applyConfig(config());
+      expect(target.activeTransports()).toEqual(['telegram']);
+      await expect(
+        fs.readFile(path.join(leaseDirectory, 'telegram.reload-reservation.json')),
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await target.dispose();
+    }
+  });
+
+  it('lets another workspace acquire after the reservation expires', async () => {
+    const directory = await storageDirectory();
+    const leaseDirectory = path.join(directory, 'remote-leases');
+    await writeReloadReservation(
+      leaseDirectory,
+      'telegram',
+      'workspace-x',
+      Date.now() - RELOAD_RESERVATION_MS - 1,
+    );
+    const target = runtime(directory, new FakeRemoteChannel(), { workspaceId: 'workspace-y' });
+
+    try {
+      await target.applyConfig(config());
+      expect(target.activeTransports()).toEqual(['telegram']);
+    } finally {
+      await target.dispose();
+    }
+  });
+
+  it('does not attempt a lease during come-back while another workspace is reserved', async () => {
+    const directory = await storageDirectory();
+    await writeReloadReservation(path.join(directory, 'remote-leases'), 'telegram', 'workspace-x');
+    const acquire = vi.spyOn(RemoteTransportLease, 'acquire');
+    try {
+      await comeBackIntoService(
+        {
+          workspaceId: 'workspace-y',
+          globalStoragePath: directory,
+          requestedConfig: () => config(),
+          isDisposed: () => false,
+          activeTransports: () => [],
+        } as never,
+        { signal: new AbortController().signal },
+      );
+
+      expect(acquire).not.toHaveBeenCalled();
+    } finally {
+      acquire.mockRestore();
+    }
+  });
+
   it('claims a chat handed to a window that is already running', async () => {
     const directory = await storageDirectory();
     const channel = new FakeRemoteChannel();

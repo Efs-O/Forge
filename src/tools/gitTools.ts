@@ -5,13 +5,11 @@
  * confirmation-gated, and keeping them together makes that boundary visible.
  */
 
-import * as path from 'path';
 import type { RegisteredTool } from './ToolRegistry';
 import {
-  getRepo,
-  getRepoForPaths,
   readLiveGitStatus,
-  resolveFilePath,
+  resolveGitPath,
+  resolveGitRequest,
   repoRelative,
   runGit,
   type GitRepoHandle,
@@ -20,7 +18,7 @@ import {
 const cwdParameter = {
   type: 'string',
   description:
-    'Workspace-relative directory or file used to select the repository. Required when multiple repositories are open.',
+    'Directory (or file) that selects the repository: absolute, or relative to the workspace root. Required when multiple repositories are open; the repo you are working in may be nested inside the workspace.',
 } as const;
 
 export function makeCreateBranchTool(): RegisteredTool {
@@ -44,7 +42,7 @@ export function makeCreateBranchTool(): RegisteredTool {
     },
     permission: 'git-write',
     handler: async (args) => {
-      const repo = await getRepo(args['cwd'] as string | undefined);
+      const { repo } = await resolveGitRequest('create_branch', args['cwd'] as string | undefined);
       const name = validateBranchName('create_branch', args['name'] as string);
       const from = args['from'] as string | undefined;
       if (from !== undefined) validateStartPoint(from);
@@ -78,7 +76,7 @@ export function makeSwitchBranchTool(): RegisteredTool {
     },
     permission: 'git-write',
     handler: async (args) => {
-      const repo = await getRepo(args['cwd'] as string | undefined);
+      const { repo } = await resolveGitRequest('switch_branch', args['cwd'] as string | undefined);
       const name = validateBranchName('switch_branch', args['name'] as string);
       // The trailing `--` with nothing after it forces <name> to be read as a
       // revision. Without it, `git checkout <name>` restores a *file* of that
@@ -106,12 +104,13 @@ export function makeStageTool(): RegisteredTool {
             paths: {
               type: 'array',
               items: { type: 'string' },
-              description: 'File paths to stage (absolute or workspace-relative).',
+              description:
+                'File paths. Absolute, or relative: with cwd, relative to cwd, and a path that already starts with cwd is read from the workspace root.',
             },
             cwd: {
               type: 'string',
               description:
-                'Workspace-relative directory that relative paths are resolved from (for example the root of a nested repository). Omit it to resolve paths from the workspace root.',
+                'Directory of the repository: absolute, or relative to the workspace root. Relative paths resolve from it. Omit it to resolve paths from the workspace root.',
             },
           },
           required: ['paths'],
@@ -122,15 +121,9 @@ export function makeStageTool(): RegisteredTool {
     permission: 'git-write',
     handler: async (args) => {
       const requestedPaths = args['paths'] as string[];
+      if (requestedPaths.length === 0) throw new Error('git_stage: at least one path is required');
       const cwd = args['cwd'] as string | undefined;
-      const base = cwd === undefined ? undefined : resolveFilePath(cwd);
-      const resolvedPaths = requestedPaths.map((filePath) =>
-        base !== undefined && !path.isAbsolute(filePath) ? path.resolve(base, filePath) : filePath,
-      );
-      const repo = await getRepoForPaths(
-        requestedPaths,
-        base === undefined ? {} : { base, cwd: base },
-      );
+      const { repo, paths: resolvedPaths } = await resolveGitRequest('stage', cwd, requestedPaths);
       const relativePaths = resolvedPaths.map((filePath) => repoRelative(repo, filePath));
       await runGit(repo, ['add', '--', ...relativePaths]);
 
@@ -190,7 +183,8 @@ export function makeRestoreFileTool(): RegisteredTool {
             paths: {
               type: 'array',
               items: { type: 'string' },
-              description: 'File paths to restore (absolute or workspace-relative).',
+              description:
+                'File paths. Absolute, or relative: with cwd, relative to cwd, and a path that already starts with cwd is read from the workspace root.',
             },
             ref: {
               type: 'string',
@@ -201,7 +195,7 @@ export function makeRestoreFileTool(): RegisteredTool {
             cwd: {
               type: 'string',
               description:
-                'Workspace-relative directory that relative paths are resolved from and that selects the repository.',
+                'Directory of the repository: absolute, or relative to the workspace root. Relative paths resolve from it. Omit it to resolve paths from the workspace root.',
             },
           },
           required: ['paths'],
@@ -213,12 +207,7 @@ export function makeRestoreFileTool(): RegisteredTool {
     mutation: {
       paths: (args) => {
         const cwd = args['cwd'] as string | undefined;
-        const base = cwd === undefined ? undefined : resolveFilePath(cwd);
-        return (args['paths'] as string[]).map((filePath) =>
-          base !== undefined && !path.isAbsolute(filePath)
-            ? path.resolve(base, filePath)
-            : filePath,
-        );
+        return (args['paths'] as string[]).map((filePath) => resolveGitPath(filePath, cwd));
       },
       showDiff: true,
     },
@@ -237,17 +226,14 @@ export function makeRestoreFileTool(): RegisteredTool {
     handler: async (args) => {
       const requestedPaths = args['paths'] as string[];
       const cwd = args['cwd'] as string | undefined;
-      const base = cwd === undefined ? undefined : resolveFilePath(cwd);
       if (!Array.isArray(requestedPaths) || requestedPaths.length === 0) {
         throw new Error('restore_file: at least one path is required');
       }
       const ref = validateRef('restore_file', (args['ref'] as string | undefined) ?? 'HEAD');
-      const repo = await getRepoForPaths(
+      const { repo, paths: resolvedPaths } = await resolveGitRequest(
+        'restore_file',
+        cwd,
         requestedPaths,
-        base === undefined ? {} : { base, cwd: base },
-      );
-      const resolvedPaths = requestedPaths.map((filePath) =>
-        base !== undefined && !path.isAbsolute(filePath) ? path.resolve(base, filePath) : filePath,
       );
       const relativePaths = resolvedPaths.map((filePath) => repoRelative(repo, filePath));
       await runGit(repo, ['checkout', ref, '--', ...relativePaths]);
@@ -287,9 +273,7 @@ export function makeCommitTool(): RegisteredTool {
     permission: 'git-write',
     handler: async (args) => {
       const cwd = args['cwd'] as string | undefined;
-      const repo = await getRepo(cwd, {
-        ...(cwd === undefined ? {} : { cwd: resolveFilePath(cwd) }),
-      });
+      const { repo } = await resolveGitRequest('commit', cwd);
       const message = args['message'] as string;
       const amend = args['amend'] === true;
       const staged = (await readLiveGitStatus(repo)).some(

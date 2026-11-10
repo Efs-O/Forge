@@ -24,10 +24,14 @@ import { disposeLocalLlamaFetch } from '../llm/localLlamaFetch';
 import type { JobStore } from '../jobs/JobStore';
 import type { SidebarProvider } from '../sidebar/SidebarProvider';
 import { getLogger } from '../util/logger';
+import {
+  clearOwnReloadReservation,
+  reloadForTelegram,
+  writeReloadReservation,
+} from '../remote/remoteReloadReservation';
 
 const log = getLogger();
 const RELOAD_NOTICE_KEY = 'forge.remote.telegramReloadNotice';
-const RELOAD_NOTICE_TTL_MS = 5 * 60_000;
 
 /**
  * Build and start the remote runtime: the channel factories (Telegram from
@@ -160,25 +164,27 @@ export async function setupRemoteRuntime(
       await remoteRuntime.applyConfig(next);
     },
     reloadWindow: async (telegramChatId) => {
-      try {
-        if (telegramChatId) {
-          await context.workspaceState.update(RELOAD_NOTICE_KEY, {
-            chatId: telegramChatId,
-            expiresAt: Date.now() + RELOAD_NOTICE_TTL_MS,
-          });
-        }
-        await executeWindowReloadCommand();
-      } catch (error) {
-        if (telegramChatId) {
-          await context.workspaceState
-            .update(RELOAD_NOTICE_KEY, undefined)
-            .then(undefined, (err) => {
-              log.warn(`[remote] could not clear Telegram reload notice: ${String(err)}`);
-            });
-        }
-        log.error(`[remote] window reload failed: ${String(error)}`);
-        void vscode.window.showErrorMessage(`Forge window reload failed: ${String(error)}`);
-      }
+      await reloadForTelegram({
+        ...(telegramChatId ? { telegramChatId } : {}),
+        setReloadNotice: async (chatId, expiresAt) =>
+          context.workspaceState.update(RELOAD_NOTICE_KEY, { chatId, expiresAt }),
+        clearReloadNotice: async () => context.workspaceState.update(RELOAD_NOTICE_KEY, undefined),
+        writeReservation: () =>
+          writeReloadReservation(
+            path.join(context.globalStorageUri.fsPath, 'remote-leases'),
+            'telegram',
+            workspaceId,
+          ),
+        clearReservation: () =>
+          clearOwnReloadReservation(
+            path.join(context.globalStorageUri.fsPath, 'remote-leases'),
+            'telegram',
+            workspaceId,
+          ),
+        executeWindowReloadCommand,
+        log,
+        showErrorMessage: (message) => void vscode.window.showErrorMessage(message),
+      });
     },
     openWorkspace: async (directory, forceNewWindow) => {
       // `forceNewWindow` is what makes `new-window` a second window instead of

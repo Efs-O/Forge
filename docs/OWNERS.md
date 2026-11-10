@@ -309,6 +309,7 @@ overlaps with an existing owner, extend the owner instead.
 | Extension-scoped transport lifecycle          | `src/remote/RemoteRuntime.ts`                   |
 | A config reload that keeps the transports up  | `src/remote/remoteRuntimeInPlaceUpdate.ts`      |
 | Transport start/stop, lease takeover          | `src/remote/RemoteTransportManager.ts`          |
+| Telegram window reload reservation and `/reload` recovery | `src/remote/remoteReloadReservation.ts` |
 | Retry timer + policy for failed remote starts | `src/remote/RemoteStartRetry.ts`                |
 | `/workspace` move, run after the cursor save  | `src/remote/remoteWorkspaceSwitch.ts`           |
 | One window record per VS Code window, and the open-window count | `src/remote/RemoteWindowRegistry.ts`       |

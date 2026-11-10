@@ -11,6 +11,9 @@ const mocks = vi.hoisted(() => {
     diagnosticListener: undefined as ((event: { uris: Array<{ toString(): string }> }) => void) | undefined,
     disposeDiagnosticsListener: vi.fn(),
     executeCommand: vi.fn(),
+    tabs: [] as Array<{ input: { uri: typeof canonicalUri } }>,
+    showTextDocument: vi.fn(),
+    closeTab: vi.fn(),
     applyAndSaveWorkspaceEdit: vi.fn(),
     describePosition: vi.fn(),
     primeSymbolAtPosition: vi.fn(async () => ({ name: 'sumPricesC1', files: [] })),
@@ -30,11 +33,23 @@ vi.mock('vscode', () => {
       return { scheme: 'file', fsPath, toString: () => `file://${fsPath}` };
     }
   }
+  class TabInputText {
+    constructor(readonly uri: typeof mocks.canonicalUri) {}
+  }
   return {
     Position,
     Range,
     Uri,
     workspace: { openTextDocument: mocks.openTextDocument, textDocuments: mocks.textDocuments },
+    TabInputText,
+    ViewColumn: { Active: -1 },
+    window: {
+      tabGroups: {
+        get all() { return [{ tabs: mocks.tabs }]; },
+        close: mocks.closeTab,
+      },
+      showTextDocument: mocks.showTextDocument,
+    },
     commands: { executeCommand: mocks.executeCommand },
     languages: {
       getDiagnostics: mocks.getDiagnostics,
@@ -89,7 +104,16 @@ describe('language-service tools pass the opened document URI', () => {
     vi.clearAllMocks();
     mocks.openTextDocument.mockImplementation(async (uri: unknown) => ({ uri }));
     mocks.textDocuments.splice(0, mocks.textDocuments.length, { uri: mocks.canonicalUri });
-    mocks.getDiagnostics.mockReturnValue([]);
+    const TextTabInput = vscode.TabInputText as unknown as new (uri: typeof mocks.canonicalUri) => object;
+    mocks.tabs.splice(0, mocks.tabs.length, {
+      input: new TextTabInput(mocks.canonicalUri) as typeof mocks.tabs[number]['input'],
+    });
+    mocks.showTextDocument.mockImplementation(async (document: { uri: typeof mocks.canonicalUri }) => {
+      const tab = { input: new (vscode.TabInputText as unknown as new (uri: typeof mocks.canonicalUri) => object)(document.uri) };
+      mocks.tabs.push(tab as typeof mocks.tabs[number]);
+      return { document };
+    });
+    mocks.getDiagnostics.mockReturnValue([{ message: 'existing problem' }]);
     mocks.onDidChangeDiagnostics.mockImplementation((listener: typeof mocks.diagnosticListener) => {
       mocks.diagnosticListener = listener ?? undefined;
       return { dispose: mocks.disposeDiagnosticsListener };
@@ -133,7 +157,8 @@ describe('language-service tools pass the opened document URI', () => {
 
   it('waits for diagnostics on a cold file before requesting code actions', async () => {
     mocks.textDocuments.splice(0);
-    mocks.getDiagnostics.mockReturnValue([]);
+    mocks.tabs.splice(0);
+    mocks.getDiagnostics.mockReturnValueOnce([]).mockReturnValueOnce([]).mockReturnValue([{ message: 'problem' }]);
     mocks.executeCommand.mockResolvedValue([{ title: 'Add declaration' }]);
     const request = makeCodeIntelTool().handler({
       operation: 'code_actions',
@@ -148,16 +173,24 @@ describe('language-service tools pass the opened document URI', () => {
     mocks.diagnosticListener?.({ uris: [{ toString: () => 'file:///other.ts' }] });
     expect(mocks.executeCommand).not.toHaveBeenCalled();
     mocks.diagnosticListener?.({ uris: [mocks.canonicalUri] });
+    expect(mocks.executeCommand).not.toHaveBeenCalled();
+    mocks.diagnosticListener?.({ uris: [mocks.canonicalUri] });
 
     await expect(request).resolves.toBe('{"actions":[{"title":"Add declaration","has_edit":false}]}');
     expect(mocks.executeCommand).toHaveBeenCalledOnce();
     expect(mocks.disposeDiagnosticsListener).toHaveBeenCalledOnce();
+    expect(mocks.showTextDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ uri: mocks.canonicalUri }),
+      { preview: false, preserveFocus: true, viewColumn: vscode.ViewColumn.Active },
+    );
+    expect(mocks.closeTab).toHaveBeenCalledWith(mocks.tabs[0], true);
   });
 
   it('adds the cold-file note after diagnostics wait timeout and disposes the listener', async () => {
     vi.useFakeTimers();
     try {
       mocks.textDocuments.splice(0);
+      mocks.tabs.splice(0);
       mocks.getDiagnostics.mockReturnValue([]);
       mocks.executeCommand.mockResolvedValue([{ title: 'Move to file' }]);
       const request = makeCodeIntelTool().handler({
@@ -169,18 +202,21 @@ describe('language-service tools pass the opened document URI', () => {
       await Promise.resolve();
       await Promise.resolve();
       expect(mocks.executeCommand).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(4_000);
 
       await expect(request).resolves.toBe(
-        '{"actions":[{"title":"Move to file","has_edit":false}],"note":"No problems are reported for this file yet, so quick fixes (such as adding a missing import) may be missing. If you expect one, open_file the file and ask again."}',
+        '{"actions":[{"title":"Move to file","has_edit":false}],"note":"No problems are reported for this file even after Forge opened it in an editor tab and waited 4 s, so quick fixes (such as adding a missing import) may be missing. Ask again in a few seconds, or make the change with edit_file."}',
       );
       expect(mocks.disposeDiagnosticsListener).toHaveBeenCalledOnce();
+      expect(mocks.showTextDocument).toHaveBeenCalledOnce();
+      expect(mocks.closeTab).toHaveBeenCalledWith(mocks.tabs[0], true);
     } finally {
       vi.useRealTimers();
     }
   });
 
   it('does not wait or add a note for an already-open file', async () => {
+    mocks.getDiagnostics.mockReturnValue([{ message: 'problem' }]);
     mocks.executeCommand.mockResolvedValue([{ title: 'Fix typo' }]);
 
     await expect(
@@ -192,6 +228,45 @@ describe('language-service tools pass the opened document URI', () => {
       }),
     ).resolves.toBe('{"actions":[{"title":"Fix typo","has_edit":false}]}');
     expect(mocks.onDidChangeDiagnostics).not.toHaveBeenCalled();
+    expect(mocks.showTextDocument).not.toHaveBeenCalled();
+    expect(mocks.closeTab).not.toHaveBeenCalled();
+  });
+
+  it('waits through an empty diagnostics event until a non-empty event arrives', async () => {
+    mocks.tabs.splice(0);
+    mocks.getDiagnostics.mockReturnValueOnce([]).mockReturnValueOnce([]).mockReturnValue([{ message: 'missing import' }]);
+    mocks.executeCommand.mockResolvedValue([{ title: 'Add import' }]);
+    const request = makeCodeIntelTool().handler({ operation: 'code_actions', path: 'src/file.ts', line: 0, character: 0 });
+    await Promise.resolve();
+    await Promise.resolve();
+    mocks.diagnosticListener?.({ uris: [mocks.canonicalUri] });
+    expect(mocks.executeCommand).not.toHaveBeenCalled();
+    mocks.diagnosticListener?.({ uris: [mocks.canonicalUri] });
+    await expect(request).resolves.toContain('Add import');
+    expect(mocks.showTextDocument).toHaveBeenCalledOnce();
+    expect(mocks.closeTab).toHaveBeenCalledWith(expect.anything(), true);
+  });
+
+  it('does not close a tab when opening the document made it dirty', async () => {
+    mocks.tabs.splice(0);
+    mocks.openTextDocument.mockResolvedValue({ uri: mocks.canonicalUri, isDirty: true });
+    mocks.getDiagnostics.mockReturnValue([{ message: 'present' }]);
+    await makeCodeIntelTool().handler({ operation: 'code_actions', path: 'src/file.ts', line: 0, character: 0 });
+    expect(mocks.closeTab).not.toHaveBeenCalled();
+  });
+
+  it('keeps the tab open until apply_code_action has saved the edit', async () => {
+    mocks.tabs.splice(0);
+    mocks.getDiagnostics.mockReturnValue([{ message: 'present' }]);
+    mocks.executeCommand.mockResolvedValue([{ title: 'Fix', edit: {} }]);
+    const order: string[] = [];
+    mocks.applyAndSaveWorkspaceEdit.mockImplementation(async () => { order.push('save'); });
+    mocks.closeTab.mockImplementation(async () => { order.push('close'); });
+    await makeApplyCodeActionTool().handler(
+      { path: 'src/file.ts', line: 0, character: 0, title: 'Fix' },
+      { beforeMutate: vi.fn() },
+    );
+    expect(order).toEqual(['save', 'close']);
   });
 
   it('lists only applicable titles in provider order when an apply title is unmatched', async () => {

@@ -232,9 +232,14 @@ describe('shell scripts are classified from their file contents', () => {
     const tool = makeShellTool({ platform: 'win32', env: { PATH: '' } });
     const elevation = "Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -ArgumentList x";
     const elevatedResult = await tool.handler({ command: elevation }, { beforeMutate: () => {} });
-    expect(elevatedResult).toMatch(
-      /This started an elevated process; Windows asked the owner to confirm it\. Before starting another elevated process, tell the owner why\.$/u,
-    );
+    expect(
+      elevatedResult.endsWith(
+        '\nThis started an elevated process; Windows asked the owner to confirm it, and only the owner at the PC can. ' +
+          'Before starting another elevated process, tell the owner why, and: put every remaining admin step (drivers, services, HKLM, Program Files) in one script, so one prompt covers them; ' +
+          'have it write its log where this shell can read it (the workspace or C:\\Users\\Public, never C:\\Windows\\Temp) and read that log before running anything again; ' +
+          'and if the same service will need restarting again, grant the owner start and stop rights to it once (sc sdset), so later restarts need no prompt.',
+      ),
+    ).toBe(true);
     expect(tool.approval?.({ command: elevation })?.dangerous).not.toBe(true);
     const script = classifyShellCommand(
       'pwsh -File elevate.ps1',

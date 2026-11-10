@@ -303,9 +303,25 @@ export class IndexManager {
     try {
       const stat = await fs.stat(uri.fsPath);
       if (stat.size > this.maxFileSizeKb() * 1024) return null;
+      if (await this.hasBinaryPrefix(uri.fsPath, stat.size)) return null;
       return await vscode.workspace.openTextDocument(uri);
     } catch {
       return null;
+    }
+  }
+
+  private async hasBinaryPrefix(filePath: string, size: number): Promise<boolean> {
+    const handle = await fs.open(filePath, 'r');
+    try {
+      const prefix = Buffer.alloc(Math.min(size, 8_000));
+      if (prefix.length === 0) return false;
+      const { bytesRead } = await handle.read(prefix, 0, prefix.length, 0);
+      // Lab 23B PDFs reached the index as raw text. Git's binary heuristic treats
+      // NUL as binary; this checks only the first 8000 bytes. UTF-16 has NULs and
+      // is skipped too, while valid UTF-8 (including Greek and emoji) is kept.
+      return prefix.subarray(0, bytesRead).includes(0);
+    } finally {
+      await handle.close();
     }
   }
 

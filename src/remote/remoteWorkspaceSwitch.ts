@@ -28,6 +28,7 @@ import {
   type RemoteTransportManager,
 } from './RemoteTransportManager';
 import { RemoteLeaseError, RemoteTransportLease } from './RemoteTransportLease';
+import { reservedForAnotherWorkspace } from './remoteReloadReservation';
 import { currentWorkspaceIdentity, workspaceAliases } from './remoteControllerOptions';
 import { preflightRemoteWorkspaceSwitch } from './remoteWorkspacePreflight';
 import type { WorkspaceHandoff } from './RemoteStoreSchemas';
@@ -241,6 +242,7 @@ async function everyEnabledLeaseIsHeld(
   const directory = path.join(deps.globalStoragePath, 'remote-leases');
   for (const channelName of ['telegram', 'whatsapp'] as const) {
     if (config.remote?.[channelName].enabled !== true) continue;
+    if (await reservedForAnotherWorkspace(directory, channelName, deps.workspaceId)) continue;
     if (!(await RemoteTransportLease.isHeld({ directory, key: channelName }))) return false;
   }
   return true;

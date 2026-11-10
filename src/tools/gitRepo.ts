@@ -15,19 +15,86 @@
  */
 
 import * as path from 'path';
+import * as fs from 'fs';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import {
   canonicalPath,
+  containsPath,
   realPathLike,
   repoRootForLocation,
   repoRootForWorkspace,
   resolveFilePath,
+  workspaceRoot,
 } from './gitDiscovery';
 
 const execFileAsync = promisify(execFile);
 
 export { resolveFilePath };
+
+/** Resolve a Git path with the shared cwd/workspace spelling rules. */
+export function resolveGitPath(filePath: string, cwd?: string): string {
+  if (cwd === undefined || path.isAbsolute(filePath)) return resolveFilePath(filePath);
+  const resolvedCwd = resolveFilePath(cwd);
+  const cwdDirectory =
+    fs.existsSync(resolvedCwd) && fs.statSync(resolvedCwd).isFile()
+      ? path.dirname(resolvedCwd)
+      : resolvedCwd;
+  const workspacePath = resolveFilePath(filePath);
+  return containsPath(cwdDirectory, workspacePath)
+    ? workspacePath
+    : path.resolve(cwdDirectory, filePath);
+}
+
+/** Select a repository and resolve any supplied file paths using one policy. */
+export async function resolveGitRequest(
+  tool: string,
+  cwd?: string,
+  requestedPaths: readonly string[] = [],
+): Promise<{ repo: GitRepoHandle; paths: string[] }> {
+  let resolvedCwd: string | undefined;
+  let repo: GitRepoHandle;
+  if (cwd !== undefined) {
+    resolvedCwd = resolveFilePath(cwd);
+    if (!fs.existsSync(resolvedCwd)) {
+      throw new Error(
+        `${tool}: cwd "${cwd}" does not exist (resolved to ${resolvedCwd}). ` +
+          `A relative cwd resolves from the workspace root, ${workspaceRoot()}. ` +
+          "Pass the repository's directory, absolute or relative to that root.",
+      );
+    }
+    try {
+      repo = await getRepo(resolvedCwd);
+    } catch (cwdError) {
+      if (!requestedPaths.length) throw cwdError;
+      const cwdDirectory = fs.statSync(resolvedCwd).isFile()
+        ? path.dirname(resolvedCwd)
+        : resolvedCwd;
+      await getRepoForPaths(requestedPaths, { base: cwdDirectory, cwd: resolvedCwd });
+      throw cwdError;
+    }
+  } else if (requestedPaths.length) {
+    repo = await getRepoForPaths(requestedPaths);
+  } else {
+    repo = await getRepo();
+  }
+
+  const paths = requestedPaths.map((requestedPath) => resolveGitPath(requestedPath, cwd));
+  if (resolvedCwd !== undefined) {
+    for (let index = 0; index < paths.length; index++) {
+      const absolute = paths[index]!;
+      const pathRepo = containsPath(repo.root, absolute) ? await getRepo(absolute) : undefined;
+      if (pathRepo === undefined || canonicalPath(pathRepo.root) !== canonicalPath(repo.root)) {
+        const requestedPath = requestedPaths[index]!;
+        throw new Error(
+          `${tool}: path "${requestedPath}" resolves to ${absolute}, which is outside the repository that cwd "${cwd}" selects (${repo.root}). ` +
+            'Pass a path inside that repository, relative to cwd or to the workspace root.',
+        );
+      }
+    }
+  }
+  return { repo, paths };
+}
 
 /**
  * A selected repository.

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveWorkspaceUri } from '../util/WorkspacePaths';
+import { withDiagnosticsReady } from './codeActionTools';
 import { describePosition, primeSymbolAtPosition } from './symbolSearch';
 import {
   formatLocationResults,
@@ -23,7 +24,8 @@ import {
  * plain text search found the class on line 32.
  *
  * `openTextDocument` loads the document into the workspace without showing it
- * in an editor, which is what primes the provider.
+ * in an editor. TypeScript diagnostics and quick fixes need a tab; diagnostics
+ * use `withDiagnosticsReady` in codeActionTools.ts.
  */
 async function openForAnalysis(pathArg: string): Promise<vscode.Uri> {
   const uri = resolveWorkspaceUri(pathArg);
@@ -184,9 +186,14 @@ export function makeGetDiagnosticsTool(): RegisteredTool {
       context?.abortSignal?.throwIfAborted();
       const p = args['path'] as string | undefined;
       let pairs: [vscode.Uri, vscode.Diagnostic[]][];
+      let timedOutEmpty = false;
       if (p) {
         const uri = resolveWorkspaceUri(p);
-        pairs = [[uri, vscode.languages.getDiagnostics(uri)]];
+        const ready = await withDiagnosticsReady(uri, async () =>
+          vscode.languages.getDiagnostics(uri),
+        );
+        pairs = [[uri, ready.result]];
+        timedOutEmpty = ready.diagnosticsWaitTimedOut && ready.diagnosticsStillEmpty;
       } else {
         pairs = vscode.languages.getDiagnostics();
       }
@@ -205,7 +212,11 @@ export function makeGetDiagnosticsTool(): RegisteredTool {
           );
         }
       }
-      return lines.length ? lines.join('\n') : 'No diagnostics found.';
+      if (lines.length) return lines.join('\n');
+      if (timedOutEmpty) {
+        return `No diagnostics reported for ${p} after Forge opened it in an editor tab and waited 4 s. If you expect errors, ask again in a few seconds or run the project's type checker with shell.`;
+      }
+      return 'No diagnostics found.';
     },
   };
 }

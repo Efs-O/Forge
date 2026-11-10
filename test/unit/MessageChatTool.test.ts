@@ -392,6 +392,24 @@ describe('message_chat tool contract and handler', () => {
     expect(refused).toContain('agent_bus.enabled: true');
   });
 
+  it('includes the malformed id explanation in the complete listed refusal', async () => {
+    const { tool } = makeTool();
+    await expect(
+      tool.handler(
+        { action: 'send', to: '5883b8-6b42-4e7f-b77d-175aae1256ff', message: 'hi' },
+        context(),
+      ),
+    ).resolves.toBe(
+        'Error: No open chat matches "5883b8-6b42-4e7f-b77d-175aae1256ff": it looks like a chat id but is not one (a chat id is 8-4-4-4-12 hex digits, like 588357b8-6b42-4e7f-b77d-175aae1256ff). Copy the id exactly from the list below, or use the tab number (#N).\n' +
+        'No other Forge window can be reached from here: set `agent_bus.enabled: true` in .forge/config.yaml of both windows, or run this chat in the window that holds the chat.\n\n' +
+        'Chats in this window (you are #1):\n' +
+        '#1 · Sender · idle · strata-flash · id sender ← you\n' +
+        '#2 · Bug hunt · idle · strata-flash · id running\n' +
+        '#3 · Release notes · idle · id idle\n' +
+        'send: {"action":"send","to":"#2","message":"…"} — or omit "to" to reach the only other running chat.',
+    );
+  });
+
   it('reads a closed chat with `view` and marks the read closed', async () => {
     const { tool, sidebar } = makeTool(hostStatus({ archived: true }));
     const view = await tool.handler({ action: 'view', to: 'Old notes' }, context());

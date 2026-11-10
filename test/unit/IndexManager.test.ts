@@ -148,6 +148,39 @@ describe('IndexManager file freshness', () => {
     expect(buildSeeds).toHaveBeenCalledWith(expect.anything(), 'scope/new.ts', expect.any(Number), expect.anything(), expect.anything());
   });
 
+  it('skips PDF-like files whose first 8000 bytes contain a NUL', async () => {
+    const index = manager();
+    await fs.writeFile(path.join(root, 'report.pdf'), Buffer.from('%PDF-1.4\nstream\n\0binary data'));
+    files.push('report.pdf');
+
+    await index.reindex();
+
+    expect(embedDocuments).not.toHaveBeenCalled();
+  });
+
+  it('skips UTF-16 text because its byte prefix contains NULs', async () => {
+    const index = manager();
+    await fs.writeFile(path.join(root, 'utf16.txt'), Buffer.from('hello', 'utf16le'));
+    files.push('utf16.txt');
+
+    await index.reindex();
+
+    expect(embedDocuments).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['unicode.txt', Buffer.from('Καλημέρα 🌍', 'utf8')],
+    ['empty.txt', Buffer.alloc(0)],
+  ])('still opens eligible UTF-8 or empty file %s', async (name, content) => {
+    const index = manager();
+    await fs.writeFile(path.join(root, name), content);
+    files.push(name);
+
+    await index.reindex();
+
+    expect(embedDocuments).toHaveBeenCalledOnce();
+  });
+
   it('refreshes changed disk content and returns the new snippet', async () => {
     const index = manager();
     await fs.writeFile(path.join(root, 'changed.ts'), 'old text');

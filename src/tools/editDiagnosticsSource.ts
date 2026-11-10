@@ -70,6 +70,7 @@ export function vscodeDiagnosticsSource(): DiagnosticsSource | undefined {
      * reported on it" forever. `openTextDocument` loads it without showing it —
      * the same priming `lspTools.ts` does for symbols, hover and definitions,
      * which is where this came from.
+     * The edit tools already show the edited file in a tab through `ToolDispatch.ts`.
      *
      * Files outside every workspace folder are skipped: the services analyse
      * documents the workspace knows, and a target the tool reached through

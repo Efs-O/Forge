@@ -234,6 +234,46 @@ describe('resolveChatReference', () => {
       expect(result.candidates.map((chat) => chat.id)).toEqual(['bug-hunt-0002', 'notes-0003']);
     }
   });
+
+  it.each([
+    '5883b8-6b42-4e7f-b77d-175aae1256ff',
+    '588357b86b42-4e7f-b77d-175aae1256ff',
+  ])('identifies malformed chat id references exactly: %s', (ref) => {
+    const result = resolveChatReference(ref, chats, 'self-id-0001');
+    expect(result).toEqual({
+      ok: false,
+      reasonCode: 'unmatched',
+      reason: `No open chat matches "${ref}": it looks like a chat id but is not one (a chat id is 8-4-4-4-12 hex digits, like 588357b8-6b42-4e7f-b77d-175aae1256ff). Copy the id exactly from the list below, or use the tab number (#N).`,
+      candidates: chats.slice(1),
+    });
+  });
+
+  it.each([
+    '11111111-2222-3333-4444-555555555555',
+    'deploy notes',
+    '#9',
+    'abc-def',
+  ])('keeps the generic unmatched reason for %s', (ref) => {
+    const result = resolveChatReference(ref, chats, 'self-id-0001');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reasonCode).toBe('unmatched');
+      expect(result.reason).toBe(
+        `No open chat matches "${ref}". Choose a chat by its id, tab number (#N), or title words.`,
+      );
+    }
+  });
+
+  it.each(['588357b8', '588357b8-6b42'])('continues to resolve valid chat id prefixes: %s', (ref) => {
+    const values: ChatRef[] = [
+      ...chats.slice(0, 1),
+      { id: '588357b8-6b42-4e7f-b77d-175aae1256ff', title: 'Matching worker', position: 2, running: false },
+    ];
+    expect(resolveChatReference(ref, values, 'self-id-0001')).toMatchObject({
+      ok: true,
+      chat: values[1],
+    });
+  });
 });
 
 describe('formatChatList', () => {

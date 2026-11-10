@@ -43,6 +43,8 @@ const FILLER_WORDS = new Set([
   'running',
   'active',
 ]);
+const CHAT_ID_PATTERN = /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/iu;
+const EXAMPLE_CHAT_ID = '588357b8-6b42-4e7f-b77d-175aae1256ff';
 
 function normalizeReference(value: string): string {
   return value
@@ -166,16 +168,24 @@ export function resolveChatReference(
       candidates: others,
     };
   }
+  const trimmedRef = ref?.trim() ?? '';
+  const looksLikeMalformedChatId =
+    /^[\da-f-]+$/iu.test(trimmedRef) &&
+    trimmedRef.includes('-') &&
+    trimmedRef.length >= 20 &&
+    !CHAT_ID_PATTERN.test(trimmedRef);
   return {
     ok: false,
     reasonCode: 'unmatched',
-    reason: `No open chat matches "${ref}". Choose a chat by its id, tab number (#N), or title words.`,
+    reason: looksLikeMalformedChatId
+      ? `No open chat matches "${ref}": it looks like a chat id but is not one (a chat id is 8-4-4-4-12 hex digits, like ${EXAMPLE_CHAT_ID}). Copy the id exactly from the list below, or use the tab number (#N).`
+      : `No open chat matches "${ref}". Choose a chat by its id, tab number (#N), or title words.`,
     candidates: others,
   };
 }
 
 export function formatChatId(id: string, chats: ChatRef[]): string {
-  if (!/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/iu.test(id)) return id;
+  if (!CHAT_ID_PATTERN.test(id)) return id;
   const normalized = id.toLowerCase();
   let length = 8;
   while (

@@ -5,14 +5,15 @@
  * repository, so they carry no confirmation weight.
  */
 
+import * as fs from 'fs';
 import type { RegisteredTool } from './ToolRegistry';
-import { getRepo, readLiveGitStatus, resolveFilePath, runGit } from './gitRepo';
+import { readLiveGitStatus, resolveGitRequest, repoRelative, runGit } from './gitRepo';
 import { formatGitLog, gitLogArgs, gitShowArgs, isEmptyHistoryError } from './gitLog';
 
 const cwdParameter = {
   type: 'string',
   description:
-    'Workspace-relative directory or file used to select the repository. Required when multiple repositories are open.',
+    'Directory (or file) that selects the repository: absolute, or relative to the workspace root. Required when multiple repositories are open; the repo you are working in may be nested inside the workspace.',
 } as const;
 
 export function makeGitStatusTool(): RegisteredTool {
@@ -33,9 +34,7 @@ export function makeGitStatusTool(): RegisteredTool {
     permission: 'git-read',
     handler: async (args) => {
       const cwd = args['cwd'] as string | undefined;
-      const repo = await getRepo(cwd, {
-        ...(cwd === undefined ? {} : { cwd: resolveFilePath(cwd) }),
-      });
+      const { repo } = await resolveGitRequest('git_read', cwd);
       const lines: string[] = [];
 
       for (const change of await readLiveGitStatus(repo)) {
@@ -77,9 +76,7 @@ export function makeGitLogTool(): RegisteredTool {
     permission: 'git-read',
     handler: async (args) => {
       const cwd = args['cwd'] as string | undefined;
-      const repo = await getRepo(cwd, {
-        ...(cwd === undefined ? {} : { cwd: resolveFilePath(cwd) }),
-      });
+      const { repo } = await resolveGitRequest('git_read', cwd);
       const maxEntries = (args['max_entries'] as number | undefined) ?? 20;
       const ref = args['branch'] as string | undefined;
 
@@ -123,10 +120,26 @@ export function makeGitDiffTool(): RegisteredTool {
       const staged = args['staged'] === true;
 
       const filePath = args['path'] as string | undefined;
-      const repo = await getRepo(filePath ?? cwd, {
-        ...(cwd === undefined || filePath !== undefined ? {} : { cwd: resolveFilePath(cwd) }),
-      });
-      const pathspec = filePath ? ['--', resolveFilePath(filePath)] : [];
+      const { repo, paths } = await resolveGitRequest(
+        'git_read',
+        cwd,
+        filePath === undefined ? [] : [filePath],
+      );
+      if (filePath !== undefined) {
+        const absolute = paths[0]!;
+        const relative = repoRelative(repo, absolute);
+        if (!fs.existsSync(absolute)) {
+          try {
+            await runGit(repo, ['ls-files', '--error-unmatch', '--', relative]);
+          } catch {
+            throw new Error(
+              `git_read: path "${filePath}" resolves to ${absolute}, which neither exists nor is tracked in the repository at ${repo.root}. ` +
+                'Pass a path inside that repository, relative to cwd or to the workspace root.',
+            );
+          }
+        }
+      }
+      const pathspec = filePath === undefined ? [] : ['--', repoRelative(repo, paths[0]!)];
       const diff = await runGit(repo, ['diff', ...(staged ? ['--staged'] : []), ...pathspec]);
       return diff || '(no diff)';
     },
@@ -156,9 +169,12 @@ export function makeGitBlameTool(): RegisteredTool {
     permission: 'git-read',
     handler: async (args) => {
       const requestedPath = args['path'] as string;
-      const filePath = resolveFilePath(requestedPath);
-      const repo = await getRepo(requestedPath);
-      return (await runGit(repo, ['blame', '--line-porcelain', '--', filePath])) || '(no output)';
+      const cwd = args['cwd'] as string | undefined;
+      const { repo, paths } = await resolveGitRequest('git_read', cwd, [requestedPath]);
+      return (
+        (await runGit(repo, ['blame', '--line-porcelain', '--', repoRelative(repo, paths[0]!)])) ||
+        '(no output)'
+      );
     },
   };
 }
@@ -194,9 +210,7 @@ export function makeGitShowTool(): RegisteredTool {
     permission: 'git-read',
     handler: async (args) => {
       const cwd = args['cwd'] as string | undefined;
-      const repo = await getRepo(cwd, {
-        ...(cwd === undefined ? {} : { cwd: resolveFilePath(cwd) }),
-      });
+      const { repo } = await resolveGitRequest('git_read', cwd);
       return (await runGit(repo, gitShowArgs(args['ref']))) || '(no output)';
     },
   };

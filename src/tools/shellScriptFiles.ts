@@ -10,8 +10,14 @@ import { commandIsAllReadOnly } from './shellReadOnlyRules';
 const MAX_SCRIPT_BYTES = 256 * 1024;
 const MAX_SCRIPT_DEPTH = 3;
 const SCRIPT_EXTENSION = /\.(?:ps1|sh|bash|bat|cmd)$/iu;
+// The UPS driver chat (2026-11-06..10) started about 12 elevated runs. Three
+// were one script rerun because its log sat in C:\Windows\Temp, which the
+// unelevated shell cannot read; most others were one admin step per prompt.
 export const ELEVATION_RESULT_NOTE =
-  'This started an elevated process; Windows asked the owner to confirm it. Before starting another elevated process, tell the owner why.';
+  'This started an elevated process; Windows asked the owner to confirm it, and only the owner at the PC can. ' +
+  'Before starting another elevated process, tell the owner why, and: put every remaining admin step (drivers, services, HKLM, Program Files) in one script, so one prompt covers them; ' +
+  'have it write its log where this shell can read it (the workspace or C:\\Users\\Public, never C:\\Windows\\Temp) and read that log before running anything again; ' +
+  'and if the same service will need restarting again, grant the owner start and stop rights to it once (sc sdset), so later restarts need no prompt.';
 
 export function appendElevationResultNote(result: string, elevated: boolean | undefined): string {
   return elevated ? `${result}\n${ELEVATION_RESULT_NOTE}` : result;
