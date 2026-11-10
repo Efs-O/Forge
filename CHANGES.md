@@ -1,5 +1,18 @@
 # Forge — Recent Changes
 
+## 0.17.142
+
+- `code_intel` (references, definition, implementations) and `rename_symbol` first open every
+  workspace file that contains the name, so a project without a tsconfig still sees them. When a
+  text search finds the name in files the language server did not report, the result says so
+  instead of answering as if complete.
+- A hover that says `(loading...)` is asked again for a few seconds; if the language server is
+  still loading, the answer says so.
+- `rename_symbol` lists files that still contain the old name after the rename.
+- A path inside Forge's own files passed to a script (`python x.py ~/.forge/...`) is still
+  refused, but the refusal now says the script cannot be judged and suggests copying the file
+  out first, instead of claiming the command changes it.
+
 ## 0.17.141
 
 - `read_file` on a path that does not exist now suggests the one workspace file with the same
