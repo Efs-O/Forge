@@ -24,6 +24,7 @@ import { disposeLocalLlamaFetch } from '../llm/localLlamaFetch';
 import type { JobStore } from '../jobs/JobStore';
 import type { SidebarProvider } from '../sidebar/SidebarProvider';
 import { getLogger } from '../util/logger';
+import { consumeClaudeReopen } from '../agentBus/claudeReopen';
 import {
   clearOwnReloadReservation,
   reloadForTelegram,
@@ -84,6 +85,16 @@ export async function setupRemoteRuntime(
   // spawns PowerShell.
   const windowsDirectory = windowDirectory(context.globalStorageUri.fsPath);
   const windowsProbe = new RemoteWindowsProbe();
+  await consumeClaudeReopen(
+    context.workspaceState,
+    (sessionId) =>
+      vscode.env.openExternal(
+        vscode.Uri.parse(
+          `${vscode.env.uriScheme}://anthropic.claude-code/open?session=${sessionId}`,
+        ),
+      ),
+    log,
+  );
   let reloadNotice = context.workspaceState.get<{ chatId: string; expiresAt: number }>(
     RELOAD_NOTICE_KEY,
   );

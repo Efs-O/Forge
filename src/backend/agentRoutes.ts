@@ -24,6 +24,7 @@ import {
 } from './agentMessageOptions';
 import { getLogger } from '../util/logger';
 import { dispatchAgentRelay } from './agentRelayDispatch';
+import { isClaudeSessionId } from '../agentBus/claudeReopen';
 import { handleAgentRemoteSessionRoute } from './agentRemoteSessionRoute';
 import { isPathInside } from '../util/pathContainment';
 import { AgentWindowEndpointRegistry } from './agentWindowEndpointRegistry';
@@ -244,15 +245,38 @@ export class AgentRoutes {
         if (rawForce !== undefined && rawForce !== 'true') {
           throw new HttpError(400, 'force must be true when supplied');
         }
+        const rawClaudeSessionId = fields['reopen_claude_session'];
+        if (rawClaudeSessionId !== undefined && !isClaudeSessionId(rawClaudeSessionId)) {
+          throw new HttpError(
+            400,
+            'reopen_claude_session must be a Claude Code session id (a UUID)',
+          );
+        }
         const result = await this.deps.prepareReload!(
           from,
           options.conversationId,
           rawForce === 'true',
         );
         if (!result.ok) return sendText(res, result.status, result.error);
-        const message =
-          `Reloading the window for "${result.workspaceFolderName}". ` +
-          'Run who or status in a few seconds to see it back.';
+        if (rawClaudeSessionId !== undefined) {
+          try {
+            if (!this.deps.rememberClaudeReopen) {
+              throw new Error('rememberClaudeReopen is not wired');
+            }
+            await this.deps.rememberClaudeReopen(rawClaudeSessionId);
+          } catch (error) {
+            log.error('[agentRoutes] Could not persist the pending Claude reopen request', error);
+            return sendText(
+              res,
+              500,
+              `Could not remember Claude Code session ${rawClaudeSessionId} for reload.`,
+            );
+          }
+        }
+        const message = rawClaudeSessionId
+          ? `Reloading the window for "${result.workspaceFolderName}". Claude session ${rawClaudeSessionId} reopens there after the reload; it stays idle until a message wakes it. Run who or status in a few seconds to see it back.`
+          : `Reloading the window for "${result.workspaceFolderName}". ` +
+            'Run who or status in a few seconds to see it back.';
         res.once('finish', () => {
           void this.deps.reloadWindow!().catch((error: unknown) => {
             log.error(`[agentRoutes] window reload failed: ${String(error)}`);

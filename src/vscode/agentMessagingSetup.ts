@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { busPaths, removeLegacyAliasFiles } from '../agentBus/agentBus';
+import { rememberClaudeReopen } from '../agentBus/claudeReopen';
 import { clearSelfWindow, setSelfWindow } from '../agentBus/selfWindow';
 import { EXCHANGES_LOG_NAME } from '../agentMesh/exchangeLog';
 import { setBoardContext } from '../agentMesh/meshContext';
@@ -275,6 +276,7 @@ export function setupAgentMessaging(
       pendingReplies,
       askRuntime,
       getRemoteRuntime,
+      rememberClaudeReopen: (sessionId) => rememberClaudeReopen(context.workspaceState, sessionId),
       isFocused: () => vscode.window.state.focused,
     }),
   );

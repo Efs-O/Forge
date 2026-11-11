@@ -1085,6 +1085,7 @@ describe('POST /agent/stop', () => {
 describe('POST /agent/reload', () => {
   const reloadText =
     'Reloading the window for "Qwen_fine_tuning". Run who or status in a few seconds to see it back.';
+  const claudeSessionId = '8635a8e0-0b34-4fd7-a12a-3f9a6a800000';
   const busyText =
     'forge.sh: that window has running turns: Maya [nightly], Untitled. ' +
     'Run reload again with --force to reload anyway.';
@@ -1092,6 +1093,7 @@ describe('POST /agent/reload', () => {
   function install(
     prepareReload: NonNullable<ConstructorParameters<typeof AgentRoutes>[0]['prepareReload']>,
     reloadWindow: NonNullable<ConstructorParameters<typeof AgentRoutes>[0]['reloadWindow']>,
+    rememberClaudeReopen?: NonNullable<ConstructorParameters<typeof AgentRoutes>[0]['rememberClaudeReopen']>,
   ): void {
     routes.dispose();
     routes = new AgentRoutes({
@@ -1100,14 +1102,15 @@ describe('POST /agent/reload', () => {
       token: TOKEN,
       prepareReload,
       reloadWindow,
+      ...(rememberClaudeReopen ? { rememberClaudeReopen } : {}),
     });
     routes.setEnabled(true);
     routes.onListening(base);
   }
 
-  async function reload(conversationId: string, force = false) {
+  async function reload(conversationId: string, force = false, sessionId?: string) {
     const response = await fetch(
-      `${base}/agent/reload?from=codex&conversation_id=${conversationId}${force ? '&force=true' : ''}`,
+      `${base}/agent/reload?from=codex&conversation_id=${conversationId}${force ? '&force=true' : ''}${sessionId === undefined ? '' : `&reopen_claude_session=${encodeURIComponent(sessionId)}`}`,
       {
         method: 'POST',
         headers: { Authorization: `Bearer ${TOKEN}` },
@@ -1121,7 +1124,9 @@ describe('POST /agent/reload', () => {
     const reloadWindow = vi.fn(async () => undefined);
     install(prepareReload, reloadWindow);
 
-    expect(await reload('chat-a')).toEqual({ status: 200, body: `${reloadText}\n` });
+    const response = await reload('chat-a');
+    expect(response.status).toBe(200);
+    expect(response.body).toBe(`${reloadText}\n`);
     expect(prepareReload).toHaveBeenCalledWith('codex', 'chat-a', false);
     expect(reloadWindow).toHaveBeenCalledOnce();
   });
@@ -1139,6 +1144,56 @@ describe('POST /agent/reload', () => {
     expect(reloadWindow).not.toHaveBeenCalled();
   });
 
+  it('remembers a valid Claude id before reloading and returns the exact text', async () => {
+    const calls: string[] = [];
+    const prepareReload = vi.fn(async () => ({ ok: true as const, workspaceFolderName: 'Qwen_fine_tuning' }));
+    const rememberClaudeReopen = vi.fn(async (id: string) => {
+      calls.push(`remember:${id}`);
+    });
+    const reloadWindow = vi.fn(async () => {
+      calls.push('reload');
+    });
+    install(prepareReload, reloadWindow, rememberClaudeReopen);
+
+    const response = await reload('chat-a', false, claudeSessionId);
+    expect(response.status).toBe(200);
+    expect(response.body).toBe(
+      `Reloading the window for "Qwen_fine_tuning". Claude session ${claudeSessionId} reopens there after the reload; it stays idle until a message wakes it. Run who or status in a few seconds to see it back.\n`,
+    );
+    expect(rememberClaudeReopen).toHaveBeenCalledWith(claudeSessionId);
+    expect(calls).toEqual([`remember:${claudeSessionId}`, 'reload']);
+  });
+
+  it('rejects a non-UUID Claude id with the exact error', async () => {
+    const prepareReload = vi.fn(async () => ({ ok: true as const, workspaceFolderName: 'Qwen_fine_tuning' }));
+    const reloadWindow = vi.fn(async () => undefined);
+    const rememberClaudeReopen = vi.fn(async () => undefined);
+    install(prepareReload, reloadWindow, rememberClaudeReopen);
+
+    const response = await reload('chat-a', false, '../x');
+    expect(response.status).toBe(400);
+    expect(response.body).toBe(
+      '{"error":"reopen_claude_session must be a Claude Code session id (a UUID)"}',
+    );
+    expect(prepareReload).not.toHaveBeenCalled();
+    expect(rememberClaudeReopen).not.toHaveBeenCalled();
+    expect(reloadWindow).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 and does not reload when the Claude id cannot be remembered', async () => {
+    const prepareReload = vi.fn(async () => ({ ok: true as const, workspaceFolderName: 'Qwen_fine_tuning' }));
+    const reloadWindow = vi.fn(async () => undefined);
+    const rememberClaudeReopen = vi.fn(async () => {
+      throw new Error('workspace state unavailable');
+    });
+    install(prepareReload, reloadWindow, rememberClaudeReopen);
+
+    const response = await reload('chat-a', false, claudeSessionId);
+    expect(response.status).toBe(500);
+    expect(response.body).toBe(`Could not remember Claude Code session ${claudeSessionId} for reload.\n`);
+    expect(reloadWindow).not.toHaveBeenCalled();
+  });
+
   it('reloads running turns when force is true', async () => {
     const prepareReload = vi.fn(async (_from: string, _id: string, force: boolean) =>
       force
@@ -1148,7 +1203,9 @@ describe('POST /agent/reload', () => {
     const reloadWindow = vi.fn(async () => undefined);
     install(prepareReload, reloadWindow);
 
-    expect(await reload('chat-a', true)).toEqual({ status: 200, body: `${reloadText}\n` });
+    const response = await reload('chat-a', true);
+    expect(response.status).toBe(200);
+    expect(response.body).toBe(`${reloadText}\n`);
     expect(prepareReload).toHaveBeenCalledWith('codex', 'chat-a', true);
     expect(reloadWindow).toHaveBeenCalledOnce();
   });
@@ -1260,6 +1317,10 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
     );
     const env = { CODEX_SESSION_ID: '00000000-0000-4000-8000-000000000001' };
     const reloadWindow = vi.fn(async () => undefined);
+    const remembered: string[] = [];
+    const rememberClaudeReopen = vi.fn(async (sessionId: string) => {
+      remembered.push(sessionId);
+    });
     installClientRoutes({
       paths: () => paths,
       inbox: stubInbox(),
@@ -1267,6 +1328,7 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
       holdsChat: (conversationId) => conversationId === 'chat-a',
       prepareReload,
       reloadWindow,
+      rememberClaudeReopen,
     });
 
     const success = await runClient(['reload', 'codex', '--to', 'chat-a', '--force'], '', env);
@@ -1281,6 +1343,44 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
     expect(malformed.code).toBe(2);
     expect(malformed.out).toBe("forge.sh: bad conversation id 'bad/id'\n");
     expect(prepareReload).toHaveBeenCalledOnce();
+
+    const claudeSessionId = '8635a8e0-0b34-4fd7-a12a-3f9a6a800000';
+    const reopened = await runClient(
+      ['reload', 'codex', '--to', 'chat-a', '--force', '--reopen-claude', claudeSessionId],
+      '',
+      env,
+    );
+    expect(reopened.code).toBe(0);
+    expect(reopened.out).toBe(
+      `Reloading the window for "Qwen_fine_tuning". Claude session ${claudeSessionId} reopens there after the reload; it stays idle until a message wakes it. Run who or status in a few seconds to see it back.\n`,
+    );
+    expect(rememberClaudeReopen).toHaveBeenCalledWith(claudeSessionId);
+    expect(remembered).toEqual([claudeSessionId]);
+
+    const badClaudeId = await runClientDetailed(
+      ['reload', 'codex', '--to', 'chat-a', '--reopen-claude', 'abc'],
+      '',
+      env,
+    );
+    expect(badClaudeId.code).toBe(2);
+    expect(badClaudeId.stderr).toBe("forge.sh: bad Claude session id 'abc'\n");
+
+    const repeatedFlag = await runClientDetailed(
+      [
+        'reload',
+        'codex',
+        '--to',
+        'chat-a',
+        '--reopen-claude',
+        claudeSessionId,
+        '--reopen-claude',
+        claudeSessionId,
+      ],
+      '',
+      env,
+    );
+    expect(repeatedFlag.code).toBe(2);
+    expect(repeatedFlag.stderr).toContain('forge.sh reload');
   }, 30_000);
 
   it('who prints bracketed and quoted titles and continues past an older JSON window', async (ctx) => {

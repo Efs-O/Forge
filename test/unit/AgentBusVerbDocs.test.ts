@@ -120,6 +120,7 @@ describe('every client flag is named in the bus README', () => {
       '--force',
       '--model',
       '--new',
+      '--reopen-claude',
       '--to',
       '--to-running',
       '--unattended',
@@ -150,8 +151,22 @@ describe('every client flag is named in the bus README', () => {
   });
 
   it('keeps the agent-note reload verb exact', () => {
-    expect(AGENT_NOTE_TEMPLATE.split('\n')).toContain(
-      '- `reload <your-name> --to <chat>`: reload the VS Code window that holds that chat, so a newly installed VSIX takes effect; it refuses while a turn runs there unless you add `--force`.',
+    expect(AGENT_NOTE_TEMPLATE.split('\n').find((line) => line.includes('reload <your-name>'))).toBe(
+      '- `reload <your-name> --to <chat> [--reopen-claude <sessionId>]`: reload the VS Code window that holds that chat, so a newly installed VSIX takes effect; it refuses while a turn runs there unless you add `--force`; reopens that idle Claude Code session\'s tab after the reload; a watcher session must still message it awake.',
+    );
+  });
+
+  it('ships the exact Claude reopen explanation in the README', () => {
+    const start = BUS_README.indexOf('After a reload the Claude Code extension restores only a session that was');
+    const end = BUS_README.indexOf('\nreload goes to the window', start);
+    expect(BUS_README.slice(start, end)).toBe(
+      'After a reload the Claude Code extension restores only a session that was\n' +
+        "mid-turn; an idle session's tab stays closed and no message can reach it.\n" +
+        '`--reopen-claude <sessionId>` makes Forge reopen that session\'s tab in the\n' +
+        'reloaded window. Reopening does not wake it: another Claude session (a\n' +
+        'watcher in a different window) must then send it a message, for example with\n' +
+        'SendMessage once `ListAgents` lists it again. The session id stays the same\n' +
+        'across reloads; its peer name and [ref] change.',
     );
   });
 

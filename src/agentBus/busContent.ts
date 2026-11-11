@@ -86,11 +86,17 @@ cancels that approval card.
 Use \`forge.sh stop <name> [--to <conversationId>]\` to cancel a running Forge
 turn like the Stop button. Queued messages are not withdrawn and may start after
 the turn stops; use \`forge.sh cancel\` for those.
-Use \`forge.sh reload <name> --to <conversationId> [--force]\` to reload the VS Code
+Use \`forge.sh reload <name> --to <conversationId> [--force] [--reopen-claude <sessionId>]\` to reload the VS Code
 window that holds that chat, so a newly installed VSIX takes effect. It can name
 any open chat in the window, whether or not that chat is linked to your session.
 If any chat in the window is running, reload refuses and names those chats; add
-\`--force\` to reload anyway.
+\`--force\` to reload anyway. After a reload the Claude Code extension restores only a session that was
+mid-turn; an idle session's tab stays closed and no message can reach it.
+\`--reopen-claude <sessionId>\` makes Forge reopen that session's tab in the
+reloaded window. Reopening does not wake it: another Claude session (a
+watcher in a different window) must then send it a message, for example with
+SendMessage once \`ListAgents\` lists it again. The session id stays the same
+across reloads; its peer name and [ref] change.
 reload goes to the window that holds that chat, whichever window holds your own link.
 Messages routed to an existing Forge chat print its id and title in the 202
 response. There is no \`join\` command: an agent identifies itself from its

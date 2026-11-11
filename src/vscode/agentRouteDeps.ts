@@ -65,6 +65,7 @@ export interface AgentRouteDepsHosts {
   pendingReplies: PendingAgentReplies;
   askRuntime: AskAgentRuntime;
   getRemoteRuntime(): RemoteRuntime | undefined;
+  rememberClaudeReopen?: (sessionId: string) => Promise<void>;
   reloadWindow?(): Promise<void>;
   isFocused(): boolean;
 }
@@ -96,6 +97,7 @@ export function buildAgentRouteDeps(hosts: AgentRouteDepsHosts): AgentRoutesDeps
     pendingReplies,
     askRuntime,
     getRemoteRuntime,
+    rememberClaudeReopen,
     isFocused,
   } = hosts;
   const busAt = () => busPaths(home);
@@ -253,6 +255,7 @@ export function buildAgentRouteDeps(hosts: AgentRouteDepsHosts): AgentRoutesDeps
       };
     },
     reloadWindow: hosts.reloadWindow ?? executeWindowReloadCommand,
+    ...(rememberClaudeReopen ? { rememberClaudeReopen } : {}),
     // A `--new` message needs a tab to exist. Ask the sidebar NOW whether one
     // could be opened, so the route can answer 409 with the reasons instead of
     // answering 202 and dropping the message in `drain()`.

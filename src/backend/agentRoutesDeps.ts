@@ -134,6 +134,8 @@ export interface AgentRoutesDeps {
   ) => ReloadPreparation | Promise<ReloadPreparation>;
   /** Runs only after the HTTP response has finished, since the command closes this window. */
   reloadWindow?: () => Promise<void>;
+  /** Persist a Claude session id before a reload is scheduled. */
+  rememberClaudeReopen?: (sessionId: string) => Promise<void>;
   /** Resolve the Forge chat that will receive an accepted agent message. */
   resolveChatTarget?: (from: string, selection: ChatTargetSelection) => ChatTargetResult;
   /** Record a peer chat writer on the accepted destination conversation. */

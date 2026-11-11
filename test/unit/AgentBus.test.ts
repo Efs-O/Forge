@@ -85,7 +85,14 @@ describe('CLIENT_SCRIPT usage block', () => {
     expect(usage).toContain('--to <conversationId>|--to-running');
     expect(usage).toContain('forge.sh steer <your-name> <to> [--to <conversationId>] [file]');
     expect(usage).toContain('forge.sh stop <your-name> [--to <conversationId>]');
-    expect(usage).toContain('forge.sh reload <your-name> --to <conversationId> [--force]');
+    expect(usage).toContain(
+      'forge.sh reload <your-name> --to <conversationId> [--force] [--reopen-claude <sessionId>]',
+    );
+    expect(
+      usageLines(CLIENT_SCRIPT).find((line) => line.includes('forge.sh reload')),
+    ).toBe(
+      '#   forge.sh reload <your-name> --to <conversationId> [--force] [--reopen-claude <sessionId>]  reload the window holding that chat; --force allows a running turn to be cut off; --reopen-claude reopens an idle Claude Code session',
+    );
     expect(BUS_README).toContain('say <name> --to-running');
     expect(BUS_README).toContain('read-verdict <name> <exchangeId>');
     expect(BUS_README).toContain('forge.sh stop <name> [--to <conversationId>]');

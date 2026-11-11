@@ -925,6 +925,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Which file the agent note goes into, the one-time disclosure, `forge.agentMesh.installNote` | `src/vscode/agentMeshNoteSetup.ts` |
 | Agent-bus client script (`~/.forge/agent-bus/forge.sh`)    | `src/agentBus/forge.sh` (bundled as text by busContent.ts)     |
 | Claude session registry + peer-pipe delivery               | `src/agentBus/claudePeer.ts`                                   |
+| One-shot Claude Code session reopen across a VS Code window reload | `src/agentBus/claudeReopen.ts`                                  |
 | Claude delivery via a `claude -p` relay (opt-in)           | `src/agentBus/claudeRelay.ts`                                  |
 | Inbound agent messages → Forge turns (queue)               | `src/agentBus/agentInbox.ts`                                   |
 | Inbound queue mid-turn eligibility, release + arrival listeners | `src/agentBus/agentInboxMidTurn.ts`                          |

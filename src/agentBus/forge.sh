@@ -9,7 +9,7 @@
 #   forge.sh ack-verdict <your-name> <exchangeId>   acknowledge a read verdict and remove its retained copy
 #   forge.sh steer <your-name> <to> [--to <conversationId>] [file] forge: interrupt the running turn and run this next (--to only here); claude/codex/copilot: withdraw this chat's earlier ask to that agent and ask this instead
 #   forge.sh stop <your-name> [--to <conversationId>]  cancel a running Forge turn; queued messages may still start
-#   forge.sh reload <your-name> --to <conversationId> [--force]  reload the window holding that chat; --force allows a running turn to be cut off
+#   forge.sh reload <your-name> --to <conversationId> [--force] [--reopen-claude <sessionId>]  reload the window holding that chat; --force allows a running turn to be cut off; --reopen-claude reopens an idle Claude Code session
 #   forge.sh cancel <your-name> <id|all>  withdraw your queued message(s) to Forge not yet started
 #   forge.sh who                      every live Forge window's linked agent sessions, one row per linked chat (titles may contain brackets or quotes)
 #   forge.sh status <your-name> [--to <conversationId>]  what your chat with Forge is doing now (tool, last words, context); --to reads a chat linked to your session, and a chat that is not linked is refused by name; before your first turn starts, your queue
@@ -420,14 +420,23 @@ elif [ "$VERB" = "stop" ]; then
   SRC=/dev/null
 elif [ "$VERB" = "reload" ]; then
   ARG="$2"; shift 2
+  REOPEN_CLAUDE_SESSION=""
+  REOPEN_CLAUDE_SET=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --to) [ $# -ge 2 ] && [ -z "$CONVERSATION_ID" ] || usage; CONVERSATION_ID="$2"; shift 2;;
       --force) [ -z "$FORCE" ] || usage; FORCE=true; shift;;
+      --reopen-claude) [ $# -ge 2 ] && [ -z "$REOPEN_CLAUDE_SET" ] || usage; REOPEN_CLAUDE_SESSION="$2"; REOPEN_CLAUDE_SET=true; shift 2;;
       *) usage;;
     esac
   done
   [ -n "$CONVERSATION_ID" ] || usage
+  if [ -n "$REOPEN_CLAUDE_SET" ]; then
+    printf '%s' "$REOPEN_CLAUDE_SESSION" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' || {
+      echo "forge.sh: bad Claude session id '$REOPEN_CLAUDE_SESSION'" >&2
+      exit 2
+    }
+  fi
   set_sender_identity "$ARG"
   SRC=/dev/null
 elif [ $# -ge 2 ]; then
@@ -454,7 +463,7 @@ case "$VERB" in
          ROUTE=stop; QUERY="from=$ARG$SENDER_QUERY"; [ -n "$CONVERSATION_ID" ] && QUERY="$QUERY&conversation_id=$CONVERSATION_ID"; SRC=/dev/null ;;
   reload) case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
           case "$CONVERSATION_ID" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: bad conversation id '$CONVERSATION_ID'" >&2; exit 2;; esac
-          ROUTE=reload; QUERY="from=$ARG$SENDER_QUERY&conversation_id=$CONVERSATION_ID"; [ -n "$FORCE" ] && QUERY="$QUERY&force=true"; SRC=/dev/null ;;
+          ROUTE=reload; QUERY="from=$ARG$SENDER_QUERY&conversation_id=$CONVERSATION_ID"; [ -n "$FORCE" ] && QUERY="$QUERY&force=true"; [ -n "$REOPEN_CLAUDE_SET" ] && QUERY="$QUERY&reopen_claude_session=$REOPEN_CLAUDE_SESSION"; SRC=/dev/null ;;
   cancel) case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
          [ $# -eq 3 ] || usage
          case "$3" in ""|*[!A-Za-z0-9_-]*) echo "forge.sh: bad id '$3' (the id say printed, or all)" >&2; exit 2;; esac
