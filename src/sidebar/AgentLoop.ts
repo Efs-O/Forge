@@ -31,7 +31,7 @@ import type { DiffDecorations } from './DiffDecorations';
 import { ToolApprovalService } from './ToolApprovalService';
 import { createChatRuleApproval } from './chatApprovalRules';
 import { writeApprovalAlways } from './approvalPolicyRules';
-import { chatClankerRecords, clankerDefaultExpiryNotifier } from './chatClanker';
+import { chatClankerRecords } from './chatClanker';
 import { clearTrashRefusals } from '../tools/trashRefusal';
 import { disposeAgentConversation } from './agentConversationDisposal';
 import type { ApprovalDecision } from './approvalMessages';
@@ -200,8 +200,6 @@ export class AgentLoop {
       // click and a sidebar click cannot store different rules for the same card.
       chatRuleApproval.allow,
       chatRuleApproval.always,
-      () => getConfig().clanker?.default_on_until,
-      clankerDefaultExpiryNotifier(post, this.onTranscriptChanged),
     );
     this.approvals.setApprovalLifecycle(
       (convId) => this.sessionTimer.pauseApproval(convId),

@@ -145,7 +145,9 @@ export class SlashCommandHandler {
       case 'reindex':
         await deps.reindexCodebase();
         return;
-
+      case 'showMemories':
+        await vscode.commands.executeCommand('forge.showMemories');
+        return;
       case 'newChat':
         await deps.newConversation();
         // Window-scoped on purpose: a chat bound to the old conversation stays
@@ -153,11 +155,9 @@ export class SlashCommandHandler {
         // binding. /resume is how a remote user follows the new one.
         this.emitActivity({ text: 'Forge: started a new chat in this window.' });
         return;
-
       case 'rename':
         await this.renameConversation();
         return;
-
       case 'checkin':
         await this.setCheckinReminder();
         return;

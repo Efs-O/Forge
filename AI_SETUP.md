@@ -174,6 +174,8 @@ Then ask the user to open the Forge sidebar and send a first prompt.
 
 ## Step 7 — Agent mesh (Forge ⇄ Claude Code ⇄ Codex): core, not optional
 
+Workspace memories are editable files in `~/.forge/memories/<workspace-folder>-<workspace-id>/`; changes take effect on the next read.
+
 The mesh is how Claude Code, Codex and Copilot message, steer and stop Forge
 chats, and every new starter config ships it on. Do not skip this step the way
 you may skip something the user did not ask for. Forge installs its message

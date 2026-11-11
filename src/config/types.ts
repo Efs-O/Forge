@@ -134,8 +134,6 @@ interface JobsConfig {
 export interface ForgeConfig {
   models: ModelConfig[];
   active_model: string | null;
-  /** Owner-only per-chat approval defaults from policy.yaml. */
-  clanker?: { default_on_until: string };
   /** Owner-only approval policy from `~/.forge/policy.yaml` (or, before the
    *  policy migration, the owner-only config file). Missing lists allow nothing. */
   approvals?: {

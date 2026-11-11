@@ -6,6 +6,7 @@ import type { ChildProcess, spawn } from 'child_process';
 import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeFindFilesTool } from '../../src/tools/dirTools';
+import { MemoryStore, attachMemoryStore } from '../../src/memory/memoryStore';
 import { makeRenameSymbolTool } from '../../src/tools/fileEditTools';
 import { makeCodeIntelTool } from '../../src/tools/codeIntelTool';
 import {
@@ -87,7 +88,10 @@ describe('isolated editor, language, search, and memory tool execution', () => {
               name: 'sample',
               kind: vscode.SymbolKind.Variable,
               range: new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 6)),
-              selectionRange: new vscode.Range(new vscode.Position(0, 6), new vscode.Position(0, 12)),
+              selectionRange: new vscode.Range(
+                new vscode.Position(0, 6),
+                new vscode.Position(0, 12),
+              ),
               children: [],
             },
           ];
@@ -193,9 +197,9 @@ describe('isolated editor, language, search, and memory tool execution', () => {
       makeOpenUrlTool({ spawnProcess }).handler({ url: 'https://example.com/' }),
     ).resolves.toBe('Opened https://example.com/ in the default browser.');
     expect(spawnProcess).toHaveBeenCalledOnce();
-    await expect(makeOpenUrlTool({ spawnProcess }).handler({ url: 'file:///secret' })).rejects.toThrow(
-      'must start with',
-    );
+    await expect(
+      makeOpenUrlTool({ spawnProcess }).handler({ url: 'file:///secret' }),
+    ).rejects.toThrow('must start with');
   });
 
   // open_file exists because the plumbing did and the tool did not: the webview
@@ -304,6 +308,7 @@ describe('isolated editor, language, search, and memory tool execution', () => {
       get: (key: string) => values.get(key),
       update: async (key: string, value: unknown) => void values.set(key, value),
     } as unknown as vscode.Memento;
+    attachMemoryStore(state, await MemoryStore.migrate(path.join(root, '.forge-memory'), state));
     await makeRememberTool(state).handler({
       key: 'decision',
       value: 'keep local',

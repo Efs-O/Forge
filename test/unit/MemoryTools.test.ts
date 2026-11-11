@@ -1,13 +1,24 @@
-import { describe, expect, it, vi } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as vscode from 'vscode';
+import { MemoryStore, attachMemoryStore, renderMemoryLine } from '../../src/memory/memoryStore';
 import {
   listMemoryKeys,
+  listMemoryLines,
   makeForgetTool,
   makeListMemoriesTool,
   makeRecallTool,
   makeRememberTool,
+  renderMemoryIndexBlock,
 } from '../../src/tools/memoryTools';
 import { ToolRegistry } from '../../src/tools/ToolRegistry';
+
+const KEY_PREFIX = 'forge.memory.';
+const KEYS_INDEX = `${KEY_PREFIX}__keys__`;
+const DESCRIPTIONS_INDEX = `${KEY_PREFIX}__descriptions__`;
+let root: string;
 
 function memory(initial: Record<string, unknown> = {}) {
   const data = new Map<string, unknown>(Object.entries(initial));
@@ -22,172 +33,254 @@ function memory(initial: Record<string, unknown> = {}) {
       else data.set(key, value);
     },
   } as vscode.Memento;
+  const directory = path.join(root, `memories-${Math.random().toString(16).slice(2)}`);
+  const attach = (store: MemoryStore) => attachMemoryStore(state, store);
   return {
     state,
     data,
+    directory,
+    attach,
     failNext: (offset = 1) => {
       failAt = calls + offset;
     },
   };
 }
 
-describe('workspace memory lifecycle', () => {
-  it('remembers, overwrites, and forgets one key without touching another', async () => {
+beforeEach(() => {
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-memory-test-'));
+});
+afterEach(() => {
+  fs.rmSync(root, { recursive: true, force: true });
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
+
+describe('workspace markdown memories', () => {
+  it('renders chat memories newest first while MEMORY.md stays sorted by key', async () => {
     const m = memory();
-    const remember = makeRememberTool(m.state);
-    const recall = makeRecallTool(m.state);
-    const forgot = vi.fn();
-    const forget = makeForgetTool(m.state, forgot);
-    await remember.handler({ key: 'one', value: 'old', description: 'old desc' });
-    await remember.handler({ key: 'one', value: 'new', description: 'new desc' });
-    await remember.handler({ key: 'two', value: 'kept', description: 'kept desc' });
-    expect(listMemoryKeys(m.state)).toEqual(['one', 'two']);
-    expect(await recall.handler({ key: 'one' })).toBe('new');
-    expect(await forget.handler({ key: 'one' })).toBe('Forgot "one".');
-    expect(await forget.handler({ key: 'one' })).toBe('Memory "one" was already absent.');
-    expect(listMemoryKeys(m.state)).toEqual(['two']);
-    expect(await makeListMemoriesTool(m.state).handler({})).toBe('- two: kept desc');
-    expect(await recall.handler({ key: 'one' })).toBe('(not found)');
-    expect(forgot).toHaveBeenCalledWith('one');
-  });
-
-  it('serializes concurrent remembers so the index keeps both keys', async () => {
-    const m = memory();
-    const remember = makeRememberTool(m.state);
-    await Promise.all([
-      remember.handler({ key: 'alpha', value: 'a', description: 'alpha desc' }),
-      remember.handler({ key: 'beta', value: 'b', description: 'beta desc' }),
-    ]);
-    expect(listMemoryKeys(m.state)).toEqual(['alpha', 'beta']);
-  });
-
-  it('reads and removes an older indexed key outside the new-key character set', async () => {
-    const key = 'old task / follow-up';
-    const m = memory({ 'forge.memory.__keys__': [key], [`forge.memory.${key}`]: 'saved' });
-    expect(await makeRecallTool(m.state).handler({ key })).toBe('saved');
-    expect(await makeForgetTool(m.state).handler({ key })).toBe(`Forgot "${key}".`);
-    expect(listMemoryKeys(m.state)).toEqual([]);
-  });
-
-  it('filters an index entry left by a failed new value write, then recovers on retry', async () => {
-    const m = memory();
-    const remember = makeRememberTool(m.state);
-    m.failNext(2);
-    await expect(remember.handler({ key: 'alpha', value: 'a', description: 'desc' })).rejects.toThrow('storage failed');
-    expect(m.data.get('forge.memory.__keys__')).toEqual(['alpha']);
-    expect(listMemoryKeys(m.state)).toEqual([]);
-    await remember.handler({ key: 'alpha', value: 'a', description: 'desc' });
-    expect(listMemoryKeys(m.state)).toEqual(['alpha']);
-  });
-
-  it('preserves a value on failed deletion and hides a stale index after the second write fails', async () => {
-    const m = memory({ 'forge.memory.__keys__': ['alpha'], 'forge.memory.alpha': 'a' });
-    const forgot = vi.fn();
-    const forget = makeForgetTool(m.state, forgot);
-    m.failNext();
-    await expect(forget.handler({ key: 'alpha' })).rejects.toThrow('storage failed');
-    expect(listMemoryKeys(m.state)).toEqual(['alpha']);
-    expect(forgot).not.toHaveBeenCalled();
-    m.failNext(2);
-    await expect(forget.handler({ key: 'alpha' })).rejects.toThrow('storage failed');
-    expect(listMemoryKeys(m.state)).toEqual([]);
-    expect(forgot).toHaveBeenCalledWith('alpha');
-    await forget.handler({ key: 'alpha' });
-    expect(m.data.has('forge.memory.__keys__')).toBe(true);
-    expect(listMemoryKeys(m.state)).toEqual([]);
-  });
-
-  it('requires delete permission without inventing a file mutation path', () => {
-    const m = memory();
-    const registry = new ToolRegistry();
-    const forget = makeForgetTool(m.state);
-    registry.register(forget);
-    expect(() => registry.assertAllowed(forget, new Set(['read']))).toThrow(
-      'is not available in this conversation',
+    const store = await MemoryStore.migrate(m.directory, m.state);
+    fs.mkdirSync(m.directory, { recursive: true });
+    fs.writeFileSync(
+      path.join(m.directory, 'c.md'),
+      '---\nname: c\ndescription: desc c\nupdated: 2026-11-12T10:00:00.001Z\n---\n\nvalue c',
     );
-    expect(() => registry.assertAllowed(forget, new Set(['delete']))).not.toThrow();
-    expect(forget.mutation).toBeUndefined();
+    fs.writeFileSync(
+      path.join(m.directory, 'a.md'),
+      '---\nname: a\ndescription: desc a\nupdated: 2026-11-12T10:00:00.002Z\n---\n\nvalue a',
+    );
+    fs.writeFileSync(
+      path.join(m.directory, 'b.md'),
+      '---\nname: b\ndescription: desc b\nupdated: 2026-11-12T10:00:00.003Z\n---\n\nvalue b',
+    );
+    attachMemoryStore(m.state, store);
+    expect(renderMemoryIndexBlock(store.listLines())).toBe(
+      'Stored memories in this workspace (saved with `remember`; call `recall` with a key for its full value):\n- b: desc b\n- a: desc a\n- c: desc c',
+    );
+    expect(fs.readFileSync(store.regenerateIndex(), 'utf8')).toBe(
+      '<!-- Generated by Forge. Edit the memory files, not this index. -->\n- [a](a.md) — desc a\n- [b](b.md) — desc b\n- [c](c.md) — desc c\n',
+    );
   });
 
-  it('keeps the memory deletion detail without marking it as a Clanker stop', () => {
-    const forget = makeForgetTool(memory().state);
-    const metadata = forget.approval?.({ key: 'old-note' });
-    expect(metadata?.detail).toBe('Remove stored workspace memory "old-note"?');
-    expect(metadata?.clankerStop).toBeUndefined();
-  });
-
-  it('stores trimmed descriptions and lists described and legacy memories oldest first', async () => {
-    const key = 'legacy';
+  it('migrates legacy memories in strictly increasing key-index order', async () => {
     const m = memory({
-      'forge.memory.__keys__': [key],
-      [`forge.memory.${key}`]: 'old value',
+      [KEYS_INDEX]: ['z', 'm', 'a'],
+      [`${KEY_PREFIX}z`]: 'value z',
+      [`${KEY_PREFIX}m`]: 'value m',
+      [`${KEY_PREFIX}a`]: 'value a',
     });
-    const remember = makeRememberTool(m.state);
-    await remember.handler({ key: 'new', value: 'value', description: '  short note  ' });
-    expect(await makeListMemoriesTool(m.state).handler({})).toBe('- legacy\n- new: short note');
-    await remember.handler({ key: 'new', value: 'updated', description: 'replacement' });
-    expect(await makeListMemoriesTool(m.state).handler({})).toBe('- legacy\n- new: replacement');
-  });
-
-  it('remembers without a description and lists only its key', async () => {
-    const m = memory();
-    const remember = makeRememberTool(m.state);
-    expect(await remember.handler({ key: 'k', value: 'saved' })).toBe(
-      'Remembered. Without a description, new chats list only the key; call remember again with a description to add one.',
+    const store = await MemoryStore.migrate(m.directory, m.state);
+    expect(store.listLines().map((line) => line.slice(2).split(':', 1)[0])).toEqual([
+      'z',
+      'm',
+      'a',
+    ]);
+    const updated = store.list().map(({ key, updated }) => ({ key, updated }));
+    const inLegacyOrder = ['z', 'm', 'a'].map(
+      (key) => updated.find((entry) => entry.key === key)!.updated,
     );
-    expect(await makeListMemoriesTool(m.state).handler({})).toBe('- k');
+    expect(Date.parse(inLegacyOrder[0]!)).toBeLessThan(Date.parse(inLegacyOrder[1]!));
+    expect(Date.parse(inLegacyOrder[1]!)).toBeLessThan(Date.parse(inLegacyOrder[2]!));
   });
 
-  it('shows only the first line of a two-line description', async () => {
+  it('caps the chat memory block at sixty lines', async () => {
     const m = memory();
+    const store = await MemoryStore.migrate(m.directory, m.state);
+    fs.mkdirSync(m.directory, { recursive: true });
+    for (let index = 0; index < 61; index += 1) {
+      const key = `m${String(index).padStart(2, '0')}`;
+      fs.writeFileSync(
+        path.join(m.directory, `${key}.md`),
+        `---\nname: ${key}\ndescription: description ${index}\nupdated: ${new Date(Date.UTC(2026, 0, 1, 0, 0, 0, index)).toISOString()}\n---\n\nvalue`,
+      );
+    }
+    expect(renderMemoryIndexBlock(store.listLines())).toBe(
+      [
+        'Stored memories in this workspace (saved with `remember`; call `recall` with a key for its full value):',
+        ...Array.from(
+          { length: 60 },
+          (_, index) => `- m${String(60 - index).padStart(2, '0')}: description ${60 - index}`,
+        ),
+        '1 more not shown; `list_memories` lists them all.',
+      ].join('\n'),
+    );
+  });
+
+  it('cuts rendered descriptions at 120 characters plus an ellipsis', () => {
+    expect(renderMemoryLine('long', 'x'.repeat(130))).toBe(`- long: ${'x'.repeat(120)}…`);
+  });
+
+  it('moves all legacy entries only after readback and regenerates the exact index', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-12T10:00:00.000Z'));
+    const m = memory({
+      [KEYS_INDEX]: ['first', 'ABC', 'abc'],
+      [DESCRIPTIONS_INDEX]: { first: 'First description' },
+      [`${KEY_PREFIX}first`]: 'first value',
+      [`${KEY_PREFIX}ABC`]: 'upper value',
+      [`${KEY_PREFIX}abc`]: 'lower value',
+    });
+    const store = await MemoryStore.migrate(m.directory, m.state);
+    m.attach(store);
+    expect(store.migrationFailed).toBe(false);
+    expect(m.data.has(KEYS_INDEX)).toBe(false);
+    expect(listMemoryKeys(m.state)).toEqual(['ABC', 'abc', 'first']);
+    expect(await makeRecallTool(m.state).handler({ key: 'ABC' })).toBe('upper value');
+    expect(await makeRecallTool(m.state).handler({ key: 'abc' })).toBe('lower value');
+    expect(fs.readFileSync(path.join(m.directory, 'MEMORY.md'), 'utf8')).toBe(
+      [
+        '<!-- Generated by Forge. Edit the memory files, not this index. -->',
+        '- [ABC](abc-b5d404.md) — upper value',
+        '- [abc](abc-ba7816.md) — lower value',
+        '- [first](first.md) — First description',
+        '',
+      ].join('\n'),
+    );
+    const file = fs.readdirSync(m.directory).find((name) => name.startsWith('first.'))!;
+    expect(fs.readFileSync(path.join(m.directory, file), 'utf8')).toBe(
+      '---\nname: first\ndescription: First description\nupdated: 2026-11-12T10:00:00.000Z\n---\n\nfirst value',
+    );
+  });
+
+  it('keeps Memento values available when a migration write fails', async () => {
+    const m = memory({ [KEYS_INDEX]: ['alpha'], [`${KEY_PREFIX}alpha`]: 'untouched' });
+    const store = await MemoryStore.migrate(m.directory, m.state, () => {
+      throw new Error('disk full');
+    });
+    m.attach(store);
+    expect(store.migrationFailed).toBe(true);
+    expect(store.migrationFailureReason).toBe('disk full');
+    expect(m.data.get(KEYS_INDEX)).toEqual(['alpha']);
+    expect(m.data.get(`${KEY_PREFIX}alpha`)).toBe('untouched');
+    expect(store.read('alpha')?.value).toBe('untouched');
+  });
+
+  it('preserves values byte-for-byte, allows unsafe legacy keys, and derives descriptions', async () => {
+    const m = memory({
+      [KEYS_INDEX]: ['legacy key / old'],
+      [`${KEY_PREFIX}legacy key / old`]: '  first line  \r\n---\r\nlast\r\n',
+    });
+    const store = await MemoryStore.migrate(m.directory, m.state);
+    m.attach(store);
+    const value = '  first line  \r\n---\r\nlast\r\n';
+    expect(await makeRecallTool(m.state).handler({ key: 'legacy key / old' })).toBe(value);
+    const entry = store.read('legacy key / old')!;
+    expect(entry.description).toBe('first line');
+    expect(entry.fileName).toMatch(/-.*\.md$/u);
+    expect(entry.fileName).not.toBe('legacy key / old.md');
+    expect(
+      await makeRememberTool(m.state).handler({ key: 'new-note', value: 'new description' }),
+    ).toBe(
+      'Stored "new-note" (description taken from its first line; pass description to write your own).',
+    );
+    const long = 'x'.repeat(121);
+    await makeRememberTool(m.state).handler({ key: 'long', value: long });
+    expect(store.read('long')?.description).toBe(`${'x'.repeat(120)}…`);
+  });
+
+  it('writes the exact frontmatter layout while preserving a CRLF value containing separator lines', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-12T10:00:00.000Z'));
+    const m = memory();
+    const store = await MemoryStore.migrate(m.directory, m.state);
+    m.attach(store);
+    const value = 'first line\r\n---\r\nlast line';
     await makeRememberTool(m.state).handler({
-      key: 'k',
-      value: 'saved',
-      description: 'first line\nsecond line',
+      key: 'fixture',
+      value,
+      description: 'Fixture description',
     });
-    expect(await makeListMemoriesTool(m.state).handler({})).toBe('- k: first line');
+    expect(fs.readFileSync(path.join(m.directory, 'fixture.md'), 'utf8')).toBe(
+      '---\nname: fixture\ndescription: Fixture description\nupdated: 2026-11-12T10:00:00.000Z\n---\n\nfirst line\r\n---\r\nlast line',
+    );
   });
 
-  it('clips a long description in the index while keeping the stored value intact', async () => {
+  it('makes case-colliding names hashed and reflects hand edits and deletions on reads', async () => {
     const m = memory();
-    const description = 'x'.repeat(250);
-    await makeRememberTool(m.state).handler({ key: 'k', value: 'saved', description });
-    expect(await makeListMemoriesTool(m.state).handler({})).toBe(`- k: ${'x'.repeat(200)}…`);
-    expect(m.data.get('forge.memory.__descriptions__')).toEqual({ k: description });
-  });
-
-  it('removes an old description when a blank one replaces it', async () => {
-    const m = memory();
+    const store = await MemoryStore.migrate(m.directory, m.state);
+    m.attach(store);
     const remember = makeRememberTool(m.state);
-    await remember.handler({ key: 'k', value: 'old', description: 'old description' });
-    expect(await remember.handler({ key: 'k', value: 'new', description: '   ' })).toBe(
-      'Remembered. Without a description, new chats list only the key; call remember again with a description to add one.',
+    await remember.handler({ key: 'ABC', value: 'upper', description: 'upper desc' });
+    await remember.handler({ key: 'abc', value: 'lower', description: 'lower desc' });
+    expect(store.list().map(({ fileName }) => fileName)).toEqual([
+      'abc-b5d404.md',
+      'abc-ba7816.md',
+    ]);
+    fs.writeFileSync(
+      path.join(m.directory, store.read('ABC')!.fileName),
+      '---\nname: "ABC"\ndescription: changed\nupdated: 2026-01-01T00:00:00.000Z\n---\n\nhand edit',
+      'utf8',
     );
-    expect(await makeListMemoriesTool(m.state).handler({})).toBe('- k');
+    expect(await makeRecallTool(m.state).handler({ key: 'ABC' })).toBe('hand edit');
+    store.forget('ABC');
+    expect(await makeListMemoriesTool(m.state).handler({})).toBe('- abc: lower desc');
   });
 
-  it('removes descriptions when forgetting and refuses the descriptions index as a key', async () => {
+  it('skips malformed frontmatter, duplicate names and temporary files with named reasons', async () => {
     const m = memory();
-    const remember = makeRememberTool(m.state);
-    await remember.handler({ key: 'note', value: 'v', description: 'first' });
-    await makeForgetTool(m.state).handler({ key: 'note' });
-    await remember.handler({ key: 'note', value: 'v2', description: 'second' });
-    expect(await makeListMemoriesTool(m.state).handler({})).toBe('- note: second');
-    await expect(
-      remember.handler({ key: '__descriptions__', value: 'v', description: 'd' }),
-    ).rejects.toThrow('__keys__ or __descriptions__');
+    const store = await MemoryStore.migrate(m.directory, m.state);
+    m.attach(store);
+    fs.mkdirSync(m.directory, { recursive: true });
+    fs.writeFileSync(path.join(m.directory, 'broken.md'), 'not frontmatter');
+    fs.writeFileSync(
+      path.join(m.directory, 'one.md'),
+      '---\nname: same\ndescription: one\nupdated: 2026-01-01T00:00:00.000Z\n---\n\none',
+    );
+    fs.writeFileSync(
+      path.join(m.directory, 'two.md'),
+      '---\nname: same\ndescription: two\nupdated: 2026-01-01T00:00:00.000Z\n---\n\ntwo',
+    );
+    fs.writeFileSync(path.join(m.directory, 'draft.md.tmp'), 'ignored');
+    const result = await makeListMemoriesTool(m.state).handler({});
+    expect(result).toContain('Skipped broken.md: invalid or incomplete frontmatter');
+    expect(result).toContain('Skipped one.md: another file has the same name "same"');
+    expect(result).toContain('Skipped two.md: another file has the same name "same"');
+    expect(result).not.toContain('draft.md.tmp');
   });
 
-  it('publishes the exact schema description and tool description', () => {
-    const remember = makeRememberTool(memory().state);
-    const fn = remember.definition.function;
-    expect(fn.description).toBe(
-      'Store a decision or pending state that must survive context compaction or help a later chat. Use it for anything not already in FORGE.md or the files that you would have to re-derive. Every new chat in this workspace starts with the stored keys and their descriptions, and the keys are listed back to you after every compaction. Overwrites an existing key and its description.',
-    );
-    expect(fn.parameters.properties.description.description).toBe(
-      'One line saying what this memory holds. Every new chat in this workspace starts with the list of keys and these descriptions.',
-    );
-    expect(fn.parameters.required).toEqual(['key', 'value']);
-    expect(fn.parameters.additionalProperties).toBe(false);
+  it('uses descriptions in chat and tool indexes and forgets files', async () => {
+    const m = memory();
+    const store = await MemoryStore.migrate(m.directory, m.state);
+    m.attach(store);
+    for (let index = 0; index < 32; index += 1) {
+      await makeRememberTool(m.state).handler({
+        key: `m${String(index).padStart(2, '0')}`,
+        value: 'value',
+        description: `description ${index}`,
+      });
+    }
+    expect(listMemoryLines(m.state)[0]).toBe('- m00: description 0');
+    expect(listMemoryLines(m.state)).toHaveLength(32);
+    expect(listMemoryKeys(m.state)).toHaveLength(32);
+    const chatIndex = renderMemoryIndexBlock(listMemoryLines(m.state))!;
+    expect(chatIndex).toContain('- m31: description 31');
+    expect(chatIndex.split('\n')).toHaveLength(33);
+    const registered = makeForgetTool(m.state);
+    expect(registered.permission).toBe('delete');
+    const registry = new ToolRegistry();
+    registry.register(registered);
+    expect(() => registry.assertAllowed(registered, new Set(['read']))).toThrow();
+    await registered.handler({ key: 'm00' });
+    expect(await makeRecallTool(m.state).handler({ key: 'm00' })).toBe('(not found)');
+    expect(fs.existsSync(path.join(m.directory, 'm00.md'))).toBe(false);
   });
 });

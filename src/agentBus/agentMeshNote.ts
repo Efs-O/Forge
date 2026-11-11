@@ -53,6 +53,8 @@ const MESH_STATE_TOKEN = '__FORGE_MESH_STATE__';
  */
 export const AGENT_NOTE_TEMPLATE = `## Forge agent bus
 
+Workspace memories are editable files in \`~/.forge/memories/<workspace-folder>-<workspace-id>/\`; changes take effect on the next read.
+
 Forge LLM is installed in this machine's VS Code, and its agent mesh is on: a local
 coding agent can message, steer and stop a Forge chat, and read what one is doing.
 That means agents other than you can act in this workspace — the last line says how to

@@ -27,7 +27,6 @@ import {
   type ChatRuleApproval,
 } from '../../src/sidebar/chatApprovalRules';
 import { GateEventLog, type GateEventRow } from '../../src/sidebar/gateEventLog';
-import { reconcileClankerDefault } from '../../src/sidebar/chatClanker';
 import { ToolDispatch } from '../../src/sidebar/ToolDispatch';
 import type { CheckpointStack } from '../../src/checkpoint/CheckpointStack';
 import type { KeepUndoCodeLensProvider } from '../../src/sidebar/KeepUndoCodeLens';
@@ -130,11 +129,9 @@ function buildDispatch(rules: string[]) {
   const chatRuleApproval: ChatRuleApproval = createChatRuleApproval({
     getConfig: () => config,
     workspaceRoot: WORKSPACE,
-    // Every wall case runs with a future policy-default chat, so these checks prove
-    // the three stops still hold under the new default too.
-    clankerMode: (conversationId) =>
-      conversationId === 'chat-1' &&
-      reconcileClankerDefault(true, 'policy-default', '2099-11-11T08:00', Date.now()).clanker,
+    // Every wall case runs with Clanker manually enabled for this chat, so these
+    // checks prove the three stops still hold when the shortcut is armed.
+    clankerMode: (conversationId) => conversationId === 'chat-1',
     recordAutoGate: (event) => gateLog.autoApproved(event),
   });
   const requestApproval = vi.fn().mockResolvedValue('approved');

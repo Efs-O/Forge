@@ -300,7 +300,7 @@ export const conversationPersistedBaseSchema = z.object({
    * off after this update — the safer side of a mode that skips confirmations.
    */
   clanker: z.boolean().optional(),
-  /** Provenance for expiring owner policy defaults; old records omit it. */
+  // Legacy input only: old policy-default chats reload off; remove once no saved chat carries this marker.
   clankerSource: z.literal('policy-default').optional(),
 });
 
@@ -474,7 +474,6 @@ export interface ConversationRuntime {
    * outlives the shortcut they also have.
    */
   clanker?: boolean;
-  clankerSource?: 'policy-default';
 }
 
 export interface SidebarRuntime {

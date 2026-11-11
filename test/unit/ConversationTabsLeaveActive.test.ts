@@ -120,6 +120,7 @@ describe('ConversationTabs leaving the active chat', () => {
     expect(h.getState().conversations.map((chat) => chat.id)).toContain('tab0');
     expect(h.getState().conversations.find((chat) => chat.id === 'tab0')?.retention_activity_at).toBe(11);
     expect(h.getState().activeConversationId).toBe(created?.id);
+    expect(created?.clanker).toBe(false);
   });
 
   it('keeps both chats open and resets activity on switch away and back', () => {

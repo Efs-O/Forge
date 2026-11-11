@@ -859,12 +859,12 @@ describe('first-turn workspace memory index', () => {
     expect(isNewChatFirstTurn(messages, { summary: 'prior work', fromIndex: 0 })).toBe(false);
   });
 
-  it('shows only the newest 30 lines and reports the omitted count', () => {
-    const lines = Array.from({ length: 31 }, (_, i) => `- k${i + 1}: d${i + 1}`);
+  it('shows only the newest 60 lines and reports the omitted count', () => {
+    const lines = Array.from({ length: 61 }, (_, i) => `- k${i + 1}: d${i + 1}`);
     const rendered = renderMemoryIndexBlock(lines);
     expect(rendered).toBe(
       'Stored memories in this workspace (saved with `remember`; call `recall` with a key for its full value):\n' +
-        Array.from({ length: 30 }, (_, i) => `- k${31 - i}: d${31 - i}`).join('\n') +
+        Array.from({ length: 60 }, (_, i) => `- k${61 - i}: d${61 - i}`).join('\n') +
         '\n1 more not shown; `list_memories` lists them all.',
     );
   });

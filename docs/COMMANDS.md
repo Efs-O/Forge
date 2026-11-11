@@ -26,6 +26,7 @@ These commands are currently contributed by the extension.
 | `Forge: Stop sharing this computer` | Turn off the two switches and the two `serve` shares Forge made, and leave every other share this computer has on the tailnet exactly as it was |
 | `Forge: Check connection` | On a laptop: walk the path to the desktop — Tailscale here, the desktop online in Tailscale, the model starter, the cloud relay, the models the desktop will serve — and name the first link that is broken in plain words. Reuses the address probe that every prompt already uses, reads only, and starts nothing |
 | `Forge: Open Config`          | Open the active config file          |
+| `Forge: Show Memories` | Open the regenerated workspace memory index |
 | `Forge: Validate Config`      | Validate the active config           |
 | `Forge: Check Media Setup`    | Report configured media engines and missing paths |
 | `Forge: Pick Model`           | Pick the active model                |

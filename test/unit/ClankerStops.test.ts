@@ -351,45 +351,6 @@ describe('Clanker keeps destructive, owner-only and secret-egress stops', () => 
     await expect(pending).resolves.toBe('declined');
   });
 
-  it('expires a default-armed chat at the approval decision and posts the exact notice once', async () => {
-    const conv: ConversationRuntime = {
-      id: CLANKER_CHAT,
-      title: 'Default chat',
-      createdAt: 1,
-      updatedAt: 1,
-      clanker: true,
-      clankerSource: 'policy-default',
-      messages: [],
-    };
-    const posted: { type: string; message?: string; id?: string }[] = [];
-    const records = chatClankerRecords((id) => (id === conv.id ? conv : undefined));
-    const service = new ToolApprovalService(
-      (message) => posted.push(message as { type: string; message?: string; id?: string }),
-      () => ({}) as never,
-      undefined,
-      undefined,
-      records,
-      undefined,
-      undefined,
-      () => undefined,
-      (conversationId, notice) => posted.push({ type: 'notice', message: notice, id: conversationId }),
-    );
-    const pending = service.request('forget', 'Remove stored memory?', false, conv.id, undefined, {
-      clankerStop: true,
-    });
-    const expectedNotice =
-      "Clanker's default from policy.yaml has ended, so this chat is gated again. Turn it back on with /clanker.";
-    expect(posted.find((message) => message.type === 'notice')?.message).toBe(expectedNotice);
-    expect(conv.clanker).toBe(false);
-    expect(conv.clankerSource).toBeUndefined();
-    const card = posted.find((message) => message.type === 'confirmRequest');
-    expect(card?.type).toBe('confirmRequest');
-    if (!card?.id) throw new Error('protected stop approval card was not posted');
-    service.resolve(card.id, 'decline');
-    await expect(pending).resolves.toBe('declined');
-    expect(posted.filter((message) => message.type === 'notice')).toHaveLength(1);
-  });
-
   it('keeps the owner-only wall ahead of the key, policy and Clanker checks', () => {
     const recorded: string[] = [];
     const rules = createChatRuleApproval({

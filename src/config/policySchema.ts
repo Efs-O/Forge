@@ -46,7 +46,6 @@ import { EnginesSchema, ModelHostsSchema } from './engineSchema';
 export const POLICY_KEYS = [
   'permissions',
   'approvals',
-  'clanker',
   'fetch',
   'exec',
   'browser',
@@ -80,7 +79,6 @@ export const SHARED_ANCHOR_KEY = 'x_shared';
 export const PolicyConfigSchema = z.object({
   permissions: ForgeConfigShape.permissions,
   approvals: ForgeConfigShape.approvals,
-  clanker: ForgeConfigShape.clanker,
   fetch: ForgeConfigShape.fetch,
   exec: ForgeConfigShape.exec,
   browser: ForgeConfigShape.browser,

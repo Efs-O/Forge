@@ -154,7 +154,6 @@ function signatureFor(
     // record by a toggle that changes no message, and a save that skipped it would
     // let a reload forget which chat the owner armed — or keep one they cleared.
     conversation.clanker ?? null,
-    conversation.clankerSource ?? null,
   ]);
 }
 

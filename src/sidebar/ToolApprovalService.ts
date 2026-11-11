@@ -24,7 +24,7 @@ import {
 import { unattendedFlaggedExitDetails, unattendedTaintGateDetails } from './untrustedExitPolicy';
 import { ApprovalTimeoutState } from './approvalTimeoutState';
 import { approvalEventForConversation } from './approvalEventLookup';
-import { readClankerModeAtApproval, type ChatClankerRecords } from './chatClanker';
+import type { ChatClankerRecords } from './chatClanker';
 
 /**
  * The card contract lives in `toolApprovalEvents.ts` — the webview bridge, the
@@ -81,11 +81,6 @@ export class ToolApprovalService {
      */
     private readonly chatRuleAllow?: ChatRuleApproval['allow'],
     private readonly chatRuleAlways?: (keys: readonly string[]) => AlwaysApprovalWriteResult,
-    private readonly getClankerDefaultUntil: () => string | undefined = () => undefined,
-    private readonly onClankerDefaultExpired: (
-      conversationId: string,
-      notice: string,
-    ) => void = () => undefined,
   ) {}
 
   addSink(sink: ToolApprovalSink): { dispose(): void } {
@@ -161,17 +156,7 @@ export class ToolApprovalService {
   }
 
   getClankerModeForApproval(conversationId: string): boolean {
-    if (!this.chatRecords) return this.clankerFlags.get(conversationId) ?? false;
-    return (
-      readClankerModeAtApproval(
-        this.chatRecords,
-        conversationId,
-        this.getClankerDefaultUntil(),
-        Date.now(),
-        this.clankerFlags.get(conversationId),
-        this.onClankerDefaultExpired,
-      ) ?? false
-    );
+    return this.chatRecords?.read(conversationId) ?? this.clankerFlags.get(conversationId) ?? false;
   }
 
   toggleClankerMode(conversationId: string): boolean {

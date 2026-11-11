@@ -1025,6 +1025,7 @@ Type `/` in chat to open the built-in command list. Forge also contributes comma
 | `/context`    | Add a file, selection, tabs, or files as context |
 | `/config`     | Open the active Forge config                     |
 | `/logs`       | Show the Forge backend output                    |
+| `/memories`   | Open the editable workspace memory index         |
 | `/clear`      | Clear the current conversation                   |
 | `/approvals`  | List approvals for this chat; `/approvals reset` clears them |
 | `/review`     | Run an immediate review prompt                   |

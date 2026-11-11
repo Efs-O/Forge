@@ -26,7 +26,7 @@ const PARALLEL_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   '__git_read_show',
 ]);
 
-const MAX_PARALLEL_READ_CALLS = 4;
+const MAX_PARALLEL_READ_CALLS = 10;
 
 export interface ParallelReadCheck {
   eligible: boolean;
@@ -213,7 +213,7 @@ export type ParallelBatchOutcome<T> =
   | { kind: 'failed'; error: unknown }
   | { kind: 'not-started' };
 
-/** Runs a consecutive read-only run with at most four active calls. */
+/** Runs a consecutive read-only run with at most ten active calls. */
 export async function runParallelReadBatch<T, R>(
   calls: readonly T[],
   signal: AbortSignal | undefined,

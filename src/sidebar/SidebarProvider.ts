@@ -123,7 +123,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       onPendingChanged: () => this.tabs.refreshRetention(),
       deliver: (text, id) => this.promptRouter.deliverChatMessage(text, id),
     });
-    this.sidebar = loadSidebarSession(workspaceState, historyArchive, this.config);
+    this.sidebar = loadSidebarSession(workspaceState, historyArchive);
     retainSessionMemoryKeys(this.sidebar, listMemoryKeys(workspaceState));
     const runtime = wireSidebar(
       {

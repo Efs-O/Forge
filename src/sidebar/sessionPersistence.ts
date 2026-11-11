@@ -1,5 +1,4 @@
 import type { Memento } from 'vscode';
-import type { ForgeConfig } from '../config/types';
 import { repairInterruptedToolCalls } from './interruptedToolCalls';
 import type { CompactionState } from './compactionTypes';
 import type { ForgeInstructionsPin } from './forgeInstructionsPin';
@@ -10,7 +9,6 @@ import { seedChatHostApprovals } from './chatApprovalRules';
 import { opResetReportedContext } from './ConversationOps';
 import { openConversationsPersistenceFor, persistMemento } from './openConversationsPersistence';
 import { copyQuestionRecords } from './sessionQuestionRecords';
-import { armNewConversationByDefault } from './chatClanker';
 import {
   ACTIVE_ID_KEY,
   HISTORY_KEY_LEGACY,
@@ -35,6 +33,7 @@ function emptyConversation(id: string, now: number): ConversationRuntime {
     updatedAt: now,
     retention_activity_at: now,
     keep_open: false,
+    clanker: false,
     messages: [],
   };
 }
@@ -122,11 +121,10 @@ function copyCompaction(compaction: {
   };
 }
 
-export function createDefaultSession(defaultOnUntil?: string): SidebarRuntime {
+export function createDefaultSession(): SidebarRuntime {
   const id = newConversationId();
   const now = Date.now();
   const conversation = emptyConversation(id, now);
-  armNewConversationByDefault(conversation, defaultOnUntil, now);
   return {
     activeConversationId: id,
     conversations: [conversation],
@@ -172,8 +170,11 @@ export function persistedToRuntime(p: ConversationPersisted): ConversationRuntim
     ...(p.tool_call_count !== undefined ? { tool_call_count: p.tool_call_count } : {}),
     ...(p.untrusted_since_ms !== undefined ? { untrusted_since_ms: p.untrusted_since_ms } : {}),
     ...(p.approval_rules !== undefined ? { approval_rules: [...(p.approval_rules ?? [])] } : {}),
-    ...(p.clanker !== undefined ? { clanker: p.clanker } : {}),
-    ...(p.clankerSource !== undefined ? { clankerSource: p.clankerSource } : {}),
+    ...(p.clankerSource === 'policy-default'
+      ? { clanker: false }
+      : p.clanker !== undefined
+        ? { clanker: p.clanker }
+        : {}),
   };
   // Older builds saved before clearing usage. With the cut at the transcript
   // end, no later model response could have measured the compacted context.
@@ -229,7 +230,6 @@ function conversationToPersisted(c: ConversationRuntime): ConversationPersisted 
     ...(c.untrusted_since_ms !== undefined ? { untrusted_since_ms: c.untrusted_since_ms } : {}),
     ...(c.approval_rules !== undefined ? { approval_rules: [...(c.approval_rules ?? [])] } : {}),
     ...(c.clanker !== undefined ? { clanker: c.clanker } : {}),
-    ...(c.clankerSource !== undefined ? { clankerSource: c.clankerSource } : {}),
   };
 }
 
@@ -307,9 +307,7 @@ function migrateLegacyHistory(
 export function loadSidebarSession(
   workspaceState: Memento,
   archive?: HistoryArchive,
-  config?: ForgeConfig,
 ): SidebarRuntime {
-  const defaultOnUntil = config?.clanker?.default_on_until;
   const openPersistence = openConversationsPersistenceFor(
     workspaceState,
     archive?.openConversations,
@@ -325,8 +323,7 @@ export function loadSidebarSession(
   const d = loaded.v1;
   if (loaded.hasSession) {
     const conversations = loaded.conversations.map(persistedToRuntime);
-    if (conversations.length === 0)
-      conversations.push(...createDefaultSession(defaultOnUntil).conversations);
+    if (conversations.length === 0) conversations.push(...createDefaultSession().conversations);
     // The pointer key wins when it still names an open conversation: a tab
     // switch writes only that, so the blob's own `activeConversationId` can be
     // several switches stale. Absent (records written before the split) or
@@ -374,7 +371,7 @@ export function loadSidebarSession(
     return indexSession(migrated, archive);
   }
 
-  const session = createDefaultSession(defaultOnUntil);
+  const session = createDefaultSession();
   session.history = (archive?.load() ?? []).map(persistedToRuntime);
   archive?.overflow.list([
     ...session.conversations.map((conversation) => conversation.id),

@@ -194,6 +194,13 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     availableWhileStreaming: true,
   },
   {
+    id: 'showMemories',
+    trigger: 'memories',
+    title: 'Show Memories',
+    description: 'Open the editable markdown memory index for this workspace.',
+    availableWhileStreaming: true,
+  },
+  {
     id: 'reindex',
     trigger: 'reindex',
     title: 'Reindex Codebase',

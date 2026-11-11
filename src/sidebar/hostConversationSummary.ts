@@ -30,6 +30,5 @@ export function summarizeConversation(
     compactCount: conv.compaction?.generation ?? 0,
     activeMs,
     clanker: conv.clanker === true,
-    ...(conv.clankerSource ? { clankerSource: conv.clankerSource } : {}),
   };
 }

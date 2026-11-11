@@ -31,7 +31,6 @@ const NON_MODEL_REF_FIELDS = [
   'permissions',
   // `approvals:` holds owner-only keys for policy.yaml; none can name a model.
   'approvals',
-  'clanker',
   // `engines` names programs Forge runs and `model_hosts` names hosts: neither
   // can hold a model name, so a model delete leaves nothing stale behind in
   // either. Both came in with the policy split (`src/config/policySchema.ts`).

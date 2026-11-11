@@ -22,6 +22,7 @@ export type ForgeSlashCommandId =
   | 'restartBackend'
   | 'reindex'
   | 'newChat'
+  | 'showMemories'
   | 'rename'
   | 'checkin'
   | 'context'

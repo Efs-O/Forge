@@ -317,17 +317,17 @@ describe('ToolDispatch parallel read batches', () => {
             () => resolve('Error: tool execution cancelled'),
             { once: true },
           );
-          if (started === 4) controller.abort();
+          if (started === 10) controller.abort();
         }),
     );
     toolRegistry.register(readTool('search_code', handler));
 
-    const calls = Array.from({ length: 6 }, (_, index) =>
+    const calls = Array.from({ length: 12 }, (_, index) =>
       makeToolCall('search_code', { query: `q${index}` }, `cancel-${index}`),
     );
     await dispatch.dispatch(calls, allowed, messages, 'abort-batch', controller.signal);
 
-    expect(started).toBe(4);
+    expect(started).toBe(10);
     expect(messages.map((message) => message.tool_call_id)).toEqual(
       calls.map((call) => call.id),
     );

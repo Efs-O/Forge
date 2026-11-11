@@ -192,6 +192,24 @@
     "general": []
   },
   {
+    "concern": "workspace-memories",
+    "source": {
+      "file": "CLAUDE.md",
+      "heading": "## What This Project Is"
+    },
+    "copies": [],
+    "general": [
+      {
+        "file": "src/agentBus/agentMeshNote.ts",
+        "anchor": "Workspace memories are editable files"
+      },
+      {
+        "file": "AI_SETUP.md",
+        "anchor": "Workspace memories are editable files"
+      }
+    ]
+  },
+  {
     "concern": "shared-hard-stops-text",
     "source": { "file": "CLAUDE.md", "heading": "## No Fallbacks Unless Requested" },
     "copies": [

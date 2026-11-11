@@ -49,6 +49,7 @@ export function opNewConversation(
     updatedAt: now,
     retention_activity_at: now,
     keep_open: false,
+    clanker: false,
     messages: [],
     ...(defaultModel ? { active_model: defaultModel } : {}),
   };

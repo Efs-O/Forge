@@ -46,6 +46,7 @@ import {
 import { registerActivationCommands } from './vscode/commandRegistrationSetup';
 import { setupKeepUndo } from './vscode/keepUndoSetup';
 import { setupToolActivation } from './vscode/toolActivationSetup';
+import { MemoryStore, memoryFolderFor, attachMemoryStore } from './memory/memoryStore';
 
 let activeRemoteRuntime: RemoteRuntime | undefined;
 /** Kept for `deactivate()`, which closes the starter BEFORE `stopOnExit`. */
@@ -88,6 +89,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   if (!bootstrapped) return;
   const activeConfigPath = bootstrapped.configPath;
   let config: ForgeConfig = bootstrapped.config;
+  const workspaceForMemories =
+    vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? activeConfigPath;
+  const memoryStore = await MemoryStore.migrate(
+    memoryFolderFor(workspaceForMemories),
+    context.workspaceState,
+  );
+  attachMemoryStore(context.workspaceState, memoryStore);
+  if (memoryStore.migrationFailed) {
+    void vscode.window.showErrorMessage(
+      `Forge could not move workspace memories to markdown files: ${memoryStore.migrationFailureReason ?? 'unknown migration error'}. Existing memories remain available from VS Code storage; the move will retry next load.`,
+    );
+  }
+  context.subscriptions.push(
+    vscode.commands.registerCommand('forge.showMemories', async () => {
+      try {
+        const file = memoryStore.regenerateIndex();
+        const document = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+        await vscode.window.showTextDocument(document);
+      } catch (error) {
+        void vscode.window.showErrorMessage(
+          `Could not open Forge memories: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }),
+  );
   // A VS Code tunnel or SSH window holds no cloud keys of its own, so a
   // key-based model goes through the desktop's cloud relay rather than reading
   // this window's keychain. Set once here, before any request can be made, on
