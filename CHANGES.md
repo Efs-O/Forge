@@ -1,5 +1,11 @@
 # Forge — Recent Changes
 
+## 0.17.161
+
+- `search_code` no longer says a file it was told to search does not exist when that file simply has no match.
+- The `shell` tool says that on Windows Git Bash turns a lone `/switch` (`schtasks /query`) into a path, and to use `shell: pwsh` or `//switch` instead.
+- `manage_jobs` `update` names each field it stored, as the job now reads (`schedule daily at 04:00`).
+
 ## 0.17.160
 
 - Creating a job always asks for approval: before, a `manage_jobs` create without a `job` argument named no file and skipped the check.
