@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.17.155
 
 - `image_search` now treats SerpApi's successful no-match answers as results and suggests another search instead of reporting an error.
 - Skills that require optional tools stay out of the catalog until those tools are registered; `load_skill` explains what must be configured.
