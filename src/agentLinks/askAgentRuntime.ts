@@ -173,7 +173,7 @@ export function makeAskAgentRuntime(options: {
       }
       return false;
     },
-    sendLive: async (agent, link, prompt, signal, purpose = 'ask', onAccepted) => {
+    sendLive: async (agent, link, prompt, signal, purpose = 'ask', onAccepted, origin) => {
       if (agent === 'codex') {
         if (purpose === 'reply') return queueCodexReply(options.getConfig, link, prompt, signal);
         return sendToPanelOwnedCodex(
@@ -202,7 +202,7 @@ export function makeAskAgentRuntime(options: {
           await sendPeerMessage(
             session,
             'Forge',
-            claudeQuestion(paths.script, id, link.title, prompt),
+            claudeQuestion(paths.script, id, link.title, prompt, origin),
           );
           onAccepted?.();
           const reply = await waitForReply(paths, id, liveWaitMs, signal);

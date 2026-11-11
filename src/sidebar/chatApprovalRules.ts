@@ -262,7 +262,7 @@ export interface ChatRuleCall {
  * `undefined` leaves the queue to apply the Clanker stop filter and card behavior.
  */
 export type ChatRuleDecision =
-  | { kind: 'answered'; key: string }
+  | { kind: 'answered'; key?: string }
   | { kind: 'offer'; offer: ApprovalOffer; alwaysInProject?: ApprovalOffer }
   | { kind: 'policy-denied'; allowPath: string; key: string };
 
@@ -388,19 +388,19 @@ export function createChatRuleApproval(options: {
       const { ctx, config } = env();
       const keyInput = keyInputFor(call);
       const keys = approvalKeysFor(keyInput, ctx);
-      const approvalKey = approvalKeysText(keys);
+      const approvalKey = keys.kind === 'keyed' ? approvalKeysText(keys.requirements) : undefined;
       const unattended = unattendedConversations.has(call.conversationId);
-      const answered = (answeredBy: 'policy_rule' | 'chat_rule' | 'clanker'): string => {
+      function answered(answeredBy: 'policy_rule' | 'chat_rule' | 'clanker'): string | undefined {
         options.recordAutoGate({
           toolName: call.toolName,
           ...(call.approvalMetadata?.detail ? { detail: call.approvalMetadata.detail } : {}),
           conversationId: call.conversationId,
           ...(call.dangerous ? { dangerous: true } : {}),
-          approvalKey,
+          ...(approvalKey !== undefined ? { approvalKey } : {}),
           answeredBy,
         });
         return approvalKey;
-      };
+      }
       // The owner-only wall is the first result from approvalKeysFor, before any
       // policy or Clanker lookup. Keep that ordering even for a keyless call.
       if (keys.kind === 'unkeyable' && keys.ownerOnly) return undefined;
@@ -413,7 +413,10 @@ export function createChatRuleApproval(options: {
         call.approvalMetadata?.secretReadTaint !== true &&
         !(call.exitVerdict.flaggedBy === 'secret' && call.reachesOut !== 'none');
       if (keys.kind !== 'keyed') {
-        if (clankerMayAnswer) return { kind: 'answered', key: answered('clanker') };
+        if (clankerMayAnswer) {
+          const key = answered('clanker');
+          return { kind: 'answered', ...(key !== undefined ? { key } : {}) };
+        }
         return undefined;
       }
       const policy = approvalPolicyDecision(
@@ -425,7 +428,7 @@ export function createChatRuleApproval(options: {
         unattendedConversations.jobMeta(call.conversationId)?.jobId,
       );
       if (policy.kind === 'allowed') {
-        return { kind: 'answered', key: answered('policy_rule') };
+        return { kind: 'answered', key: answered('policy_rule') as string };
       }
       if (unattended) {
         const job = unattendedConversations.jobMeta(call.conversationId);
@@ -437,18 +440,18 @@ export function createChatRuleApproval(options: {
               : job
                 ? `approvals.jobs.${job.jobId}.allow`
                 : 'approvals.unattended_bus.allow',
-          key: approvalKey,
+          key: approvalKeysText(keys.requirements),
         };
       }
       if (coveredByChatRules(call.conversation, call.conversationId, keys, ctx, config)) {
-        return { kind: 'answered', key: answered('chat_rule') };
+        return { kind: 'answered', key: answered('chat_rule') as string };
       }
       // Clanker is last and chat-scoped. Deny-list recursive deletes can have a key,
       // so they stay gated here even though an owner chat rule may still answer them.
       const denyList =
         keyInput.approvalGateKind === 'denyList' || keyInput.exitGateKind === 'denyList';
       if (clankerMayAnswer && !denyList) {
-        return { kind: 'answered', key: answered('clanker') };
+        return { kind: 'answered', key: answered('clanker') as string };
       }
       // These validated keys define both the card copy and what its button stores.
       // `approvalKeysFor` makes invalid or wall-reaching keys unkeyable first.

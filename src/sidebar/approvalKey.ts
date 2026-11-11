@@ -352,6 +352,6 @@ export function approvalKeysFor(
 }
 
 /** The keys a call needs, joined for the `approval_key` column of the `gate` row. */
-export function approvalKeysText(keys: CallApprovalKeys): string {
-  return keys.kind === 'keyed' ? keys.requirements.map((req) => req.key).join(',') : keys.why;
+export function approvalKeysText(requirements: readonly ApprovalRequirement[]): string {
+  return requirements.map((req) => req.key).join(',');
 }

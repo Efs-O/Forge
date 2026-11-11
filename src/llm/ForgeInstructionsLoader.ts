@@ -50,6 +50,7 @@ Fill in the blanks below; delete any rule that does not fit this project.
 - For stateful, queued or retried work, test failure, retry, restart and duplicate delivery, not only the happy path.
 - Every plan has acceptance criteria listing the invariants and edge cases, each tied to a test or named validation step.
 - Keep defects you introduced separate from ones that were already there.
+- Never swallow an error or hide invalid config behind a silent fallback: show the failure and the next useful step.
 - For every new wait, timer, delivery or child process, name what cancels it and test that path: an uncancelled one is a leak that only shows up after a week of runs.
 - For every message, verdict or request your code acts on, name what checks it came from the right session, chat or sender, and test that too.
 - If this project caps file length, check the count while you edit (\`wc -l\`) and split at a real seam before the cap, not after the lint fails at the end of your turn.

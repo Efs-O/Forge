@@ -1,5 +1,7 @@
 import type { AgentKind, AgentLink } from './chatAgentLinks';
 
+export type AskAgentOrigin = { kind: 'owner'; channel: 'telegram' };
+
 /**
  * The live half of a linked-agent ask: the transport contract, the wait for a
  * session Forge did not start to become reachable, and delivery through it.
@@ -47,6 +49,7 @@ export interface AskAgentRuntime {
     signal: AbortSignal,
     purpose?: 'ask' | 'reply',
     onAccepted?: () => void,
+    origin?: AskAgentOrigin,
   ): Promise<AskAgentRunResult>;
   runHeadless(options: {
     agent: AgentKind;

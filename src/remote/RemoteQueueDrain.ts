@@ -84,7 +84,11 @@ export async function drainRemoteQueue(
         let acceptanceNotice: Promise<unknown> | undefined;
         const result = await deps.host.askAgent(
           next.conversationId,
-          { agent: next.sessionTarget, message: next.text },
+          {
+            agent: next.sessionTarget,
+            message: next.text,
+            origin: { kind: 'owner', channel: 'telegram' },
+          },
           deps.signal,
           (link) => {
             linkedSessionWrite = deps.store.setAgentSession(next.id, link.sessionId);

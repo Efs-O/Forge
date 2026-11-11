@@ -277,18 +277,41 @@ describe('sweepStale', () => {
 });
 
 describe('messages', () => {
-  it('a Claude question carries the id and a runnable reply command', () => {
+  it('a Claude question without owner origin keeps the whole Forge message', () => {
     const msg = claudeQuestion(
       'C:\\Users\\me\\.forge\\agent-bus\\forge.sh',
       'fg1-a',
       'subj',
       'body',
     );
-    expect(msg).toContain('[Forge asks, question fg1-a] subj');
-    expect(msg).toContain(
-      `bash "C:/Users/me/.forge/agent-bus/forge.sh" reply fg1-a <<'FORGE_REPLY'`,
+    expect(msg).toBe(
+      `[Forge asks, question fg1-a] subj\n\nbody\n\n` +
+        "Forge's agent is blocked until you answer. Show your user this question and your\n" +
+        'answer, then send the answer with:\n\n' +
+        `bash "C:/Users/me/.forge/agent-bus/forge.sh" reply fg1-a <<'FORGE_REPLY'\n` +
+        '<your answer>\nFORGE_REPLY\n\n' +
+        `(Or write it to a file and run: bash "C:/Users/me/.forge/agent-bus/forge.sh" reply fg1-a <file>.) Not SendMessage: Forge\n` +
+        'is not a Claude session.',
     );
-    expect(msg).toContain('body');
+  });
+
+  it('a Claude owner Telegram question carries the exact owner message', () => {
+    const msg = claudeQuestion(
+      'C:\\Users\\me\\.forge\\agent-bus\\forge.sh',
+      'fg1-a',
+      'subj',
+      'body',
+      { kind: 'owner', channel: 'telegram' },
+    );
+    expect(msg).toBe(
+      `[Owner message via Telegram, question fg1-a] subj\n\nbody\n\n` +
+        'The owner is waiting on Telegram for your answer. Show your user this message and your\n' +
+        'answer, then send the answer with:\n\n' +
+        `bash "C:/Users/me/.forge/agent-bus/forge.sh" reply fg1-a <<'FORGE_REPLY'\n` +
+        '<your answer>\nFORGE_REPLY\n\n' +
+        `(Or write it to a file and run: bash "C:/Users/me/.forge/agent-bus/forge.sh" reply fg1-a <file>.) Not SendMessage: Forge\n` +
+        'is not a Claude session.',
+    );
   });
 
   it('an inbound message names its sender, with linked-session metadata as a footer', () => {

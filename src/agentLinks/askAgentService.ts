@@ -18,6 +18,7 @@ import {
 import type { AskAgentResult } from './askAgentResult';
 export { renderAskAgentResult } from './askAgentResult';
 export type { AskAgentResult } from './askAgentResult';
+import type { AskAgentOrigin } from './liveSessionDelivery';
 import { waitForLive, type AskAgentRunResult, type AskAgentRuntime } from './liveSessionDelivery';
 // The transport contract and the live-delivery helper belong to
 // `liveSessionDelivery.ts`, which the relay and the inbound reply lifecycle
@@ -43,6 +44,7 @@ export interface AskAgentRequest {
   agent: AgentKind;
   message: string;
   subject?: string;
+  origin?: AskAgentOrigin;
 }
 
 export interface AskAgentServiceOptions {
@@ -75,10 +77,10 @@ function description(request: AskAgentRequest, title: string): string {
 function askHeader(request: AskAgentRequest, conversation: ConversationRuntime): string {
   const title = conversation.title.replace(/\s+/gu, ' ').trim();
   const shown = title.length > MAX_SUBJECT_CHARS ? `${title.slice(0, MAX_SUBJECT_CHARS)}…` : title;
-  return (
-    `[Forge ask from chat "${shown}" · ${conversation.id}]\n` +
-    `To message this chat again later: forge.sh say ${request.agent} --to ${conversation.id}`
-  );
+  const followUp = `To message this chat again later: forge.sh say ${request.agent} --to ${conversation.id}`;
+  return request.origin?.kind === 'owner'
+    ? `[Owner message via Telegram, relayed by Forge chat "${shown}" · ${conversation.id}]\nThe owner wrote this, not Forge's model. Your answer goes back to the owner's Telegram chat.\n${followUp}`
+    : `[Forge ask from chat "${shown}" · ${conversation.id}]\n${followUp}`;
 }
 
 function promptFor(
@@ -91,10 +93,11 @@ function promptFor(
   const subject = request.subject?.trim();
   const body = subject ? `Subject: ${subject}\n\n${task}` : task;
   const titleLine = firstCodexAsk ? `${link.title}\n\n` : '';
-  return (
-    `${titleLine}${askHeader(request, conversation)}\n\n${body}\n\n` +
-    'Return a concise answer for the Forge chat.'
-  );
+  const closing =
+    request.origin?.kind === 'owner'
+      ? 'Return your answer to the owner; Forge sends it to their Telegram chat.'
+      : 'Return a concise answer for the Forge chat.';
+  return `${titleLine}${askHeader(request, conversation)}\n\n${body}\n\n${closing}`;
 }
 
 function validateRequest(value: AskAgentRequest): AskAgentRequest {
@@ -312,6 +315,7 @@ async function ask(
         context.signal,
         'ask',
         () => markAccepted(linked!),
+        ...(request.origin ? [request.origin] : []),
       );
     } else if (panel) {
       const opened = await options.runtime.openPanel(agent, linked.sessionId);
@@ -340,6 +344,7 @@ async function ask(
             context.signal,
             'ask',
             () => markAccepted(linked!),
+            ...(request.origin ? [request.origin] : []),
           );
         } else if (cameUp === 'unknown') {
           lead = `${label} session could not be checked; resumed headlessly. `;

@@ -76,7 +76,10 @@ describe('ensureForgeInstructionsFile', () => {
     // the question-card rule this repository's FORGE.md gained the same day:
     // a choice between fixed answers goes on an ask_user card, not a numbered
     // list, except in an unattended run. Cap 6,335 keeps the same 75 bytes.
-    expect(Buffer.byteLength(content, 'utf8')).toBeLessThan(6335);
+    // 2026-11-12: 6,377 bytes. The instruction audit found one general rule the
+    // starter lacked: never swallow an error or hide bad config behind a silent
+    // fallback. Cap 6,452 keeps the same 75 bytes.
+    expect(Buffer.byteLength(content, 'utf8')).toBeLessThan(6452);
   });
 
   it('carries the review items that took this repo to 0.8% failed calls', () => {

@@ -7,6 +7,7 @@
  */
 
 import clientScriptSource from './forge.sh';
+import type { AskAgentOrigin } from '../agentLinks/liveSessionDelivery';
 import type { AgentSenderMetadata } from '../agentLinks/chatAgentLinks';
 import { agentDisplayName } from '../agentLinks/chatAgentLinks';
 import { INBOX_CAP } from './agentInbox';
@@ -311,14 +312,19 @@ export function claudeQuestion(
   id: string,
   subject: string,
   question: string,
+  origin?: AskAgentOrigin,
 ): string {
   const cmd = clientCommand(scriptPath);
   return [
-    `[Forge asks, question ${id}] ${subject}`,
+    origin?.kind === 'owner'
+      ? `[Owner message via Telegram, question ${id}] ${subject}`
+      : `[Forge asks, question ${id}] ${subject}`,
     '',
     question,
     '',
-    "Forge's agent is blocked until you answer. Show your user this question and your",
+    origin?.kind === 'owner'
+      ? 'The owner is waiting on Telegram for your answer. Show your user this message and your'
+      : "Forge's agent is blocked until you answer. Show your user this question and your",
     'answer, then send the answer with:',
     '',
     `${cmd} reply ${id} <<'FORGE_REPLY'`,

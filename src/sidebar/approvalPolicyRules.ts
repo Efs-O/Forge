@@ -41,7 +41,7 @@ export function approvalPolicyDecision(
       ),
     )
   ) {
-    return { kind: 'allowed', key: approvalKeysText({ kind: 'keyed', requirements }) };
+    return { kind: 'allowed', key: approvalKeysText(requirements) };
   }
   if (!unattended) return { kind: 'none' };
 
@@ -54,7 +54,7 @@ export function approvalPolicyDecision(
       allowed.some((rule) => ruleCovers(rule, requirement, context)),
     )
   ) {
-    return { kind: 'allowed', key: approvalKeysText({ kind: 'keyed', requirements }) };
+    return { kind: 'allowed', key: approvalKeysText(requirements) };
   }
   return { kind: 'denied', allowPath };
 }

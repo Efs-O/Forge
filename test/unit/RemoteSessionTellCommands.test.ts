@@ -158,7 +158,11 @@ describe('Telegram linked-agent asks', () => {
     await state.drain();
     expect(state.askAgent).toHaveBeenCalledWith(
       'c1',
-      { agent: 'codex', message: 'build 2 failed' },
+      {
+        agent: 'codex',
+        message: 'build 2 failed',
+        origin: { kind: 'owner', channel: 'telegram' },
+      },
       expect.any(AbortSignal),
       expect.any(Function),
       expect.any(Function),

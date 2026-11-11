@@ -75,9 +75,11 @@ async function drainWith(
     | { kind: 'failed'; error: string },
   canDeliver: () => Promise<boolean> = async () => true,
   duringTurn?: (progress: RemoteAgentProgress) => Promise<void>,
+  sessionTarget?: 'claude' | 'codex' | 'copilot',
+  captureAsk?: (request: { agent: string; message: string; origin?: unknown }) => void,
 ): Promise<DrainRig> {
   const state = await store();
-  await state.enqueue(request());
+  await state.enqueue(request(sessionTarget ? { sessionTarget } : {}));
 
   const channel = new FakeRemoteChannel('telegram');
   const calls = traceChatCalls(channel);
@@ -97,6 +99,23 @@ async function drainWith(
     CLOCK_INTERVAL_MS,
   );
   const host = {
+    getAgentLink: vi.fn(() => undefined),
+    askAgent: vi.fn(
+      async (
+        _conversationId: string,
+        ask: { agent: string; message: string; origin?: unknown },
+      ) => {
+        captureAsk?.(ask);
+        return {
+          agent: sessionTarget ?? 'claude',
+          status: 'completed' as const,
+          finalText: 'Linked agent answer.',
+          sessionTitle: 'Claude session',
+          subject: 'hello',
+          live: true,
+        };
+      },
+    ),
     send: vi.fn(async () => {
       await duringTurn?.(progress);
       return outcome;
@@ -132,6 +151,26 @@ async function drainWith(
 }
 
 describe('queue drain status bubble', () => {
+  it('marks an agent ask as the owner message received via Telegram', async () => {
+    let received: unknown;
+    const { outbox } = await drainWith(
+      { kind: 'completed', finalText: 'ignored by agent route' },
+      async () => true,
+      undefined,
+      'claude',
+      (request) => {
+        received = request;
+      },
+    );
+
+    expect(received).toEqual({
+      agent: 'claude',
+      message: 'hello',
+      origin: { kind: 'owner', channel: 'telegram' },
+    });
+    await outbox.stop();
+  });
+
   it('opens a plain bubble, delivers the answer, then deletes the working line', async () => {
     const { state, channel, calls, armAfter } = await drainWith({
       kind: 'completed',

@@ -118,6 +118,7 @@ function harness(rules: string[], options: HarnessOptions = {}) {
     }),
   );
   const rows: GateEventRow[] = [];
+  const autoGateEvents: Array<{ approvalKey?: string }> = [];
   const gateLog = new GateEventLog({ write: (row) => rows.push(row), now: () => Date.now() });
   const records = new Map<string, ConversationRuntime>();
   const persist = vi.fn();
@@ -129,7 +130,10 @@ function harness(rules: string[], options: HarnessOptions = {}) {
     ...(options.clanker
       ? { clankerMode: (conversationId: string) => conversationId === 'chat-1' }
       : {}),
-    recordAutoGate: (event) => gateLog.autoApproved(event),
+    recordAutoGate: (event) => {
+      autoGateEvents.push(event);
+      gateLog.autoApproved(event);
+    },
     lookup: (conversationId) => records.get(conversationId),
     persist,
   });
@@ -204,6 +208,7 @@ function harness(rules: string[], options: HarnessOptions = {}) {
   };
   return {
     rows,
+    autoGateEvents,
     requestApproval,
     deliverChatMessage,
     records,
@@ -465,6 +470,7 @@ describe('Clanker, armed for this chat, answers a key the owner could have allow
     expect(row.kind).toBe('auto');
     expect(row.answered_by).toBe('clanker');
     expect(row.approval_key).toBe('cross_chat');
+    expect(probe.autoGateEvents[0]?.approvalKey).toBe('cross_chat');
     expect(row.tool).toBe('message_chat');
     expect(row.conversation_id).toBe('chat-1');
   });
@@ -486,6 +492,29 @@ describe('Clanker, armed for this chat, answers a key the owner could have allow
     // A card answers it, so the row is the card's own, written by the sink — not an
     // `auto` row claiming Clanker answered a call it had no key for.
     expect(probe.rows).toHaveLength(0);
+  });
+
+  it('records no approval key when Clanker answers an unkeyable call', () => {
+    const probe = harness([], { clanker: true });
+    const decision = probe.chatRuleApproval.decide({
+      toolName: 'shell',
+      args: { command: 'custom dangerous operation' },
+      dangerous: true,
+      toolGate: true,
+      outsideWorkspace: false,
+      declaredSafe: false,
+      reachesOut: 'none',
+      exitVerdict: {} as never,
+      mutationPaths: [],
+      outsideMutationPaths: [],
+      conversationId: 'chat-1',
+      conversation: conversation([]),
+    });
+
+    expect(decision).toEqual({ kind: 'answered' });
+    expect(probe.autoGateEvents[0]?.approvalKey).toBeUndefined();
+    expect(probe.rows).toHaveLength(1);
+    expect(probe.rows[0]?.approval_key).toBeUndefined();
   });
 
   it('does not offer a chat rule for the deny-list command `git rebase`', async () => {

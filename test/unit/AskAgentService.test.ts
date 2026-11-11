@@ -106,7 +106,7 @@ describe('ask_agent session resolution', () => {
   // 2026-11-09: the header used to be a bare "[Forge ask]", and `forge.sh who`
   // prints titles but no ids, so an agent that wanted to write back to the
   // asking chat later spent turns finding it. The title stays; the id is added.
-  it('names the asking chat by title and id, with the command to reach it again', async () => {
+  it('keeps the full Forge ask text without an owner origin', async () => {
     const state = setup({ isLive: vi.fn(async () => true) });
     state.conv.title = 'Design\n  chat';
     state.conv.agentLinks = { claude: linked('claude') };
@@ -122,9 +122,39 @@ describe('ask_agent session resolution', () => {
       },
     );
     const prompt = vi.mocked(state.runtime.sendLive).mock.calls[0]?.[2];
-    expect(prompt).toContain(`[Forge ask from chat "Design chat" · ${id}]`);
-    expect(prompt).toContain(`To message this chat again later: forge.sh say claude --to ${id}`);
-    expect(prompt).toContain('Review this');
+    expect(prompt).toBe(
+      `[Forge ask from chat "Design chat" · ${id}]\n` +
+        `To message this chat again later: forge.sh say claude --to ${id}\n\n` +
+        'Review this\n\nReturn a concise answer for the Forge chat.',
+    );
+  });
+
+  it('identifies an owner Telegram ask in the whole prompt', async () => {
+    const state = setup({ isLive: vi.fn(async () => true) });
+    state.conv.title = 'Design\n  chat';
+    state.conv.agentLinks = { claude: linked('claude') };
+    rebuildIndex([state.conv]);
+    await state.handler(
+      {
+        agent: 'claude',
+        message: 'Review this',
+        origin: { kind: 'owner', channel: 'telegram' },
+      },
+      {
+        conversation: state.conv,
+        checkpoint: state.checkpoint,
+        signal: new AbortController().signal,
+        workspaceRoot: 'C:/repo',
+        persistConversation: state.persistConversation,
+      },
+    );
+    const prompt = vi.mocked(state.runtime.sendLive).mock.calls[0]?.[2];
+    expect(prompt).toBe(
+      `[Owner message via Telegram, relayed by Forge chat "Design chat" · ${id}]\n` +
+        `The owner wrote this, not Forge's model. Your answer goes back to the owner's Telegram chat.\n` +
+        `To message this chat again later: forge.sh say claude --to ${id}\n\n` +
+        'Review this\n\nReturn your answer to the owner; Forge sends it to their Telegram chat.',
+    );
   });
 
   // 2026-11-06: a Codex thread Forge started is an `exec` thread, which the VS
