@@ -1,5 +1,11 @@
 # Forge — Recent Changes
 
+## 0.17.159
+
+- `open_url_in_browser` asks under its host's `net:` key, so "Allow for this chat" is remembered per host; after a secret read it still asks every time.
+- `manage_jobs` says the job definition goes in `definition`, never in `job`.
+- `ask_agent` queues a different question to an agent that is still busy on this chat's earlier one, and delivers both replies in order; only a repeat of a pending question is refused.
+
 ## 0.17.158
 
 - `desktop_focus_window` refuses a window that its own modal dialog has disabled (Notepad's Open dialog, for one), and names the dialog to act on instead. Before, focusing the disabled window reported success while every key sent to it was lost.
