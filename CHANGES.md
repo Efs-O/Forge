@@ -1,5 +1,14 @@
 # Forge — Recent Changes
 
+## 0.17.157
+
+- `open_url_in_browser` asks with a Forge approval card and opens the URL through the OS, so a Clanker chat no longer stalls on VS Code's own dialog, and the result names the URL it opened.
+- `desktop_focus_window` refuses when another window (usually the app's own dialog) takes the foreground right after focusing, and names that window.
+- The VS Code refusal in the desktop tools says the setting is the owner's, in `~/.forge/policy.yaml`.
+- The loop guard knows which tools change things again: repeated desktop and browser actions no longer get read-only warnings or a "no progress" stop.
+- `manage_jobs` says which fields `create` requires and what the others default to.
+- `install_llamacpp` is removed; the `llamacpp_update` job action, or an agent job following `docs/LLAMACPP_UPDATE.md`, installs llama.cpp.
+
 ## 0.17.156
 
 - `forge.sh reload --reopen-claude <sessionId>` reopens an idle Claude Code session's tab in the reloaded window; a watcher session still sends the message that wakes it.
