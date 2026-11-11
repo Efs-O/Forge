@@ -137,6 +137,8 @@ export interface SearchCodeFound {
   moreRemains: boolean;
   /** The directory the crawl actually rooted at, in forward-slash form. */
   rootDir: string;
+  /** The workspace root the `include` was resolved against (an include naming one file roots the crawl at that file). */
+  workspaceRoot: string;
   /**
    * The exclusion globs this search did NOT apply, because they would have
    * pruned the search root itself. Carried up rather than swallowed: a search
@@ -197,6 +199,7 @@ export async function searchWorkspaceText(
           matches: Array.from(matches.values()),
           moreRemains,
           rootDir: scope.rootDir,
+          workspaceRoot: folder.uri.fsPath,
           skippedExcludes,
         });
     };
@@ -308,6 +311,7 @@ export async function searchWorkspaceText(
           matches: Array.from(matches.values()),
           moreRemains,
           rootDir: scope.rootDir,
+          workspaceRoot: folder.uri.fsPath,
           skippedExcludes,
         });
         return;

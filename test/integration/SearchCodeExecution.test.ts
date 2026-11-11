@@ -380,6 +380,17 @@ describe('isolated search_code process execution', () => {
     expect(result).toContain('opened no file');
   });
 
+  it('does not call an existing named file missing when it simply has no match', async () => {
+    // The crawl is rooted AT a named file; judging the include against that
+    // root doubled the path and reported a real file as not there.
+    fs.mkdirSync(path.join(root, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'docs', 'present.md'), 'no hit here\n', 'utf8');
+    const result = await tool().handler({ query: 'case fixture', include: 'docs/present.md' });
+    expect(result).toContain('No matches');
+    expect(result).not.toContain('names one path exactly');
+    expect(result).not.toContain('opened no file');
+  });
+
   it('kills the spawned search and reports caller cancellation', async () => {
     const controller = new AbortController();
     const pending = tool().handler(

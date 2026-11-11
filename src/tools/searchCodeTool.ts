@@ -194,7 +194,7 @@ export function makeSearchCodeTool(
         }
         throw error;
       }
-      const { matches: crawled, moreRemains, rootDir, skippedExcludes } = found;
+      const { matches: crawled, moreRemains, rootDir, workspaceRoot, skippedExcludes } = found;
       /**
        * What this search did NOT look at, said in the order the caller needs it.
        *
@@ -219,7 +219,10 @@ export function makeSearchCodeTool(
         );
       }
       if (crawled.length === 0) {
-        const includeNote = missingIncludeNote(include, rootDir);
+        // Against the workspace root, as the scope resolver judged it: an include
+        // naming one existing file roots the crawl AT that file, so resolving the
+        // include against rootDir doubled the path and reported a real file missing.
+        const includeNote = missingIncludeNote(include, workspaceRoot);
         if (includeNote) skipNotes.push(`[${includeNote.trimStart()}]`);
         else if (isGlobInclude(include)) {
           const excludes = SEARCH_EXCLUDES.map((glob) => '`' + glob + '`').join(', ');
