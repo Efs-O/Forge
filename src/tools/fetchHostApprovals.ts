@@ -411,12 +411,13 @@ export function hostApprovedForChat(
 }
 
 /**
- * The gate a redirect has to pass before it is followed.
+ * The host check for a redirect before it is followed.
  *
  * Without it, an open redirect on an approved host (`www.google.com/url?q=…`)
  * launders a request to any host on the internet: the card was answered for
- * google, and the bytes went to the collector. The message names the host and
- * the sanctioned next step, so the agent can do it instead of inventing one.
+ * google, and the bytes went to the collector. An unapproved host goes to
+ * ToolDispatch for the same approval flow as a direct `web_fetch` call; this
+ * message is retained for handlers running without that dispatcher callback.
  */
 export function redirectGate(
   config: ForgeConfig | undefined,

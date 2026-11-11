@@ -21,6 +21,10 @@ describe('Clanker status delivery', () => {
           state = reducer(state, { type: 'TOKEN', text: 'Earlier reply. ', convId: 'target' });
         }
         await handler.handle('clanker');
+        const expectedNotice = on
+          ? "\n> 💥 **Clanker Mode ON** — this chat only. Deny-listed destructive shell commands, Forge guard files, and sending data out after reading a secret still stop. `/clanker` again turns it off.\n"
+          : '\n> 💥 **Clanker Mode OFF** — this chat is gated again. The approvals this chat earned are not revoked.\n';
+        expect(posted[0]?.message).toBe(expectedNotice);
         expect(posted).toEqual([
           expect.objectContaining({
             type: 'notice',

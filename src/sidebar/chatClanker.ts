@@ -48,7 +48,7 @@ export function clankerDefaultNotice(defaultOnUntil: string): string {
   const date = new Date(Date.parse(defaultOnUntil));
   const pad = (value: number): string => String(value).padStart(2, '0');
   const until = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-  return `Clanker is on by default until ${until} (policy.yaml clanker.default_on_until). Its three stops still hold: destructive actions, Forge guard files, a secret read followed by egress. Turn it off here with /clanker.`;
+  return `Clanker is on by default until ${until} (policy.yaml clanker.default_on_until). Its three stops still hold: deny-listed destructive shell commands, Forge guard files, a secret read followed by egress. Turn it off here with /clanker.`;
 }
 
 /** Apply the policy only to a record as it is created. */

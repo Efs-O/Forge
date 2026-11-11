@@ -156,9 +156,9 @@ describe('the pair the approval queue reads and writes through', () => {
 });
 
 describe('the owner-set expiring Clanker default', () => {
-  const future = '2026-11-11T08:00';
+  const future = '2999-01-01T08:00';
   const creationNotice =
-    'Clanker is on by default until 2026-11-11 08:00 (policy.yaml clanker.default_on_until). Its three stops still hold: destructive actions, Forge guard files, a secret read followed by egress. Turn it off here with /clanker.';
+    'Clanker is on by default until 2999-01-01 08:00 (policy.yaml clanker.default_on_until). Its three stops still hold: deny-listed destructive shell commands, Forge guard files, a secret read followed by egress. Turn it off here with /clanker.';
   const expiredNotice =
     "Clanker's default from policy.yaml has ended, so this chat is gated again. Turn it back on with /clanker.";
 

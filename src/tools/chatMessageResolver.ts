@@ -45,7 +45,6 @@ const FILLER_WORDS = new Set([
 ]);
 const CHAT_ID_PATTERN = /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/iu;
 const EXAMPLE_CHAT_ID = '588357b8-6b42-4e7f-b77d-175aae1256ff';
-
 function normalizeReference(value: string): string {
   return value
     .trim()
@@ -203,9 +202,11 @@ function displayTitle(title: string): string {
   return title.replace(/[\s\p{Cc}]+/gu, ' ').trim();
 }
 
-/** Format the open tabs in tab order, using ids the resolver can accept directly. */
+/** Format every open tab in tab order, with its tab number left intact. */
 export function formatChatList(chats: ChatRef[], selfId: string): string {
-  const ordered = [...chats].sort((left, right) => left.position - right.position);
+  const ordered = chats
+    .filter((chat) => !chat.closed)
+    .sort((left, right) => left.position - right.position);
   const self = ordered.find((chat) => chat.id === selfId);
   const lines = ordered.map((chat) => {
     const model = chat.model ? ` · ${chat.model}` : '';

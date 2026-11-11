@@ -62,6 +62,37 @@ describe('web_fetch DNS SSRF protection', () => {
     );
   });
 
+  it.each(['127.0.0.1', '10.0.0.5', '169.254.169.254'])(
+    'refuses redirect to raw private address %s before asking for host approval',
+    async (address) => {
+      const lookup = vi.fn(async () => [{ address: '8.8.8.8', family: 4 }]);
+      const fetch = vi.fn(async () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: `http://${address}/private` },
+        }),
+      );
+      const authorizeFetchRedirect = vi.fn(async () => undefined);
+      const tool = makeWebFetchTool({ lookup, fetch });
+
+      await expect(
+        tool.handler(
+          { url: 'https://public.example.test/start' },
+          { conversationId: `raw-ip-${address}`, authorizeFetchRedirect } as never,
+        ),
+      ).rejects.toThrow(`redirect target rejected — Blocked: raw IP address not permitted: ${address}`);
+
+      expect(authorizeFetchRedirect).not.toHaveBeenCalled();
+      expect(lookup).toHaveBeenCalledExactlyOnceWith('public.example.test');
+      expect(fetch).toHaveBeenCalledExactlyOnceWith(
+        'https://public.example.test/start',
+        { address: '8.8.8.8', family: 4 },
+        expect.any(Object),
+        expect.anything(),
+      );
+    },
+  );
+
   it.each([
     ['CGNAT', '100.64.0.1'],
     ['IPv6 ULA', 'fd00::1'],

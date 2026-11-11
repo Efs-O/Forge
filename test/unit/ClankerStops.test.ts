@@ -256,7 +256,7 @@ function makeRules(enabled: boolean, recorded: string[]) {
 describe('Clanker answers every non-protected approval', () => {
   it('shows the exact three-stop description', () => {
     expect(SLASH_COMMANDS.find((command) => command.trigger === 'clanker')?.description).toBe(
-      "Toggle full-auto mode — no confirmation prompts until you run /clanker again. Destructive commands, Forge's own guard files, and sending data out after reading a secret still stop.",
+      "Toggle full-auto mode — no confirmation prompts until you run /clanker again. Deny-listed destructive shell commands, Forge guard files, and sending data out after reading a secret still stop.",
     );
   });
 
@@ -326,10 +326,10 @@ describe('Clanker keeps destructive, owner-only and secret-egress stops', () => 
     expect(recorded).toEqual([]);
   });
 
-  it('does not answer a destructive tool gate outside the turn checkpoint', async () => {
+  it('keeps an explicit tool-owned stop on the owner approval path', async () => {
     const recorded: string[] = [];
     const call = makeCall({
-      toolName: 'forget',
+      toolName: 'tool_owned_stop',
       approvalMetadata: { clankerStop: true, detail: 'Remove stored memory?' },
     });
     const decision = makeRules(true, recorded).decide(call);
@@ -342,7 +342,7 @@ describe('Clanker keeps destructive, owner-only and secret-egress stops', () => 
       () => ({}) as never,
     );
     service.setClankerMode(CLANKER_CHAT, true);
-    const pending = service.request('forget', 'Remove stored memory?', false, CLANKER_CHAT, undefined, {
+    const pending = service.request('tool_owned_stop', 'Tool-owned stop.', false, CLANKER_CHAT, undefined, {
       clankerStop: true,
     });
     const card = posted.find((message) => message.type === 'confirmRequest');

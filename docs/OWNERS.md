@@ -893,6 +893,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Check dispatch + check context                             | `src/jobs/checks/runCheck.ts`                                |
 | Check context + result types                               | `src/jobs/checks/checkTypes.ts`                                |
 | Human-readable job description (for `/jobs`)               | `src/jobs/jobDescribe.ts`                                      |
+| `manage_jobs` create confirmation text (enabled/disabled, agent model) | `src/jobs/jobCreateText.ts` |
 | `manage_jobs` tool (create/update/pause/delete)            | `src/tools/jobTools.ts`                                        |
 | Job reference resolution (exact id/name, then substring) shared by `manage_jobs` and `/job` | `src/jobs/jobRefResolver.ts` |
 | Discuss chat seeding (`manage_jobs` + `/job chat`)         | `src/jobs/jobDiscuss.ts`                                       |

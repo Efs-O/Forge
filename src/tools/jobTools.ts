@@ -1,19 +1,20 @@
 /**
  * `manage_jobs` is the single persistent-job tool (B2, D4), one action per
  * call. It is advertised in every conversation when `jobs.enabled`, with read
- * for `list`/`get`, write for changes, and approved delete (even under
- * `/clanker`). `run_now` marks the next tick; `discuss` opens and seeds the
- * job chat (B.6).
+ * for `list`/`get`, write for changes, and dangerous delete (Clanker approves it
+ * only in an attended chat). `run_now` marks the next tick; `discuss` opens and
+ * seeds the job chat (B.6).
  */
 
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { ForgeConfig } from '../config/types';
 import { defaultState, type JobStore } from '../jobs/JobStore';
-import { JobSchema, type Job, type JobFile } from '../jobs/jobSchema';
+import { JOB_SCHEDULE_KINDS, JobSchema, type JobFile } from '../jobs/jobSchema';
 import { resolveJobRef, type JobMatch } from '../jobs/jobRefResolver';
 import { appendHomeNote } from '../jobs/jobsHome';
 import { nextDue } from '../jobs/schedule';
+import { jobCreateText } from '../jobs/jobCreateText';
 import { describeJob, describeSchedule, formatWhen, lastRunOutcome } from '../jobs/jobDescribe';
 import { openDiscussChat } from '../jobs/jobDiscuss';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
@@ -89,8 +90,8 @@ export function makeManageJobsTool(deps: ManageJobsDeps): RegisteredTool {
           "or open a job's discuss chat. Available in every chat when jobs are enabled. " +
           'For recurring work or work that must survive a restart; for one process exit, notify_on_exit. ' +
           '`update` takes a partial definition (for example only `schedule`), so "check at 08:00 instead" ' +
-          'is one call. `delete` always asks for approval. `run_now` runs the job on the next scheduler ' +
-          'tick, even from a window that does not hold the lease.',
+          'is one call. `delete` asks first; attended Clanker approves it. `run_now` runs the job ' +
+          'on the next scheduler tick, even from a window that does not hold the lease.',
         parameters: {
           type: 'object',
           properties: {
@@ -110,7 +111,7 @@ export function makeManageJobsTool(deps: ManageJobsDeps): RegisteredTool {
               description:
                 'What to do. `list` lists all jobs; `get` inspects one; `create` adds one; `update` ' +
                 'changes one (partial definition); `pause`/`resume` toggle it; `delete` removes it ' +
-                '(always asks for approval); `run_now` runs it on the next tick; `discuss` opens its ' +
+                '(asks for approval); `run_now` runs it on the next tick; `discuss` opens its ' +
                 'discuss chat.',
             },
             job: {
@@ -161,18 +162,16 @@ export function makeManageJobsTool(deps: ManageJobsDeps): RegisteredTool {
     },
     // Advertised only when a `jobs:` block is present.
     advertise: () => deps.getConfig().jobs?.enabled === true,
-    // `delete` always asks, even under /clanker: `dangerous` is what keeps
-    // clanker from removing a job without anyone being asked.
+    // Attended Clanker approves job deletion. Dangerous keeps an unattended or
+    // job turn from consenting for itself; with Clanker off, the card asks.
     approval: (args) => {
-      // Dangerous so /clanker cannot consent for the user, and a job turn
-      // (unattended policy) cannot consent for itself.
+      // The CLI-consent branch stays dangerous, so the turn cannot consent for itself.
       if (needsCliConsent(deps.getConfig(), jobModelOf(deps, args))) {
         return { dangerous: true, detail: CLI_AGENT_CONSENT_DETAIL };
       }
       if (args['action'] !== DELETE_ACTION) return undefined;
       return {
         dangerous: true,
-        clankerStop: true,
         detail: `Delete job "${String(args['job'] ?? '')}". Its definition, state, and run log are removed.`,
       };
     },
@@ -188,6 +187,16 @@ export function makeManageJobsTool(deps: ManageJobsDeps): RegisteredTool {
             return `Error: manage_jobs: \`${action}\` needs \`definition\`, the job definition as a JSON object${asString}. The definition was sent in \`job\`, which names an existing job (id or name). Nothing ran. Resend it as \`definition\`.`;
           }
           return `Error: manage_jobs: \`${action}\` needs \`definition\`, the job definition as a JSON object${asString}. Nothing ran.`;
+        }
+        const schedule = (definition as Record<string, unknown>)['schedule'];
+        if (schedule !== null && typeof schedule === 'object' && !Array.isArray(schedule)) {
+          const kind = (schedule as Record<string, unknown>)['kind'];
+          if (kind !== undefined && !JOB_SCHEDULE_KINDS.some((accepted) => accepted === kind)) {
+            return (
+              `Error: manage_jobs: schedule.kind must be one of ${JOB_SCHEDULE_KINDS.join(', ')} ` +
+              `(received ${JSON.stringify(kind)}).`
+            );
+          }
         }
       }
       if (
@@ -366,32 +375,7 @@ async function createJob(deps: ManageJobsDeps, args: Record<string, unknown>): P
   // job fired on the next tick (2026-09-23, 15:53). Seed its first run time.
   const firstRun = nextDue(result.data.schedule, now);
   await deps.store.saveState(id, { ...defaultState(), next_due_at: firstRun.getTime() });
-  const action = result.data.action;
-  return `Created job "${result.data.name}" [${id}]. First run: ${firstRun.toLocaleString()}.${jobsModelSentence(deps.getConfig(), action)}`;
-}
-
-/**
- * The create confirmation's sentence about which model the agent will run on.
- *
- * A `jobs.default_model` naming a model that has been deleted is NOT rethrown
- * here: the job is already saved and its first run seeded by the time this
- * sentence is built, so a throw would report a half-written file as a failed
- * create. The runner names that failure at the job start instead
- * (`AgentTaskRunner.run`), and the user still needs to see it now — this is the
- * moment they could fix the field.
- */
-function jobsModelSentence(config: ForgeConfig, action: Job['action']): string {
-  if (action?.kind !== 'agent_task') return '';
-  if (action.model) return ` Its agent runs on ${action.model}.`;
-  try {
-    return ` Its agent runs on jobs.default_model (${jobDefaultModel(config) ?? 'unset'}).`;
-  } catch {
-    return (
-      ` Its agent runs on jobs.default_model (${config.jobs?.default_model ?? 'unset'}). ` +
-      'That model is no longer in config.yaml, so this job will fail until ' +
-      '`jobs.default_model` names a configured model.'
-    );
-  }
+  return jobCreateText(result.data, id, firstRun, deps.getConfig());
 }
 
 /** Build a stable id from the name: a slug, suffixed if taken (so two "llama.cpp" jobs can coexist). */

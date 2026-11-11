@@ -146,6 +146,34 @@ describe('background shell exit notification', () => {
     expect(stopped.status).toBe('terminated');
   });
 
+  it('states list scope and marks executions started by this chat', async () => {
+    const current = backgroundExecutionManager.start({
+      command: process.execPath,
+      args: ['-e', 'setInterval(() => {}, 1000)'],
+      cwd: process.cwd(),
+      env: { FORGE_CONVERSATION_ID: 'chat-a' },
+    });
+    const other = backgroundExecutionManager.start({
+      command: process.execPath,
+      args: ['-e', 'setInterval(() => {}, 1000)'],
+      cwd: process.cwd(),
+      env: { FORGE_CONVERSATION_ID: 'chat-b' },
+    });
+    const tool = makeListExecutionsTool();
+    expect(tool.definition.function.description).toBe(
+      'List the background executions in this VS Code window, from every chat (this_chat marks yours), with id and status. Use it to recover a lost execution_id.',
+    );
+    const listed = JSON.parse(
+      String(await tool.handler({}, { beforeMutate: () => {}, conversationId: 'chat-a' })),
+    ) as { executions: Array<{ execution_id: string; this_chat: boolean }> };
+    expect(
+      listed.executions.find((execution) => execution.execution_id === current.id)?.this_chat,
+    ).toBe(true);
+    expect(
+      listed.executions.find((execution) => execution.execution_id === other.id)?.this_chat,
+    ).toBe(false);
+  });
+
   // Everything below is the 2026-10-30 change: the wake is on by default, and a
   // stopped turn silences it. The exit listener IS the wake — backgroundExitNotice
   // routes its text, and a route to an idle chat starts a turn — so "the listener

@@ -68,11 +68,13 @@ function kindUnionError(issue: unknown): string {
  * - `daily`: at a clock time each day.
  * - `weekly`: at a clock time on one or more weekdays.
  */
+export const JOB_SCHEDULE_KINDS = ['interval', 'daily', 'weekly'] as const;
+
 const ScheduleSchema = z.discriminatedUnion(
   'kind',
   [
     z.object({
-      kind: z.literal('interval'),
+      kind: z.literal(JOB_SCHEDULE_KINDS[0]),
       minutes: z
         .number()
         .int()
@@ -83,11 +85,11 @@ const ScheduleSchema = z.discriminatedUnion(
         ),
     }),
     z.object({
-      kind: z.literal('daily'),
+      kind: z.literal(JOB_SCHEDULE_KINDS[1]),
       at: ClockTimeSchema,
     }),
     z.object({
-      kind: z.literal('weekly'),
+      kind: z.literal(JOB_SCHEDULE_KINDS[2]),
       days: z
         .array(WeekdaySchema)
         .refine((days) => days.length >= 1, 'weekly needs at least one weekday'),

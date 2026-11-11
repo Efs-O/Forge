@@ -236,8 +236,9 @@ export class ToolApprovalService {
       }
       return Promise.resolve('approved');
     }
-    /* Clanker covers every remaining call except protected stops. Dangerous alone
-     * is not a stop; the owner wall runs earlier and deny-list gates are tagged. */
+    /* Clanker covers every remaining call except deny-listed destructive shell
+     * commands, Forge guard files, and secret reads followed by egress. Dangerous
+     * alone is not a stop; the owner wall runs earlier and deny-list gates are tagged. */
     if (
       conversationId &&
       options?.clankerStop !== true &&

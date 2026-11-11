@@ -293,9 +293,7 @@ export function makeGetEditorContextTool(): RegisteredTool {
       function: {
         name: 'get_editor_context',
         description:
-          'Read what the user currently has open: the active file, the selected text and its ' +
-          'range, the cursor position, and the paths of all open editor tabs. Use this when the ' +
-          'user refers to "this", "here", or "the selection" without naming a file.',
+          'Reports the window\'s editor: active file, selection and range, cursor, and open tab paths. Other chats in this window share this editor, so it may show their files. Use when the user says "this", "here", or "the selection" without naming a file.',
         parameters: {
           type: 'object',
           properties: {},

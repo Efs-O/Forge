@@ -428,7 +428,11 @@ export function formatPeerSection(peers: PeerWindow[], unreachable: UnreachableW
   const lines: string[] = ['', 'Other windows:'];
   for (const peer of peers) {
     lines.push(`${peerWindowListLabel(peer)} — ${peer.chats.length} chat(s):`);
-    for (const chat of peer.chats) {
+    const ordered = [
+      ...peer.chats.filter((chat) => !chat.closed),
+      ...peer.chats.filter((chat) => chat.closed),
+    ];
+    for (const chat of ordered) {
       const state = chat.closed ? 'closed' : chat.running ? 'running' : 'idle';
       const model = chat.model ? ` · ${chat.model}` : '';
       lines.push(`  ${chat.title} · ${state}${model} · id ${chat.id}`);

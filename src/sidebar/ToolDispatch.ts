@@ -7,7 +7,8 @@ import type { ChatMessage, ToolCall } from '../llm/types';
 import type { CheckpointStack } from '../checkpoint/CheckpointStack';
 import type { CheckpointSession } from '../checkpoint/CheckpointStack';
 import type { KeepUndoCodeLensProvider } from './KeepUndoCodeLens';
-import type { ToolHandlerResult, ToolPermission } from '../tools/ToolRegistry';
+import type { RegisteredTool, ToolHandlerResult, ToolPermission } from '../tools/ToolRegistry';
+import { ToolApprovalRefusal } from '../tools/toolContract';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import { repairTrailingPathSpace, trailingPathSpaceNote } from '../tools/pathArgTrim';
 import { ToolFailureTracker } from '../tools/StripTools';
@@ -189,6 +190,7 @@ export class ToolDispatch {
           continue;
         }
         args = pre.args;
+        const handlerArgs = pre.args;
         const reg = pre.reg;
 
         // A path argument ending in whitespace is a stray space, not a filename
@@ -202,55 +204,21 @@ export class ToolDispatch {
 
         const approvalCache =
           internal?.cachedApproval ?? (await readToolApprovalMetadata(reg, args, convId));
-        const {
-          approvalMetadata,
-          isDangerous,
-          mutationPaths,
-          outsideMutationPaths,
-          exitInput,
-          exitVerdict,
-        } = evaluateToolApproval(tc, reg, args, context, approvalCache, this.toolRegistry);
-        // A chat rule or attended Clanker can answer this candidate card before it
-        // opens and writes the `gate` row saying who answered it;
-        // `createChatRuleApproval` itself refuses to consult rules for an unattended
-        // run, so a job or an unattended bus turn behaves exactly as it does today.
-        // What it answers with when NOTHING covered the call is the other half: the
-        // keys the owner could have allowed and what they say in plain words, which
-        // is what makes the card that opens offer "Allow for this chat" — or not, for
-        // a call whose key the rules refused, like `git rebase`.
-        const chatRule =
-          exitVerdict.card && convId !== undefined
-            ? this.chatRuleApproval?.decide({
-                ...exitInput,
-                args,
-                approvalMetadata,
-                exitVerdict,
-                mutationPaths,
-                outsideMutationPaths,
-                conversationId: convId,
-                conversation: modelContext?.conversation,
-              })
-            : undefined;
-        if (exitVerdict.card && chatRule?.kind !== 'answered') {
-          const raw = JSON.stringify(args, null, 2);
-          const fallbackDetail = raw.length > 300 ? raw.slice(0, 300) + '\n…' : raw;
-          const detail =
-            approvalMetadata?.detail ??
-            (tc.function.name === 'delete_file' ? await describeDelete(args) : fallbackDetail);
-          const outcome = await this.requestApproval(
-            tc.function.name,
-            detail,
-            isDangerous,
-            convId,
-            signal,
-            approvalCallOptions(approvalMetadata, exitVerdict, chatRule, exitInput.reachesOut),
-          );
-          if (outcome !== 'approved') {
-            result = toolApprovalResult(tc.function.name, outcome);
-            this.postResult(tc, toolResultText(result), undefined, convId, effects.post);
-            messages.push(toolResultMessage(tc, toolResultContent(result), startedAt));
-            continue;
-          }
+        const evaluation = evaluateToolApproval(
+          tc,
+          reg,
+          args,
+          context,
+          approvalCache,
+          this.toolRegistry,
+        );
+        const { mutationPaths } = evaluation;
+        const outcome = await this.requestToolApproval(tc, args, evaluation, context);
+        if (outcome !== 'approved') {
+          result = toolApprovalResult(tc.function.name, outcome);
+          this.postResult(tc, toolResultText(result), undefined, convId, effects.post);
+          messages.push(toolResultMessage(tc, toolResultContent(result), startedAt));
+          continue;
         }
 
         this.snapshotPaths(mutationPaths, checkpoint);
@@ -264,6 +232,12 @@ export class ToolDispatch {
           ...(signal !== undefined ? { abortSignal: signal } : {}),
           ...(convId !== undefined ? { conversationId: convId } : {}),
           ...(convId !== undefined ? { clankerMode } : {}),
+          ...(tc.function.name === 'web_fetch'
+            ? {
+                authorizeFetchRedirect: (url: string) =>
+                  this.requestFetchRedirectApproval(url, tc, handlerArgs, reg, context),
+              }
+            : {}),
           toolCallId: tc.id,
           ...(modelContext ?? {}),
           conversationMessages: messages,
@@ -317,12 +291,16 @@ export class ToolDispatch {
         }
       } catch (err) {
         const policyDenied = err instanceof ToolApprovalPolicyDenied;
-        if (!policyDenied) effects.failureTracker.record(convId);
+        const approvalRefused = err instanceof ToolApprovalRefusal;
+        if (!policyDenied && !approvalRefused) effects.failureTracker.record(convId);
         // A schema refusal is formatted, not printed: Zod's own message is a JSON
         // array of issues, which the model reads as data and re-sends unchanged.
         // `toolErrorText.ts` owns the one place every thrown tool error becomes a
         // result string, so no tool has to word its own refusals.
-        result = policyDenied ? err.message : toolErrorText(tc.function.name, err, args);
+        result =
+          policyDenied || approvalRefused
+            ? err.message
+            : toolErrorText(tc.function.name, err, args);
       }
 
       const questionRecord = toolResultQuestionRecord(result);
@@ -332,6 +310,72 @@ export class ToolDispatch {
       this.postResult(tc, toolResultText(result), args, convId, effects.post, questionRecord);
       messages.push(toolResultMessage(tc, toolResultContent(result), startedAt));
     }
+  }
+
+  /** Handler-side redirects use the same metadata, chat rules and queue as direct calls. */
+  private async requestFetchRedirectApproval(
+    url: string,
+    tc: ToolCall,
+    args: Record<string, unknown>,
+    reg: RegisteredTool,
+    context: ToolDispatchRoundContext,
+  ): Promise<void> {
+    const redirectArgs = { ...args, url };
+    const cached = await readToolApprovalMetadata(reg, redirectArgs, context.convId);
+    const evaluation = evaluateToolApproval(
+      tc,
+      reg,
+      redirectArgs,
+      context,
+      cached,
+      this.toolRegistry,
+    );
+    const metadata = evaluation.approvalMetadata;
+    if (!metadata) throw new Error('web_fetch redirect approval metadata is missing.');
+    if (metadata.cardTextOnly) return;
+    const outcome = await this.requestToolApproval(tc, redirectArgs, evaluation, context);
+    if (outcome !== 'approved') {
+      throw new ToolApprovalRefusal(
+        `${toolApprovalResult(tc.function.name, outcome)} Redirect host: ${new URL(url).hostname}.`,
+      );
+    }
+  }
+
+  /** Shared by direct calls and redirects so chat rules, cards and auto-answers cannot drift. */
+  private async requestToolApproval(
+    tc: ToolCall,
+    args: Record<string, unknown>,
+    evaluation: ReturnType<typeof evaluateToolApproval>,
+    context: ToolDispatchRoundContext,
+  ): Promise<ToolApprovalOutcome> {
+    const { approvalMetadata, isDangerous, exitInput, exitVerdict } = evaluation;
+    const chatRule =
+      exitVerdict.card && context.convId !== undefined
+        ? this.chatRuleApproval?.decide({
+            ...exitInput,
+            args,
+            approvalMetadata,
+            exitVerdict,
+            mutationPaths: evaluation.mutationPaths,
+            outsideMutationPaths: evaluation.outsideMutationPaths,
+            conversationId: context.convId,
+            conversation: context.modelContext?.conversation,
+          })
+        : undefined;
+    if (!exitVerdict.card || chatRule?.kind === 'answered') return 'approved';
+    const raw = JSON.stringify(args, null, 2);
+    const fallbackDetail = raw.length > 300 ? raw.slice(0, 300) + '\n…' : raw;
+    const detail =
+      approvalMetadata?.detail ??
+      (tc.function.name === 'delete_file' ? await describeDelete(args) : fallbackDetail);
+    return this.requestApproval(
+      tc.function.name,
+      detail,
+      isDangerous,
+      context.convId,
+      context.signal,
+      approvalCallOptions(approvalMetadata, exitVerdict, chatRule, exitInput.reachesOut),
+    );
   }
 
   async openFile(filePath: string, options?: OpenFileOptions): Promise<void> {

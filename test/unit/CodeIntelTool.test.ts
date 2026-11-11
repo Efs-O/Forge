@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   executeCommand: vi.fn(),
   getDiagnostics: vi.fn(),
   onDidChangeDiagnostics: vi.fn(),
-  diagnosticListener: undefined as ((event: { uris: Array<{ toString(): string }> }) => void) | undefined,
+  diagnosticListeners: [] as Array<(event: { uris: Array<{ toString(): string }> }) => void>,
   hostHasTabApi: false,
   tabs: [] as Array<{ input: { uri: { toString(): string } } }>,
   showTextDocument: vi.fn(),
@@ -93,6 +93,7 @@ describe('code_intel', () => {
     mocks.getDiagnostics.mockReturnValue([]);
     mocks.hostHasTabApi = false;
     mocks.tabs.splice(0);
+    mocks.diagnosticListeners.splice(0);
     mocks.showTextDocument.mockImplementation(async (document: { uri: { toString(): string } }) => {
       const tab = { input: new (vscode.TabInputText as unknown as new (uri: { toString(): string }) => object)(document.uri) };
       mocks.tabs.push(tab as typeof mocks.tabs[number]);
@@ -100,10 +101,18 @@ describe('code_intel', () => {
     });
     mocks.openTextDocument.mockImplementation(async (uri: unknown) => ({ ...sourceDocument(positionFixture), uri, isDirty: false }));
     mocks.closeTab.mockClear();
-    mocks.onDidChangeDiagnostics.mockImplementation((listener: typeof mocks.diagnosticListener) => {
-      mocks.diagnosticListener = listener ?? undefined;
-      return { dispose: vi.fn() };
-    });
+    mocks.onDidChangeDiagnostics.mockImplementation(
+      (listener: (event: { uris: Array<{ toString(): string }> }) => void) => {
+        mocks.diagnosticListeners.push(listener);
+        return {
+          dispose: () => {
+            mocks.diagnosticListeners = mocks.diagnosticListeners.filter(
+              (entry) => entry !== listener,
+            );
+          },
+        };
+      },
+    );
   });
 
   it('advertises one strict operation-enum schema', () => {
@@ -128,6 +137,15 @@ describe('code_intel', () => {
     for (const description of oldDescriptions) {
       expect(merged).toContain(description);
     }
+  });
+
+  it('explains which diagnostics a missing or explicit path checks', () => {
+    expect(makeCodeIntelTool().definition.function.description).toContain(
+      'diagnostics: Get language diagnostics. Without a path, reports only files open in the editor; with a path, checks that file even when closed. (needs: path?)',
+    );
+    expect(makeCodeIntelTool().definition.function.parameters.properties['path'].description).toBe(
+      'diagnostics: File path (absolute or workspace-relative). Omit to report only files open in the editor; a path checks that file even when closed. Other operations: File path (absolute or workspace-relative). Relative paths resolve against the first workspace folder; the repo may be nested inside it.',
+    );
   });
 
   it('keeps the read permission every replaced read tool had (no approval)', () => {
@@ -178,6 +196,132 @@ describe('code_intel', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('checks a closed file when diagnostics are requested by path', async () => {
+    mocks.hostHasTabApi = true;
+    mocks.getDiagnostics.mockReturnValue([{
+      range: { start: { line: 1 } },
+      severity: vscode.DiagnosticSeverity.Warning,
+      code: 'TS6133',
+      message: 'Unused declaration',
+    }]);
+    await expect(
+      makeCodeIntelTool().handler({ operation: 'diagnostics', path: 'fixture.ts' }),
+    ).resolves.toBe('fixture.ts:2: warning TS6133: Unused declaration');
+    expect(mocks.showTextDocument).toHaveBeenCalledOnce();
+    expect(mocks.closeTab).toHaveBeenCalledOnce();
+  });
+
+  it('waits for a fresh diagnostic event after a Forge edit before reading a cached set', async () => {
+    const { markDiagnosticsPending } = await import('../../src/tools/editDiagnosticsSource');
+    const uri = { fsPath: 'N:/workspace/fixture.ts', toString: () => 'file:///N:/workspace/fixture.ts' };
+    mocks.hostHasTabApi = true;
+    mocks.tabs.push({ input: new (vscode.TabInputText as unknown as new (uri: typeof uri) => object)(uri) as typeof mocks.tabs[number]['input'] });
+    mocks.getDiagnostics.mockReturnValue([{
+      range: { start: { line: 1 } },
+      severity: vscode.DiagnosticSeverity.Error,
+      code: 'TS2304',
+      message: "Cannot find name 'sumPricesBX'",
+    }]);
+    markDiagnosticsPending(uri as never);
+
+    const request = makeCodeIntelTool().handler({ operation: 'diagnostics', path: 'fixture.ts' });
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    mocks.getDiagnostics.mockReturnValue([]);
+    for (const listener of [...mocks.diagnosticListeners]) listener({ uris: [uri] });
+
+    await expect(request).resolves.toBe('No diagnostics found.');
+  });
+
+  it('does not wait for diagnostics on a README.md edit', async () => {
+    vi.useFakeTimers();
+    try {
+      const { markDiagnosticsPending } = await import('../../src/tools/editDiagnosticsSource');
+      const uri = { fsPath: 'N:/workspace/README.md', toString: () => 'file:///N:/workspace/README.md' };
+      mocks.getDiagnostics.mockReturnValue([]);
+      markDiagnosticsPending(uri as never);
+
+      await expect(
+        makeCodeIntelTool().handler({ operation: 'diagnostics', path: 'README.md' }),
+      ).resolves.toBe('No diagnostics found.');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('returns fresh diagnostics immediately when the check event arrived before the read', async () => {
+    vi.useFakeTimers();
+    try {
+      const { markDiagnosticsPending } = await import('../../src/tools/editDiagnosticsSource');
+      const uri = { fsPath: 'N:/workspace/fixture.ts', toString: () => 'file:///N:/workspace/fixture.ts' };
+      mocks.getDiagnostics.mockReturnValue([{
+        range: { start: { line: 1 } },
+        severity: vscode.DiagnosticSeverity.Error,
+        code: 'TS2304',
+        message: "Cannot find name 'sumPricesBX'",
+      }]);
+      markDiagnosticsPending(uri as never);
+      for (const listener of [...mocks.diagnosticListeners]) listener({ uris: [uri] });
+
+      await expect(
+        makeCodeIntelTool().handler({ operation: 'diagnostics', path: 'fixture.ts' }),
+      ).resolves.toBe("fixture.ts:2: error TS2304: Cannot find name 'sumPricesBX'");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('returns current diagnostics with a note after one fresh-check timeout, then clears the mark', async () => {
+    vi.useFakeTimers();
+    try {
+      const { hasPendingDiagnostics, markDiagnosticsPending } = await import('../../src/tools/editDiagnosticsSource');
+      const uri = { fsPath: 'N:/workspace/fixture.ts', toString: () => 'file:///N:/workspace/fixture.ts' };
+      mocks.hostHasTabApi = true;
+      mocks.tabs.push({ input: new (vscode.TabInputText as unknown as new (uri: typeof uri) => object)(uri) as typeof mocks.tabs[number]['input'] });
+      mocks.getDiagnostics.mockReturnValue([{
+        range: { start: { line: 1 } },
+        severity: vscode.DiagnosticSeverity.Error,
+        code: 'TS2304',
+        message: "Cannot find name 'sumPricesBX'",
+      }]);
+      markDiagnosticsPending(uri as never);
+
+      const request = makeCodeIntelTool().handler({ operation: 'diagnostics', path: 'fixture.ts' });
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(4_000);
+      await expect(request).resolves.toBe(
+        "Note: VS Code reported no new check of fixture.ts in the 4 s after Forge's edit, so these diagnostics may predate it.\nfixture.ts:2: error TS2304: Cannot find name 'sumPricesBX'",
+      );
+      expect(hasPendingDiagnostics(uri as never)).toBe(false);
+      mocks.getDiagnostics.mockReturnValue([]);
+      await expect(
+        makeCodeIntelTool().handler({ operation: 'diagnostics', path: 'fixture.ts' }),
+      ).resolves.toBe('No diagnostics found.');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reads only the diagnostic pairs VS Code reports when no path is supplied', async () => {
+    const uri = { fsPath: 'N:/workspace/open.ts', toString: () => 'file:///N:/workspace/open.ts' };
+    mocks.getDiagnostics.mockReturnValue([[
+      uri,
+      [{
+        range: { start: { line: 0 } },
+        severity: vscode.DiagnosticSeverity.Error,
+        code: 'TS2322',
+        message: 'Type mismatch',
+      }],
+    ]]);
+    await expect(makeCodeIntelTool().handler({ operation: 'diagnostics' })).resolves.toBe(
+      'open.ts:1: error TS2322: Type mismatch',
+    );
+    expect(mocks.getDiagnostics).toHaveBeenCalledOnce();
+    expect(mocks.getDiagnostics).toHaveBeenCalledWith();
   });
 
   it('formats existing path diagnostics and leaves an existing tab alone', async () => {

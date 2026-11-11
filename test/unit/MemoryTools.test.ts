@@ -109,9 +109,11 @@ describe('workspace memory lifecycle', () => {
     expect(forget.mutation).toBeUndefined();
   });
 
-  it('marks workspace memory deletion as a Clanker stop', () => {
+  it('keeps the memory deletion detail without marking it as a Clanker stop', () => {
     const forget = makeForgetTool(memory().state);
-    expect(forget.approval?.({ key: 'old-note' })?.clankerStop).toBe(true);
+    const metadata = forget.approval?.({ key: 'old-note' });
+    expect(metadata?.detail).toBe('Remove stored workspace memory "old-note"?');
+    expect(metadata?.clankerStop).toBeUndefined();
   });
 
   it('stores trimmed descriptions and lists described and legacy memories oldest first', async () => {

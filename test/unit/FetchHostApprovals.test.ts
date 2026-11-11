@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ENCODED_LABEL_LIMIT,
   ENCODED_RUN_LIMIT,
@@ -516,9 +516,10 @@ describe('web_fetch carries the gate to the card and to the result', () => {
     expect(out).not.toContain('was new to this chat');
   });
 
-  it('does not follow a redirect to a host this chat has not approved', async () => {
+  it('asks the dispatcher before following a redirect to a new host', async () => {
     const lookups: string[] = [];
     const fetches: string[] = [];
+    const ask = vi.fn(async () => undefined);
     const fetchTool = makeWebFetchTool({
       lookup: (async (hostname: string) => {
         lookups.push(hostname);
@@ -536,17 +537,24 @@ describe('web_fetch carries the gate to the card and to the result', () => {
       }) as never,
       getConfig: () => config(['origin.example.test']),
     });
-    await expect(
-      fetchTool.handler(
+    const out = String(
+      await fetchTool.handler(
         { url: 'https://origin.example.test/start' },
-        { conversationId: 'fetch-24', beforeMutate: () => undefined } as never,
+        {
+          conversationId: 'fetch-24',
+          beforeMutate: () => undefined,
+          authorizeFetchRedirect: ask,
+        } as never,
       ),
-    ).rejects.toThrow(
-      /the redirect goes to collector\.example\.net.*not followed.*call web_fetch with https:\/\/collector\.example\.net\/p\?d=secret directly/s,
     );
-    // The target was never resolved and never fetched: not following is the point.
-    expect(lookups).toEqual(['origin.example.test']);
-    expect(fetches).toEqual(['https://origin.example.test/start']);
+    expect(ask).toHaveBeenCalledExactlyOnceWith('https://collector.example.net/p?d=secret');
+    expect(lookups).toEqual(['origin.example.test', 'collector.example.net']);
+    expect(fetches).toEqual([
+      'https://origin.example.test/start',
+      'https://collector.example.net/p?d=secret',
+    ]);
+    expect(out).toContain('page');
+    expect(isHostApproved('fetch-24', 'collector.example.net')).toBe(true);
   });
 
   it('follows a redirect to a host the owner listed', async () => {
@@ -571,4 +579,55 @@ describe('web_fetch carries the gate to the card and to the result', () => {
     expect(out).toContain('page');
     expect(out).not.toContain('was new to this chat');
   });
+
+  it('does not ask again for a redirect on the direct call host', async () => {
+    const ask = vi.fn(async () => undefined);
+    const fetchTool = makeWebFetchTool({
+      lookup: publicLookup as never,
+      fetch: (async (url: string) =>
+        url.endsWith('/start')
+          ? new Response(null, { status: 302, headers: { location: '/next' } })
+          : new Response('<p>page</p>', { headers: { 'content-type': 'text/html' } })) as never,
+      getConfig: () => config([]),
+    });
+
+    await fetchTool.handler(
+      { url: 'https://same-host.example/start' },
+      {
+        conversationId: 'fetch-same-host',
+        beforeMutate: () => undefined,
+        authorizeFetchRedirect: ask,
+      } as never,
+    );
+
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it('does not ask again for a host already approved earlier in this chat', async () => {
+    const ask = vi.fn(async () => undefined);
+    markHostApproved('fetch-prior-approval', 'cdn.example.net');
+    const fetchTool = makeWebFetchTool({
+      lookup: publicLookup as never,
+      fetch: (async (url: string) =>
+        url.endsWith('/start')
+          ? new Response(null, {
+              status: 302,
+              headers: { location: 'https://cdn.example.net/asset' },
+            })
+          : new Response('<p>page</p>', { headers: { 'content-type': 'text/html' } })) as never,
+      getConfig: () => config(['origin.example.test']),
+    });
+
+    await fetchTool.handler(
+      { url: 'https://origin.example.test/start' },
+      {
+        conversationId: 'fetch-prior-approval',
+        beforeMutate: () => undefined,
+        authorizeFetchRedirect: ask,
+      } as never,
+    );
+
+    expect(ask).not.toHaveBeenCalled();
+  });
+
 });

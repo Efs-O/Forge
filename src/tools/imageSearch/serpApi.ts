@@ -32,7 +32,13 @@ export async function serpApiGet(
   // SerpApi puts the reason in `error` for both 4xx (bad key: 401) and quota
   // exhaustion; surface it verbatim — it names the fix.
   const error = isRecord(data) && typeof data['error'] === 'string' ? data['error'] : undefined;
-  if (error) throw new Error(`SerpApi: ${error}`);
+  const successfulSearchWithError =
+    response.ok &&
+    isRecord(data) &&
+    isRecord(data['search_metadata']) &&
+    data['search_metadata']['status'] === 'Success' &&
+    typeof data['error'] === 'string';
+  if (error && !successfulSearchWithError) throw new Error(`SerpApi: ${error}`);
   if (!response.ok || !isRecord(data)) {
     throw new Error(`SerpApi search failed: HTTP ${response.status} — ${text.slice(0, 200)}`);
   }

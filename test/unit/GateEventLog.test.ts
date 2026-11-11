@@ -86,6 +86,46 @@ function resolvedOf(
 }
 
 describe('the gate ledger', () => {
+  const summarizedCalls = [
+    [
+      'manage_jobs',
+      JSON.stringify({ action: 'create', definition: { name: 'Nightly' } }),
+      'Create job "Nightly".',
+    ],
+    [
+      'message_chat',
+      JSON.stringify({ action: 'send', to: 'target', message: 'a build note' }),
+      'Send message to "target": "a build note"',
+    ],
+    [
+      'ask_agent',
+      JSON.stringify({ agent: 'codex', message: 'Review the patch.' }),
+      'Ask codex: "Review the patch."',
+    ],
+  ] as const;
+
+  it.each(summarizedCalls)('records a readable auto reason for %s', (tool, detail, expected) => {
+    const h = harness();
+    h.log.autoApproved({ toolName: tool, detail, answeredBy: 'clanker' });
+    expect(h.rows[0]!.reason).toBe(expected);
+  });
+
+  it.each(summarizedCalls)('records a readable card reason for %s', (tool, detail, expected) => {
+    const h = harness();
+    const event = card({ toolName: tool, detail });
+    h.requested(event);
+    h.resolved(resolvedOf(event, 'resolved'));
+    expect(h.rows[0]!.reason).toBe(expected);
+  });
+
+  it('gives auto gates without supplied detail a human-readable operation summary', () => {
+    const h = harness();
+    h.log.autoApproved({ toolName: 'message_chat', answeredBy: 'clanker' });
+    h.log.autoApproved({ toolName: 'ask_agent', answeredBy: 'clanker' });
+    expect(h.rows[0]!.reason).toBe('Send a message to another Forge chat.');
+    expect(h.rows[1]!.reason).toBe('Ask a linked CLI agent.');
+  });
+
   it('writes one row per card, timed from the card itself', () => {
     const h = harness();
     h.requested(card());

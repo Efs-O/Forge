@@ -10,6 +10,7 @@
  */
 
 import type { ApprovalOffer } from './approvalMessages';
+import { ToolApprovalRefusal } from '../tools/toolContract';
 
 export type ToolApprovalOutcome =
   | 'approved'
@@ -59,9 +60,10 @@ function asSentence(part: string): string {
 }
 
 /** A tool was refused by policy rather than by a human. Unattended runs retain
- *  this outcome; attended Clanker calls are handled by the three-stop rule before
- *  they reach the queue. */
-export class ToolApprovalPolicyDenied extends Error {
+ *  this outcome; attended Clanker calls are handled by the three stops (deny-listed
+ *  destructive shell commands, Forge guard files, and secret reads followed by
+ *  egress) before they reach the queue. */
+export class ToolApprovalPolicyDenied extends ToolApprovalRefusal {
   constructor(
     toolName: string,
     run: {
@@ -115,12 +117,13 @@ export class ToolApprovalPolicyDenied extends Error {
  * `ownerGate` and `taintGate` describe why unattended runs refuse a gated call
  * instead of waiting for an owner. `denyList` carries the deny list's refusal and
  * sanctioned alternative. In attended chats, Clanker answers these gates unless
- * the call is one of its three explicit stops; the `clankerStop` option carries
- * those stops into this queue. With Clanker off, normal approval cards remain.
+ * the call is a deny-listed destructive shell command, touches a Forge guard file,
+ * or sends data out after a secret read; the `clankerStop` option carries those
+ * stops into this queue. With Clanker off, normal approval cards remain.
  */
 export interface ToolApprovalCallOptions {
   gateKind?: 'ownerGate' | 'taintGate' | 'denyList';
-  /** A tool-owned irreversible action that Clanker must leave to the owner. */
+  /** A tool-owned protected stop that attended Clanker must leave to the owner. */
   clankerStop?: boolean;
   /** What made this card exist, in one line, from the gate that knows it. */
   cardReason?: string;

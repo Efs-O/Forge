@@ -380,6 +380,9 @@ export class LocalDelegationService {
             text = text.slice(0, MAX_DELEGATION_RESULT_CHARS * 2);
           }
         },
+        // Reasoning is not part of the delegated answer. Providing this handler
+        // also prevents clients that fall back to onToken from leaking it.
+        onReasoning: () => {},
         onDone: (finishReason) => {
           if (signal.aborted || finishReason === 'cancelled') {
             reject(signal.reason ?? new DOMException('Delegation cancelled', 'AbortError'));

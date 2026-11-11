@@ -59,7 +59,7 @@ export function makeCodeIntelTool(): RegisteredTool {
         name: 'code_intel',
         description: [
           'Run one VS Code language service operation.',
-          'diagnostics: Get language diagnostics (errors, warnings) for a file or the whole workspace. (needs: path?)',
+          'diagnostics: Get language diagnostics. Without a path, reports only files open in the editor; with a path, checks that file even when closed. (needs: path?)',
           'document_symbols: List all symbols (functions, classes, variables, etc.) in a file as an indented tree. (needs: path)',
           'workspace_symbols: Search for symbols by name across the entire workspace. (needs: query)',
           'hover: Get hover information (type info, docs) at a specific position in a file. (needs: path, line, character)',
@@ -88,7 +88,7 @@ export function makeCodeIntelTool(): RegisteredTool {
             path: {
               type: 'string',
               description:
-                'diagnostics: File path (absolute or workspace-relative). Omit for all workspace diagnostics. document_symbols, hover, definition, references, implementations: File path (absolute or workspace-relative). code_actions: File path, absolute or workspace-relative. Relative paths resolve against the first workspace folder; the repo you are working in may be nested inside it.',
+                'diagnostics: File path (absolute or workspace-relative). Omit to report only files open in the editor; a path checks that file even when closed. Other operations: File path (absolute or workspace-relative). Relative paths resolve against the first workspace folder; the repo may be nested inside it.',
             },
             line: {
               type: 'integer',

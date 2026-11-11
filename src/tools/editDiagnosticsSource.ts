@@ -32,6 +32,130 @@ import type { DiagnosticsSource, ReportedProblem } from './editDiagnostics';
  */
 const MAX_PRIMED_FILE_BYTES = 5 * 1024 * 1024;
 
+const TS_JS_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.mjs', '.cjs']);
+const TS_JS_LANGUAGES = new Set(['typescript', 'typescriptreact', 'javascript', 'javascriptreact']);
+const pendingDiagnostics = new Map<string, PendingDiagnosticsMark>();
+const reportedDiagnosticsUris = new Set<string>();
+const completedDiagnosticsChecks = new Set<string>();
+const timedOutDiagnosticsChecks = new Set<string>();
+let pendingDiagnosticsSubscription: vscode.Disposable | undefined;
+
+/** The instant a Forge edit began waiting for its next diagnostics check. */
+export interface PendingDiagnosticsMark {
+  markedAt: number;
+}
+
+/** Mark an eligible Forge-written document until its next diagnostics check. */
+export function markDiagnosticsPending(uriOrPath: vscode.Uri | string): void {
+  const uri = typeof uriOrPath === 'string' ? vscode.Uri.file(uriOrPath) : uriOrPath;
+  const key = uri.toString();
+  if (!hasDiagnosticsProvider(uri) || !installDiagnosticsObserver()) return;
+
+  reportedDiagnosticsUris.add(key);
+  completedDiagnosticsChecks.delete(key);
+  timedOutDiagnosticsChecks.delete(key);
+  pendingDiagnostics.set(key, { markedAt: Date.now() });
+}
+
+/** Whether a Forge edit still needs a diagnostics change event for this document. */
+export function hasPendingDiagnostics(uri: vscode.Uri): boolean {
+  return pendingDiagnostics.has(uri.toString());
+}
+
+/** The timestamp for a pending edit, so its wait ends four seconds after the edit. */
+export function pendingDiagnosticsMark(uri: vscode.Uri): PendingDiagnosticsMark | undefined {
+  return pendingDiagnostics.get(uri.toString());
+}
+
+/** Clear only the same mark that timed out, preserving a newer edit's wait. */
+export function clearPendingDiagnostics(uri: vscode.Uri, mark: PendingDiagnosticsMark): void {
+  const key = uri.toString();
+  if (pendingDiagnostics.get(key) === mark) {
+    pendingDiagnostics.delete(key);
+    timedOutDiagnosticsChecks.add(key);
+    disposeDiagnosticsObserverWhenIdle();
+  }
+}
+
+/** Whether a matching diagnostics event already cleared a mark for this edit. */
+export function hasCompletedDiagnosticsCheck(uri: vscode.Uri): boolean {
+  return completedDiagnosticsChecks.has(uri.toString());
+}
+
+/** Whether a prior timeout should keep retries from starting another cold wait. */
+export function hasTimedOutDiagnosticsCheck(uri: vscode.Uri): boolean {
+  return timedOutDiagnosticsChecks.has(uri.toString());
+}
+
+/** Whether VS Code has a known diagnostics provider for this document. */
+export function hasDiagnosticsProvider(uri: vscode.Uri): boolean {
+  const key = uri.toString();
+  if (reportedDiagnosticsUris.has(key)) return true;
+
+  const languages = getLanguages();
+  const getDiagnostics = languages?.['getDiagnostics'] as
+    | ((resource: vscode.Uri) => vscode.Diagnostic[])
+    | undefined;
+  try {
+    if (typeof getDiagnostics === 'function' && getDiagnostics(uri).length > 0) {
+      reportedDiagnosticsUris.add(key);
+      return true;
+    }
+  } catch {
+    // A diagnostics read that cannot run is not evidence that a provider exists.
+  }
+
+  const documents = vscode.workspace.textDocuments ?? [];
+  const languageId = documents.find((document) => document.uri.toString() === key)?.languageId;
+  if (languageId !== undefined && TS_JS_LANGUAGES.has(languageId)) return true;
+  return TS_JS_EXTENSIONS.has(pathExtension(uri.fsPath));
+}
+
+function pathExtension(filePath: string): string {
+  const filename = filePath.replace(/\\/gu, '/').split('/').pop() ?? '';
+  const dot = filename.lastIndexOf('.');
+  return dot < 0 ? '' : filename.slice(dot).toLowerCase();
+}
+
+/** Install one observer for provider history and pending-mark cleanup. */
+function installDiagnosticsObserver(): boolean {
+  if (pendingDiagnosticsSubscription) return true;
+  const languages = getLanguages();
+  const onDidChange = languages?.['onDidChangeDiagnostics'] as
+    | ((listener: (event: { uris: vscode.Uri[] }) => void) => vscode.Disposable)
+    | undefined;
+  if (typeof onDidChange !== 'function') return false;
+
+  try {
+    pendingDiagnosticsSubscription = onDidChange((event) => {
+      for (const changedUri of event.uris) {
+        const key = changedUri.toString();
+        reportedDiagnosticsUris.add(key);
+        if (pendingDiagnostics.delete(key)) completedDiagnosticsChecks.add(key);
+      }
+      disposeDiagnosticsObserverWhenIdle();
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function disposeDiagnosticsObserverWhenIdle(): void {
+  if (pendingDiagnostics.size > 0) return;
+  pendingDiagnosticsSubscription?.dispose();
+  pendingDiagnosticsSubscription = undefined;
+}
+
+/** VS Code's test hosts may omit the language namespace entirely. */
+function getLanguages(): Record<string, unknown> | undefined {
+  try {
+    return (vscode as unknown as { languages?: Record<string, unknown> }).languages;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * The VS Code-backed source, or undefined when this host has no diagnostics API.
  *
@@ -42,7 +166,7 @@ const MAX_PRIMED_FILE_BYTES = 5 * 1024 * 1024;
  * and a sentence about a service that was never there.
  */
 export function vscodeDiagnosticsSource(): DiagnosticsSource | undefined {
-  const languages = (vscode as unknown as { languages?: Record<string, unknown> }).languages;
+  const languages = getLanguages();
   const getDiagnostics = languages?.['getDiagnostics'] as
     | (() => [vscode.Uri, vscode.Diagnostic[]][])
     | undefined;
@@ -56,7 +180,10 @@ export function vscodeDiagnosticsSource(): DiagnosticsSource | undefined {
     reported() {
       const pairs = getDiagnostics();
       if (!Array.isArray(pairs)) return undefined;
-      return pairs.map(([uri, problems]) => [uri.fsPath, problems.map(toReportedProblem)]);
+      return pairs.map(([uri, problems]) => {
+        reportedDiagnosticsUris.add(uri.toString());
+        return [uri.fsPath, problems.map(toReportedProblem)];
+      });
     },
     onChange(listener) {
       const subscription = onDidChange((event) => listener(event.uris.map((uri) => uri.fsPath)));

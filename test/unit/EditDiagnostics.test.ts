@@ -15,6 +15,7 @@ import { formatDiagnosticLine } from '../../src/tools/lspTools';
 import { makeEditFileTool } from '../../src/tools/editFileTool';
 import { makeWriteFileTool } from '../../src/tools/builtinTools';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
+import { hasPendingDiagnostics } from '../../src/tools/editDiagnosticsSource';
 
 /**
  * `tools.edit_diagnostics` (tools-expansion lane F1, item 1.3).
@@ -616,6 +617,7 @@ describe('the VS Code-backed source', () => {
     };
     try {
       const watch = await makeProblemWatcher({ settings: () => ({ settle_ms: 0 }) })(FILE)!;
+      expect(hasPendingDiagnostics(vscode.Uri.file(FILE))).toBe(true);
       problems = [
         [
           vscode.Uri.file(FILE),
@@ -633,6 +635,8 @@ describe('the VS Code-backed source', () => {
       const note = await watch.settle();
       expect(note).toContain('New problems after this edit (TypeScript):');
       expect(note).toContain('error TS2304: Cannot find name q.');
+      expect(listeners).toHaveLength(1);
+      listeners[0]!({ uris: [vscode.Uri.file(FILE)] });
       expect(listeners).toHaveLength(0);
     } finally {
       languages['getDiagnostics'] = hadGet;

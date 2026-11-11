@@ -283,7 +283,7 @@ export class SlashCommandHandler {
           type: 'notice',
           conversationId,
           message: on
-            ? "\n> 💥 **Clanker Mode ON** — this chat only. Destructive commands, Forge's own guard files, and sending data out after reading a secret still stop. `/clanker` again turns it off.\n"
+            ? '\n> 💥 **Clanker Mode ON** — this chat only. Deny-listed destructive shell commands, Forge guard files, and sending data out after reading a secret still stop. `/clanker` again turns it off.\n'
             : '\n> 💥 **Clanker Mode OFF** — this chat is gated again. The approvals this chat earned are not revoked.\n',
         });
         return;

@@ -49,6 +49,7 @@ export interface BackgroundExecutionSummary {
   command: string;
   args: readonly string[];
   cwd: string;
+  conversationId?: string;
   status: BackgroundExecutionStatus;
   pid: number | undefined;
   startedAt: number;

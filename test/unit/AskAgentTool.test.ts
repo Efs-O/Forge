@@ -75,8 +75,10 @@ describe('ask_agent request boundary', () => {
     await expect(
       tool.handler({ agent: 'claude', message: 'x'.repeat(20001) }, turn),
     ).rejects.toThrow();
-    const properties = tool.definition.function.parameters
-      ?.properties as Record<string, Record<string, unknown>>;
+    const properties = tool.definition.function.parameters?.properties as Record<
+      string,
+      Record<string, unknown>
+    >;
     expect(properties['message']?.['maxLength']).toBe(20000);
     expect(MAX_QUESTION_CHARS).toBe(20000);
   });
@@ -84,7 +86,7 @@ describe('ask_agent request boundary', () => {
   it('tells the model the reply comes later and not to ask again', () => {
     const description = tool.definition.function.description;
     expect(description).toBe(
-      'Ask the Claude, Codex, or Copilot session linked to this chat; a missing link creates one. Returns at once; reply arrives here as a message. Keep working; do not ask again. If blocked, end your turn; reply starts a new one. Do not edit files you asked it to change. For local/cloud models, use ask_local_agent.',
+      "Ask the Claude, Codex, or Copilot session linked to this chat; a missing link creates one. Returns at once; reply arrives here as a message. Keep working; do not ask again. If blocked, end your turn; reply starts a new one. Do not edit files you asked it to change. For local/cloud models, use ask_local_agent.",
     );
     expect(description).toContain(
       'Ask the Claude, Codex, or Copilot session linked to this chat; a missing link creates one.',
@@ -94,6 +96,7 @@ describe('ask_agent request boundary', () => {
     expect(description).not.toContain('Copilot CLI');
     expect(description).toContain('Returns at once; reply arrives here as a message');
     expect(description).toContain('do not ask again');
+    expect(description).not.toContain('background CLI process');
     const agent = tool.definition.function.parameters?.properties['agent'];
     expect(agent?.enum).toEqual(['claude', 'codex', 'copilot']);
     expect(agent?.description).toContain('`claude` is Claude Code');

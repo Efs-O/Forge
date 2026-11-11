@@ -4,14 +4,10 @@ import { resolveCliExecutable } from '../agents/resolveCliExecutable';
 /**
  * Check that a linked Codex thread is still present before Forge queues work.
  *
- * Every `ask_agent` to a linked Codex ran its own check, and each check spawns
- * a throwaway `codex app-server` process and reads the one thread by id. Two asks
- * in one round therefore paid for the same answer twice, and the second one
- * timed out at 15 s while the first was still answering (lab run U2b,
- * 2026-11-09). One check per (executable, cwd, sessionId) is in flight at a
- * time: a second ask arriving while one runs awaits the same promise and spawns
- * nothing. Nothing is remembered once a check settles — a stale answer about
- * whether a thread is alive is worth less than the spawn it would save.
+ * A check launches one throwaway app-server and reads only the requested
+ * thread. Concurrent asks for the same (executable, cwd, sessionId) share that
+ * read, and a positive result is reused for 30 seconds. Negative answers and
+ * errors are checked again on the next ask.
  */
 export async function codexThreadIsLive(
   sessionId: string,
@@ -19,22 +15,39 @@ export async function codexThreadIsLive(
 ): Promise<boolean> {
   const executable = await resolveCliExecutable(options.codexCli ?? 'codex', 'codex');
   const key = `${executable}\u0000${options.cwd}\u0000${sessionId}`;
+  if (hasCachedPositive(key)) return true;
   const running = inFlight.get(key);
   if (running) return running;
-  const started = checkOnce(executable, options.cwd, sessionId, options.timeoutMs ?? 8_000);
+  const started = startReadThread(executable, options.cwd, sessionId, options.timeoutMs ?? 8_000);
   inFlight.set(key, started);
   try {
-    return await started;
+    const live = await started;
+    if (live) positiveThreadCache.set(key, Date.now() + POSITIVE_CACHE_MS);
+    return live;
   } finally {
-    // Both the success and the failure path drop it: the next ask re-asks.
     if (inFlight.get(key) === started) inFlight.delete(key);
   }
 }
 
-/** The checks running right now, keyed by the executable, folder and thread they ask about. */
+const POSITIVE_CACHE_MS = 30_000;
+
+/** Positive thread observations are short-lived and scoped to one thread check. */
+const positiveThreadCache = new Map<string, number>();
+
+/** One thread read at a time per executable, folder and session. */
 const inFlight = new Map<string, Promise<boolean>>();
 
-async function checkOnce(
+function hasCachedPositive(key: string): boolean {
+  const expiresAt = positiveThreadCache.get(key);
+  if (expiresAt === undefined) return false;
+  if (expiresAt <= Date.now()) {
+    positiveThreadCache.delete(key);
+    return false;
+  }
+  return true;
+}
+
+function startReadThread(
   executable: string,
   cwd: string,
   sessionId: string,

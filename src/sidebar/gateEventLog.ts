@@ -59,9 +59,8 @@ export interface GateEventRow {
    *  log written by an older Forge. */
   kind: 'card' | 'refusal' | 'auto';
   tool: string;
-  /** The card's rule text, or the guard's own first line, capped so a file
-   *  content echoed into a refusal cannot pad the transcript. */
-  reason?: string;
+  /** Human-readable approval detail or call summary, or the guard's first line. */
+  reason: string;
   cause?: GateEventCause;
   conversation_id?: string;
   dangerous?: boolean;
@@ -172,6 +171,59 @@ function reasonText(value: string): string {
     : firstLine;
 }
 
+/** A gate must never turn the first line of an argument preview (`{`) into its
+ *  reason. Prefer the card detail, summarize structured previews for common
+ *  cross-chat/job actions, and keep a readable tool-level summary when no detail
+ *  was supplied by the gate. */
+function approvalReason(tool: string, detail?: string): string {
+  const value = detail?.trim() ?? '';
+  if (value && value[0] !== '{') return reasonText(value);
+  const summary = value ? summarizeArgumentPreview(tool, value) : undefined;
+  const fallback =
+    tool === 'manage_jobs'
+      ? 'Manage persistent jobs.'
+      : tool === 'message_chat'
+        ? 'Send a message to another Forge chat.'
+        : tool === 'ask_agent'
+          ? 'Ask a linked CLI agent.'
+          : `Approval requested for ${tool}.`;
+  return reasonText(summary ?? fallback);
+}
+
+function summarizeArgumentPreview(tool: string, value: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+  const args = parsed as Record<string, unknown>;
+  if (tool === 'manage_jobs' && args['action'] === 'create') {
+    const definition = args['definition'];
+    if (definition !== null && typeof definition === 'object' && !Array.isArray(definition)) {
+      const name = (definition as Record<string, unknown>)['name'];
+      if (typeof name === 'string') return `Create job "${name}".`;
+    }
+    return 'Create a persistent job.';
+  }
+  if (tool === 'message_chat' && (args['action'] === undefined || args['action'] === 'send')) {
+    const target = typeof args['to'] === 'string' ? `"${args['to']}"` : 'another Forge chat';
+    const message = args['message'];
+    return typeof message === 'string'
+      ? `Send message to ${target}: ${JSON.stringify(message)}`
+      : `Send a message to ${target}.`;
+  }
+  if (tool === 'ask_agent') {
+    const agent = typeof args['agent'] === 'string' ? args['agent'] : 'a linked agent';
+    const message = args['message'];
+    return typeof message === 'string'
+      ? `Ask ${agent}: ${JSON.stringify(message)}`
+      : `Ask ${agent}.`;
+  }
+  return undefined;
+}
+
 /** The refusal row for one tool result. Built here, not inside the guard, so a
  *  guard does not have to know a log exists — and cannot change its own answer
  *  because of it. */
@@ -240,7 +292,7 @@ export class GateEventLog implements ToolApprovalSink {
       type: 'gate',
       kind: 'auto',
       tool: event.toolName,
-      ...(event.detail ? { reason: reasonText(event.detail) } : {}),
+      reason: approvalReason(event.toolName, event.detail),
       ...(event.conversationId ? { conversation_id: event.conversationId } : {}),
       ...(event.dangerous ? { dangerous: true } : {}),
       // Absent when the answer was not a key: Clanker running a call that has no
@@ -264,7 +316,7 @@ export class GateEventLog implements ToolApprovalSink {
       type: 'gate',
       kind: 'card',
       tool: event.toolName,
-      ...(event.detail ? { reason: reasonText(event.detail) } : {}),
+      reason: approvalReason(event.toolName, event.detail),
       ...(event.conversationId ? { conversation_id: event.conversationId } : {}),
       ...(event.dangerous ? { dangerous: true } : {}),
       ...(raisedAt ? { raised_ms: raisedAt } : {}),

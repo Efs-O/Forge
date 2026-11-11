@@ -6,6 +6,8 @@ import { z } from 'zod';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolDispatch, resolveToolPath } from '../../src/sidebar/ToolDispatch';
 import { ToolApprovalPolicyDenied } from '../../src/sidebar/toolApprovalOutcome';
+import { createChatRuleApproval } from '../../src/sidebar/chatApprovalRules';
+import { unattendedConversations } from '../../src/sidebar/unattendedConversations';
 import { isFailureResult } from '../../src/sidebar/toolResultView';
 import { classifyResult } from '../../src/sidebar/compactionLedger';
 import type { ChatMessage, ToolCall } from '../../src/llm/types';
@@ -16,6 +18,7 @@ import type { ToolFailureTracker } from '../../src/tools/StripTools';
 import { ToolRegistry } from '../../src/tools/ToolRegistry';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
 import { ToolBudget } from '../../src/tools/ToolBudget';
+import { makeWebFetchTool } from '../../src/tools/fetchTool';
 import {
   hiddenLazyToolNames,
   recordLazyGroupTool,
@@ -27,6 +30,7 @@ import {
   clearConversationUntrustedState,
   markConversationReadUntrusted,
 } from '../../src/tools/exfilTaint';
+import { clearConversationHostApprovals } from '../../src/tools/fetchHostApprovals';
 import { TEST_BASH } from '../support/bash';
 
 // vi.mock is hoisted — compute WS inside the factory using require
@@ -114,6 +118,7 @@ describe('ToolDispatch', () => {
     'headless',
     'git-read',
     'git-write',
+    'fetch',
   ] as const);
 
   beforeEach(() => {
@@ -162,7 +167,247 @@ describe('ToolDispatch', () => {
     // Phase 4's card rule reads this flag, so a test that flagged a chat must not
     // leave it flagged for the next one.
     clearConversationUntrustedState();
+    clearConversationHostApprovals();
   });
+
+  function registerRedirectingFetchTool(destination: string, config?: unknown) {
+    const fetches: string[] = [];
+    toolRegistry.register(
+      makeWebFetchTool({
+        getConfig: () =>
+          (config ?? { fetch: { allowed_hosts: ['origin.example.test'] } }) as never,
+        lookup: async () => [{ address: '8.8.8.8', family: 4 }],
+        fetch: (async (url: string) => {
+          fetches.push(url);
+          return url.endsWith('/start')
+            ? new Response(null, { status: 302, headers: { location: destination } })
+            : new Response('<p>redirected page</p>', { headers: { 'content-type': 'text/html' } });
+        }) as never,
+      }),
+    );
+    return fetches;
+  }
+
+  it('uses the direct new-host card flow for redirects, then follows an approval', async () => {
+    const destination = 'https://collector.example.net/landing';
+    const fetches = registerRedirectingFetchTool(destination);
+    const chatRules = createChatRuleApproval({
+      getConfig: () => ({ fetch: { allowed_hosts: ['origin.example.test'] } }) as never,
+      recordAutoGate: vi.fn(),
+    });
+    dispatch = new ToolDispatch(
+      toolRegistry,
+      checkpoints,
+      codeLens,
+      failureTracker,
+      post,
+      requestApproval,
+      diffDecorations,
+      chatRules,
+    );
+    const messages: ChatMessage[] = [];
+
+    await dispatch.dispatch(
+      [makeToolCall('web_fetch', { url: 'https://origin.example.test/start' })],
+      allowed,
+      messages,
+      'redirect-approval',
+    );
+
+    expect(requestApproval).toHaveBeenCalledExactlyOnceWith(
+      'web_fetch',
+      'GET https://collector.example.net/landing',
+      false,
+      'redirect-approval',
+      undefined,
+      expect.objectContaining({
+        cardReason: 'new host for this chat: collector.example.net',
+        allowForChat: expect.objectContaining({ keys: ['net:collector.example.net'] }),
+      }),
+    );
+    expect(fetches).toEqual([
+      'https://origin.example.test/start',
+      'https://collector.example.net/landing',
+    ]);
+    expect(messages[0]?.content).toContain('redirected page');
+  });
+
+  it('names the redirect host when the new-host card is declined', async () => {
+    requestApproval.mockResolvedValueOnce('declined');
+    const fetches = registerRedirectingFetchTool('https://collector.example.net/landing');
+    const messages: ChatMessage[] = [];
+
+    await dispatch.dispatch(
+      [makeToolCall('web_fetch', { url: 'https://origin.example.test/start' })],
+      allowed,
+      messages,
+      'redirect-declined',
+    );
+
+    expect(fetches).toEqual(['https://origin.example.test/start']);
+    expect(messages[0]?.content).toBe(
+      'User declined: web_fetch. The user said no to this action: do not do the same thing another way (another tool, command or path) unless they ask for it. Redirect host: collector.example.net.',
+    );
+    expect(failureTracker.record).not.toHaveBeenCalled();
+  });
+
+  it('uses attended Clanker and unattended policy decisions for redirect hosts', async () => {
+    const destination = 'https://collector.example.net/landing';
+    registerRedirectingFetchTool(destination);
+    const clankerEvents: unknown[] = [];
+    const clankerRules = createChatRuleApproval({
+      clankerMode: () => true,
+      recordAutoGate: (event) => clankerEvents.push(event),
+    });
+    dispatch = new ToolDispatch(
+      toolRegistry,
+      checkpoints,
+      codeLens,
+      failureTracker,
+      post,
+      requestApproval,
+      diffDecorations,
+      clankerRules,
+    );
+
+    const clankerMessages: ChatMessage[] = [];
+    await dispatch.dispatch(
+      [makeToolCall('web_fetch', { url: 'https://origin.example.test/start' })],
+      allowed,
+      clankerMessages,
+      'redirect-clanker',
+    );
+    expect(requestApproval).not.toHaveBeenCalled();
+    expect(clankerEvents).toContainEqual(
+      expect.objectContaining({
+        toolName: 'web_fetch',
+        conversationId: 'redirect-clanker',
+        approvalKey: 'net:collector.example.net',
+        answeredBy: 'clanker',
+      }),
+    );
+    expect(clankerMessages[0]?.content).toContain('redirected page');
+
+    const policyConfig = {
+      fetch: { allowed_hosts: ['origin.example.test'] },
+      approvals: { unattended_bus: { allow: [] } },
+    };
+    const deniedRules = createChatRuleApproval({
+      getConfig: () => policyConfig as never,
+      recordAutoGate: vi.fn(),
+    });
+    dispatch = new ToolDispatch(
+      toolRegistry,
+      checkpoints,
+      codeLens,
+      failureTracker,
+      post,
+      requestApproval,
+      diffDecorations,
+      deniedRules,
+    );
+    const marker = unattendedConversations.mark('redirect-unattended-denied');
+    try {
+      requestApproval.mockRejectedValueOnce(
+        new ToolApprovalPolicyDenied('web_fetch', {
+          job: false,
+          allowPath: 'approvals.unattended_bus.allow',
+          approvalKey: 'net:collector.example.net',
+          why: 'new host for this chat: collector.example.net',
+        }),
+      );
+      const deniedMessages: ChatMessage[] = [];
+      await dispatch.dispatch(
+        [makeToolCall('web_fetch', { url: 'https://origin.example.test/start' })],
+        allowed,
+        deniedMessages,
+        'redirect-unattended-denied',
+      );
+      expect(requestApproval).toHaveBeenCalledWith(
+        'web_fetch',
+        'GET https://collector.example.net/landing',
+        false,
+        'redirect-unattended-denied',
+        undefined,
+        expect.objectContaining({
+          policyAllowPath: 'approvals.unattended_bus.allow',
+          policyApprovalKey: 'net:collector.example.net',
+        }),
+      );
+      expect(deniedMessages[0]?.content).toBe(
+        'unattended: approval key denied by policy: "web_fetch". Add net:collector.example.net to approvals.unattended_bus.allow in ~/.forge/policy.yaml. new host for this chat: collector.example.net. Nobody is present to approve it, so do not retry it. Continue with safe steps or report the step as not done.',
+      );
+      expect(failureTracker.record).not.toHaveBeenCalled();
+    } finally {
+      marker.dispose();
+    }
+
+    const allowedConfig = {
+      fetch: { allowed_hosts: ['origin.example.test'] },
+      approvals: { unattended_bus: { allow: ['net:collector.example.net'] } },
+    };
+    const allowedEvents: unknown[] = [];
+    const allowedRules = createChatRuleApproval({
+      getConfig: () => allowedConfig as never,
+      recordAutoGate: (event) => allowedEvents.push(event),
+    });
+    dispatch = new ToolDispatch(
+      toolRegistry,
+      checkpoints,
+      codeLens,
+      failureTracker,
+      post,
+      requestApproval,
+      diffDecorations,
+      allowedRules,
+    );
+    const allowMarker = unattendedConversations.mark('redirect-unattended-allowed');
+    try {
+      const allowedMessages: ChatMessage[] = [];
+      await dispatch.dispatch(
+        [makeToolCall('web_fetch', { url: 'https://origin.example.test/start' })],
+        allowed,
+        allowedMessages,
+        'redirect-unattended-allowed',
+      );
+      expect(requestApproval).toHaveBeenCalledOnce();
+      expect(allowedEvents).toContainEqual(
+        expect.objectContaining({
+          toolName: 'web_fetch',
+          conversationId: 'redirect-unattended-allowed',
+          approvalKey: 'net:collector.example.net',
+          answeredBy: 'policy_rule',
+        }),
+      );
+      expect(allowedMessages[0]?.content).toContain('redirected page');
+    } finally {
+      allowMarker.dispose();
+    }
+  });
+
+  it.each(['127.0.0.1', '10.0.0.5', '169.254.169.254'])(
+    'refuses direct fetch to raw IP %s before opening approval',
+    async (address) => {
+      const lookup = vi.fn(async () => [{ address: '8.8.8.8', family: 4 }]);
+      const fetch = vi.fn(async () => new Response('<p>not reached</p>'));
+      toolRegistry.register(makeWebFetchTool({ lookup, fetch }));
+      const messages: ChatMessage[] = [];
+
+      await dispatch.dispatch(
+        [makeToolCall('web_fetch', { url: `http://${address}/private` })],
+        allowed,
+        messages,
+        `raw-ip-${address}`,
+      );
+
+      expect(requestApproval).not.toHaveBeenCalled();
+      expect(lookup).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+      expect(messages[0]?.content).toBe(
+        `Error: web_fetch: Blocked: raw IP address not permitted: ${address}`,
+      );
+    },
+  );
 
   it('dispatches a read tool without approval', async () => {
     toolRegistry.register({

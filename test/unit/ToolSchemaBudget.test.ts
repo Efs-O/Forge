@@ -128,7 +128,10 @@ import {
 // 2026-11-11: unchanged after browser_scroll gained into_view; browser schemas are excluded below.
 // 2026-11-11: 67,929 (+104) after clarifying shell cwd, notebook formats and video sampling.
 // 2026-11-11: 67,962 (+33, merged) after adding branch context to git_read status and describing the editing-only code_intel group.
-const MEASURED_CHARS = 67_962;
+// 2026-11-11: 67,978 (+16, merged) after saying attended Clanker approves manage_jobs delete.
+// 2026-11-11: 68,000 (+22, merged) after message_chat list described all chats and list_executions marked this chat's runs.
+// 2026-11-11: 67,984 (-16, merged) after diagnostics editor scope and shared editor context.
+const MEASURED_CHARS = 67_984;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.

@@ -37,7 +37,7 @@ const WINDOW_TRICKLE = '55555555-5555-4555-8555-555555555555';
 const WINDOW_JUNK = '66666666-6666-4666-8666-666666666666';
 
 let busRoot: string;
-let servers: http.Server[] = [];
+const servers: http.Server[] = [];
 /** What the live fake window answers for `GET /agent/chats`, mutable per test. */
 let report: { windowId: string; workspace: string; models: string[]; chats: unknown[] } = {
   windowId: WINDOW_A,
@@ -136,6 +136,58 @@ describe('peer discovery', () => {
     expect(findPeerChat(peers, 'aaaa111')).toBeUndefined();
     expect(findPeerChat(peers, 'worker')).toBeUndefined();
     expect(findPeerChat(peers, '#1')).toBeUndefined();
+  });
+});
+
+describe('peer list formatting', () => {
+  it('lists every peer chat, with open chats before closed chats', () => {
+    const peer: PeerWindow = {
+      windowId: WINDOW_A,
+      url: 'http://127.0.0.1:1',
+      token: TOKEN,
+      workspace: 'N:/repo-a',
+      models: [],
+      chats: [
+        { id: 'closed-1', title: 'Closed 1', running: false, closed: true, awaitingApproval: false },
+        { id: 'open-2', title: 'Open two', running: false, closed: false, awaitingApproval: false },
+        { id: 'closed-2', title: 'Closed 2', running: false, closed: true, awaitingApproval: false },
+        { id: 'closed-3', title: 'Closed 3', running: false, closed: true, awaitingApproval: false },
+        { id: 'closed-4', title: 'Closed 4', running: false, closed: true, awaitingApproval: false },
+        { id: 'closed-5', title: 'Closed 5', running: false, closed: true, awaitingApproval: false },
+        { id: 'closed-6', title: 'Closed 6', running: false, closed: true, awaitingApproval: false },
+        { id: 'closed-7', title: 'Closed 7', running: false, closed: true, awaitingApproval: false },
+        { id: 'closed-8', title: 'Closed 8', running: false, closed: true, awaitingApproval: false },
+        {
+          id: 'open-1',
+          title: 'Open one',
+          running: true,
+          model: 'strata-flash',
+          closed: false,
+          awaitingApproval: false,
+        },
+      ],
+    };
+
+    const result = formatPeerSection([peer], []);
+
+    expect(result).toBe(
+      [
+        '',
+        'Other windows:',
+        'repo-a (N:/repo-a) — 10 chat(s):',
+        '  Open two · idle · id open-2',
+        '  Open one · running · strata-flash · id open-1',
+        '  Closed 1 · closed · id closed-1',
+        '  Closed 2 · closed · id closed-2',
+        '  Closed 3 · closed · id closed-3',
+        '  Closed 4 · closed · id closed-4',
+        '  Closed 5 · closed · id closed-5',
+        '  Closed 6 · closed · id closed-6',
+        '  Closed 7 · closed · id closed-7',
+        '  Closed 8 · closed · id closed-8',
+        'Address a chat in another window by its id; `#N` is this window only.',
+      ].join('\n'),
+    );
   });
 });
 

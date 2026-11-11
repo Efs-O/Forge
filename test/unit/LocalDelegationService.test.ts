@@ -5,6 +5,7 @@ import type { ChatCompletionRequest } from '../../src/llm/types';
 import type { StreamHandlers } from '../../src/llm/OpenAIClient';
 import { resolveDelegationTarget } from '../../src/delegation/eligibility';
 import { LocalDelegationService } from '../../src/delegation/LocalDelegationService';
+import { makeLocalAgentTool } from '../../src/tools/localAgentTool';
 import {
   MAX_DELEGATION_CONTEXT_BYTES,
   MAX_DELEGATION_CONTEXT_FILE_BYTES,
@@ -71,6 +72,7 @@ function makeHarness(
     streamText: string;
     finishReason: string;
     realPath: (filePath: string) => Promise<string>;
+    streamReasoning: string[];
   }> = {},
 ): Harness {
   const release = vi.fn();
@@ -104,6 +106,12 @@ function makeHarness(
         signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
       }
       if (!opts.streamNever) {
+        if (opts.streamReasoning) {
+          for (const delta of opts.streamReasoning) {
+            if (handlers.onReasoning) handlers.onReasoning(delta);
+            else handlers.onToken(delta);
+          }
+        }
         handlers.onToken(opts.streamText ?? 'analysis');
         handlers.onDone(opts.finishReason ?? 'stop');
         resolve();
@@ -198,6 +206,15 @@ describe('delegation eligibility', () => {
 });
 
 describe('LocalDelegationService limits and dispatch', () => {
+  it('keeps reasoning out of the complete ask_local_agent result', async () => {
+    const h = makeHarness({ streamReasoning: ['reasoning-E-', '1 '], streamText: 'pong-E-1' });
+    const tool = makeLocalAgentTool(h.service, config);
+
+    await expect(tool.handler({ model: 'llama', task: 'Ping' })).resolves.toBe(
+      '[Delegated analysis — llama]\n\npong-E-1',
+    );
+  });
+
   it('says when the reply was cut off at max_output_tokens', async () => {
     const h = makeHarness({ streamText: 'We need answer user', finishReason: 'length' });
     const result = await h.service.ask({

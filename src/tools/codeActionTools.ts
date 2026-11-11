@@ -2,6 +2,14 @@ import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveRealWorkspacePath, resolveWorkspaceUri } from '../util/WorkspacePaths';
 import { applyAndSaveWorkspaceEdit } from './workspaceEditApply';
+import {
+  clearPendingDiagnostics,
+  hasDiagnosticsProvider,
+  hasCompletedDiagnosticsCheck,
+  hasTimedOutDiagnosticsCheck,
+  markDiagnosticsPending,
+  pendingDiagnosticsMark,
+} from './editDiagnosticsSource';
 
 interface ListedCodeAction {
   title: string;
@@ -20,6 +28,7 @@ export interface DiagnosticsReadyResult<T> {
   result: T;
   diagnosticsWaitTimedOut: boolean;
   diagnosticsStillEmpty: boolean;
+  diagnosticsFreshnessWaitTimedOut: boolean;
 }
 
 const DIAGNOSTICS_WAIT_MS = 4_000;
@@ -44,7 +53,12 @@ function codeActionApplies(
   );
 }
 
-async function waitForDiagnostics(uri: vscode.Uri): Promise<boolean> {
+async function waitForDiagnostics(
+  uri: vscode.Uri,
+  requireNonEmpty: boolean,
+  timeoutMs = DIAGNOSTICS_WAIT_MS,
+): Promise<boolean> {
+  if (timeoutMs <= 0) return true;
   return new Promise((resolve, reject) => {
     let settled = false;
     let subscription: vscode.Disposable | undefined;
@@ -55,12 +69,12 @@ async function waitForDiagnostics(uri: vscode.Uri): Promise<boolean> {
       subscription?.dispose();
       resolve(timedOut);
     };
-    const timeout = setTimeout(() => finish(true), DIAGNOSTICS_WAIT_MS);
+    const timeout = setTimeout(() => finish(true), timeoutMs);
     try {
       subscription = vscode.languages.onDidChangeDiagnostics((event) => {
         if (
           event.uris.some((changedUri) => changedUri.toString() === uri.toString()) &&
-          vscode.languages.getDiagnostics(uri).length > 0
+          (!requireNonEmpty || vscode.languages.getDiagnostics(uri).length > 0)
         ) {
           finish(false);
         }
@@ -77,6 +91,7 @@ async function waitForDiagnostics(uri: vscode.Uri): Promise<boolean> {
 export async function withDiagnosticsReady<T>(
   uri: vscode.Uri,
   run: (document: vscode.TextDocument) => Promise<T>,
+  options: { waitForFreshDiagnostics?: boolean } = {},
 ): Promise<DiagnosticsReadyResult<T>> {
   const document = await vscode.workspace.openTextDocument(uri);
   const window = vscode.window;
@@ -87,8 +102,20 @@ export async function withDiagnosticsReady<T>(
     typeof tabGroups.close === 'function' &&
     typeof vscode.languages.onDidChangeDiagnostics === 'function';
   if (!canOpenTab) {
+    const pendingMark = options.waitForFreshDiagnostics ? pendingDiagnosticsMark(uri) : undefined;
+    let diagnosticsFreshnessWaitTimedOut = false;
+    if (pendingMark) {
+      const remainingMs = DIAGNOSTICS_WAIT_MS - (Date.now() - pendingMark.markedAt);
+      diagnosticsFreshnessWaitTimedOut = await waitForDiagnostics(uri, false, remainingMs);
+      if (diagnosticsFreshnessWaitTimedOut) clearPendingDiagnostics(uri, pendingMark);
+    }
     const result = await run(document);
-    return { result, diagnosticsWaitTimedOut: false, diagnosticsStillEmpty: false };
+    return {
+      result,
+      diagnosticsWaitTimedOut: false,
+      diagnosticsStillEmpty: false,
+      diagnosticsFreshnessWaitTimedOut,
+    };
   }
 
   const existingTab = tabGroups.all
@@ -113,14 +140,35 @@ export async function withDiagnosticsReady<T>(
   }
 
   let diagnosticsWaitTimedOut = false;
+  let diagnosticsFreshnessWaitTimedOut = false;
   try {
-    if (vscode.languages.getDiagnostics(uri).length === 0) {
-      diagnosticsWaitTimedOut = await waitForDiagnostics(uri);
+    const pendingMark = options.waitForFreshDiagnostics ? pendingDiagnosticsMark(uri) : undefined;
+    if (pendingMark) {
+      const remainingMs = DIAGNOSTICS_WAIT_MS - (Date.now() - pendingMark.markedAt);
+      diagnosticsFreshnessWaitTimedOut = await waitForDiagnostics(uri, false, remainingMs);
+      if (diagnosticsFreshnessWaitTimedOut) clearPendingDiagnostics(uri, pendingMark);
+    } else {
+      const completedFreshCheck =
+        options.waitForFreshDiagnostics && hasCompletedDiagnosticsCheck(uri);
+      const priorFreshTimeout = options.waitForFreshDiagnostics && hasTimedOutDiagnosticsCheck(uri);
+      if (
+        !completedFreshCheck &&
+        !priorFreshTimeout &&
+        hasDiagnosticsProvider(uri) &&
+        vscode.languages.getDiagnostics(uri).length === 0
+      ) {
+        diagnosticsWaitTimedOut = await waitForDiagnostics(uri, true);
+      }
     }
     const result = await run(document);
     const diagnosticsStillEmpty =
       diagnosticsWaitTimedOut && vscode.languages.getDiagnostics(uri).length === 0;
-    return { result, diagnosticsWaitTimedOut, diagnosticsStillEmpty };
+    return {
+      result,
+      diagnosticsWaitTimedOut,
+      diagnosticsStillEmpty,
+      diagnosticsFreshnessWaitTimedOut,
+    };
   } finally {
     if (openedTab && !document.isDirty) await tabGroups.close(openedTab, true);
   }
@@ -132,7 +180,7 @@ async function codeActions(
   character: number,
   requestedPath = path,
   toolName = 'code_intel code_actions',
-  afterQuery?: (actions: vscode.CodeAction[]) => Promise<void>,
+  afterQuery?: (actions: vscode.CodeAction[], documentUri: vscode.Uri) => Promise<void>,
 ): Promise<CodeActionsResult> {
   const uri = resolveWorkspaceUri(path);
   const ready = await withDiagnosticsReady(uri, async (document) => {
@@ -152,7 +200,7 @@ async function codeActions(
           'Check the position is on code (read_file the line), or use code_intel diagnostics to see what the language server reports for this file.',
       );
     }
-    await afterQuery?.(actions);
+    await afterQuery?.(actions, document.uri);
     return actions;
   });
   return {
@@ -226,7 +274,7 @@ export function makeApplyCodeActionTool(
         args['character'] as number,
         args['path'] as string,
         'apply_code_action',
-        async (actions) => {
+        async (actions, documentUri) => {
           const action = actions.find((candidate) => candidate.title === args['title']);
           if (!action) {
             const applicableTitles = [
@@ -254,6 +302,7 @@ export function makeApplyCodeActionTool(
               `apply_code_action: "${action.title}" carries no edit. Make the change with edit_file.`,
             );
           }
+          markDiagnosticsPending(documentUri);
           await applyAndSaveWorkspaceEdit('apply_code_action', action.edit, extraRoots(), context);
         },
       );

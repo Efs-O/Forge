@@ -161,18 +161,21 @@ export function makeListExecutionsTool(): RegisteredTool {
       function: {
         name: 'list_executions',
         description:
-          'List every background execution started this session, with its id and status. Use this to recover an execution_id you no longer have.',
+          'List the background executions in this VS Code window, from every chat (this_chat marks yours), with id and status. Use it to recover a lost execution_id.',
         parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
       },
     },
     permission: 'headless',
     autoApprove: true,
-    handler: async () => {
+    handler: async (_args, context) => {
       const executions = backgroundExecutionManager.list();
       return JSON.stringify({
         count: executions.length,
         executions: executions.map((execution) => ({
           execution_id: execution.id,
+          this_chat:
+            context?.conversationId !== undefined &&
+            execution.conversationId === context.conversationId,
           command: [execution.command, ...execution.args].join(' '),
           cwd: execution.cwd,
           status: execution.status,

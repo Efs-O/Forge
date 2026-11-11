@@ -166,14 +166,14 @@ export function makeGetDiagnosticsTool(): RegisteredTool {
       function: {
         name: '__code_intel_get_diagnostics',
         description:
-          'Get language diagnostics (errors, warnings) for a file or the whole workspace.',
+          'Get language diagnostics. Without a path, reports only files open in the editor; with a path, checks that file even when closed.',
         parameters: {
           type: 'object',
           properties: {
             path: {
               type: 'string',
               description:
-                'File path (absolute or workspace-relative). Omit for all workspace diagnostics.',
+                'File path (absolute or workspace-relative). Omit to report only files open in the editor; provide a path to check that file even when closed.',
             },
           },
           required: [],
@@ -187,13 +187,21 @@ export function makeGetDiagnosticsTool(): RegisteredTool {
       const p = args['path'] as string | undefined;
       let pairs: [vscode.Uri, vscode.Diagnostic[]][];
       let timedOutEmpty = false;
+      let freshnessNote = '';
       if (p) {
         const uri = resolveWorkspaceUri(p);
-        const ready = await withDiagnosticsReady(uri, async () =>
-          vscode.languages.getDiagnostics(uri),
+        const ready = await withDiagnosticsReady(
+          uri,
+          async () => vscode.languages.getDiagnostics(uri),
+          { waitForFreshDiagnostics: true },
         );
         pairs = [[uri, ready.result]];
         timedOutEmpty = ready.diagnosticsWaitTimedOut && ready.diagnosticsStillEmpty;
+        if (ready.diagnosticsFreshnessWaitTimedOut) {
+          freshnessNote =
+            `Note: VS Code reported no new check of ${p} in the 4 s after Forge's edit, ` +
+            'so these diagnostics may predate it.';
+        }
       } else {
         pairs = vscode.languages.getDiagnostics();
       }
@@ -212,11 +220,12 @@ export function makeGetDiagnosticsTool(): RegisteredTool {
           );
         }
       }
-      if (lines.length) return lines.join('\n');
-      if (timedOutEmpty) {
-        return `No diagnostics reported for ${p} after Forge opened it in an editor tab and waited 4 s. If you expect errors, ask again in a few seconds or run the project's type checker with shell.`;
-      }
-      return 'No diagnostics found.';
+      const diagnosticsText = lines.length
+        ? lines.join('\n')
+        : timedOutEmpty
+          ? `No diagnostics reported for ${p} after Forge opened it in an editor tab and waited 4 s. If you expect errors, ask again in a few seconds or run the project's type checker with shell.`
+          : 'No diagnostics found.';
+      return freshnessNote ? `${freshnessNote}\n${diagnosticsText}` : diagnosticsText;
     },
   };
 }

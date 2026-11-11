@@ -186,6 +186,9 @@ export class BackgroundExecutionManager {
         command: execution.command,
         args: execution.args,
         cwd: execution.cwd,
+        ...(execution.conversationId !== undefined
+          ? { conversationId: execution.conversationId }
+          : {}),
         status: execution.status,
         pid: execution.pid,
         startedAt: execution.startedAt,

@@ -4,7 +4,6 @@ import { ImageSearchConfigSchema } from '../../src/config/imageSearchSchema';
 import type { ForgeConfig, ImageSearchConfig } from '../../src/config/types';
 import type { ChatMessage } from '../../src/llm/types';
 import { makeImageSearchTool, pickSource } from '../../src/tools/imageSearch/imageSearchTool';
-import { uploadTemporaryImage } from '../../src/tools/imageSearch/litterboxUpload';
 import {
   downloadThumbnails,
   isThumbnailHost,
@@ -23,12 +22,7 @@ import { UserNotificationService } from '../../src/sidebar/UserNotificationServi
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import {
-  formatLensResults,
-  MAX_RESULT_CHARS,
-  lensThumbnailCandidates,
-  searchLens,
-} from '../../src/tools/imageSearch/serpApiLens';
+import { lensThumbnailCandidates } from '../../src/tools/imageSearch/serpApiLens';
 
 /** Shapes copied from the live 2026-09-15 SerpApi yandex_images response. */
 const YANDEX = {
@@ -279,88 +273,6 @@ describe('image_search tool', () => {
   });
 });
 
-describe('formatLensResults', () => {
-  it('keeps title, source, link, size, price and date; drops thumbnails', () => {
-    const text = formatLensResults(EXACT, 'exact_matches', 8);
-    expect(text).toContain(
-      '1. Eiffel Tower - Wikipedia — Wikipedia — <https://en.wikipedia.org/wiki/Eiffel_Tower> — 330x550',
-    );
-    expect(text).toContain('— $28.00');
-    expect(text).toContain('— Feb 21, 2026');
-    expect(text).not.toContain('thumbnail');
-  });
-
-  it('leads with what Lens identified for type all', () => {
-    const text = formatLensResults(
-      {
-        related_content: [{ query: 'Eiffel Tower' }],
-        visual_matches: [{ title: 'A', link: 'https://a' }],
-        short_videos: [{ title: 'ignored' }],
-      },
-      'all',
-      8,
-    );
-    expect(text.split('\n')[0]).toBe('Google Lens identifies it as: Eiffel Tower');
-    expect(text).toContain('Visually similar: 1 found');
-    expect(text).not.toContain('ignored');
-  });
-
-  it('caps the model-facing text', () => {
-    const many = Array.from({ length: 20 }, (_, i) => ({
-      title: 'x'.repeat(100),
-      link: `https://e/${i}`,
-    }));
-    const text = formatLensResults({ visual_matches: many, organic_results: many }, 'all', 20);
-    expect(text.length).toBeLessThanOrEqual(MAX_RESULT_CHARS + 60);
-  });
-
-  it('says so when nothing matched', () => {
-    expect(formatLensResults({ search_metadata: {} }, 'exact_matches', 8)).toMatch(
-      /found no matches/,
-    );
-  });
-});
-
-describe('HTTP clients', () => {
-  it('searchLens surfaces SerpApi error text verbatim', async () => {
-    const fetchImpl = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ error: 'Your account has run out of searches.' }), {
-          status: 429,
-        }),
-    );
-    await expect(
-      searchLens({ imageUrl: 'https://a/b.jpg', type: 'all', apiKey: 'k', fetchImpl }),
-    ).rejects.toThrow('SerpApi: Your account has run out of searches.');
-  });
-
-  it('searchLens omits type for all and sends it otherwise', async () => {
-    const fetchImpl = vi.fn(
-      async (_url: string | URL | Request) => new Response('{}', { status: 200 }),
-    );
-    await searchLens({ imageUrl: 'https://a/b.jpg', type: 'all', apiKey: 'k', fetchImpl });
-    await searchLens({
-      imageUrl: 'https://a/b.jpg',
-      type: 'exact_matches',
-      apiKey: 'k',
-      fetchImpl,
-    });
-    expect(String(fetchImpl.mock.calls[0]?.[0])).not.toContain('type=');
-    expect(String(fetchImpl.mock.calls[1]?.[0])).toContain('type=exact_matches');
-  });
-
-  it('uploadTemporaryImage requires a Litterbox file URL back', async () => {
-    const ok = vi.fn(async () => new Response('https://litter.catbox.moe/q1w2e3.jpg\n'));
-    await expect(
-      uploadTemporaryImage({ bytes: JPEG, filename: 'a.jpg', mime: 'image/jpeg', fetchImpl: ok }),
-    ).resolves.toBe('https://litter.catbox.moe/q1w2e3.jpg');
-    const bad = vi.fn(async () => new Response('<html>busy</html>'));
-    await expect(
-      uploadTemporaryImage({ bytes: JPEG, filename: 'a.jpg', mime: 'image/jpeg', fetchImpl: bad }),
-    ).rejects.toThrow(/no file URL/);
-  });
-});
-
 describe('thumbnails', () => {
   const context = {
     beforeMutate: () => undefined,
@@ -456,7 +368,10 @@ describe('yandex engine', () => {
     const result = String(await tool.handler({}, context));
     expect(search).not.toHaveBeenCalled();
     expect(yandex).toHaveBeenCalledWith(
-      expect.objectContaining({ imageUrl: 'https://litter.catbox.moe/abc.jpg', apiKey: 'serp-key' }),
+      expect.objectContaining({
+        imageUrl: 'https://litter.catbox.moe/abc.jpg',
+        apiKey: 'serp-key',
+      }),
     );
     expect(result.split('\n')[0]).toBe('Yandex identifies it as: eiffel tower paris; torre eiffel');
   });
@@ -491,7 +406,9 @@ describe('yandex engine', () => {
   });
 
   it('formats an empty Yandex response and allows only Yandex thumbnail hosts', () => {
-    expect(formatYandexResults({}, 8)).toBe('Yandex found no matches for this image.');
+    expect(formatYandexResults({}, 8)).toBe(
+      'Yandex found no matches for this image. SerpApi keeps this answer for about an hour, so the same call returns it again; try engine google_lens.',
+    );
     expect(isThumbnailHost('https://avatars.mds.yandex.net/i?id=1')).toBe(true);
     expect(isThumbnailHost('https://i.pinimg.com/474x/e6.jpg')).toBe(false);
     expect(yandexThumbnailCandidates({ image_results: [{ title: 'no thumb' }] })).toEqual([]);

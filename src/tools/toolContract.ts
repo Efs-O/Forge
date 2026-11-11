@@ -52,14 +52,15 @@ export interface ToolApprovalMetadata {
    *
    * `ownerGate` and `taintGate` explain an unattended refusal rather than waiting
    * for an owner. `denyList` carries the deny list's refusal and sanctioned
-   * alternative. Attended Clanker chats answer these gates except for the three
-   * protected stop classes; `ToolApprovalService` receives that decision through
-   * the `clankerStop` option. With Clanker off, the normal approval card remains.
+   * alternative. Attended Clanker chats answer these gates except for deny-listed
+   * destructive shell commands, Forge guard files, and secret reads followed by
+   * egress; `ToolApprovalService` receives that decision through the `clankerStop`
+   * option. With Clanker off, the normal approval card remains.
    */
   gateKind?: 'ownerGate' | 'taintGate' | 'denyList';
   /** True on fetch metadata when this chat has read a secret and the request sends data out. */
   secretReadTaint?: boolean;
-  /** A destructive action outside the turn checkpoint; Clanker must leave it to the owner. */
+  /** A tool-owned protected stop that attended Clanker must leave to the owner. */
   clankerStop?: boolean;
   /** What made this card exist, in one line, from the gate that knows it: a
    *  matched secret pattern, a new host, a payload size. It is the reason the
@@ -117,6 +118,9 @@ export interface QuestionToolResult {
 export type ToolHandlerResult = string | MultimodalToolResult | QuestionToolResult;
 export type QuestionWaitRunner = <T>(wait: () => Promise<T>) => Promise<T>;
 
+/** An approval refusal the dispatcher must return without tool-error rewrapping. */
+export class ToolApprovalRefusal extends Error {}
+
 export interface ToolHandler {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- tool args are schema-validated at call site
   (args: Record<string, unknown>, context?: ToolHandlerContext): Promise<ToolHandlerResult>;
@@ -126,6 +130,8 @@ export interface ToolHandlerContext {
   beforeMutate(paths: string[]): void;
   /** Caller's AbortSignal, threaded through for long-running tools. */
   abortSignal?: AbortSignal;
+  /** Ask the dispatcher to run web_fetch's normal approval flow for a redirect host. */
+  authorizeFetchRedirect?: (url: string) => Promise<void>;
   /** Conversation the call belongs to. */
   conversationId?: string;
   /** The owning chat has attended Clanker mode enabled for this call. */

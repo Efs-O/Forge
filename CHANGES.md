@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `image_search` now treats SerpApi's successful no-match answers as results and suggests another search instead of reporting an error.
 - `browser_scroll` can bring a selector or inspected element into view without choosing a scroll distance.
 - `shell.cwd` now explains that relative paths inside the command resolve from the selected working directory.
 - `read_notebook` now says it reads `.ipynb` files only; non-notebook files point to `read_file`.
@@ -12,6 +13,18 @@
 - Tool calls with a declared argument name followed by leaked </parameter markup now repair that key; markup values get a precise plain-JSON resend refusal.
 - read_file now points to a commit on another Git ref when a missing path exists there, and tells the agent how to read or switch to it.
 - Session logs now preserve Forge's post-call warnings in tool-result rows, so the transcript matches what the model received.
+- Attended Clanker chats approve forgetting workspace memories and deleting jobs; dangerous job deletion still refuses in unattended and job turns.
+- Gate ledger rows now record a human-readable approval detail or action summary for card and auto-approved gates.
+- Creating a disabled job now says it will not run until resumed, while keeping the agent-model sentence.
+- `manage_jobs` now lists the accepted schedule kinds and names them when refusing an unsupported kind.
+- `message_chat` lists every open chat here and every chat in other windows, with open peer chats first.
+- `list_executions` states its current-window, any-chat scope and oldest-first order, and marks executions started by the current chat.
+- ask_agent reply messages now identify answers from background CLI runs and distinguish them from live-session replies.
+- ask_local_agent returns the delegated answer without leaking reasoning into its result.
+- Codex liveness checks read the requested thread directly and reuse positive results for 30 seconds.
+- `code_intel` waits up to 4 seconds after Forge edits a file with a diagnostics provider; if VS Code reports no new check, it returns the current diagnostics with a note that they may predate the edit.
+- `code_intel` now explains that diagnostics without a path cover only files open in the editor, while a path checks that file even when closed.
+- `get_editor_context` now says chats in the same window share the editor, so it may show their files.
 
 ## 0.17.154
 

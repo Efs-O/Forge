@@ -29,7 +29,7 @@
  * (the forge-bench tool host), where the whole feature is a no-op.
  */
 import * as fs from 'fs';
-import { vscodeDiagnosticsSource } from './editDiagnosticsSource';
+import { markDiagnosticsPending, vscodeDiagnosticsSource } from './editDiagnosticsSource';
 import { describeProblems } from './editDiagnosticsNotes';
 export { diffProblems } from './editDiagnosticsNotes';
 
@@ -177,11 +177,23 @@ export function makeProblemWatcher(deps: {
   let clearingInstalled = false;
   return async (writtenPath: string) => {
     const configured = deps.settings();
-    if (configured?.enabled === false) return undefined;
-    const settleMs = bounded(configured?.settle_ms, DEFAULT_SETTLE_MS, 0, 15_000);
-    const maxItems = bounded(configured?.max_items, DEFAULT_MAX_ITEMS, 1, 50);
     const source = sourceOf();
     if (!source) return undefined;
+    const markFreshness = deps.source === undefined;
+    const freshnessOnlyWatch = (): ProblemWatch | undefined => {
+      if (!markFreshness) return undefined;
+      markDiagnosticsPending(writtenPath);
+      return {
+        async settle(): Promise<string> {
+          return '';
+        },
+      };
+    };
+    if (configured?.enabled === false) {
+      return freshnessOnlyWatch();
+    }
+    const settleMs = bounded(configured?.settle_ms, DEFAULT_SETTLE_MS, 0, 15_000);
+    const maxItems = bounded(configured?.max_items, DEFAULT_MAX_ITEMS, 1, 50);
     const key = matchingKey(writtenPath);
     // A file that does not exist yet cannot be opened, so a create is left to
     // the settle path below, which opens it once the write has landed.
@@ -199,12 +211,16 @@ export function makeProblemWatcher(deps: {
       snapshot = problemsByPath(source.reported());
     } catch {
       // A language service that cannot be read before the write cannot be
-      // diffed against it either; say nothing rather than guess.
-      return undefined;
+      // diffed against it either. The edit still needs a future check, though.
+      return freshnessOnlyWatch();
     }
-    if (snapshot === undefined) return undefined;
+    if (snapshot === undefined) return freshnessOnlyWatch();
     const beforeSeen = snapshot.has(key);
     const beforeProblems = snapshot.get(key) ?? [];
+    // The caller creates this watch before applying its write. Mark here, after
+    // the pre-write snapshot, so an event delivered before diagnostics are read
+    // clears the pending state for the edit that caused it.
+    if (markFreshness) markDiagnosticsPending(writtenPath);
     return {
       async settle(signal?: AbortSignal): Promise<string> {
         // Nothing reported on this file means it is new or unserved. Opening it

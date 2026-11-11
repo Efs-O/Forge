@@ -30,6 +30,9 @@ describe('remote rich text', () => {
 
   it('gives help one paragraph per group and per note, with the subject bolded', () => {
     const rendered = markupTelegramLines(HELP_TEXT, decorateHelpLine);
+    expect(HELP_TEXT).toContain(
+      '/clanker on arms THIS chat only: deny-listed destructive shell commands, Forge guard files, and sending data out after reading a secret still stop — here or in the sidebar.',
+    );
     expect(rendered.startsWith('<b>Forge commands:</b>')).toBe(true);
     expect(rendered).toContain('<b>Session:</b> /agents');
     expect(rendered).toContain('• <b>/stop</b> cancels');

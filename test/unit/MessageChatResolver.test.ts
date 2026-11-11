@@ -300,4 +300,38 @@ describe('formatChatList', () => {
     expect(result).toContain('#2 · Second chat · idle · id 12345678-a');
     expect(formatChatId('short-id', values)).toBe('short-id');
   });
+
+  it('lists every open tab in tab order and omits closed local history', () => {
+    const open: ChatRef[] = Array.from({ length: 9 }, (_unused, index) => ({
+      id: `open-${index + 1}`,
+      title: `Open ${index + 1}`,
+      position: index + 1,
+      running: false,
+    }));
+    const closed: ChatRef = {
+      id: 'closed-1',
+      title: 'Closed history',
+      position: 0,
+      running: false,
+      closed: true,
+    };
+
+    const result = formatChatList([...open, closed], 'open-9');
+
+    expect(result).toBe(
+      [
+        'Chats in this window (you are #9):',
+        '#1 · Open 1 · idle · id open-1',
+        '#2 · Open 2 · idle · id open-2',
+        '#3 · Open 3 · idle · id open-3',
+        '#4 · Open 4 · idle · id open-4',
+        '#5 · Open 5 · idle · id open-5',
+        '#6 · Open 6 · idle · id open-6',
+        '#7 · Open 7 · idle · id open-7',
+        '#8 · Open 8 · idle · id open-8',
+        '#9 · Open 9 · idle · id open-9 ← you',
+        'send: {"action":"send","to":"#2","message":"…"} — or omit "to" to reach the only other running chat.',
+      ].join('\n'),
+    );
+  });
 });

@@ -69,6 +69,12 @@ describe('get_editor_context', () => {
     win.tabGroups.all = [];
   });
 
+  it('says its editor context belongs to the shared window', () => {
+    expect(makeGetEditorContextTool().definition.function.description).toBe(
+      `Reports the window's editor: active file, selection and range, cursor, and open tab paths. Other chats in this window share this editor, so it may show their files. Use when the user says "this", "here", or "the selection" without naming a file.`,
+    );
+  });
+
   it('reports no active editor without throwing', async () => {
     const out = (await makeGetEditorContextTool().handler({})) as string;
     expect(out).toContain('Active editor: (none)');

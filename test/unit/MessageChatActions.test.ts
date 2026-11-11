@@ -13,7 +13,7 @@ const L1_DISABLED_DEFINITION = {
   function: {
     name: 'message_chat',
     description:
-      "Message another Forge chat. `to` is a chat id, `#N` from `list`, or words from the chat's title — `#N` and title words mean this window's chats; a chat in another Forge window on this machine takes its id, or its first 8 or more characters when no other chat's id starts the same way. Omit `to` to reach the other chat when exactly one other chat is running (or open); otherwise an omitted `to` answers the chat in another window that last wrote to this one. No `list` needed first. A running chat reads it at its next tool round; an idle chat starts a turn. Replies arrive the same way. `list`: show the chats, including other windows'. `action` defaults to `send` when a `message` is given, so a message alone is enough. `view`: read what one named chat has done — its last prompt/answer pairs, at most 10; `to` is required, and reading changes nothing. `view` also reads a closed chat by id or title, and marks the result `closed`.",
+      "Message another Forge chat. `to` is a chat id, `#N` from `list`, or words from the chat's title — `#N` and title words mean this window's chats; a chat in another Forge window on this machine takes its id, or its first 8 or more characters when no other chat's id starts the same way. Omit `to` to reach the other chat when exactly one other chat is running (or open); otherwise an omitted `to` answers the chat in another window that last wrote to this one. No `list` needed first. A running chat reads it at its next tool round; an idle chat starts a turn. Replies arrive the same way. `list`: show every chat in every window, open ones first. `action` defaults to `send` when a `message` is given, so a message alone is enough. `view`: read what one named chat has done — its last prompt/answer pairs, at most 10; `to` is required, and reading changes nothing. `view` also reads a closed chat by id or title, and marks the result `closed`.",
     parameters: {
       type: 'object',
       properties: {
@@ -698,7 +698,7 @@ describe('message_chat new and steer actions', () => {
     expect(rig.sidebar.deliverChatMessage).not.toHaveBeenCalled();
     expect(rig.sidebar.createConversation).not.toHaveBeenCalled();
     expect(rig.emitHostActivity).not.toHaveBeenCalled();
-    // Reading it does not reopen it: `list` still names only the open tabs.
+    // Reading it does not reopen it or add its closed row to the open-tab list.
     expect(await rig.tool.handler({ action: 'list' }, context())).not.toContain('Take the build');
     // `view` of this chat is still refused, closed chats or not.
     expect(await rig.tool.handler({ action: 'view', to: 'sender' }, context())).toContain(

@@ -71,7 +71,9 @@ export function formatYandexResults(data: SerpApiResponse, maxResults: number): 
     lines.push('', `Visually similar: ${similar.length} images (thumbnails only, no titles).`);
   }
 
-  if (!lines.length) return 'Yandex found no matches for this image.';
+  if (!lines.length) {
+    return 'Yandex found no matches for this image. SerpApi keeps this answer for about an hour, so the same call returns it again; try engine google_lens.';
+  }
   return capResultText(lines.join('\n').trim());
 }
 

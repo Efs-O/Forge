@@ -87,7 +87,9 @@ export function formatLensResults(
     shown.forEach((match: LensMatch, index) => lines.push(formatMatch(match, index + 1)));
   }
 
-  if (!lines.length) return `Google Lens (${type}) found no matches for this image.`;
+  if (!lines.length) {
+    return `Google Lens (${type}) found no matches for this image. SerpApi keeps this answer for about an hour, so the same call returns it again; try another type, or engine yandex.`;
+  }
   return capResultText(lines.join('\n').trim());
 }
 

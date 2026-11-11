@@ -111,8 +111,23 @@ describe('manage_jobs — definition and permissions', () => {
   it('requires approval (dangerous) only for delete', () => {
     const deletion = tool.approval?.({ action: 'delete', job: 'disk' });
     expect(deletion?.dangerous).toBe(true);
-    expect(deletion?.clankerStop).toBe(true);
+    expect(deletion?.clankerStop).toBeUndefined();
+    expect(deletion?.detail).toBe(
+      'Delete job "disk". Its definition, state, and run log are removed.',
+    );
     expect(tool.approval?.({ action: 'pause', job: 'disk' })).toBeUndefined();
+  });
+
+  it('advertises the supported schedule kinds and who approves delete', () => {
+    const definition = tool.definition.function.parameters as {
+      properties: { definition: { description: string } };
+    };
+    expect(definition.properties.definition.description).toContain(
+      '`schedule` ({kind:interval,minutes} | {kind:daily,at:"HH:MM"} | {kind:weekly,days,at})',
+    );
+    expect(tool.definition.function.description).toContain(
+      '`delete` asks first; attended Clanker approves it.',
+    );
   });
 
   it('reports the job files it mutates for write actions', () => {
@@ -141,20 +156,61 @@ describe('manage_jobs — list', () => {
 });
 
 describe('manage_jobs — create', () => {
-  it('creates a job from a full definition and generates an id', async () => {
-    const out = await call({
+  it('refuses an unsupported schedule kind with the accepted values', () => {
+    const args = {
       action: 'create',
       definition: {
-        name: 'Disk Watch',
-        schedule: { kind: 'interval', minutes: 30 },
-        check: { kind: 'disk_space', path: 'C:\\', min_free_gb: 10 },
+        name: 'Nightly',
+        schedule: { kind: 'cron' },
+        check: { kind: 'none' },
         on_change: { kind: 'notify' },
       },
-    });
-    expect(out).toContain('Created job "Disk Watch" [disk-watch]');
+    };
+    expect(new ToolRegistry().invalidArgs(tool, args)).toBe(
+      'Error: manage_jobs: schedule.kind must be one of interval, daily, weekly (received "cron").',
+    );
+  });
+
+  it('creates a job from a full definition and generates an id', async () => {
+    const now = new Date('2026-11-11T08:00:00.000Z');
+    const out = await call(
+      {
+        action: 'create',
+        definition: {
+          name: 'Disk Watch',
+          schedule: { kind: 'interval', minutes: 30 },
+          check: { kind: 'disk_space', path: 'C:\\', min_free_gb: 10 },
+          on_change: { kind: 'notify' },
+        },
+      },
+      { now: () => now },
+    );
+    const firstRun = new Date(now.getTime() + 30 * 60_000).toLocaleString();
+    expect(out).toBe(`Created job "Disk Watch" [disk-watch]. First run: ${firstRun}.`);
     const loaded = await store.load('disk-watch');
     expect(loaded?.job.name).toBe('Disk Watch');
     expect(loaded?.job.enabled).toBe(true);
+  });
+
+  it('says a disabled job will not run until resumed and keeps the model sentence', async () => {
+    const out = await call(
+      {
+        action: 'create',
+        definition: {
+          name: 'Nightly',
+          enabled: false,
+          schedule: { kind: 'daily', at: '08:00' },
+          check: { kind: 'none' },
+          on_change: { kind: 'notify' },
+          action: { kind: 'agent_task', task: 'check releases' },
+        },
+      },
+      { now: () => new Date('2026-11-11T08:00:00.000Z') },
+    );
+    expect(out).toBe(
+      'Created job "Nightly" [nightly]. It is disabled, so it will not run until you resume it. ' +
+        'Its agent runs on primary.',
+    );
   });
 
   it('refuses a wake job off Windows and names the supported alternative', async () => {

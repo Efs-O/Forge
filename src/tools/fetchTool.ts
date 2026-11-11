@@ -1,5 +1,6 @@
 import { lookup as dnsLookup } from 'dns/promises';
 import type { RegisteredTool } from './ToolRegistry';
+import { ToolApprovalRefusal } from './toolContract';
 import { htmlToText } from '../util/htmlText';
 import { readTextCapped } from '../util/readTextCapped';
 import {
@@ -107,6 +108,15 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
       },
     },
     permission: 'fetch',
+    refuseBeforeApproval: (args) => {
+      const url = args['url'];
+      if (typeof url !== 'string') return undefined;
+      const parsed = parseFetchUrl(url);
+      return typeof parsed === 'string' &&
+        parsed.startsWith('Blocked: raw IP address not permitted:')
+        ? `Error: web_fetch: ${parsed}`
+        : undefined;
+    },
     /** The page's text is content this chat did not choose, and a model can be
      *  told what to do by the text it is reading. `ToolDispatch` marks the chat
      *  from this declaration after the handler runs, and `AgentLoop` asks the same
@@ -158,6 +168,7 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
 
       let result: { response: Response; body: string; bytesRead: number; truncated: boolean };
       try {
+        const checkRedirectHost = redirectGate(dependencies.getConfig?.(), context?.conversationId);
         result = await fetchPublicPage(
           url,
           httpsOnly,
@@ -165,10 +176,20 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
           pinnedFetch,
           MAX_WEB_FETCH_BYTES,
           context?.abortSignal,
-          redirectGate(dependencies.getConfig?.(), context?.conversationId),
+          async (redirectTarget) => {
+            const refusal =
+              normalizedHostname(redirectTarget) === host
+                ? undefined
+                : checkRedirectHost(redirectTarget);
+            if (!refusal) return undefined;
+            if (!context?.authorizeFetchRedirect) return refusal;
+            await context.authorizeFetchRedirect(redirectTarget.toString());
+            markHostApproved(context.conversationId, normalizedHostname(redirectTarget));
+            return undefined;
+          },
         );
       } catch (err) {
-        if (err instanceof ToolError) throw err;
+        if (err instanceof ToolError || err instanceof ToolApprovalRefusal) throw err;
         throw new ToolError(`web_fetch: network error — ${(err as Error).message}`);
       }
       const { response, body: html, bytesRead, truncated } = result;
@@ -231,7 +252,7 @@ async function fetchPublicPage(
   pinnedFetch: PinnedFetch,
   maxBytes: number,
   signal?: AbortSignal,
-  hostGate?: (url: URL) => string | undefined,
+  hostGate?: (url: URL) => Promise<string | undefined>,
 ): Promise<{ response: Response; body: string; bytesRead: number; truncated: boolean }> {
   let currentUrl = url;
   const pins = new Map<string, ResolvedAddress>();
@@ -292,11 +313,15 @@ async function fetchPublicPage(
       await response.body?.cancel();
       if (!location) throw new ToolError('web_fetch: redirect had no Location header.');
       const redirectTarget = new URL(location, currentUrl);
+      const targetShape = parseFetchUrl(redirectTarget.toString());
+      if (typeof targetShape === 'string') {
+        throw new ToolError(`web_fetch: redirect target rejected — ${targetShape}`);
+      }
       // An open redirect on an approved host would otherwise launder the request
       // to any host on the internet under a card the user answered for this one
-      // (docs/plans/EXFIL_GATES_PLAN.md example 5), so the target has to be
-      // approved on its own and the message says what to do instead.
-      const notApproved = hostGate?.(redirectTarget);
+      // (docs/plans/EXFIL_GATES_PLAN.md example 5), so an unapproved target asks
+      // through ToolDispatch before its DNS lookup or connection.
+      const notApproved = await hostGate?.(redirectTarget);
       if (notApproved) throw new ToolError(`web_fetch: ${notApproved}`);
       currentUrl = redirectTarget.toString();
     }

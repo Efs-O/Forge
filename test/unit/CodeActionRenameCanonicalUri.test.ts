@@ -91,6 +91,7 @@ vi.mock('../../src/tools/symbolSearch', () => ({
 import * as vscode from 'vscode';
 import { makeApplyCodeActionTool } from '../../src/tools/codeActionTools';
 import { makeCodeIntelTool } from '../../src/tools/codeIntelTool';
+import { hasPendingDiagnostics } from '../../src/tools/editDiagnosticsSource';
 import { makeRenameSymbolTool } from '../../src/tools/fileEditTools';
 
 const errorFrom = (promise: Promise<unknown>): Promise<string> =>
@@ -302,6 +303,9 @@ describe('language-service tools pass the opened document URI', () => {
       },
     };
     mocks.executeCommand.mockResolvedValue([action]);
+    mocks.applyAndSaveWorkspaceEdit.mockImplementation(async () => {
+      expect(hasPendingDiagnostics(mocks.canonicalUri as never)).toBe(true);
+    });
 
     await expect(
       makeCodeIntelTool().handler({ operation: 'code_actions', path: 'src/file.ts', line: 0, character: 0 }),
@@ -320,6 +324,9 @@ describe('language-service tools pass the opened document URI', () => {
       [],
       expect.anything(),
     );
+    expect(hasPendingDiagnostics(mocks.canonicalUri as never)).toBe(true);
+    mocks.diagnosticListener?.({ uris: [mocks.canonicalUri] });
+    expect(hasPendingDiagnostics(mocks.canonicalUri as never)).toBe(false);
     expect(
       mocks.executeCommand.mock.calls.some(([command]) => command === '_typescript.applyCodeActionCommand'),
     ).toBe(false);

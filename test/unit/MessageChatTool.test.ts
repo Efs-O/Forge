@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type {
   ForgeConversationSummary,
-  ForgeHostFacade,
   ForgeHostStatus,
 } from '../../src/sidebar/ForgeHostFacade';
 import type { ChatMessageDelivery } from '../../src/sidebar/backgroundExitNotice';
@@ -160,6 +159,9 @@ describe('message_chat tool contract and handler', () => {
     expect(toDescription).toContain('words from its title');
     expect(toDescription).toContain('Never target this chat');
     expect(toDescription).toContain('closed chat must be read with action: view');
+    expect((tool.definition.function as { description: string }).description).toContain(
+      "`list`: show every chat in every window, open ones first.",
+    );
     // `action` is no longer required, and the description says what replaces it,
     // so the model is not asked to guess why a message-only call worked.
     expect((tool.definition.function as { description: string }).description).toContain(
@@ -293,6 +295,31 @@ describe('message_chat tool contract and handler', () => {
     expect(refused).toContain('send:');
     const targetRefused = await tool.handler({ action: 'list', to: '#2' }, context());
     expect(targetRefused).toContain('does not take `to` or `message`');
+  });
+
+  it('keeps tab numbers tied to send targets across a full list', async () => {
+    const status: ForgeHostStatus = {
+      activeConversationId: 'chat-11',
+      conversations: Array.from({ length: 11 }, (_unused, index) =>
+        conversation(`chat-${index + 1}`, `Chat ${index + 1}`),
+      ),
+      requestChains: [],
+      streamingConversationIds: [],
+    };
+    const sidebar = makeSidebar(status);
+    const tool = makeMessageChatTool({ getSidebar: () => sidebar });
+
+    const listed = String(await tool.handler({ action: 'list' }, context('chat-11')));
+    expect(listed).toContain('Chats in this window (you are #11):');
+    expect(listed).toContain('#9 · Chat 9 · idle · strata-flash · id chat-9');
+    expect(listed).toContain('#11 · Chat 11 · idle · strata-flash · id chat-11 ← you');
+    expect(listed).not.toContain('not shown');
+
+    await tool.handler(
+      { action: 'send', to: '#9', message: 'Reach chat nine.' },
+      context('chat-11'),
+    );
+    expect(sidebar.deliverChatMessage.mock.calls[0]?.[1]).toBe('chat-9');
   });
 
   it('keeps `list` byte-identical when there is nobody else to talk to', async () => {

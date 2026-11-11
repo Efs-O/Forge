@@ -123,7 +123,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     trigger: 'clanker',
     title: 'Full Clanker',
     description:
-      "Toggle full-auto mode — no confirmation prompts until you run /clanker again. Destructive commands, Forge's own guard files, and sending data out after reading a secret still stop.",
+      'Toggle full-auto mode — no confirmation prompts until you run /clanker again. Deny-listed destructive shell commands, Forge guard files, and sending data out after reading a secret still stop.',
     // An in-memory approval-mode flag that touches no backend state. Mid-turn is
     // exactly when it is wanted: the agent is asking for confirmations now.
     availableWhileStreaming: true,

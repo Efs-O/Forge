@@ -47,9 +47,12 @@ export function renderAskStillPending(agent: AgentKind, exchangeId: string, age:
 export function renderAskReplyMessage(exchangeId: string, result: AskAgentResult): string {
   const label = agentDisplayName(result.agent);
   const subject = result.subject ? `: ${result.subject}` : '';
+  const background = result.live
+    ? ''
+    : `; a new background ${label} session answered, not a session the owner has open`;
   const heading =
     result.status === 'completed'
-      ? `**${label} replied** (ask_agent exchange ${exchangeId}${subject})`
+      ? `**${label} replied** (ask_agent exchange ${exchangeId}${subject}${background})`
       : `**${label} did not reply** (ask_agent exchange ${exchangeId}${subject})`;
   const body =
     result.status === 'completed'

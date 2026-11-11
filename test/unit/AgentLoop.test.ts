@@ -285,7 +285,7 @@ describe('AgentLoop', () => {
     await loop.runTurn(conv, config.models[0]!, 'student prompt');
 
     expect(notice).toBe(
-      'Clanker is on by default until 2999-01-01 00:00 (policy.yaml clanker.default_on_until). Its three stops still hold: destructive actions, Forge guard files, a secret read followed by egress. Turn it off here with /clanker.',
+      'Clanker is on by default until 2999-01-01 00:00 (policy.yaml clanker.default_on_until). Its three stops still hold: deny-listed destructive shell commands, Forge guard files, a secret read followed by egress. Turn it off here with /clanker.',
     );
     expect(requests).toEqual([
       [
