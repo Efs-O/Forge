@@ -93,6 +93,13 @@ describe('the gate ledger', () => {
       'Create job "Nightly".',
     ],
     [
+      'manage_jobs',
+      JSON.stringify({ action: 'update', job: 'lab-p2r-1', definition: { enabled: false } }),
+      'Update job "lab-p2r-1".',
+    ],
+    ['manage_jobs', JSON.stringify({ action: 'pause', job: 'disk' }), 'Pause job "disk".'],
+    ['manage_jobs', JSON.stringify({ action: 'run_now', job: 'disk' }), 'Run job "disk".'],
+    [
       'message_chat',
       JSON.stringify({ action: 'send', to: 'target', message: 'a build note' }),
       'Send message to "target": "a build note"',

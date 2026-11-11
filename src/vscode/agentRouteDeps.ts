@@ -21,6 +21,7 @@ import { renderBusStatus, renderBusView, renderQueuedStatus } from '../agentBus/
 import type { BusTurnWatch } from '../agentBus/busTurnWatch';
 import type { ForgeConfig } from '../config/types';
 import { makeAgentToAgentRelay, makeAgentToAgentSteer } from '../agentLinks/agentToAgentRelay';
+import { chatNotOpenHereMessage } from '../agentLinks/inboundAgentRouting';
 import { recordAcceptedInboundReply } from '../agentLinks/agentReplyLifecycle';
 import { isAskAgentRunning, type AskAgentRuntime } from '../agentLinks/askAgentService';
 import { agentKindSchema, type AgentSender } from '../agentLinks/chatAgentLinks';
@@ -114,10 +115,13 @@ export function buildAgentRouteDeps(hosts: AgentRouteDepsHosts): AgentRoutesDeps
       // chat by guessing its id is exactly what a read route must not allow.
       const conversation = status.conversations.find((item) => item.id === conversationId);
       if (!conversation || conversation.archived) {
+        const owner = exchangeConversationFromLedger(conversationId, busAt().root);
         return {
           ok: false as const,
           status: 404 as const,
-          error: `Forge chat "${conversationId}" is no longer open`,
+          error: owner
+            ? `"${conversationId}" is an exchange id, not a chat id: its chat is --to ${owner}`
+            : chatNotOpenHereMessage(conversationId),
         };
       }
       const link = sender ? facade.getAgentLink(conversationId, sender.kind) : undefined;
@@ -209,7 +213,9 @@ export function buildAgentRouteDeps(hosts: AgentRouteDepsHosts): AgentRoutesDeps
     // last steer left since Telegram `/steer` was removed (MID_TURN_TELL
     // Phase 4). An idle chat has nothing to interrupt.
     resolveChatTarget: (from, selection) =>
-      resolveBusMessageTarget(getFacade(), from, selection, exchangeConversationFromLedger),
+      resolveBusMessageTarget(getFacade(), from, selection, (id) =>
+        exchangeConversationFromLedger(id, busAt().root),
+      ),
     recordPeerWriter: (conversationId, writer) => {
       const conversation = getFacade().getConversation(conversationId);
       if (conversation) conversation.latestPeerWriter = writer;
@@ -228,11 +234,8 @@ export function buildAgentRouteDeps(hosts: AgentRouteDepsHosts): AgentRoutesDeps
       stopForgeForSender(getFacade(), from, conversationId),
     prepareReload: (from, conversationId, force) => {
       const facade = getFacade();
-      const target = resolveBusMessageTarget(
-        facade,
-        from,
-        { conversationId },
-        exchangeConversationFromLedger,
+      const target = resolveBusMessageTarget(facade, from, { conversationId }, (id) =>
+        exchangeConversationFromLedger(id, busAt().root),
       );
       if (!target.ok) return target;
       const status = facade.status();
@@ -393,7 +396,7 @@ export function buildAgentRouteDeps(hosts: AgentRouteDepsHosts): AgentRoutesDeps
         return {
           ok: false as const,
           status: 404 as const,
-          error: `Forge chat "${conversationId}" is no longer open`,
+          error: chatNotOpenHereMessage(conversationId),
         };
       // One more than the caller asked for, so "there was more" is a measurement
       // taken here rather than a guess made at the far end.

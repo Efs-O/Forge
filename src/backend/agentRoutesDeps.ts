@@ -124,7 +124,7 @@ export interface AgentRoutesDeps {
     conversationId: string | undefined,
   ) => Promise<
     | { ok: true; conversationId: string; title: string }
-    | { ok: false; status: 400 | 409; error: string }
+    | { ok: false; status: 404 | 409; error: string }
   >;
   /** Resolve an open chat in this window and decide whether reload may proceed. */
   prepareReload?: (

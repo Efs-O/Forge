@@ -20,13 +20,13 @@ describe('reduceTurn', () => {
     const b = reduceTurn(a, event('narration', { text: 'checking files' }), 20);
     const c = reduceTurn(b, event('tool', { toolName: 'write_file' }), 30);
     const d = reduceTurn(c, event('notice', { text: 'careful', severity: 'warning' }), 40);
-    const ended = reduceTurn(d, event('end', { ok: true }), 50);
-    expect(ended).toMatchObject({ state: 'ended', toolCalls: 2, lastTool: 'write_file', lastNarration: 'checking files', warnings: ['careful'], endedOk: true });
+    const ended = reduceTurn(d, event('end', { outcome: 'ok' }), 50);
+    expect(ended).toMatchObject({ state: 'ended', toolCalls: 2, lastTool: 'write_file', lastNarration: 'checking files', warnings: ['careful'], endedOutcome: 'ok' });
     expect(a).toMatchObject({ state: 'running', toolCalls: 1, lastEventAt: 10 });
   });
 
   it('starts a fresh turn after end', () => {
-    const ended = reduceTurn(undefined, event('end', { ok: true }), 10);
+    const ended = reduceTurn(undefined, event('end', { outcome: 'ok' }), 10);
     expect(reduceTurn(ended, event('status', { text: 'working' }), 20)).toMatchObject({ state: 'running', startedAt: 20, toolCalls: 0, warnings: [] });
   });
 
@@ -92,15 +92,15 @@ describe('turn timing (audit F4)', () => {
     // progress event, the closing one, and the snapshot was built from that
     // event alone - so its start and its end were the same instant.
     const started = reduceTurn(undefined, event('start'), 1_000);
-    const ended = reduceTurn(started, event('end', { ok: true }), 17_000);
+    const ended = reduceTurn(started, event('end', { outcome: 'ok' }), 17_000);
     expect(ended).toMatchObject({
       state: 'ended',
       startedAt: 1_000,
       endedAt: 17_000,
       toolCalls: 0,
     });
-    expect(statusOf(ended, 17_000)).toContain(
-      'idle · last turn ended ok 0 s ago after 16 s, 0 tool call(s)',
+    expect(statusOf(ended, 17_000).split('\n')[1]).toBe(
+      'State: idle · last turn ended ok 0 s ago after 16 s, 0 tool call(s)',
     );
   });
 
@@ -110,14 +110,14 @@ describe('turn timing (audit F4)', () => {
     // duration ran from that turn's start to this turn's end.
     const first = reduceTurn(
       reduceTurn(undefined, event('start'), 0),
-      event('end', { ok: true }),
+      event('end', { outcome: 'ok' }),
       31_000,
     );
     const stopped = reduceTurn(first, event('start'), 40_000);
     expect(stopped).toMatchObject({ state: 'running', startedAt: 40_000, toolCalls: 0 });
-    const ended = reduceTurn(stopped, event('end', { ok: false }), 42_175);
-    expect(statusOf(ended, 42_175)).toContain(
-      'idle · last turn ended with an error 0 s ago after 2 s, 0 tool call(s)',
+    const ended = reduceTurn(stopped, event('end', { outcome: 'stopped' }), 42_175);
+    expect(statusOf(ended, 42_175).split('\n')[1]).toBe(
+      'State: idle · last turn was stopped 0 s ago after 2 s, 0 tool call(s)',
     );
   });
 

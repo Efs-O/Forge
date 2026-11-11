@@ -156,7 +156,7 @@ it('keeps the mirrored reply bubble through turn end and outbox delivery', async
   progress.begin('c1', 'chat-a', id, 'host');
   progress.handle({ conversationId: 'c1', kind: 'commentary', text: 'The reply.' });
   const delivery = fanout.mirrorTurn('c1', 'The reply.', 'Speed: 20 tok/s');
-  progress.handle({ conversationId: 'c1', kind: 'end', ok: true });
+  progress.handle({ conversationId: 'c1', kind: 'end', outcome: 'ok' });
   await expect(delivery).resolves.toBe(1);
   await expect(outbox.flush('chat-a')).resolves.toBe(true);
   expect(channel.edits.at(-1)).toMatchObject({
@@ -268,17 +268,19 @@ describe('turn mirroring', () => {
     events: SidebarProviderEvents;
     emitted: HostActivityEvent[];
     inner: ReturnType<typeof vi.fn>;
+    outcomes: string[];
   } {
     const emitted: HostActivityEvent[] = [];
+    const outcomes: string[] = [];
     const inner = vi.fn();
     const events: SidebarProviderEvents = { onGenerationFinished: inner };
     wireTurnMirror(events, {
       lookup: () => conv,
       emit: (event) => emitted.push(event),
-      endProgress: () => undefined,
+      endProgress: (_id, outcome) => outcomes.push(outcome),
       turnSpeeds: createTurnSpeedLedger(),
     });
-    return { events, emitted, inner };
+    return { events, emitted, inner, outcomes };
   }
 
   it('mirrors the assistant answer and keeps the original listener', () => {
@@ -288,14 +290,14 @@ describe('turn mirroring', () => {
         { role: 'assistant', content: 'the answer' },
       ]),
     );
-    events.onGenerationFinished?.('m', 'conv-1');
+    events.onGenerationFinished?.('m', 'conv-1', undefined, 'completed');
     expect(emitted).toEqual([{ text: 'the answer', conversationId: 'conv-1', kind: 'turn' }]);
     // Decorating must not swallow the status-bar update it wraps.
-    expect(inner).toHaveBeenCalledWith('m', 'conv-1', undefined);
+    expect(inner).toHaveBeenCalledWith('m', 'conv-1', undefined, 'completed');
   });
 
   it('does not re-send a narrated tool round when a stopped turn has no final answer', () => {
-    const { events, emitted } = wire(
+    const { events, emitted, outcomes } = wire(
       conversation([
         { role: 'user', content: 'hi' },
         {
@@ -308,13 +310,14 @@ describe('turn mirroring', () => {
         { role: 'tool', tool_call_id: 't1', content: 'file text' },
       ]),
     );
-    events.onGenerationFinished?.('m', 'conv-1', '');
+    events.onGenerationFinished?.('m', 'conv-1', '', 'cancelled');
     expect(emitted).toEqual([]);
+    expect(outcomes).toEqual(['stopped']);
   });
 
   it('uses the provider final text when a cold restart changes the transcript tail', () => {
     const { events, emitted } = wire(conversation([{ role: 'user', content: 'hi' }]));
-    events.onGenerationFinished?.('m', 'conv-1', 'the freshly completed answer');
+    events.onGenerationFinished?.('m', 'conv-1', 'the freshly completed answer', 'completed');
     expect(emitted).toEqual([
       { text: 'the freshly completed answer', conversationId: 'conv-1', kind: 'turn' },
     ]);
@@ -330,7 +333,7 @@ describe('turn mirroring', () => {
         { role: 'tool', content: 'ok', tool_call_id: 't1', name: 'read_file' },
       ]),
     );
-    events.onGenerationFinished?.('m', 'conv-1');
+    events.onGenerationFinished?.('m', 'conv-1', undefined, 'completed');
     expect(emitted[0]?.text).toBe('the answer');
   });
 
@@ -341,14 +344,14 @@ describe('turn mirroring', () => {
         { role: 'assistant', content: '   ' },
       ]),
     );
-    events.onGenerationFinished?.('m', 'conv-1');
+    events.onGenerationFinished?.('m', 'conv-1', undefined, 'completed');
     expect(emitted).toEqual([]);
   });
 
   // PromptRun's /compact turn calls onGenerationFinished with no conversation.
   it('ignores a turn with no conversation id', () => {
     const { events, emitted } = wire(conversation([{ role: 'assistant', content: 'x' }]));
-    events.onGenerationFinished?.('m', undefined);
+    events.onGenerationFinished?.('m', undefined, undefined, 'completed');
     expect(emitted).toEqual([]);
   });
 
@@ -356,7 +359,7 @@ describe('turn mirroring', () => {
     const { events, emitted } = wire(
       conversation([{ role: 'assistant', content: 'x'.repeat(5_000) }]),
     );
-    events.onGenerationFinished?.('m', 'conv-1');
+    events.onGenerationFinished?.('m', 'conv-1', undefined, 'completed');
     expect(emitted[0]!.text.length).toBeLessThan(5_000);
     expect(emitted[0]!.text).toContain('truncated');
   });

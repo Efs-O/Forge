@@ -130,14 +130,14 @@ describe('renderBusStatus', () => {
   });
 
   it('reports the last ended turn and rounded-down durations', () => {
-    const ended = turn({ state: 'ended', startedAt: 1_000_000 - 125 * 60_000, endedAt: 1_000_000 - 59_000, endedOk: false });
-    expect(renderBusStatus(base({ turn: ended }))).toContain('State: idle · last turn ended with an error 59 s ago after 2 h 4 min, 2 tool call(s)');
+    const ended = turn({ state: 'ended', startedAt: 1_000_000 - 125 * 60_000, endedAt: 1_000_000 - 59_000, endedOutcome: 'error' });
+    expect(renderBusStatus(base({ turn: ended })).split('\n')[1]).toBe('State: idle · last turn ended with an error 59 s ago after 2 h 4 min, 2 tool call(s)');
   });
 
   it.each([
     [59, '59 s'], [60, '1 min'], [59 * 60, '59 min'], [60 * 60, '1 h 0 min'], [125 * 60, '2 h 5 min'],
   ])('formats duration boundary %i seconds as %s', (seconds, expected) => {
-    const ended = turn({ state: 'ended', startedAt: 0, endedAt: 0, endedOk: true });
+    const ended = turn({ state: 'ended', startedAt: 0, endedAt: 0, endedOutcome: 'ok' });
     expect(renderBusStatus(base({ turn: ended, now: seconds * 1_000 }))).toContain(`ended ok ${expected} ago`);
   });
 

@@ -108,6 +108,13 @@ describe('inbound session routing', () => {
     expect(added.agentLinks?.claude?.sessionId).toBe(sender.sessionId); // and the new one stays
   });
 
+  it('names a chat that is not open in this window exactly', () => {
+    rebuildIndex([]);
+    expect(() => route(state(chat('local')), { conversationId: 'elsewhere' })).toThrow(
+      'Forge chat "elsewhere" is not open in this window. If it is open in another Forge window, send from a session linked there.',
+    );
+  });
+
   it('refuses --to a chat whose link of this kind names a different session', () => {
     // The one refusal `--to` keeps. Revert the check in
     // `src/agentLinks/inboundAgentRouting.ts` and this test fails.
@@ -117,8 +124,8 @@ describe('inbound session routing', () => {
     link(mine, linkValue(sender.sessionId));
     link(theirs, linkValue(otherSender.sessionId, 'Other session'));
 
-    expect(() => route(state(mine, [theirs]), { conversationId: 'theirs' })).toThrow(
-      'already links a different claude session',
+    expect(() => route(state(mine, [theirs]), { conversationId: 'theirs' })).toThrowError(
+      new Error('Chat "Their chat" already links a different claude session.'),
     );
     // Refusing must not have taken the other session's chat away from it.
     expect(chatsForSession(otherSender.sessionId)).toEqual(['theirs']);

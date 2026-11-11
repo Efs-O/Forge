@@ -312,7 +312,8 @@ export async function runPromptToMarkdown(
           target.apiKey,
         );
       });
-      ctx.events.onGenerationFinished?.(target.loadedModel);
+      // PromptRun has no conversation outcome; the stream resolved successfully.
+      ctx.events.onGenerationFinished?.(target.loadedModel, undefined, undefined, 'completed');
       if (
         options.requireComplete === true &&
         (toolCalls.length === 0 || !options.contactTools || !options.dispatchContactTool) &&

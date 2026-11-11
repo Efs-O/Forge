@@ -45,8 +45,8 @@ export class HiddenChatAlerts implements vscode.Disposable {
       onGenerationStarted?.(model, id);
       if (id) this.started.set(id, Date.now());
     };
-    deps.events.onGenerationFinished = (model, id, text) => {
-      onGenerationFinished?.(model, id, text);
+    deps.events.onGenerationFinished = (model, id, text, outcome) => {
+      onGenerationFinished?.(model, id, text, outcome);
       const startedAt = id ? this.started.get(id) : undefined;
       if (id) this.started.delete(id);
       if (startedAt !== undefined && Date.now() - startedAt >= HIDDEN_TURN_ALERT_MS) {

@@ -382,7 +382,8 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
   wireTurnMirror(events, {
     lookup: (id) => host.getSidebar().conversations.find((conv) => conv.id === id),
     emit: (event) => slashHandler.emitActivity(event),
-    endProgress: (id, ok) => agentLoop.reportProgress({ conversationId: id, kind: 'end', ok }),
+    endProgress: (id, outcome) =>
+      agentLoop.reportProgress({ conversationId: id, kind: 'end', outcome }),
     willAutoResume: (message) => {
       const auto = host.getConfig().auto_compact;
       return auto?.enabled === true && auto.resume !== false && isContextExhaustionReason(message);

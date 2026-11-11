@@ -1,5 +1,8 @@
 import type { AgentSender } from '../agentLinks/chatAgentLinks';
-import { formatAlsoLinkedNotice } from '../agentLinks/inboundAgentRouting';
+import {
+  formatAlsoLinkedNotice,
+  InboundAgentChatNotOpenError,
+} from '../agentLinks/inboundAgentRouting';
 import type { InboxMessageOptions, ChatTargetResult } from '../agentBus/agentInbox';
 import type { AgentRoutesDeps } from './agentRoutesDeps';
 import { AgentRouteHttpError } from './agentRouteFields';
@@ -27,11 +30,18 @@ export async function admitInboundMessage(options: {
       : undefined;
     if (messageOptions.toRunning && (!running || !running.ok))
       throw new AgentRouteHttpError(409, running?.error ?? 'Forge chat targeting is unavailable');
-    const routed = await deps.resolveInboundAgent(sender, {
-      ...(messageOptions.conversationId ? { conversationId: messageOptions.conversationId } : {}),
-      ...(running?.ok ? { runningConversationId: running.conversationId } : {}),
-      ...(messageOptions.newChat ? { newChat: true } : {}),
-    });
+    let routed: Awaited<ReturnType<NonNullable<AgentRoutesDeps['resolveInboundAgent']>>>;
+    try {
+      routed = await deps.resolveInboundAgent(sender, {
+        ...(messageOptions.conversationId ? { conversationId: messageOptions.conversationId } : {}),
+        ...(running?.ok ? { runningConversationId: running.conversationId } : {}),
+        ...(messageOptions.newChat ? { newChat: true } : {}),
+      });
+    } catch (error) {
+      if (error instanceof InboundAgentChatNotOpenError)
+        throw new AgentRouteHttpError(404, error.message);
+      throw error;
+    }
     target = { ok: true, conversationId: routed.conversationId, title: routed.title };
     const queuedBehindRunningTurn = deps.isChatBusy?.(target.conversationId) ?? false;
     messageOptions = {

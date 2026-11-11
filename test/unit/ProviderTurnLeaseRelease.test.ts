@@ -248,6 +248,26 @@ describe('runLocalProviderTurn turn-lease release', () => {
     expect((pool as unknown as { releases: number }).releases).toBe(1);
   });
 
+  it('settles as failed when a local catch hook throws', async () => {
+    const h = fakeHarness(countingPool());
+    const ctrl = new AbortController();
+    h.ctx.lifecycle.register('conv-1', ctrl);
+    const settle = vi.spyOn(h.ctx.lifecycle, 'settle');
+    const finished = vi.fn();
+    h.ctx.events.onBackendError = () => {
+      throw new Error('backend error hook failed');
+    };
+    h.ctx.events.onGenerationFinished = finished;
+    h.ctx.runModelTurn = async () => {
+      throw new Error('model request failed');
+    };
+
+    await expect(runTurn(h.ctx, ctrl)).rejects.toThrow('backend error hook failed');
+
+    expect(settle).toHaveBeenCalledWith('conv-1');
+    expect(finished).toHaveBeenCalledWith('A', 'conv-1', '', 'failed');
+  });
+
   it('releases capacity during a question wait and reacquires before continuation', async () => {
     const pool = countingPool();
     const h = fakeHarness(pool);
@@ -476,6 +496,41 @@ describe('runLocalProviderTurn turn-lease release', () => {
     expect((pool as unknown as { releases: number }).releases).toBe(1);
     expect(h.ctx.lifecycle.isStreaming('conv-1')).toBe(false);
     expect([...h.ctx.lifecycle.modelDemandIds()]).toEqual([]);
+  });
+
+  it('settles as failed when a cloud catch post throws', async () => {
+    const target = vi.spyOn(cloudRequestResolver, 'resolveCloudRequestTarget');
+    target.mockResolvedValue({ baseUrl: 'http://127.0.0.1:8091', apiKey: 'key' });
+    const h = fakeHarness(countingPool());
+    const ctrl = new AbortController();
+    h.ctx.lifecycle.register('conv-1', ctrl);
+    const settle = vi.spyOn(h.ctx.lifecycle, 'settle');
+    const finished = vi.fn();
+    h.ctx.events.onGenerationFinished = finished;
+    h.ctx.runModelTurn = async () => {
+      throw new Error('cloud request failed');
+    };
+    const post = vi.fn((message: HostToWebview) => {
+      if (message.type === 'error') throw new Error('error post failed');
+    });
+
+    try {
+      await expect(
+        runCloudProviderTurn(h.ctx, {
+          conv: fakeConv(),
+          model: { ...fakeModel('cloud'), provider: 'openai-compatible' },
+          text: 'hello',
+          attachments: undefined,
+          activeFile: undefined,
+          ctrl,
+          postC: post,
+        }),
+      ).rejects.toThrow('error post failed');
+      expect(settle).toHaveBeenCalledWith('conv-1');
+      expect(finished).toHaveBeenCalledWith('cloud', 'conv-1', '', 'failed');
+    } finally {
+      target.mockRestore();
+    }
   });
 
   it('releases and refreshes a cloud hold, endpoint, and key around a question', async () => {

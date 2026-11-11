@@ -115,7 +115,7 @@ describe('RemoteController.mirrorPrompt', () => {
         'You (VS Code): run the checks',
         'Forge: working…',
       ]));
-      progressEvent(listener, { conversationId: 'c1', kind: 'end', ok: true });
+      progressEvent(listener, { conversationId: 'c1', kind: 'end', outcome: 'ok' });
       await controller.mirrorTurn('c1', 'The checks passed.');
       await vi.waitFor(() => expect(order.at(-1)).toBe('The checks passed.'));
       expect(order).toEqual([
@@ -185,7 +185,7 @@ describe('RemoteController.mirrorPrompt', () => {
 
       await expect(controller.mirrorPrompt('c1', 'You (VS Code): inspect the change')).resolves.toBe(1);
       progressEvent(listener, { conversationId: 'c1', kind: 'status', text: 'Running tests…' });
-      progressEvent(listener, { conversationId: 'c1', kind: 'end', ok: true });
+      progressEvent(listener, { conversationId: 'c1', kind: 'end', outcome: 'ok' });
       await vi.waitFor(() => expect(state.pendingOutbox('fake')).toHaveLength(1));
       await controller.mirrorTurn('c1', 'Here is the answer.');
 

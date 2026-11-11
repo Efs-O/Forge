@@ -217,12 +217,17 @@ export class RemoteAgentProgress {
     const bubble = state?.bubble;
     if (!state || state.closed || !bubble) return;
     if (event.kind === 'end') {
-      // Only the lazily-opened kind. A remote request's message is closed by
-      // RemoteQueueDrain with the request's own outcome, which knows the two
-      // endings this event cannot tell apart: a cancelled request also ends
-      // its turn "successfully", and closing it here would report it as done.
+      // RemoteQueueDrain closes remote requests with their richer queue
+      // outcome; this event closes only a host-started turn.
       if (state.origin !== 'host') return;
-      void this.finish(event.conversationId, event.ok ? 'Forge: completed.' : 'Forge: failed.');
+      void this.finish(
+        event.conversationId,
+        event.outcome === 'stopped'
+          ? 'Forge: stopped.'
+          : event.outcome === 'ok'
+            ? 'Forge: completed.'
+            : 'Forge: failed.',
+      );
       return;
     }
     state.lastActivityAt = Date.now();

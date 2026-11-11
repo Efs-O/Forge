@@ -42,9 +42,9 @@ export function wireSessionTimer(events: SidebarProviderEvents, deps: SessionTim
     mark(conversationId, (conv) => timer.start(conv));
     origStarted?.(modelName, conversationId);
   };
-  events.onGenerationFinished = (modelName, conversationId) => {
+  events.onGenerationFinished = (modelName, conversationId, finalText, outcome) => {
     mark(conversationId, (conv) => timer.finish(conv));
-    origFinished?.(modelName, conversationId);
+    origFinished?.(modelName, conversationId, finalText, outcome);
   };
 
   timer.setCheckpointCallback((conversationId) => {

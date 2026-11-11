@@ -10,6 +10,7 @@ import { BUS_TARGET_SCAN, busTargetConversation } from '../agentBus/busTarget';
 import { parseForgeInboundPrompt } from '../agentBus/busContent';
 import { EXCHANGES_LOG_NAME, readEvents } from '../agentMesh/exchangeLog';
 import { agentDisplayName, type AgentSenderMetadata } from '../agentLinks/chatAgentLinks';
+import { chatNotOpenHereMessage } from '../agentLinks/inboundAgentRouting';
 import { availableProfilesFor } from '../config/ConfigResolver';
 import type { ForgeConfig } from '../config/types';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
@@ -20,8 +21,11 @@ import { getLogger } from '../util/logger';
 const log = getLogger();
 
 /** The chat a bus exchange belongs to, from the exchange ledger. */
-export function exchangeConversationFromLedger(exchangeId: string): string | undefined {
-  const events = readEvents(path.join(busPaths().root, EXCHANGES_LOG_NAME));
+export function exchangeConversationFromLedger(
+  exchangeId: string,
+  root = busPaths().root,
+): string | undefined {
+  const events = readEvents(path.join(root, EXCHANGES_LOG_NAME));
   return events.find((event) => event.exchangeId === exchangeId && event.conversation)
     ?.conversation;
 }
@@ -73,7 +77,7 @@ export function resolveBusMessageTarget(
       status: 404,
       error: owner
         ? `"${conversationId}" is an exchange id, not a chat id: its chat is --to ${owner}`
-        : `Forge chat "${conversationId}" is no longer open`,
+        : chatNotOpenHereMessage(conversationId),
     };
   }
   return { ok: true, conversationId, title: conversation.title };
@@ -81,7 +85,7 @@ export function resolveBusMessageTarget(
 
 type StreamingBusTarget =
   | { ok: true; conversationId: string; title: string }
-  | { ok: false; status: 400 | 409; error: string };
+  | { ok: false; status: 404 | 409; error: string };
 
 /** Resolve a sender's target and require a running turn — what `stop` needs.
  *  A steer does NOT use this: it must answer for an idle chat (its message
@@ -98,7 +102,7 @@ function resolveStreamingBusTarget(
     { ...(targetConversationId ? { conversationId: targetConversationId } : {}) },
     exchangeConversationFromLedger,
   );
-  if (!target.ok) return { ok: false, status: 400, error: target.error };
+  if (!target.ok) return target;
   if (!facade.status().streamingConversationIds.includes(target.conversationId)) {
     return {
       ok: false,

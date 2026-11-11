@@ -223,4 +223,55 @@ describe('CLI turn plan context', () => {
     expect(runCliChat).not.toHaveBeenCalled();
     expect(runWarmCliChat).not.toHaveBeenCalled();
   });
+
+  it('settles as failed when a CLI catch hook throws', async () => {
+    runCliChat.mockImplementationOnce(async (options: { onPrepared: () => void }) => {
+      options.onPrepared();
+      throw new Error('CLI request failed');
+    });
+    const conv = {
+      id: 'cli-hook-failed',
+      title: 'CLI hook failure',
+      createdAt: 0,
+      updatedAt: 0,
+      messages: [],
+    } as ConversationRuntime;
+    const lifecycle = {
+      register: vi.fn(),
+      markStreaming: vi.fn(),
+      clearStreaming: vi.fn(),
+      settle: vi.fn(),
+      terminationKind: vi.fn(),
+    };
+    const finished = vi.fn();
+    const context = {
+      workspaceRoot: '/repo',
+      lifecycle,
+      events: {
+        onBackendError: () => {
+          throw new Error('backend error hook failed');
+        },
+        onGenerationFinished: finished,
+      },
+      cliSessions: {},
+      cliDriver: {},
+      commitUserPrompt: vi.fn(),
+      onTranscriptChanged: vi.fn(),
+      emitAgentProgress: vi.fn(),
+    } as unknown as CliTurnContext;
+
+    await expect(
+      runCliTurn(
+        context,
+        conv,
+        { name: 'codex', provider: 'cli', cli: 'codex' } as never,
+        'continue',
+        undefined,
+        vi.fn(),
+      ),
+    ).rejects.toThrow('backend error hook failed');
+
+    expect(lifecycle.settle).toHaveBeenCalledWith('cli-hook-failed');
+    expect(finished).toHaveBeenCalledWith('codex', 'cli-hook-failed', '', 'failed');
+  });
 });

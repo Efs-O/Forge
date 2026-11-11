@@ -642,6 +642,7 @@ overlaps with an existing owner, extend the owner instead.
 | LSP location and symbol-result formatting | `src/tools/lspFormat.ts` |
 | In-memory workspace memory tool            | `src/tools/memoryTools.ts`            |
 | UX tools (show_diff, open_file)            | `src/tools/uxTools.ts`                |
+| Clipboard tools (copy/read_clipboard)      | `src/tools/clipboardTools.ts`         |
 | Power tools (sleep, wake timer, WoL info)  | `src/tools/powerTools.ts`             |
 | Denylist (dangerous command filter)        | `src/tools/DenyList.ts`               |
 | Shell command-string extraction and control statement normalization | `src/tools/shellCommandStrings.ts` |

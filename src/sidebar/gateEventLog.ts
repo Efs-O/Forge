@@ -190,6 +190,15 @@ function approvalReason(tool: string, detail?: string): string {
   return reasonText(summary ?? fallback);
 }
 
+/** The gated `manage_jobs` actions that name one job, as the ledger reads them. */
+const JOB_ACTION_VERBS: Record<string, string> = {
+  update: 'Update',
+  pause: 'Pause',
+  resume: 'Resume',
+  delete: 'Delete',
+  run_now: 'Run',
+};
+
 function summarizeArgumentPreview(tool: string, value: string): string | undefined {
   let parsed: unknown;
   try {
@@ -206,6 +215,10 @@ function summarizeArgumentPreview(tool: string, value: string): string | undefin
       if (typeof name === 'string') return `Create job "${name}".`;
     }
     return 'Create a persistent job.';
+  }
+  if (tool === 'manage_jobs' && typeof args['job'] === 'string') {
+    const verb = JOB_ACTION_VERBS[String(args['action'])];
+    if (verb) return `${verb} job "${args['job']}".`;
   }
   if (tool === 'message_chat' && (args['action'] === undefined || args['action'] === 'send')) {
     const target = typeof args['to'] === 'string' ? `"${args['to']}"` : 'another Forge chat';

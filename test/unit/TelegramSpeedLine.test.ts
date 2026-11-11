@@ -175,7 +175,12 @@ describe('the speed line on a Telegram reply', () => {
     const before = JSON.stringify(messages);
     const events: {
       onGenerationStarted?: (model: string | null, id?: string) => void;
-      onGenerationFinished?: (model: string | null, id?: string, text?: string) => void;
+      onGenerationFinished?: (
+        model: string | null,
+        id: string | undefined,
+        text: string | undefined,
+        outcome: 'completed' | 'failed' | 'cancelled' | 'interrupted',
+      ) => void;
       onTurnFailed?: (id: string | undefined, message: string) => void;
     } = {};
     const emitted: HostActivityEvent[] = [];
@@ -188,7 +193,7 @@ describe('the speed line on a Telegram reply', () => {
 
     events.onGenerationStarted?.('strata', 'c1');
     ledger.record('c1', strataCapture());
-    events.onGenerationFinished?.('strata', 'c1', 'done, the fix is committed');
+    events.onGenerationFinished?.('strata', 'c1', 'done, the fix is committed', 'completed');
 
     expect(emitted).toHaveLength(1);
     expect(emitted[0]?.text).toBe('done, the fix is committed');

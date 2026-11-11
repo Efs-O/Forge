@@ -4,7 +4,7 @@ import { HiddenChatAlerts } from '../../src/sidebar/hiddenChatAlerts';
 
 afterEach(() => vi.restoreAllMocks());
 
-function fixture() {
+function fixture(onFinished?: NonNullable<ReturnType<typeof makeEvents>['onGenerationFinished']>) {
   let approval:
     | {
         requested: (event: { conversationId?: string }) => void;
@@ -26,9 +26,14 @@ function fixture() {
     | undefined;
   const events: {
     onGenerationStarted?: (model: string | null, id?: string) => void;
-    onGenerationFinished?: (model: string | null, id?: string) => void;
+    onGenerationFinished?: (
+      model: string | null,
+      id: string | undefined,
+      text: string | undefined,
+      outcome: 'completed' | 'failed' | 'cancelled' | 'interrupted',
+    ) => void;
     onTurnFailed?: (id: string | undefined, message: string) => void;
-  } = {};
+  } = onFinished ? { onGenerationFinished: onFinished } : {};
   let active = 'visible';
   let visible = true;
   const switchChat = vi.fn();
@@ -64,6 +69,17 @@ function fixture() {
   };
 }
 
+function makeEvents() {
+  return {
+    onGenerationFinished: (
+      _model: string | null,
+      _id: string | undefined,
+      _text: string | undefined,
+      _outcome: 'completed' | 'failed' | 'cancelled' | 'interrupted',
+    ) => {},
+  };
+}
+
 describe('HiddenChatAlerts', () => {
   it('alerts for hidden approvals and questions, then allows a later request after resolution', () => {
     const state = fixture();
@@ -83,7 +99,7 @@ describe('HiddenChatAlerts', () => {
     const now = vi.spyOn(Date, 'now').mockReturnValue(10_000);
     state.events.onGenerationStarted?.('model', 'background');
     now.mockReturnValue(70_000);
-    state.events.onGenerationFinished?.('model', 'background');
+    state.events.onGenerationFinished?.('model', 'background', undefined, 'completed');
     state.events.onTurnFailed?.('background', 'backend stopped');
     state.approval().requested({ conversationId: 'background' });
     expect(toast).toHaveBeenCalledTimes(3);
@@ -97,7 +113,7 @@ describe('HiddenChatAlerts', () => {
     const now = vi.spyOn(Date, 'now').mockReturnValue(10_000);
     state.events.onGenerationStarted?.('model', 'long');
     now.mockReturnValue(70_000);
-    state.events.onGenerationFinished?.('model', 'long');
+    state.events.onGenerationFinished?.('model', 'long', undefined, 'completed');
     state.events.onTurnFailed?.(undefined, 'backend stopped');
     expect(toast).toHaveBeenCalledTimes(2);
     state.alerts.dispose();
@@ -129,6 +145,14 @@ describe('HiddenChatAlerts', () => {
     state.setVisible(false);
     state.approval().requested({ conversationId: 'background' });
     expect(toast).toHaveBeenCalledTimes(2);
+    state.alerts.dispose();
+  });
+
+  it('forwards the generation outcome unchanged to the wrapped hook', () => {
+    const inner = vi.fn();
+    const state = fixture(inner);
+    state.events.onGenerationFinished?.('model', 'background', 'answer', 'cancelled');
+    expect(inner).toHaveBeenCalledWith('model', 'background', 'answer', 'cancelled');
     state.alerts.dispose();
   });
 
@@ -214,8 +238,8 @@ describe('HiddenChatAlerts', () => {
     const now = vi.spyOn(Date, 'now').mockReturnValue(10_000);
     state.events.onGenerationStarted?.('model', 'short');
     now.mockReturnValue(69_999);
-    state.events.onGenerationFinished?.('model', 'short');
-    state.events.onGenerationFinished?.('model');
+    state.events.onGenerationFinished?.('model', 'short', undefined, 'completed');
+    state.events.onGenerationFinished?.('model', undefined, undefined, 'completed');
     state.events.onGenerationStarted?.('model', 'running');
     expect(toast).not.toHaveBeenCalled();
     state.alerts.dispose();

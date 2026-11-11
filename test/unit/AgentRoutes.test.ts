@@ -13,6 +13,7 @@ import {
   type BusPaths,
 } from '../../src/agentBus/agentBus';
 import { AgentRoutes } from '../../src/backend/agentRoutes';
+import { InboundAgentChatNotOpenError } from '../../src/agentLinks/inboundAgentRouting';
 import { PendingAgentReplies } from '../../src/agentLinks/pendingAgentReplies';
 import { windowEndpointPath } from '../../src/agentBus/windowEndpoints';
 import { TEST_BASH } from '../support/bash';
@@ -368,6 +369,57 @@ describe('auth and limits', () => {
 });
 
 describe('routes', () => {
+  it('answers 404 for say --to a chat not open here and accepts an open chat', async () => {
+    const sender = { kind: 'codex' as const, sessionId: '00000000-0000-4000-8000-000000000001' };
+    const target = {
+      conversationId: 'open-chat',
+      title: 'Open chat',
+      sender: { ...sender, title: 'Codex session' },
+      link: {
+        ...sender,
+        cwd: '/workspace',
+        title: 'Codex session',
+        linkedAt: 1,
+        lastUsedAt: 1,
+        origin: 'first-inbound' as const,
+      },
+    };
+    const resolveInboundAgent = vi.fn(async (_sender, selection) => {
+      if (selection.conversationId === 'elsewhere')
+        throw new InboundAgentChatNotOpenError(selection.conversationId);
+      return target;
+    });
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      workspaceRoot: '/workspace',
+      pendingReplies: new PendingAgentReplies(paths.root),
+      resolveInboundAgent,
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+    const identity = encodeURIComponent(JSON.stringify(sender));
+    const missing = await post(
+      `/agent/message?from=codex&conversation_id=elsewhere&sender=${identity}`,
+      'hello',
+    );
+    expect(missing).toEqual({
+      status: 404,
+      body: {
+        error:
+          'Forge chat "elsewhere" is not open in this window. If it is open in another Forge window, send from a session linked there.',
+      },
+    });
+    const open = await post(
+      `/agent/message?from=codex&conversation_id=open-chat&sender=${identity}`,
+      'hello',
+    );
+    expect(open.status).toBe(202);
+    expect(open.body).toMatchObject({ conversationId: 'open-chat', title: 'Open chat' });
+    expect(resolveInboundAgent).toHaveBeenCalledTimes(2);
+  });
+
   it('records a peer writer only against the accepted destination chat', async () => {
     routes.dispose();
     const recordPeerWriter = vi.fn();
@@ -1048,16 +1100,20 @@ describe('POST /agent/stop', () => {
     expect(stopForge).toHaveBeenCalledOnce();
   });
 
-  it('returns 409 for an idle chat and 400 for a closed chat or exchange id', async () => {
+  it('returns 409 for an idle chat and 404 for a closed chat or exchange id', async () => {
     const stopForge = vi.fn(async (_from: string, conversationId: string | undefined) => {
       if (conversationId === 'closed')
         return {
           ok: false as const,
-          status: 400 as const,
-          error: 'Forge chat "closed" is no longer open',
+          status: 404 as const,
+          error: 'Forge chat "closed" is not open in this window. If it is open in another Forge window, send from a session linked there.',
         };
       if (conversationId === 'exchange-1')
-        return { ok: false as const, status: 400 as const, error: 'exchange id is not a chat id' };
+        return {
+          ok: false as const,
+          status: 404 as const,
+          error: '"exchange-1" is an exchange id, not a chat id: its chat is --to owner',
+        };
       return {
         ok: false as const,
         status: 409 as const,
@@ -1067,8 +1123,8 @@ describe('POST /agent/stop', () => {
     install(stopForge);
 
     expect((await post('/agent/stop?from=codex&conversation_id=idle-chat', '')).status).toBe(409);
-    expect((await post('/agent/stop?from=codex&conversation_id=closed', '')).status).toBe(400);
-    expect((await post('/agent/stop?from=codex&conversation_id=exchange-1', '')).status).toBe(400);
+    expect((await post('/agent/stop?from=codex&conversation_id=closed', '')).status).toBe(404);
+    expect((await post('/agent/stop?from=codex&conversation_id=exchange-1', '')).status).toBe(404);
     expect(stopForge).toHaveBeenCalledTimes(3);
   });
 
@@ -1214,14 +1270,14 @@ describe('POST /agent/reload', () => {
     const prepareReload = vi.fn(async () => ({
       ok: false as const,
       status: 404,
-      error: 'Forge chat "missing" is no longer open',
+      error: 'Forge chat "missing" is not open in this window. If it is open in another Forge window, send from a session linked there.',
     }));
     const reloadWindow = vi.fn(async () => undefined);
     install(prepareReload, reloadWindow);
 
     expect(await reload('missing')).toEqual({
       status: 404,
-      body: 'Forge chat "missing" is no longer open\n',
+      body: 'Forge chat "missing" is not open in this window. If it is open in another Forge window, send from a session linked there.\n',
     });
     expect(reloadWindow).not.toHaveBeenCalled();
   });
@@ -2947,12 +3003,15 @@ describe('GET /agent/peer-view', () => {
       peerView: () => ({
         ok: false,
         status: 404 as const,
-        error: 'Forge chat "peer-9" is no longer open',
+        error: 'Forge chat "peer-9" is not open in this window. If it is open in another Forge window, send from a session linked there.',
       }),
     });
     const res = await get('/agent/peer-view?conversation_id=peer-9');
     expect(res.status).toBe(404);
-    expect((await res.json()).error).toContain('no longer open');
+    expect(await res.json()).toEqual({
+      error:
+        'Forge chat "peer-9" is not open in this window. If it is open in another Forge window, send from a session linked there.',
+    });
   });
 });
 

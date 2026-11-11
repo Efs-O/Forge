@@ -28,7 +28,7 @@ export interface TurnMirrorWiring {
    * no activity event, and a live progress message with no closer stays on
    * "working…" for good.
    */
-  endProgress: (conversationId: string, ok: boolean) => void;
+  endProgress: (conversationId: string, outcome: 'ok' | 'error' | 'stopped') => void;
   /**
    * True when the post-turn auto-compaction will pick this failure up and
    * resume it. Telling the user "nothing further is running" and then resuming
@@ -109,9 +109,15 @@ export function wireTurnMirror(events: SidebarProviderEvents, deps: TurnMirrorWi
   };
 
   const original = events.onGenerationFinished;
-  events.onGenerationFinished = (modelName, conversationId, finalText) => {
-    original?.(modelName, conversationId, finalText);
+  events.onGenerationFinished = (modelName, conversationId, finalText, outcome) => {
+    original?.(modelName, conversationId, finalText, outcome);
     if (conversationId === undefined) return;
+    const progressOutcome =
+      outcome === 'cancelled' || outcome === 'interrupted'
+        ? 'stopped'
+        : outcome === 'failed'
+          ? 'error'
+          : 'ok';
     // The provider already has the exact final answer at this point. Reading
     // the transcript here was racy around cold backend startup/restart: a
     // session sync or a continuation could make the callback see a different
@@ -121,7 +127,7 @@ export function wireTurnMirror(events: SidebarProviderEvents, deps: TurnMirrorWi
       // A turn with no answer has no reply to carry a speed line, so the sums
       // are dropped rather than kept for something that will never be sent.
       deps.turnSpeeds.abandonTurn(conversationId);
-      deps.endProgress(conversationId, true);
+      deps.endProgress(conversationId, progressOutcome);
       return;
     }
     const line = deps.turnSpeeds.finishTurn(conversationId);
@@ -134,7 +140,7 @@ export function wireTurnMirror(events: SidebarProviderEvents, deps: TurnMirrorWi
       kind: 'turn',
       ...(line ? { speedLine: line } : {}),
     });
-    deps.endProgress(conversationId, true);
+    deps.endProgress(conversationId, progressOutcome);
   };
 
   // A failed turn fires onGenerationFinished too, but with no final text — so
@@ -146,7 +152,7 @@ export function wireTurnMirror(events: SidebarProviderEvents, deps: TurnMirrorWi
   events.onTurnFailed = (conversationId, message) => {
     originalFailed?.(conversationId, message);
     if (conversationId === undefined) return;
-    deps.endProgress(conversationId, false);
+    deps.endProgress(conversationId, 'error');
     // No answer, no line: a turn that died leaves no sums behind for the next
     // answer of the same chat to wear as its own speed.
     deps.turnSpeeds.abandonTurn(conversationId);

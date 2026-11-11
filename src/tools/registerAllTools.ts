@@ -21,10 +21,9 @@ import {
   makeOpenFileTool,
   makeNotifyUserTool,
   makeShowNotificationTool,
-  makeCopyToClipboardTool,
-  makeReadClipboardTool,
   makeOpenUrlTool,
 } from './uxTools';
+import { makeCopyToClipboardTool, makeReadClipboardTool } from './clipboardTools';
 import { makeAskUserTool } from './askUserTool';
 import { makeLoadSkillTool, type LoadSkillProvider } from './loadSkillTool';
 import { PowerControl } from '../system/PowerControl';

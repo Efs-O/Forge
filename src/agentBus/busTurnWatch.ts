@@ -18,7 +18,7 @@ export interface TurnSnapshot {
   lastNarration?: string;
   phase?: string;
   warnings: string[];
-  endedOk?: boolean;
+  endedOutcome?: 'ok' | 'error' | 'stopped';
   endedAt?: number;
 }
 
@@ -41,7 +41,7 @@ export function reduceTurn(
       lastEventAt: now,
       toolCalls: 0,
       warnings: [],
-      endedOk: event.ok,
+      endedOutcome: event.outcome,
       endedAt: now,
     };
   }
@@ -72,7 +72,7 @@ export function reduceTurn(
       break;
     case 'end':
       current.state = 'ended';
-      current.endedOk = event.ok;
+      current.endedOutcome = event.outcome;
       current.endedAt = now;
       break;
     case 'commentary':

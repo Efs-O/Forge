@@ -1,3 +1,5 @@
+import type { ForgeTurnOutcome } from './turnOutcome';
+
 /**
  * Host-side notifications the sidebar raises as a turn progresses.
  *
@@ -9,8 +11,9 @@ export interface SidebarProviderEvents {
   onGenerationStarted?: (modelName: string | null, conversationId?: string) => void;
   onGenerationFinished?: (
     modelName: string | null,
-    conversationId?: string,
-    finalText?: string,
+    conversationId: string | undefined,
+    finalText: string | undefined,
+    outcome: ForgeTurnOutcome['kind'],
   ) => void;
   onBackendError?: (message: string) => void;
   /**

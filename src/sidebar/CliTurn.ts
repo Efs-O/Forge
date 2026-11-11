@@ -85,7 +85,7 @@ export async function runCliTurn(
   let generationStarted = false;
   let finalText = '';
   let assistantCreatedAt: number | undefined;
-  let outcome: ForgeTurnOutcome;
+  let outcome: ForgeTurnOutcome | undefined;
 
   try {
     const sessionId = conv.cli_sessions?.[model.name];
@@ -197,6 +197,15 @@ export async function runCliTurn(
       };
     }
   } catch (err) {
+    outcome = ctrl.signal.aborted
+      ? ctx.lifecycle.terminationKind(convId) === 'interrupted'
+        ? { kind: 'interrupted', finalText: '' }
+        : { kind: 'cancelled', finalText: '' }
+      : {
+          kind: 'failed',
+          error: err instanceof Error ? err.message : String(err),
+          finalText: '',
+        };
     const message = err instanceof Error ? err.message : String(err);
     log.error(`[AgentLoop] cli chat failed model=${model.name}: ${message}`);
     if (!ctrl.signal.aborted) {
@@ -204,18 +213,18 @@ export async function runCliTurn(
       postC({ type: 'error', message });
     }
     postC({ type: 'done', finishReason: ctrl.signal.aborted ? 'cancelled' : 'error' });
-    outcome = ctrl.signal.aborted
-      ? ctx.lifecycle.terminationKind(convId) === 'interrupted'
-        ? { kind: 'interrupted', finalText: '' }
-        : { kind: 'cancelled', finalText: '' }
-      : { kind: 'failed', error: message, finalText: '' };
   } finally {
     ctx.lifecycle.clearStreaming(convId);
     conv.updatedAt = Date.now();
-    if (generationStarted) {
-      ctx.events.onGenerationFinished?.(model.name, convId, finalText);
+    try {
+      if (generationStarted) {
+        // The turn's own error path threw before deciding, which is a failure.
+        ctx.events.onGenerationFinished?.(model.name, convId, finalText, outcome?.kind ?? 'failed');
+      }
+    } finally {
+      ctx.lifecycle.settle(convId);
     }
-    ctx.lifecycle.settle(convId);
   }
+  if (!outcome) throw new Error('Turn ended before an outcome was recorded.');
   return outcome;
 }

@@ -34,7 +34,7 @@ export function renderBusStatus(input: BusStatusInput): string {
         : streaming
           ? 'busy · this turn started before the watcher attached; no live detail'
           : turn?.state === 'ended'
-            ? `idle · last turn ended ${turn.endedOk ? 'ok' : 'with an error'} ${dur(now - (turn.endedAt ?? now))} ago after ${dur((turn.endedAt ?? now) - turn.startedAt)}, ${turn.toolCalls} tool call(s)`
+            ? `idle · ${turn.endedOutcome === 'stopped' ? 'last turn was stopped' : `last turn ended ${turn.endedOutcome === 'ok' ? 'ok' : 'with an error'}`} ${dur(now - (turn.endedAt ?? now))} ago after ${dur((turn.endedAt ?? now) - turn.startedAt)}, ${turn.toolCalls} tool call(s)`
             : 'idle';
   const lines = [
     `Chat: ${conversation.title} · ${conversation.id}`,

@@ -73,7 +73,7 @@ describe('HostProgressOpener', () => {
     const { channel, opener } = rig();
     opener.handle(token('working on it'));
     await settle();
-    opener.handle({ conversationId: 'c1', kind: 'end', ok: true });
+    opener.handle({ conversationId: 'c1', kind: 'end', outcome: 'ok' });
     await settle();
     expect(channel.edits.at(-1)?.text).toBe('Forge: completed.');
   });
@@ -86,7 +86,7 @@ describe('HostProgressOpener', () => {
     expect(channel.progress.map((message) => message.text)).toEqual(['Forge: working…']);
     expect(channel.stopButtons.has('1')).toBe(true);
 
-    opener.handle({ conversationId: 'c1', kind: 'end', ok: true });
+    opener.handle({ conversationId: 'c1', kind: 'end', outcome: 'ok' });
     await settle();
 
     expect(channel.stopButtons.has('1')).toBe(false);
@@ -97,7 +97,7 @@ describe('HostProgressOpener', () => {
     const { channel, opener } = rig();
     opener.handle(token('working on it'));
     await settle();
-    opener.handle({ conversationId: 'c1', kind: 'end', ok: false });
+    opener.handle({ conversationId: 'c1', kind: 'end', outcome: 'error' });
     await settle();
     expect(channel.edits.at(-1)?.text).toBe('Forge: failed.');
   });
@@ -126,7 +126,7 @@ describe('HostProgressOpener', () => {
     });
     opener.handle(token('unheard'));
     await settle();
-    opener.handle({ conversationId: 'c1', kind: 'end', ok: true });
+    opener.handle({ conversationId: 'c1', kind: 'end', outcome: 'ok' });
     await settle();
     expect(channel.progress).toHaveLength(0);
 
@@ -162,7 +162,7 @@ describe('HostProgressOpener', () => {
     expect(channel.edits.at(-1)?.messageId).toBe('msg-7');
     // And the turn's `end` must not close it -- only the request's outcome does,
     // because a cancelled request also ends its turn without failing.
-    opener.handle({ conversationId: 'c1', kind: 'end', ok: true });
+    opener.handle({ conversationId: 'c1', kind: 'end', outcome: 'ok' });
     await settle();
     expect(progress.owns('c1')).toBe(true);
   });
@@ -178,7 +178,7 @@ describe('HostProgressOpener', () => {
     await settle();
     expect(channel.progress).toEqual([]);
 
-    opener.handle({ conversationId: 'c1', kind: 'end', ok: true });
+    opener.handle({ conversationId: 'c1', kind: 'end', outcome: 'ok' });
     await settle();
     expect(queued).toEqual([{ chatId: 'chat-1', text: 'You (VS Code): hello' }]);
   });
@@ -243,7 +243,7 @@ describe('HostProgressOpener', () => {
     expect(channel.edits.at(-1)?.text).toContain('stopped following this turn');
     const editsAfterStop = channel.edits.length;
     opener.handle(status('Still running…'));
-    opener.handle({ conversationId: 'c1', kind: 'end', ok: true });
+    opener.handle({ conversationId: 'c1', kind: 'end', outcome: 'ok' });
     await settle();
     expect(channel.edits).toHaveLength(editsAfterStop);
     expect(channel.progress).toHaveLength(1);

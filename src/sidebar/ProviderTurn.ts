@@ -101,6 +101,7 @@ function finishTurn(
   postC: (msg: HostToWebview) => void,
   releaseBackend: boolean,
   finalText: string,
+  outcome: ForgeTurnOutcome['kind'],
 ): void {
   const convId = conv.id;
   ctx.lifecycle.clearStreaming(convId);
@@ -129,7 +130,7 @@ function finishTurn(
     }
   }
   try {
-    ctx.events.onGenerationFinished?.(model.name, convId, finalText);
+    ctx.events.onGenerationFinished?.(model.name, convId, finalText, outcome);
   } catch (err) {
     // The status-bar hook is also what clears `activeTurnModels`, so it runs
     // even after a failed commit; a throw here must not skip settle either.
@@ -179,7 +180,7 @@ export async function runCloudProviderTurn(
   ctx.lifecycle.markStreaming(convId);
   ctx.events.onGenerationStarted?.(model.name, convId);
   let finalText = '';
-  let outcome: ForgeTurnOutcome;
+  let outcome: ForgeTurnOutcome | undefined;
   try {
     const result = await ctx.runModelTurn(
       async () => baseUrl,
@@ -250,9 +251,15 @@ export async function runCloudProviderTurn(
         };
     finalText = result.finalText;
   } catch (err) {
+    outcome = ctrl.signal.aborted
+      ? abortedTurnOutcome(ctx.lifecycle.terminationKind(convId))
+      : {
+          kind: 'failed',
+          error: err instanceof Error ? err.message : String(err),
+          finalText: '',
+        };
     if (ctrl.signal.aborted) {
       postC({ type: 'done', finishReason: 'cancelled' });
-      outcome = abortedTurnOutcome(ctx.lifecycle.terminationKind(convId));
     } else {
       // describeError, not `.message`: undici reports a refused connection, a
       // reset socket and a headers timeout all as "fetch failed" and keeps the
@@ -269,14 +276,15 @@ export async function runCloudProviderTurn(
     }
   } finally {
     try {
-      finishTurn(ctx, conv, model, checkpoint, postC, false, finalText);
+      // The turn's own error path threw before deciding, which is a failure.
+      finishTurn(ctx, conv, model, checkpoint, postC, false, finalText, outcome?.kind ?? 'failed');
     } finally {
       externalHold?.release();
     }
   }
+  if (!outcome) throw new Error('Turn ended before an outcome was recorded.');
   return outcome;
 }
-
 function isManagedServerInterruption(message: string): boolean {
   return /I\/O operation on closed file|ECONNRESET|socket hang up|fetch failed|connection reset|stream.*closed/i.test(
     message,
@@ -386,7 +394,7 @@ export async function runLocalProviderTurn(
     ctx.lifecycle.markStreaming(convId);
     ctx.events.onGenerationStarted?.(model.name, convId);
     let finalText = '';
-    let outcome: ForgeTurnOutcome;
+    let outcome: ForgeTurnOutcome | undefined;
     try {
       const result = await ctx.runModelTurn(
         // The POOL, not `backend`. A model unloaded mid-turn comes back through
@@ -454,10 +462,16 @@ export async function runLocalProviderTurn(
           };
       finalText = result.finalText;
     } catch (err) {
+      outcome = ctrl.signal.aborted
+        ? abortedTurnOutcome(ctx.lifecycle.terminationKind(convId))
+        : {
+            kind: 'failed',
+            error: err instanceof Error ? err.message : String(err),
+            finalText: '',
+          };
       const message = err instanceof Error ? err.message : String(err);
       if (ctrl.signal.aborted) {
         postC({ type: 'done', finishReason: 'cancelled' });
-        outcome = abortedTurnOutcome(ctx.lifecycle.terminationKind(convId));
       } else {
         // `provider` is optional and unset for local llama entries, which is how
         // this line read "[AgentLoop] undefined chat failed" in the 09-05 logs.
@@ -471,17 +485,16 @@ export async function runLocalProviderTurn(
       }
     } finally {
       try {
-        finishTurn(ctx, conv, model, checkpoint, postC, true, finalText);
+        // The turn's own error path threw before deciding, which is a failure.
+        finishTurn(ctx, conv, model, checkpoint, postC, true, finalText, outcome?.kind ?? 'failed');
       } finally {
         await turnLease?.release();
       }
     }
+    if (!outcome) throw new Error('Turn ended before an outcome was recorded.');
     return outcome;
   } finally {
-    // Safety net for exit paths added later. `release()` is idempotent, so the
-    // explicit calls above stay — they matter because they free the slot BEFORE
-    // `settle`, and the net would otherwise be the only release on the aborted
-    // early return, i.e. after the window was already told the turn ended.
+    // Idempotent net for later exits; the explicit releases above free the slot before settle.
     await turnLease?.release();
   }
 }

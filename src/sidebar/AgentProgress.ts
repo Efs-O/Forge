@@ -50,10 +50,10 @@ export type AgentProgressEvent =
    * request to close it, so without this it would stay on "working…" and the
    * next turn would inherit the stale message.
    *
-   * `ok` distinguishes the two endings a reader cares about. It says nothing
-   * about the answer -- that arrives on its own through the mirror.
+   * Outcome is decided by the turn lifecycle and says nothing about the
+   * answer -- that arrives on its own through the mirror.
    */
-  | { conversationId: string; kind: 'end'; ok: boolean };
+  | { conversationId: string; kind: 'end'; outcome: 'ok' | 'error' | 'stopped' };
 
 export type AgentProgressListener = (event: AgentProgressEvent) => void;
 

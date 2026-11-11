@@ -47,6 +47,18 @@ export interface InboundAgentTarget {
   alsoLinkedFrom?: { conversationId: string; title: string };
 }
 
+/** The one wording for a requested chat id this window does not hold (say, status, view, stop). */
+export function chatNotOpenHereMessage(conversationId: string): string {
+  return `Forge chat "${conversationId}" is not open in this window. If it is open in another Forge window, send from a session linked there.`;
+}
+
+/** A requested chat id that this VS Code window does not currently hold. */
+export class InboundAgentChatNotOpenError extends Error {
+  constructor(readonly conversationId: string) {
+    super(chatNotOpenHereMessage(conversationId));
+  }
+}
+
 export interface InboundAgentRoutingDeps {
   sidebar: SidebarRuntime;
   sender: AgentSender;
@@ -139,7 +151,7 @@ export function resolveInboundAgentTarget(deps: InboundAgentRoutingDeps): Inboun
   const requestedId = selection.conversationId ?? selection.runningConversationId;
   if (requestedId) {
     const selected = byId(sidebar, requestedId);
-    if (!selected) throw new Error(`Forge chat "${requestedId}" is no longer open.`);
+    if (!selected) throw new InboundAgentChatNotOpenError(requestedId);
     const existing = get(selected, sender.kind);
     // The one thing still refused: this chat is somebody else's link of this
     // kind. Being linked to a different chat of the same session is not a

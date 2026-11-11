@@ -408,6 +408,7 @@ describe('the routes a production window registers', () => {
         ts: 2,
         exchangeId: 'x1',
         workspace,
+        conversation: 'c1',
         from: 'codex',
         senderSessionId: CODEX_SESSION,
         to: 'forge',
@@ -633,7 +634,7 @@ describe('the routes a production window registers', () => {
     token = routes.token; // a fresh window publishes a fresh token
     const response = await call('steer', ROUTE_FOR_VERB['steer']!);
     expect(response.status).toBe(409);
-    expect(String(response.body['error'])).toContain('no longer open');
+    expect(String(response.body['error'])).toContain('not open in this window');
     expect(String(response.body['error'])).toContain('Nothing was queued');
     expect(accepts).toBe(1);
     expect(interrupted.size).toBe(0);
@@ -677,7 +678,10 @@ describe('the routes a production window registers', () => {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(gone.status).toBe(404);
-    expect(String((await gone.json()).error)).toContain('no longer open');
+    expect(await gone.json()).toEqual({
+      error:
+        'Forge chat "chat-9" is not open in this window. If it is open in another Forge window, send from a session linked there.',
+    });
     // Read-only by construction: no turn was stopped, cancelled or started, and
     // nothing was restored into a tab — a neighbour reading over the socket
     // cannot move the owner's window or wake an engine behind their back.
@@ -918,7 +922,18 @@ describe('the routes a production window registers', () => {
     // the field, before any chat is read at all.
     const gone = await read('status', CLAUDE_SESSION, 'claude-c');
     expect(gone.status).toBe(404);
-    expect(await errorOf(gone)).toContain('claude-c');
+    expect(await gone.json()).toEqual({
+      error:
+        'Forge chat "claude-c" is not open in this window. If it is open in another Forge window, send from a session linked there.',
+    });
+    const exchangeId = await fetch(
+      `${base}/agent/status?from=codex&kind=codex&sessionId=${CODEX_SESSION}&conversation_id=x1`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    expect(exchangeId.status).toBe(404);
+    expect(await exchangeId.json()).toEqual({
+      error: '"x1" is an exchange id, not a chat id: its chat is --to c1',
+    });
     const badId = await read('status', CLAUDE_SESSION, 'bad/chat');
     expect(badId.status).toBe(400);
     expect(await errorOf(badId)).toContain('conversation_id');

@@ -1,6 +1,8 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { EventEmitter } from 'events';
+import type { ChildProcess, spawn } from 'child_process';
 import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeFindFilesTool } from '../../src/tools/dirTools';
@@ -13,10 +15,9 @@ import {
 } from '../../src/tools/memoryTools';
 import { makeSearchCodebaseTool } from '../../src/tools/semanticSearchTool';
 import type { UserQuestionService } from '../../src/sidebar/UserQuestionService';
+import { makeCopyToClipboardTool, makeReadClipboardTool } from '../../src/tools/clipboardTools';
 import {
-  makeCopyToClipboardTool,
   makeOpenUrlTool,
-  makeReadClipboardTool,
   makeOpenFileTool,
   makeShowDiffTool,
   makeShowNotificationTool,
@@ -156,7 +157,14 @@ describe('isolated editor, language, search, and memory tool execution', () => {
     const command = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
     vi.spyOn(vscode.window, 'showInputBox').mockResolvedValue('fixture answer');
     const notification = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined);
-    const open = vi.spyOn(vscode.env, 'openExternal').mockResolvedValue(true);
+    // open_url opens through the OS opener (c6807d0b), never openExternal; the
+    // double keeps this test from launching a real browser.
+    const browser = new EventEmitter() as ChildProcess;
+    browser.unref = vi.fn();
+    const spawnProcess = vi.fn((() => {
+      queueMicrotask(() => browser.emit('spawn'));
+      return browser;
+    }) as typeof spawn);
 
     await expect(
       makeShowDiffTool().handler({ original_path: 'sample.ts', modified_path: 'sample.ts' }),
@@ -181,9 +189,11 @@ describe('isolated editor, language, search, and memory tool execution', () => {
     expect(notification).toHaveBeenCalledWith('notice');
     await makeCopyToClipboardTool().handler({ text: 'clipboard fixture' });
     await expect(makeReadClipboardTool().handler({})).resolves.toBe('clipboard fixture');
-    await makeOpenUrlTool().handler({ url: 'https://example.com/' });
-    expect(open).toHaveBeenCalledOnce();
-    await expect(makeOpenUrlTool().handler({ url: 'file:///secret' })).rejects.toThrow(
+    await expect(
+      makeOpenUrlTool({ spawnProcess }).handler({ url: 'https://example.com/' }),
+    ).resolves.toBe('Opened https://example.com/ in the default browser.');
+    expect(spawnProcess).toHaveBeenCalledOnce();
+    await expect(makeOpenUrlTool({ spawnProcess }).handler({ url: 'file:///secret' })).rejects.toThrow(
       'must start with',
     );
   });

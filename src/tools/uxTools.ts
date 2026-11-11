@@ -51,7 +51,10 @@ export function makeShowDiffTool(): RegisteredTool {
       type: 'function',
       function: {
         name: 'show_diff',
-        description: 'Open a VS Code diff editor comparing two files.',
+        description:
+          'Open a VS Code diff editor comparing two files, for the user to see. The result ' +
+          'carries no diff text; to read the changes yourself, use git_read diff (tracked ' +
+          'files) or read_file on both files.',
         parameters: {
           type: 'object',
           properties: {
@@ -312,57 +315,6 @@ export function makeShowNotificationTool(): RegisteredTool {
         vscode.window.showInformationMessage(message);
       }
       return 'Shown.';
-    },
-  };
-}
-
-// ── copy_to_clipboard ─────────────────────────────────────────────────────────
-
-export function makeCopyToClipboardTool(): RegisteredTool {
-  return {
-    definition: {
-      type: 'function',
-      function: {
-        name: 'copy_to_clipboard',
-        description: 'Copy text to the system clipboard.',
-        parameters: {
-          type: 'object',
-          properties: {
-            text: { type: 'string', description: 'Text to copy.' },
-          },
-          required: ['text'],
-          additionalProperties: false,
-        },
-      },
-    },
-    permission: 'read',
-    handler: async (args) => {
-      await vscode.env.clipboard.writeText(args['text'] as string);
-      return 'Copied.';
-    },
-  };
-}
-
-// ── read_clipboard ────────────────────────────────────────────────────────────
-
-export function makeReadClipboardTool(): RegisteredTool {
-  return {
-    definition: {
-      type: 'function',
-      function: {
-        name: 'read_clipboard',
-        description: 'Read the current contents of the system clipboard.',
-        parameters: {
-          type: 'object',
-          properties: {},
-          required: [],
-          additionalProperties: false,
-        },
-      },
-    },
-    permission: 'read',
-    handler: async (_args) => {
-      return vscode.env.clipboard.readText();
     },
   };
 }
