@@ -1,5 +1,10 @@
 # Forge — Recent Changes
 
+## 0.17.160
+
+- Creating a job always asks for approval: before, a `manage_jobs` create without a `job` argument named no file and skipped the check.
+- Deleting a job can be allowed for a chat, or in `policy.yaml`, with the new `job-delete:<id>` key; the card names the job and its id.
+
 ## 0.17.159
 
 - `open_url_in_browser` asks under its host's `net:` key, so "Allow for this chat" is remembered per host; after a secret read it still asks every time.
