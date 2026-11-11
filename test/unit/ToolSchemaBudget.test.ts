@@ -134,7 +134,8 @@ import {
 // 2026-11-11: 66,897 (-1,087) after removing install_llamacpp (the llamacpp_update job covers it).
 // 2026-11-11: 67,049 (+152) after manage_jobs names the fields create requires (Group F).
 // 2026-11-11: 67,102 (+53) after manage_jobs says the job definition goes in definition.
-const MEASURED_CHARS = 67_102;
+// 2026-11-11: 67,283 (+181) after shell says Git Bash turns a lone /switch into a path (lab pass 2 group D).
+const MEASURED_CHARS = 67_283;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.
