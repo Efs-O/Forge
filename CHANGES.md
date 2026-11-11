@@ -1,5 +1,12 @@
 # Forge — Recent Changes
 
+## 0.17.164
+
+- The `shell` tool names its parameter: run PowerShell, or Windows programs that take /switches, by setting `"shell": "pwsh"` on the call, not by writing it into `command`.
+- A Telegram message to a linked Claude or Codex session now says it is the owner's message and that the answer goes back to their Telegram chat; it used to read as a question from Forge's model.
+- When Clanker runs a call that has no approval key, the gate log row no longer puts the reason in its `approval_key` column.
+- The starter FORGE.md that `/init` writes says never to swallow an error or hide invalid config behind a silent fallback.
+
 ## 0.17.163
 
 - `desktop_focus_window` focuses the window when another app, such as a browser just opened, holds the foreground; Windows refused it before.
