@@ -1,5 +1,12 @@
 # Forge — Recent Changes
 
+## 0.17.162
+
+- `show_diff` says its result carries no diff text, and to read the changes with `git_read diff` or `read_file`.
+- An approval card for a job update, pause, resume, delete or run names the job, not just "Manage persistent jobs."
+- The agent bus answers 404, not 500, for `say --to` a chat that is not open in this window, and says it may be open in another Forge window.
+- `forge.sh status` after a stopped turn says the turn was stopped, not that it ended ok.
+
 ## 0.17.161
 
 - `search_code` no longer says a file it was told to search does not exist when that file simply has no match.
