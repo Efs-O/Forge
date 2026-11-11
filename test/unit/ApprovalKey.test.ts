@@ -92,6 +92,24 @@ function req(key: string, targets?: string[]): ApprovalRequirement {
 }
 
 describe('approvalKeysFor, the plan §2 table', () => {
+  it('keys a dangerous job delete by the exact job id', () => {
+    const result = approvalKeysFor(
+      input({
+        toolName: 'manage_jobs',
+        dangerous: true,
+        toolGate: true,
+        approvalKey: 'job-delete:lab-f-1',
+      }),
+      CTX,
+    );
+    expect(result.kind).toBe('keyed');
+    if (result.kind !== 'keyed') throw new Error(result.why);
+    expect(result.requirements[0]!.key).toBe('job-delete:lab-f-1');
+    expect(ruleCovers('job-delete:lab-f-1', result.requirements[0]!, CTX)).toBe(true);
+    expect(ruleCovers('job-delete:lab-f-2', result.requirements[0]!, CTX)).toBe(false);
+    expect(ruleCovers('job-delete:lab', result.requirements[0]!, CTX)).toBe(false);
+  });
+
   it.each([
     ['https://example.com/', 'net:example.com'],
     ['https://Example.COM:8443/a?b=1', 'net:example.com'],
@@ -582,6 +600,7 @@ describe('validateRuleKey', () => {
     ['write:N:/Strata', undefined],
     ['secret:C:/Users/someone/.ssh/id_ed25519', undefined],
     ['rdelete:D:/Downloads', undefined],
+    ['job-delete:lab-f-1', undefined],
     ['rdelete:N:/ws/project/docs', undefined],
     ['write:N:/ws/project', undefined],
   ])('accepts %s', (key, expected) => {
@@ -597,6 +616,8 @@ describe('validateRuleKey', () => {
     ['net:prog: with no program', 'net:prog:'],
     ['delegate: with no agent', 'delegate:'],
     ['tool: with no tool', 'tool:'],
+    ['job-delete: with no job', 'job-delete:'],
+    ['job-delete: with invalid id characters', 'job-delete:a b'],
     ['tool: naming something that is not a tool name', 'tool:git commit'],
     ['write: with a relative path', 'write:docs/notes'],
     ['secret: with a relative path', 'secret:.env'],
@@ -620,6 +641,14 @@ describe('validateRuleKey', () => {
     const reason = validateRuleKey(key, { ...CTX, ownerOnly: [`${HOME}/.forge`, 'N:/owner'] });
     expect(reason ?? '').not.toBe('');
     expect(reason).toMatch(/refused|needs|inside|is not|names|must|root|unknown/iu);
+  });
+
+  it('uses the job-delete refusal wording', () => {
+    expect(validateRuleKey('job-delete:', CTX)).toBe('a job-delete: rule names no job');
+    expect(validateRuleKey('job-delete:a b', CTX)).toBe(
+      'a job-delete: rule must name a job id, not a b',
+    );
+    expect(validateRuleKey('job-delete:lab-f-1', CTX)).toBeUndefined();
   });
 
   it('refuses a disk root on a POSIX platform too', () => {

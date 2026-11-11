@@ -20,6 +20,7 @@ describe('describeApprovalKey', () => {
     ['net:prog:git-push', 'network commands run with git-push'],
     ['cross_chat', 'messages to other chats'],
     ['delegate:codex', 'asking codex'],
+    ['job-delete:lab-f-1', 'deleting the job lab-f-1'],
     ['write:N:/Strata', 'writes inside N:/Strata'],
     [
       'secret:C:/Users/x/.forge/agent-bus/endpoint.json',
@@ -39,7 +40,7 @@ describe('describeApprovalKey', () => {
   });
 
   it('prints a key that names nothing itself, so no line has a blank in it', () => {
-    for (const key of ['net:', 'net:prog:', 'write:', 'rdelete:', 'tool:', 'delegate:']) {
+    for (const key of ['net:', 'net:prog:', 'write:', 'rdelete:', 'tool:', 'delegate:', 'job-delete:']) {
       expect(describeApprovalKey(key)).toBe(key);
     }
   });

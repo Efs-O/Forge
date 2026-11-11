@@ -17,6 +17,7 @@
  */
 import {
   DELEGATE_KEY,
+  JOB_DELETE_KEY,
   NET_KEY,
   NET_PROG_KEY,
   RDELETE_KEY,
@@ -40,6 +41,7 @@ const WORDS_BY_PREFIX: ReadonlyArray<{ prefix: string; words: (value: string) =>
   { prefix: SECRET_NET_KEY, words: (host) => `any request to ${host} after a secret read` },
   { prefix: NET_KEY, words: (host) => `any request to ${host}` },
   { prefix: DELEGATE_KEY, words: (agent) => `asking ${agent}` },
+  { prefix: JOB_DELETE_KEY, words: (id) => `deleting the job ${id}` },
   { prefix: WRITE_KEY, words: (root) => `writes inside ${root}` },
   { prefix: SECRET_KEY, words: (file) => `reading ${file}` },
   { prefix: TOOL_KEY, words: (name) => `the ${name} tool` },

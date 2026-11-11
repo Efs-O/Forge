@@ -876,6 +876,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | ---------------------------------------------------------- | -------------------------------------------------------------- |
 | Stale owner job approval policy warning | `src/jobs/approvalJobRuleWarnings.ts` |
 | Job definition + state + run-log store (disk layout)       | `src/jobs/JobStore.ts`                                         |
+| Stable job-name slug and unique job-id generation          | `src/jobs/jobId.ts`                                            |
 | Job schema (Zod) + state / run-row types                   | `src/jobs/jobSchema.ts`                                        |
 | Schedule math (`nextDue`, `isDue`, `wakeTimesFor`)         | `src/jobs/schedule.ts`                                         |
 | Tick loop, lease, concurrency                               | `src/jobs/JobScheduler.ts`                                     |

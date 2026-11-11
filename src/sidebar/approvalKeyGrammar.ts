@@ -49,6 +49,7 @@ export const APPROVAL_KEY_PREFIXES = [
   'secret:',
   'tool:',
   'rdelete:',
+  'job-delete:',
 ] as const;
 
 export const NET_KEY = 'net:';
@@ -59,6 +60,7 @@ export const WRITE_KEY = 'write:';
 export const SECRET_KEY = 'secret:';
 export const TOOL_KEY = 'tool:';
 export const RDELETE_KEY = 'rdelete:';
+export const JOB_DELETE_KEY = 'job-delete:';
 
 /** `.forge` is Forge's own folder name; `~/.forge/` is the owner's folder, and a
  *  rule that reaches into it would let a chat approve a change to the guards the
@@ -309,6 +311,11 @@ export function validateRuleKey(key: string, ctx: ApprovalKeyContext): string | 
     case TOOL_KEY:
       if (rest.length === 0) return 'a tool: rule names no tool';
       return /^[a-z0-9_]+$/u.test(rest) ? undefined : `a tool: rule must name a tool, not ${rest}`;
+    case JOB_DELETE_KEY:
+      if (rest.length === 0) return 'a job-delete: rule names no job';
+      return /^[A-Za-z0-9._-]+$/u.test(rest)
+        ? undefined
+        : `a job-delete: rule must name a job id, not ${rest}`;
     case WRITE_KEY:
     case SECRET_KEY:
     case RDELETE_KEY: {

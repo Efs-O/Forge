@@ -3,10 +3,13 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JobStore } from '../../src/jobs/JobStore';
+import { jobSlug, uniqueJobId } from '../../src/jobs/jobId';
 import { JobSchema, type Job } from '../../src/jobs/jobSchema';
+import { CLI_AGENT_CONSENT_DETAIL } from '../../src/jobs/cliAgentGate';
 import { makeManageJobsTool, type ManageJobsDeps } from '../../src/tools/jobTools';
 import { ToolRegistry, type RegisteredTool } from '../../src/tools/ToolRegistry';
 import type { ForgeConfig } from '../../src/config/types';
+import { pathIsInWorkspace } from '../../src/util/WorkspacePaths';
 
 const workspaceMock = vi.hoisted(() => ({
   folders: undefined as Array<{ uri: { fsPath: string } }> | undefined,
@@ -119,14 +122,35 @@ describe('manage_jobs — definition and permissions', () => {
     expect(extra('delete')).toEqual(['delete']);
   });
 
-  it('requires approval (dangerous) only for delete', () => {
-    const deletion = tool.approval?.({ action: 'delete', job: 'disk' });
+  it('requires approval (dangerous) only for delete', async () => {
+    await store.saveJob(job());
+    const deletion = await tool.approval?.({ action: 'delete', job: 'disk' });
     expect(deletion?.dangerous).toBe(true);
     expect(deletion?.clankerStop).toBeUndefined();
     expect(deletion?.detail).toBe(
-      'Delete job "disk". Its definition, state, and run log are removed.',
+      'Delete job "Disk" (disk). Its definition, state, and run log are removed.',
     );
-    expect(tool.approval?.({ action: 'pause', job: 'disk' })).toBeUndefined();
+    expect(deletion?.approvalKey).toBe('job-delete:disk');
+    await expect(tool.approval?.({ action: 'pause', job: 'disk' })).resolves.toBeUndefined();
+  });
+
+  it('keeps CLI-agent consent dangerous and unkeyed', async () => {
+    const cliTool = makeManageJobsTool(
+      deps({
+        getConfig: () =>
+          ({
+            ...makeConfig({ enabled: true, allowed_hosts: [], max_concurrent: 1 }),
+            models: [{ name: 'claude', gguf_path: '', provider: 'cli' }],
+          }) as ForgeConfig,
+      }),
+    );
+    const consent = await cliTool.approval?.({
+      action: 'create',
+      definition: { name: 'Daily', action: { kind: 'agent_task', task: 'check', model: 'claude' } },
+    });
+    expect(consent?.dangerous).toBe(true);
+    expect(consent?.detail).toBe(CLI_AGENT_CONSENT_DETAIL);
+    expect(consent?.approvalKey).toBeUndefined();
   });
 
   it('advertises the supported schedule kinds and who approves delete', () => {
@@ -147,6 +171,30 @@ describe('manage_jobs — definition and permissions', () => {
       path.join(root, 'state', 'disk.json'),
     ]);
     expect(tool.mutation!.paths({ action: 'list' })).toEqual([]);
+  });
+
+  it('reports create paths from the definition name, whether job is omitted or supplied', () => {
+    const expected = [path.join(root, 'lab-f-1.json'), path.join(root, 'state', 'lab-f-1.json')];
+    const definition = { name: 'Lab F 1' };
+    expect(tool.mutation!.paths({ action: 'create', definition })).toEqual(expected);
+    expect(tool.mutation!.paths({ action: 'create', job: 'anything', definition })).toEqual(expected);
+    expect(tool.mutation!.paths({ action: 'create', definition: {} })).toEqual([]);
+  });
+
+  it('places a create with no job argument outside the workspace gate', () => {
+    workspaceMock.folders = [{ uri: { fsPath: path.join(root, 'workspace') } }];
+    const paths = tool.mutation!.paths({ action: 'create', definition: { name: 'Lab F 1' } });
+    expect(paths).toEqual([
+      path.join(root, 'lab-f-1.json'),
+      path.join(root, 'state', 'lab-f-1.json'),
+    ]);
+    expect(paths.every((filePath) => !pathIsInWorkspace(filePath))).toBe(true);
+  });
+
+  it('keeps the job slug and unique id rules stable', () => {
+    expect(jobSlug('llama.cpp')).toBe('llama-cpp');
+    expect(uniqueJobId('llama.cpp', new Set(['llama-cpp']))).toBe('llama-cpp-2');
+    expect(jobSlug('!!!')).toBe('job');
   });
 });
 
@@ -588,6 +636,33 @@ describe('manage_jobs — pause and resume', () => {
 });
 
 describe('manage_jobs — delete', () => {
+  it('keys a resolved job delete using its id and name', async () => {
+    await store.saveJob(job());
+    await expect(tool.approval?.({ action: 'delete', job: 'Disk' })).resolves.toEqual({
+      dangerous: true,
+      detail: 'Delete job "Disk" (disk). Its definition, state, and run log are removed.',
+      approvalKey: 'job-delete:disk',
+    });
+  });
+
+  it('leaves a missing job delete unkeyable with the existing detail', async () => {
+    await expect(tool.approval?.({ action: 'delete', job: 'missing' })).resolves.toEqual({
+      dangerous: true,
+      detail: 'Delete job "missing". Its definition, state, and run log are removed.',
+    });
+  });
+
+  it('leaves an ambiguous job delete without an approval key', async () => {
+    await store.saveJob(job({ id: 'llama-a', name: 'Llama A' }));
+    await store.saveJob(job({ id: 'llama-b', name: 'Llama B' }));
+    const approval = await tool.approval?.({ action: 'delete', job: 'llama' });
+    expect(approval?.dangerous).toBe(true);
+    expect(approval?.approvalKey).toBeUndefined();
+    expect(approval?.detail).toBe(
+      'Delete job "llama". Its definition, state, and run log are removed.',
+    );
+  });
+
   it('removes the job definition, state, and run log', async () => {
     await store.saveJob(job());
     await store.saveState('disk', {

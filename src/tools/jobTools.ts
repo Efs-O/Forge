@@ -12,6 +12,7 @@ import type { ForgeConfig } from '../config/types';
 import { defaultState, type JobStore } from '../jobs/JobStore';
 import { JOB_SCHEDULE_KINDS, JobSchema, type JobFile } from '../jobs/jobSchema';
 import { resolveJobRef, type JobMatch } from '../jobs/jobRefResolver';
+import { jobSlug, uniqueJobId } from '../jobs/jobId';
 import { appendHomeNote } from '../jobs/jobsHome';
 import { nextDue } from '../jobs/schedule';
 import { jobCreateText } from '../jobs/jobCreateText';
@@ -19,6 +20,7 @@ import { describeJob, describeSchedule, formatWhen, lastRunOutcome } from '../jo
 import { openDiscussChat } from '../jobs/jobDiscuss';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { CLI_AGENT_CONSENT_DETAIL, needsCliConsent } from '../jobs/cliAgentGate';
+import { JOB_DELETE_KEY } from '../sidebar/approvalKeyGrammar';
 import { jobDefaultModel, pinAgentTaskModel } from '../config/jobsSchema';
 import type { RegisteredTool } from './ToolRegistry';
 import { describeToolIssues } from './toolErrorText';
@@ -152,6 +154,20 @@ export function makeManageJobsTool(deps: ManageJobsDeps): RegisteredTool {
       paths: (args) => {
         const action = args['action'];
         if (typeof action !== 'string' || !WRITE_ACTIONS.has(action as Action)) return [];
+        if (action === 'create') {
+          const definition = args['definition'];
+          const name =
+            definition !== null && typeof definition === 'object' && !Array.isArray(definition)
+              ? (definition as Record<string, unknown>)['name']
+              : undefined;
+          if (typeof name !== 'string' || !name.trim()) return [];
+          // A collision may add a numeric suffix, but both files stay under these folders.
+          const slug = jobSlug(name);
+          return [
+            path.join(deps.store.root, `${slug}.json`),
+            path.join(deps.store.root, 'state', `${slug}.json`),
+          ];
+        }
         const id = typeof args['job'] === 'string' ? args['job'] : undefined;
         if (!id) return [];
         return [
@@ -163,14 +179,26 @@ export function makeManageJobsTool(deps: ManageJobsDeps): RegisteredTool {
     },
     // Advertised only when a `jobs:` block is present.
     advertise: () => deps.getConfig().jobs?.enabled === true,
-    // Attended Clanker approves job deletion. Dangerous keeps an unattended or
-    // job turn from consenting for itself; with Clanker off, the card asks.
-    approval: (args) => {
+    // Attended Clanker approves job deletion. Dangerous keeps an unattended or job
+    // turn from consenting for itself unless a rule names its job-delete: key.
+    approval: async (args) => {
       // The CLI-consent branch stays dangerous, so the turn cannot consent for itself.
       if (needsCliConsent(deps.getConfig(), jobModelOf(deps, args))) {
         return { dangerous: true, detail: CLI_AGENT_CONSENT_DETAIL };
       }
       if (args['action'] !== DELETE_ACTION) return undefined;
+      const ref = args['job'];
+      if (typeof ref === 'string' && ref.trim()) {
+        const match = await resolveJob(deps, ref);
+        if (match.kind === 'one') {
+          const { id, name } = match.jobFile.job;
+          return {
+            dangerous: true,
+            detail: `Delete job "${name}" (${id}). Its definition, state, and run log are removed.`,
+            approvalKey: `${JOB_DELETE_KEY}${id}`,
+          };
+        }
+      }
       return {
         dangerous: true,
         detail: `Delete job "${String(args['job'] ?? '')}". Its definition, state, and run log are removed.`,
@@ -344,7 +372,7 @@ async function createJob(deps: ManageJobsDeps, args: Record<string, unknown>): P
   }
   const existing = await deps.store.loadAll();
   const taken = new Set(existing.map((jf) => jf.job.id));
-  const id = uniqueId(partial['name'] as string, taken);
+  const id = uniqueJobId(partial['name'] as string, taken);
   const now = (deps.now ?? (() => new Date()))();
   const nowMs = now.getTime();
   const candidate: Record<string, unknown> = {
@@ -377,21 +405,6 @@ async function createJob(deps: ManageJobsDeps, args: Record<string, unknown>): P
   const firstRun = nextDue(result.data.schedule, now);
   await deps.store.saveState(id, { ...defaultState(), next_due_at: firstRun.getTime() });
   return jobCreateText(result.data, id, firstRun, deps.getConfig());
-}
-
-/** Build a stable id from the name: a slug, suffixed if taken (so two "llama.cpp" jobs can coexist). */
-function uniqueId(name: string, taken: ReadonlySet<string>): string {
-  const slug =
-    name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 40) || 'job';
-  if (!taken.has(slug)) return slug;
-  for (let n = 2; ; n++) {
-    const candidate = `${slug}-${n}`;
-    if (!taken.has(candidate)) return candidate;
-  }
 }
 
 /** Apply a partial definition to an existing job; the id is never edited. */
