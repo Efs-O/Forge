@@ -107,7 +107,7 @@ describe('manage_jobs consent', () => {
       getConfig: () => makeConfig(false),
       allowCliAgents,
     });
-    expect(tool.approval?.(createArgs('claude-code'))).toEqual({
+    expect(await tool.approval?.(createArgs('claude-code'))).toEqual({
       dangerous: true,
       detail: CLI_AGENT_CONSENT_DETAIL,
     });
@@ -115,11 +115,11 @@ describe('manage_jobs consent', () => {
     expect(allowCliAgents).toHaveBeenCalledTimes(1);
   });
 
-  it('does not ask for a local model or once allowed', () => {
+  it('does not ask for a local model or once allowed', async () => {
     const local = makeManageJobsTool({ store: new JobStore(root), getConfig: () => makeConfig(false) });
-    expect(local.approval?.(createArgs('qwen'))).toBeUndefined();
-    expect(local.approval?.(createArgs())).toBeUndefined(); // pins active_model (qwen)
+    expect(await local.approval?.(createArgs('qwen'))).toBeUndefined();
+    expect(await local.approval?.(createArgs())).toBeUndefined(); // pins active_model (qwen)
     const allowed = makeManageJobsTool({ store: new JobStore(root), getConfig: () => makeConfig(true) });
-    expect(allowed.approval?.(createArgs('claude-code'))).toBeUndefined();
+    expect(await allowed.approval?.(createArgs('claude-code'))).toBeUndefined();
   });
 });

@@ -517,11 +517,12 @@ describe('--to with an exchange id', () => {
     });
   });
 
-  it('still says "no longer open" for an id the ledger does not know', () => {
+  it('says the chat is not open in this window for an id the ledger does not know', () => {
     expect(resolveBusMessageTarget(facade, 'claude', { conversationId: 'gone' }, ledger)).toEqual({
       ok: false,
       status: 404,
-      error: 'Forge chat "gone" is no longer open',
+      error:
+        'Forge chat "gone" is not open in this window. If it is open in another Forge window, send from a session linked there.',
     });
   });
 });

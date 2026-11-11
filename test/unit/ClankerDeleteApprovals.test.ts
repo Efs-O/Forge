@@ -30,8 +30,12 @@ const forget = makeForgetTool({
   update: async () => undefined,
 } as unknown as vscode.Memento);
 
+// The delete card resolves the job, so the store holds the one it names.
 const manageJobs = makeManageJobsTool({
-  store: { root: 'jobs' } as unknown as JobStore,
+  store: {
+    root: 'jobs',
+    loadAll: async () => [{ job: { id: 'nightly', name: 'Nightly' } }],
+  } as unknown as JobStore,
   getConfig: () => ({ jobs: { enabled: true } }) as ForgeConfig,
 });
 
@@ -42,7 +46,7 @@ const requests: Array<{ tool: string; metadata: ToolApprovalMetadata }> = [
   },
   {
     tool: 'manage_jobs',
-    metadata: manageJobs.approval!({ action: 'delete', job: 'nightly' })!,
+    metadata: (await manageJobs.approval!({ action: 'delete', job: 'nightly' }))!,
   },
 ];
 
@@ -65,6 +69,14 @@ describe('Clanker answers memory and job deletion in attended chats', () => {
       expect(rows[0]!.reason).toBe(metadata.detail);
     },
   );
+
+  it('names the job on the manage_jobs delete card', () => {
+    expect(requests[1]!.metadata).toEqual({
+      dangerous: true,
+      detail: 'Delete job "Nightly" (nightly). Its definition, state, and run log are removed.',
+      approvalKey: 'job-delete:nightly',
+    });
+  });
 
   it.each(requests)(
     'shows the normal approval card for $tool with Clanker off',
@@ -97,7 +109,7 @@ describe('job deletion stays dangerous in unattended turns', () => {
     const marker = unattendedConversations.mark(CONVERSATION, job);
     try {
       const { posted, service } = setup(true);
-      const metadata = manageJobs.approval!({ action: 'delete', job: 'nightly' })!;
+      const metadata = (await manageJobs.approval!({ action: 'delete', job: 'nightly' }))!;
       await expect(
         service.request(
           'manage_jobs',
