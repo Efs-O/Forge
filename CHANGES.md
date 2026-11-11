@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.158
+
+- `desktop_focus_window` refuses a window that its own modal dialog has disabled (Notepad's Open dialog, for one), and names the dialog to act on instead. Before, focusing the disabled window reported success while every key sent to it was lost.
+
 ## 0.17.157
 
 - `open_url_in_browser` asks with a Forge approval card and opens the URL through the OS, so a Clanker chat no longer stalls on VS Code's own dialog, and the result names the URL it opened.
