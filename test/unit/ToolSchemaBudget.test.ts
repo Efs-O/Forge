@@ -133,7 +133,8 @@ import {
 // 2026-11-11: 67,984 (-16, merged) after diagnostics editor scope and shared editor context.
 // 2026-11-11: 66,897 (-1,087) after removing install_llamacpp (the llamacpp_update job covers it).
 // 2026-11-11: 67,049 (+152) after manage_jobs names the fields create requires (Group F).
-const MEASURED_CHARS = 67_049;
+// 2026-11-11: 67,102 (+53) after manage_jobs says the job definition goes in definition.
+const MEASURED_CHARS = 67_102;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.

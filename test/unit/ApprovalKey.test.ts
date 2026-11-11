@@ -12,6 +12,11 @@
 import { describe, expect, it } from 'vitest';
 import { classifyShellCommand } from '../../src/tools/shellPolicy';
 import {
+  clearConversationSecretState,
+  markConversationReadSecret,
+} from '../../src/tools/exfilTaint';
+import { makeOpenUrlTool } from '../../src/tools/uxTools';
+import {
   approvalKeysFor,
   ruleCovers,
   validateRuleKey,
@@ -87,6 +92,83 @@ function req(key: string, targets?: string[]): ApprovalRequirement {
 }
 
 describe('approvalKeysFor, the plan §2 table', () => {
+  it.each([
+    ['https://example.com/', 'net:example.com'],
+    ['https://Example.COM:8443/a?b=1', 'net:example.com'],
+  ])('keys open_url_in_browser %s by its host', (url, expected) => {
+    const metadata = makeOpenUrlTool().approval?.({ url });
+    expect(metadata?.approvalKey).toBe(expected);
+    expect(
+      keysOf(
+        input({
+          toolName: 'open_url_in_browser',
+          dangerous: true,
+          toolGate: true,
+          reachesOut: 'network',
+          approvalKey: metadata?.approvalKey,
+        }),
+      ),
+    ).toEqual([expected]);
+  });
+
+  it('covers an open_url_in_browser gate only with a rule for the same host', () => {
+    const metadata = makeOpenUrlTool().approval?.({ url: 'https://example.com/' });
+    const requirement = approvalKeysFor(
+      input({
+        toolName: 'open_url_in_browser',
+        dangerous: true,
+        toolGate: true,
+        reachesOut: 'network',
+        approvalKey: metadata?.approvalKey,
+      }),
+      CTX,
+    );
+    expect(requirement.kind).toBe('keyed');
+    if (requirement.kind !== 'keyed') throw new Error(requirement.why);
+    expect(ruleCovers('net:example.com', requirement.requirements[0]!, CTX)).toBe(true);
+    expect(ruleCovers('net:example.org', requirement.requirements[0]!, CTX)).toBe(false);
+  });
+
+  it('keeps secret-read browser egress unkeyable with the existing fail-closed reason', () => {
+    const conversationId = 'approval-key-secret-browser';
+    markConversationReadSecret(conversationId);
+    try {
+      const metadata = makeOpenUrlTool().approval?.(
+        { url: 'https://example.com/' },
+        { conversationId },
+      );
+      expect(metadata?.approvalKey).toBeUndefined();
+      const result = approvalKeysFor(
+        input({
+          toolName: 'open_url_in_browser',
+          dangerous: true,
+          toolGate: true,
+          reachesOut: 'network',
+          approvalGateKind: metadata?.gateKind,
+        }),
+        CTX,
+      );
+      expect(result).toEqual({
+        kind: 'unkeyable',
+        why:
+          'this gate called itself dangerous without naming the folder, host or file it is ' +
+          'asking about, so it fails closed and asks the owner every time.',
+      });
+    } finally {
+      clearConversationSecretState(conversationId);
+    }
+  });
+
+  it('gives an unparsable https url no key instead of throwing', () => {
+    const metadata = makeOpenUrlTool().approval?.({ url: 'https://' });
+    expect(metadata?.dangerous).toBe(true);
+    expect(metadata?.approvalKey).toBeUndefined();
+  });
+
+  it('does not ask approval for a non-HTTP(S) browser URL', () => {
+    expect(makeOpenUrlTool().approval?.({ url: 'file:///tmp/page.html' })).toBeUndefined();
+  });
+
   it.each([
     ['a network exit through one program', 'curl -s https://x', ['net:prog:curl']],
     ['a git push', 'git push origin main', ['net:prog:git-push']],

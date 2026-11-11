@@ -118,7 +118,8 @@ export function makeManageJobsTool(deps: ManageJobsDeps): RegisteredTool {
               type: 'string',
               description:
                 'The job id or name, fuzzy-matched. Required for every action except `list` and ' +
-                '`create`. An ambiguous match returns the candidates instead of guessing.',
+                '`create`. An ambiguous match returns the candidates instead of guessing. Never the ' +
+                'job definition: that goes in `definition`.',
             },
             definition: {
               type: 'object',

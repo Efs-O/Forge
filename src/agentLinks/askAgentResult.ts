@@ -37,6 +37,15 @@ export function renderAskStarted(agent: AgentKind, exchangeId: string): string {
   return `Asked ${agentDisplayName(agent)} (exchange ${exchangeId}). Its reply will arrive as a message in this chat; carry on with the rest of the task.`;
 }
 
+/** What `ask_agent` returns when its distinct ask is queued behind another. */
+export function renderAskQueued(
+  agent: AgentKind,
+  exchangeId: string,
+  afterExchangeId: string,
+): string {
+  return `Asked ${agentDisplayName(agent)} (exchange ${exchangeId}); it starts when exchange ${afterExchangeId} finishes. Its reply will arrive as a message in this chat; carry on with the rest of the task.`;
+}
+
 /** A second ask to an agent that has not replied yet: nothing was sent. */
 export function renderAskStillPending(agent: AgentKind, exchangeId: string, age: string): string {
   const label = agentDisplayName(agent);

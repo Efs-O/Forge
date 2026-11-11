@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AskAgentRunResult, AskAgentRuntime } from '../../src/agentLinks/askAgentService';
 import { isAskAgentRunning } from '../../src/agentLinks/askAgentService';
 import {
@@ -102,12 +102,21 @@ function setup(config: Partial<ForgeConfig> = { agent_bus: { enabled: true } } a
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+const waitForRun = (signal: AbortSignal) =>
+  vi.waitFor(() => expect(runs.some((run) => run.signal === signal)).toBe(true));
+const runFor = (signal: AbortSignal) => runs.find((run) => run.signal === signal)!;
 
 describe('ask_agent background asks', () => {
   beforeEach(async () => {
     for (const run of runs.splice(0)) run.settle({ status: 'cancelled', finalText: '' });
     await flush();
     vi.mocked(runtime.runHeadless).mockClear();
+  });
+
+  afterEach(async () => {
+    for (const entry of pendingAgentAsksFor(chatId)) entry.controller.abort();
+    for (const run of runs.splice(0)) run.settle({ status: 'cancelled', finalText: '' });
+    for (let i = 0; i < 4; i += 1) await flush();
   });
 
   it('returns at once with an exchange id and delivers the reply once', async () => {
@@ -152,29 +161,116 @@ describe('ask_agent background asks', () => {
     ]);
   });
 
-  it('refuses a second ask to the same agent but runs another agent', async () => {
+  it('queues a different ask, refuses its repeat, and runs another agent at once', async () => {
     const { asker } = setup();
     const first = await asker.start(chatId, { agent: 'claude', message: 'one' });
-    const exchange = /exchange ([0-9a-f]{8})/u.exec(first)?.[1];
+    const firstId = /exchange ([0-9a-f]{8})/u.exec(first)?.[1];
+    const queued = await asker.start(chatId, { agent: 'claude', message: 'two' });
+    const queuedId = /exchange ([0-9a-f]{8})/u.exec(queued)?.[1];
+    expect(queued).toBe(
+      `Asked Claude (exchange ${queuedId}); it starts when exchange ${firstId} finishes. Its reply will arrive as a message in this chat; carry on with the rest of the task.`,
+    );
     const again = await asker.start(chatId, { agent: 'claude', message: 'two' });
-    expect(again).toContain(`Claude is still working on exchange ${exchange}`);
-    expect(again).not.toMatch(/^Error:/u);
-    expect(runtime.runHeadless).toHaveBeenCalledTimes(1);
+    expect(again).toBe(
+      `Claude is still working on exchange ${queuedId} (asked under a minute ago); nothing new was sent. Its reply will arrive as a message: do not ask again. Carry on, or end your turn if you cannot continue without it.`,
+    );
+    await vi.waitFor(() => expect(runs.filter((run) => run.agent === 'claude')).toHaveLength(1));
     const codex = await asker.start(chatId, { agent: 'codex', message: 'three' });
     expect(codex).toMatch(/^Asked Codex/u);
-    expect(runtime.runHeadless).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(runs.filter((run) => run.agent === 'codex')).toHaveLength(1));
+    for (const run of runs) run.settle({ status: 'completed', finalText: 'done' });
+    await flush();
+  });
+
+  it('starts queued asks only after the previous ask settles and delivers replies in order', async () => {
+    const { asker, deliver } = setup();
+    await asker.start(chatId, { agent: 'claude', message: 'one' });
+    const firstSignal = pendingAgentAsksFor(chatId)[0]!.controller.signal;
+    await asker.start(chatId, { agent: 'claude', message: 'two' });
+    await waitForRun(firstSignal);
+    expect(runs.filter((run) => run.signal === firstSignal)).toHaveLength(1);
+    runFor(firstSignal).settle({ status: 'completed', finalText: 'first reply' });
+    await flush();
+    const secondSignal = pendingAgentAsksFor(chatId)[0]!.controller.signal;
+    await waitForRun(secondSignal);
+    expect(runs.filter((run) => run.signal === firstSignal || run.signal === secondSignal)).toHaveLength(2);
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(deliver.mock.calls[0]![0]).toContain('first reply');
+    runFor(secondSignal).settle({ status: 'completed', finalText: 'second reply' });
+    await flush();
+    expect(deliver).toHaveBeenCalledTimes(2);
+    expect(deliver.mock.calls[1]![0]).toContain('second reply');
+  });
+
+  it('refuses trimmed duplicate questions without queueing them', async () => {
+    const { asker } = setup();
+    await asker.start(chatId, { agent: 'claude', message: ' one ' });
+    const signal = pendingAgentAsksFor(chatId)[0]!.controller.signal;
+    const duplicate = await asker.start(chatId, { agent: 'claude', message: 'one' });
+    expect(duplicate).toBe(
+      'Claude is still working on exchange ' +
+        `${pendingAgentAsksFor(chatId)[0]!.exchangeId} (asked under a minute ago); nothing new was sent. ` +
+        'Its reply will arrive as a message: do not ask again. Carry on, or end your turn if you cannot continue without it.',
+    );
+    expect(pendingAgentAsksFor(chatId)).toHaveLength(1);
+    await waitForRun(signal);
+    expect(runs.filter((run) => run.signal === signal)).toHaveLength(1);
+    runFor(signal).settle({ status: 'completed', finalText: 'done' });
+    await flush();
   });
 
   it('cancel aborts every pending exchange of the chat and delivers nothing', async () => {
     const { asker, deliver } = setup();
     await asker.start(chatId, { agent: 'claude', message: 'one' });
-    await asker.start(chatId, { agent: 'codex', message: 'two' });
+    await asker.start(chatId, { agent: 'claude', message: 'two' });
+    const signals = pendingAgentAsksFor(chatId).map((entry) => entry.controller.signal);
     asker.cancel(chatId);
     await flush();
-    expect(runs.map((run) => run.signal.aborted)).toEqual([true, true]);
+    expect(signals.map((signal) => signal.aborted)).toEqual([true, true]);
+    expect(runs.filter((run) => run.signal === signals[0])).toHaveLength(1);
     expect(deliver).not.toHaveBeenCalled();
     expect(pendingAgentAsksFor(chatId)).toEqual([]);
     expect(isAskAgentRunning(chatId)).toBe(false);
+  });
+
+  it('lists running and queued exchanges in the end-of-turn notice', async () => {
+    const { asker } = setup();
+    await asker.start(chatId, { agent: 'claude', message: 'one' });
+    const running = pendingAgentAsksFor(chatId)[0]!;
+    await asker.start(chatId, { agent: 'claude', message: 'two' });
+    const queued = pendingAgentAsksFor(chatId)[1]!;
+    expect(pendingAgentAsksNotice(chatId, running.startedAt)).toBe(
+      `Waiting on Claude (exchange ${running.exchangeId}, under a minute); its reply will start a new turn.\n` +
+        `Waiting on Claude (exchange ${queued.exchangeId}, queued after ${running.exchangeId}); its reply will start a new turn.`,
+    );
+  });
+
+  it('reports a queued exchange as running once it starts', async () => {
+    const { asker } = setup();
+    await asker.start(chatId, { agent: 'claude', message: 'one' });
+    const firstSignal = pendingAgentAsksFor(chatId)[0]!.controller.signal;
+    await asker.start(chatId, { agent: 'claude', message: 'two' });
+    const queued = pendingAgentAsksFor(chatId)[1]!;
+    await waitForRun(firstSignal);
+    runFor(firstSignal).settle({ status: 'completed', finalText: 'first' });
+    await vi.waitFor(() => expect(runs).toHaveLength(2));
+    expect(pendingAgentAsksNotice(chatId, queued.startedAt)).toBe(
+      `Waiting on Claude (exchange ${queued.exchangeId}, under a minute); its reply will start a new turn.`,
+    );
+  });
+
+  it('delivers a queued refusal as a reply when it never starts', async () => {
+    const config = { agent_bus: { enabled: true } } as ForgeConfig;
+    const { asker, deliver } = setup(config);
+    await asker.start(chatId, { agent: 'claude', message: 'one' });
+    const firstSignal = pendingAgentAsksFor(chatId)[0]!.controller.signal;
+    await asker.start(chatId, { agent: 'claude', message: 'two' });
+    config.agent_bus = { enabled: false };
+    await waitForRun(firstSignal);
+    runFor(firstSignal).settle({ status: 'completed', finalText: 'first' });
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(2));
+    expect(runs.filter((run) => run.signal === firstSignal)).toHaveLength(1);
+    expect(deliver.mock.calls[1]![0]).toContain('ask_agent is disabled');
   });
 
   it('delivers a failure, and a runtime that throws, as a reply that did not come', async () => {

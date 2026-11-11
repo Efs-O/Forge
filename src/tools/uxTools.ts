@@ -22,6 +22,7 @@ import type { ForgeConfig } from '../config/types';
 import { secretPatternForTaint } from './secretPaths';
 import { hasConversationReadSecret, secretReadCardReason } from './exfilTaint';
 import { openSystemBrowser } from './systemBrowser';
+import { NET_KEY } from '../sidebar/approvalKeyGrammar';
 
 type UnattendedOutboxWriter = (
   conversationId: string,
@@ -409,13 +410,14 @@ export function makeOpenUrlTool(
     permission: 'read',
     approval: (args, context) => {
       const url = args['url'];
-      if (typeof url !== 'string' || !(url.startsWith('https://') || url.startsWith('http://')))
-        return undefined;
+      if (typeof url !== 'string' || !/^https?:\/\//.test(url)) return undefined;
       const readSecret = hasConversationReadSecret(context?.conversationId);
+      const host = URL.canParse(url) ? new URL(url).hostname.toLowerCase() : undefined; // else no key
       return {
         detail: url,
         dangerous: true,
         reachesOut: 'network',
+        ...(!readSecret && host ? { approvalKey: `${NET_KEY}${host}` } : {}),
         ...(readSecret
           ? {
               gateKind: 'taintGate' as const,

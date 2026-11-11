@@ -88,6 +88,17 @@ describe('manage_jobs — definition and permissions', () => {
     expect(tool.permission).toBe('read');
   });
 
+  it('says the job definition belongs in definition', () => {
+    const schema = tool.definition.function.parameters as {
+      properties: { job: { description: string } };
+    };
+    expect(schema.properties.job.description).toBe(
+      'The job id or name, fuzzy-matched. Required for every action except `list` and `create`. ' +
+        'An ambiguous match returns the candidates instead of guessing. Never the job definition: ' +
+        'that goes in `definition`.',
+    );
+  });
+
   it('advertises only when a jobs block is present and enabled', () => {
     expect(tool.advertise!()).toBe(true);
     jobsEnabled = false;

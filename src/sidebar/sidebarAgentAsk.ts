@@ -10,6 +10,7 @@ import {
 import { makeAskAgentRuntime } from '../agentLinks/askAgentRuntime';
 import {
   renderAskAgentResult,
+  renderAskQueued,
   renderAskReplyMessage,
   renderAskStarted,
   renderAskStillPending,
@@ -20,7 +21,7 @@ import {
   cancelPendingAgentAsks,
   formatAskAge,
   newExchangeId,
-  pendingAgentAsk,
+  pendingAgentAsksForAgent,
   removePendingAgentAsk,
   type PendingAgentAsk,
   type StartAgentAsk,
@@ -78,27 +79,30 @@ export function createSidebarAgentAsk(options: {
       );
   };
 
-  const start: StartAgentAsk = async (conversationId, request) => {
-    const conversation = findConversation(options.getSidebar(), conversationId);
-    if (!conversation) return 'Error: ask_agent: this chat is not available in this window.';
-    const busy = pendingAgentAsk(conversationId, request.agent);
-    if (busy)
-      return renderAskStillPending(
-        request.agent,
-        busy.exchangeId,
-        formatAskAge(busy.startedAt, Date.now()),
-      );
-    const entry: PendingAgentAsk = {
-      exchangeId: newExchangeId(),
-      conversationId,
-      agent: request.agent,
-      startedAt: Date.now(),
-      controller: new AbortController(),
-    };
-    // Registered before the first await, so a second call in the same round
-    // sees it and is refused instead of resuming the same CLI session twice.
-    addPendingAgentAsk(entry);
-    options.onPendingChanged?.(conversationId);
+  const runEntry = async (
+    entry: PendingAgentAsk,
+    conversation: NonNullable<ReturnType<typeof findConversation>>,
+    queued: boolean,
+  ): Promise<string> => {
+    if (entry.controller.signal.aborted) {
+      removePendingAgentAsk(entry);
+      const next = pendingAgentAsksForAgent(entry.conversationId, entry.agent)[0];
+      if (next) void runEntry(next, conversation, true);
+      options.onPendingChanged?.(entry.conversationId);
+      return renderAskAgentResult({
+        agent: entry.agent,
+        status: 'cancelled',
+        finalText: '',
+        sessionTitle: '',
+        subject: '',
+        live: false,
+      });
+    }
+    // Starting now: from here the notice reports it as running, aged from its start.
+    if (queued) {
+      delete entry.queuedAfterExchangeId;
+      entry.startedAt = Date.now();
+    }
     let started = false;
     let markStarted!: () => void;
     const startedSignal = new Promise<void>((resolve) => {
@@ -106,11 +110,11 @@ export function createSidebarAgentAsk(options: {
     });
     const checkpoint = options.checkpoints.beginTurn(
       `agent-ask-${entry.exchangeId}`,
-      conversationId,
+      entry.conversationId,
     );
     const run = (async (): Promise<AskAgentResult> => {
       try {
-        return await backgroundHandler(request, {
+        return await backgroundHandler(entry.request, {
           conversation,
           checkpoint,
           signal: entry.controller.signal,
@@ -123,7 +127,7 @@ export function createSidebarAgentAsk(options: {
         });
       } catch (err) {
         return {
-          agent: request.agent,
+          agent: entry.agent,
           status: 'failed',
           finalText: '',
           sessionTitle: '',
@@ -134,19 +138,54 @@ export function createSidebarAgentAsk(options: {
       } finally {
         options.checkpoints.commitTurn(checkpoint);
         removePendingAgentAsk(entry);
-        options.onPendingChanged?.(conversationId);
+        options.onPendingChanged?.(entry.conversationId);
         options.persist();
       }
     })();
     void run.then((result) => {
-      if (started) deliverReply(entry, result);
+      if (started || queued) deliverReply(entry, result);
+      const next = pendingAgentAsksForAgent(entry.conversationId, entry.agent)[0];
+      if (next) void runEntry(next, conversation, true);
     });
-    // A refusal settles the run before it starts; that is the tool's answer.
     const early = await Promise.race([
       startedSignal.then(() => undefined),
       run.then((result) => (started ? undefined : result)),
     ]);
-    return early ? renderAskAgentResult(early) : renderAskStarted(request.agent, entry.exchangeId);
+    return queued
+      ? renderAskQueued(entry.agent, entry.exchangeId, entry.queuedAfterExchangeId ?? '')
+      : early
+        ? renderAskAgentResult(early)
+        : renderAskStarted(entry.agent, entry.exchangeId);
+  };
+
+  const start: StartAgentAsk = async (conversationId, request) => {
+    const conversation = findConversation(options.getSidebar(), conversationId);
+    if (!conversation) return 'Error: ask_agent: this chat is not available in this window.';
+    const message = request.message.trim();
+    const queue = pendingAgentAsksForAgent(conversationId, request.agent);
+    const busy = queue.find((entry) => entry.message === message);
+    if (busy)
+      return renderAskStillPending(
+        request.agent,
+        busy.exchangeId,
+        formatAskAge(busy.startedAt, Date.now()),
+      );
+    const tail = queue[queue.length - 1];
+    const entry: PendingAgentAsk = {
+      exchangeId: newExchangeId(),
+      conversationId,
+      agent: request.agent,
+      message,
+      request: { ...request, message },
+      startedAt: Date.now(),
+      controller: new AbortController(),
+      ...(tail ? { queuedAfterExchangeId: tail.exchangeId } : {}),
+    };
+    addPendingAgentAsk(entry);
+    options.onPendingChanged?.(conversationId);
+    return tail
+      ? renderAskQueued(request.agent, entry.exchangeId, tail.exchangeId)
+      : runEntry(entry, conversation, false);
   };
 
   return {
