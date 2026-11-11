@@ -265,6 +265,13 @@ function Focus-Window([IntPtr]$h) {
     [void][Forge.Win32]::SetForegroundWindow($h)
   } finally { if ($attached) { [void][Forge.Win32]::AttachThreadInput($me, $fgThread, $false) } }
   if (Wait-Foreground $h 500) { return 'ok_attached' }
+  # Last try: Windows lets the process that sent the last input event set the
+  # foreground. When an unrelated app holds it (a browser opened by
+  # open_url_in_browser), the two tries above are refused; an Alt tap from this
+  # driver earns that right. Send-Inputs throws when UIPI blocks the input.
+  Send-Inputs @((New-VkInput 0x12 $false), (New-VkInput 0x12 $true))
+  [void][Forge.Win32]::SetForegroundWindow($h)
+  if (Wait-Foreground $h 500) { return 'ok_input' }
   return 'refused_focus_lock'
 }
 function Get-WindowInfo([IntPtr]$h) {
@@ -536,7 +543,7 @@ function Invoke-Op($req) {
       $h = [IntPtr]$w.id
       $focusResult = Focus-Window $h
       if ($focusResult -eq 'refused_focus_lock') { return @{ ok = $false; reason = 'Windows refused to focus the target (focus lock): ask the user to click the window once, then retry' } }
-      if ($focusResult -eq 'ok' -or $focusResult -eq 'ok_attached') {
+      if ($focusResult -eq 'ok' -or $focusResult -eq 'ok_attached' -or $focusResult -eq 'ok_input') {
         Start-Sleep -Milliseconds 200
         $foreground = [Forge.Win32]::GetForegroundWindow()
         if ($foreground -ne $h) {
