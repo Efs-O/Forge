@@ -41,7 +41,7 @@ const GROUP_PURPOSE: Readonly<Record<(typeof NATIVE_LAZY_GROUP_NAMES)[number], s
     'view images (including a picture of a page, chart or scene you rendered, to check your own visual work), generate and upscale images, reverse image search, generate videos and music, inspect video stills, render HTML to a PNG or preview (headless, opens no browser window), export documents, send files',
   memory: 'remember, recall, forget notes kept across conversations',
   notebook: 'Jupyter notebook cells',
-  system: 'this PC: power, sleep/wake, status, llama.cpp',
+  system: 'this PC: power, sleep/wake, status',
 };
 
 function describeGroups(): string {

@@ -313,22 +313,6 @@ export async function runToolCallingLoop(
       );
     }
     if (calls?.length) {
-      try {
-        loopGuard.beforeRound(calls, options.isMutatingTool);
-      } catch (error) {
-        if (error instanceof ToolLoopDetectedError && loopRecoveries < MAX_LOOP_RECOVERIES) {
-          loopRecoveries++;
-          loopGuard = new ToolLoopGuard();
-          options.messages.push({
-            role: 'user',
-            content: loopRecoveryNudge(error.message, MAX_LOOP_RECOVERIES - loopRecoveries),
-          });
-          options.onMessagesChanged?.();
-          continue;
-        }
-        options.onRepeatedCall?.();
-        throw error;
-      }
       // The retry produced real work, so the next round may think again.
       reasoningStopRetries = 0;
       // Carry this round's reasoning on the tool-call turn. rawReasoning resets

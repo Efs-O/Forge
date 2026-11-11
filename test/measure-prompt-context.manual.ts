@@ -37,7 +37,7 @@ import { ALL_TOOL_PERMISSIONS } from '../src/tools/ToolRegistry';
 const ROOT = path.resolve(__dirname, '..');
 const WORKSPACE = 'n:\\vs code apps\\Forge';
 const GGUF = 'N:/QWEN GGUF/Qwen3.8-27B/Qwen3.8-27B-UD-Q3_K_XL.gguf';
-// Newest Forge-installed llama.cpp build (install_llamacpp puts them here).
+// Newest Forge-installed llama.cpp build (the llamacpp_update job puts them here).
 const TOKENIZE_EXE = ((): string => {
   const base = path.join(process.env['LOCALAPPDATA'] ?? '', 'Forge');
   const builds = fs.existsSync(base)

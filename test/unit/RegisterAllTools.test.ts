@@ -67,7 +67,6 @@ const EXPECTED_NATIVE_NAMES = [
   'git_read',
   'image_search',
   'insert_code',
-  'install_llamacpp',
   'list_delegation_targets',
   'list_directory',
   'list_executions',
@@ -233,8 +232,6 @@ describe('registerAllTools canonical coordinator catalog', () => {
           name !== 'generate_image' &&
           // image_search needs the absent image_search provider.
           name !== 'image_search' &&
-          // install_llamacpp needs the absent llama_server.binary.
-          name !== 'install_llamacpp' &&
           // ask_agent needs the absent agent_bus block.
           name !== 'ask_agent' &&
           // set_checkin needs the absent elapsed_time_note block.

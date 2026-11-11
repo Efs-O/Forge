@@ -59,7 +59,7 @@ import { writeChunkLimit } from '../tools/writeChunking';
 import { toolCallProgressMsg } from './toolCallProgress';
 import type { RequestOfferedListener } from '../sessions/requestFingerprint';
 import type { RequestCapture } from '../sessions/requestStats';
-import type { QuestionWaitRunner } from '../tools/toolContract';
+import { isMutatingTool, type QuestionWaitRunner } from '../tools/toolContract';
 import { reportRequestUsage } from './requestUsageReporting';
 import { startStrataBusyWarning } from './strataBusyWarning';
 
@@ -376,6 +376,7 @@ export async function runModelTurn(
         mirrorLiveSessionAnswers(conv.id, toolCalls, messages, ctx.emitAgentProgress);
         // Token bar ticks in `onUsage`: a tool result moves no measured context.
       },
+      isMutatingTool: (name) => isMutatingTool(ctx.toolRegistry.get(name)),
       onMessagesChanged: () => ctx.onTranscriptChanged?.(conv),
       ...(ctx.drainTells ? { drainTells: () => ctx.drainTells!(conv.id) } : {}),
       onToken: (text, createdAt) => {

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage, ToolCall } from '../../src/llm/types';
 import { ToolLoopDetectedError, ToolLoopGuard } from '../../src/agent/ToolLoopGuard';
+import {
+  ALL_TOOL_PERMISSIONS,
+  ToolRegistry,
+  type RegisteredTool,
+} from '../../src/tools/ToolRegistry';
+import { isMutatingTool, READ_ONLY_PERMISSIONS } from '../../src/tools/toolContract';
 
 function call(name: string, args: Record<string, unknown>): ToolCall[] {
   return [
@@ -44,7 +50,7 @@ describe('ToolLoopGuard', () => {
     }
     expect(() =>
       guard.afterRound(call('read_file', { path: 'a', line: 1 }), result('same')),
-    ).toThrow(ToolLoopDetectedError);
+    ).toThrow('Forge: repeated tool call produced no progress.');
   });
 
   it('allows repeated polling when the result changes', () => {
@@ -102,12 +108,21 @@ describe('ToolLoopGuard', () => {
     expect(pathA[0]?.content).toBe('Error: a2');
   });
 
-  it('blocks a repeated mutation before its third execution', () => {
+  it('allows six identical mutating rounds with identical results', () => {
     const guard = new ToolLoopGuard();
-    const calls = call('write_file', { path: 'a', content: 'x' });
-    guard.afterRound(calls, result('written'));
-    guard.afterRound(calls, result('written'));
-    expect(() => guard.beforeRound(calls, () => true)).toThrow(/before a third execution/);
+    const calls = call('desktop_press', { keys: ['pagedown'] });
+    for (let index = 0; index < 6; index++) {
+      expect(() => guard.afterRound(calls, result('Pressed'), () => true)).not.toThrow();
+    }
+  });
+
+  it('does not add the read-only repeat warning to a mutating repeat', () => {
+    const guard = new ToolLoopGuard();
+    const calls = call('desktop_press', { keys: ['pagedown'] });
+    guard.afterRound(calls, result('Pressed'), () => true);
+    const repeated = result('Pressed');
+    expect(guard.afterRound(calls, repeated, () => true)).toBe(false);
+    expect(repeated[0]?.content).toBe('Pressed');
   });
 
   it('detects a repeated alternating cycle', () => {
@@ -118,5 +133,49 @@ describe('ToolLoopGuard', () => {
       guard.afterRound(index % 2 === 0 ? a : b, result(index % 2 === 0 ? 'A' : 'B'));
     }
     expect(() => guard.afterRound(b, result('B'))).toThrow(/alternating/);
+  });
+});
+
+describe('ToolRegistry loop-guard permission classes', () => {
+  it.each(ALL_TOOL_PERMISSIONS)('%s is classified by its permission tier', (permission) => {
+    const registry = new ToolRegistry();
+    const tool: RegisteredTool = {
+      definition: {
+        type: 'function',
+        function: {
+          name: permission,
+          description: '',
+          parameters: { type: 'object', properties: {} },
+        },
+      },
+      permission,
+      ...(permission === 'write' || permission === 'delete'
+        ? { mutation: { paths: () => [] } }
+        : {}),
+      handler: async () => '',
+    };
+    registry.register(tool);
+    expect(isMutatingTool(registry.get(permission))).toBe(
+      !READ_ONLY_PERMISSIONS.has(permission),
+    );
+  });
+
+  it('treats additional mutating permissions as mutating and unknown names as read-only', () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      definition: {
+        type: 'function',
+        function: {
+          name: 'read_with_write',
+          description: '',
+          parameters: { type: 'object', properties: {} },
+        },
+      },
+      permission: 'read',
+      additionalPermissions: ['write'],
+      handler: async () => '',
+    });
+    expect(isMutatingTool(registry.get('read_with_write'))).toBe(true);
+    expect(isMutatingTool(registry.get('unknown_tool'))).toBe(false);
   });
 });

@@ -1,4 +1,4 @@
-import { conversationSecretReadReason, hasConversationReadSecret } from './exfilTaint';
+import { hasConversationReadSecret, secretReadCardReason } from './exfilTaint';
 import type { ForgeConfig } from '../config/types';
 
 /**
@@ -297,9 +297,7 @@ export function fetchApprovalFor(
     return {
       detail,
       dangerous: true,
-      cardReason:
-        conversationSecretReadReason(conversationId) ??
-        'this chat has read a secret path, so nothing more leaves it without you',
+      cardReason: secretReadCardReason(conversationId),
       declineHint:
         'tell the owner what you need from this host; a secret read taints the whole chat',
       gateKind: 'taintGate',

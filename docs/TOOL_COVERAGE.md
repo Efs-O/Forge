@@ -53,7 +53,6 @@ This matrix covers native tools only; MCP servers are not started during generat
 | git_read | native | git-read | harness | automated | opt-in | read-only |
 | image_search | native | search | harness | automated | opt-in | search |
 | insert_code | native | write | harness | automated | opt-in | write |
-| install_llamacpp | native | write | harness | automated | opt-in | write |
 | list_delegation_targets | native | delegate | harness | automated | opt-in | delegate |
 | list_directory | native | read | harness | automated | opt-in | read-only |
 | list_executions | native | headless | harness | automated | opt-in | headless |

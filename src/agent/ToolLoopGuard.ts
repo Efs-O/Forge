@@ -4,6 +4,7 @@ import { isJsonObject, parseJson } from '../tools/jsonInput';
 interface ToolRoundRecord {
   call: string;
   result: string;
+  mutating: boolean;
 }
 
 interface FailedToolStreak {
@@ -78,34 +79,27 @@ export class ToolLoopGuard {
   private readonly records: ToolRoundRecord[] = [];
   private failedToolStreak: FailedToolStreak | undefined;
 
-  beforeRound(calls: ToolCall[], isMutatingTool?: (name: string) => boolean): void {
-    if (!calls.some((call) => isMutatingTool?.(call.function.name))) return;
-    const call = callFingerprint(calls);
-    const length = this.records.length;
-    if (
-      length >= 2 &&
-      this.records[length - 1]?.call === call &&
-      this.records[length - 2]?.call === call
-    ) {
-      throw new ToolLoopDetectedError(
-        'Forge: repeated mutating tool call blocked before a third execution.',
-      );
-    }
-  }
-
   afterRound(
     calls: ToolCall[],
     resultMessages: ChatMessage[],
     isMutatingTool?: (name: string) => boolean,
   ): boolean {
-    this.records.push({ call: callFingerprint(calls), result: resultFingerprint(resultMessages) });
+    const mutating = calls.some((call) => isMutatingTool?.(call.function.name));
+    this.records.push({
+      call: callFingerprint(calls),
+      result: resultFingerprint(resultMessages),
+      mutating,
+    });
     const length = this.records.length;
     const last = this.records[length - 1];
     if (
       length >= IDENTICAL_READ_ONLY_ROUNDS &&
       this.records
         .slice(-IDENTICAL_READ_ONLY_ROUNDS)
-        .every((record) => record.call === last?.call && record.result === last?.result)
+        .every(
+          (record) =>
+            !record.mutating && record.call === last?.call && record.result === last?.result,
+        )
     ) {
       throw new ToolLoopDetectedError('Forge: repeated tool call produced no progress.');
     }
@@ -116,6 +110,7 @@ export class ToolLoopGuard {
       if (
         left &&
         right &&
+        cycle.every((record) => !record.mutating) &&
         cycle.every((record, index) => {
           const expected = index % 2 === 0 ? left : right;
           return record.call === expected.call && record.result === expected.result;
@@ -128,10 +123,13 @@ export class ToolLoopGuard {
     // After the throws: a persistent identical failure must still end the turn.
     const failure = this.warnOnRepeatedFailure(calls, resultMessages);
     if (failure.tracked) return failure.warned;
-    if (calls.some((call) => isMutatingTool?.(call.function.name))) return false;
+    if (mutating) return false;
     const earlier = this.records.findIndex(
       (record, index) =>
-        index < length - 1 && record.call === last?.call && record.result === last?.result,
+        index < length - 1 &&
+        !record.mutating &&
+        record.call === last?.call &&
+        record.result === last?.result,
     );
     if (earlier < 0) return false;
     const prefix =

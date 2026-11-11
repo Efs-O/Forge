@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { createHash } from 'crypto';
+import type { spawn } from 'child_process';
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveWorkspaceUri } from '../util/WorkspacePaths';
@@ -19,6 +20,8 @@ import { markdownToHtml, localMarkdownImageResolver } from '../documents/markdow
 import { writeFileAtomicSync } from '../util/atomicWrite';
 import type { ForgeConfig } from '../config/types';
 import { secretPatternForTaint } from './secretPaths';
+import { hasConversationReadSecret, secretReadCardReason } from './exfilTaint';
+import { openSystemBrowser } from './systemBrowser';
 
 type UnattendedOutboxWriter = (
   conversationId: string,
@@ -376,7 +379,11 @@ export function makeReadClipboardTool(): RegisteredTool {
 const PREVIEW_IMAGE_BUDGET_BYTES = 8 * 1024 * 1024;
 
 export function makeOpenUrlTool(
-  deps: { getConfig?: () => ForgeConfig; extraRoots?: () => readonly string[] } = {},
+  deps: {
+    getConfig?: () => ForgeConfig;
+    extraRoots?: () => readonly string[];
+    spawnProcess?: typeof spawn;
+  } = {},
 ): RegisteredTool {
   return {
     definition: {
@@ -400,11 +407,31 @@ export function makeOpenUrlTool(
       },
     },
     permission: 'read',
+    approval: (args, context) => {
+      const url = args['url'];
+      if (typeof url !== 'string' || !(url.startsWith('https://') || url.startsWith('http://')))
+        return undefined;
+      const readSecret = hasConversationReadSecret(context?.conversationId);
+      return {
+        detail: url,
+        dangerous: true,
+        reachesOut: 'network',
+        ...(readSecret
+          ? {
+              gateKind: 'taintGate' as const,
+              secretReadTaint: true,
+              cardReason: secretReadCardReason(context?.conversationId),
+              declineHint:
+                'tell the owner what you need to open; a secret read taints the whole chat',
+            }
+          : {}),
+      };
+    },
     handler: async (args) => {
       const url = args['url'] as string;
       if (url.startsWith('https://') || url.startsWith('http://')) {
-        await vscode.env.openExternal(vscode.Uri.parse(url));
-        return 'Opened.';
+        await openSystemBrowser(url, process.platform, deps.spawnProcess);
+        return `Opened ${url} in the default browser.`;
       }
       if (!/^[a-z]:[\\/]/i.test(url) && /^[a-z][a-z0-9+.-]*:/i.test(url))
         throw new Error(

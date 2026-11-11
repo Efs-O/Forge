@@ -108,9 +108,7 @@ const NATIVE_GROUP_BY_TOOL: ReadonlyMap<string, string> = new Map([
     'copy_to_clipboard',
     'read_clipboard',
   ].map((name) => [name, 'editor_ui'] as const),
-  ...['install_llamacpp', 'get_power_info', 'schedule_wake', 'sleep_computer'].map(
-    (name) => [name, 'system'] as const,
-  ),
+  ...['get_power_info', 'schedule_wake', 'sleep_computer'].map((name) => [name, 'system'] as const),
   ...['read_notebook', 'edit_notebook_cell'].map((name) => [name, 'notebook'] as const),
   // `create_directory` left this map with the tool itself (2026-10-29, lane B
   // item B3): the map is only consulted for registered names, so leaving the

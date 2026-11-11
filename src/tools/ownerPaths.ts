@@ -42,11 +42,9 @@ import type { RegisteredTool } from './ToolRegistry';
  * What the rule does NOT reach, each one checked rather than assumed:
  * - Forge's own code, not an agent tool call: `manage_jobs` writes
  *   `~/.forge/jobs/<id>.json` (its `mutation.paths` names them), the session
- *   logger writes `~/.forge/sessions/`, the background registry writes
- *   `~/.forge/background-execs/`, and `install_llamacpp` switches one field of
- *   the config through `ConfigWriter` under its own approval card. Wrapping
- *   those would refuse a feature, not a risk, so `registerAllTools.ts` wraps
- *   the agent's file tools and leaves these three.
+ *   logger writes `~/.forge/sessions/`, and the background registry writes
+ *   `~/.forge/background-execs/`. Wrapping those would refuse a feature, not a
+ *   risk, so `registerAllTools.ts` wraps the agent's file tools and leaves these.
  * - A path the shell computes at run time (for example, `Add-Content
  *   ~/.forge/$f x`, a script, `python -c`, or command substitution). A token
  *   matcher cannot see it. `~`, `$HOME`, `%USERPROFILE%`, `$env:USERPROFILE`,

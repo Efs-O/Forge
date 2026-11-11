@@ -2,43 +2,37 @@
 
 For the Forge agent and for people. Windows CUDA builds only.
 
-## The one-call way: `install_llamacpp`
+## The job way: `llamacpp_update`
 
-Ask the agent to "install the newest llama.cpp" and it calls `install_llamacpp`.
-The call needs your approval. Then it:
+This machine's `llama-updates` job is an agent job instead: it installs and
+smoke-tests a build by following `docs/LLAMACPP_UPDATE.md`, and the owner
+switches `llama_server.binary` in `~/.forge/policy.yaml`. The built-in action
+below also switches, from Forge's own code.
+
+A job whose action is `llamacpp_update` runs on its schedule, or now when you
+ask the agent to run it (`manage_jobs` `run_now`). It:
 
 1. finds the newest prerelease tag on `ggml-org/llama.cpp` (llama.cpp publishes
-   its `bNNNN` builds as prereleases), or uses the `tag` you give it;
-2. downloads the main zip matching `asset_pattern` (default
-   `llama-*-bin-win-cuda-*-x64.zip`, newest CUDA version) and its matching
+   its `bNNNN` builds as prereleases);
+2. downloads the main zip matching the job's `asset_pattern` and its matching
    `cudart` zip;
 3. checks both SHA-256 digests against the release API, and refuses if either
    is missing or wrong;
-4. extracts both into `%LOCALAPPDATA%\Forge\llama.cpp-<tag>\` (it will not
-   overwrite an existing folder);
-5. smoke-tests `llama-server.exe`: `--version` must report the build,
-   `--list-devices` must run, and one embeddings request runs when embeddings
-   are configured;
-6. deletes the downloaded zips;
-7. points `llama_server.binary` in `config.yaml` at the new build and keeps
-   the file's comments (pass `switch_config: false` to skip this).
+4. extracts both into `%LOCALAPPDATA%\Forge\llama.cpp-<tag>\`;
+5. smoke-tests `llama-server.exe`;
+6. stages the build, and switches `llama_server.binary` to it on an idle
+   scheduler tick, keeping the file's comments and the build it replaced.
 
-It does **not** restart the backend, because the model running the turn is that
-backend. The new build takes effect on the next model load, or at once if you
-type `/restart` in the chat — the same command as **Forge: Restart Backend** in
-the palette (`webview-ui/src/slashCommands.ts:132`).
-Old build folders are kept, so rolling back means pointing `llama_server.binary`
-at the previous folder.
+The pipeline is `src/jobs/actions/llamacppInstall.ts` (stages 2-5) and
+`src/jobs/actions/llamacppUpdate.ts` (staging, switch, rollback). The new build
+takes effect on the next model load, or at once after `/restart`.
+Old build folders except the one replaced are deleted after a switch, so
+rolling back means pointing `llama_server.binary` at that previous folder.
 
-It needs `jobs.allowed_hosts` in `config.yaml` to list `api.github.com`,
-`github.com`, `objects.githubusercontent.com` and
-`release-assets.githubusercontent.com`: the gate is re-checked on every
-redirect, and GitHub serves a release asset from one CDN or the other, so
-adding only three still fails at the hop. This is the same
-download gate the scheduled `llamacpp_update` job uses, and both run the same
-pipeline (`src/jobs/actions/llamacppInstall.ts`).
-
-The tool is advertised only when `llama_server.binary` is set.
+It needs `jobs.allowed_hosts` to list `api.github.com`, `github.com`,
+`objects.githubusercontent.com` and `release-assets.githubusercontent.com`:
+the gate is re-checked on every redirect, and GitHub serves a release asset
+from one CDN or the other, so adding only three still fails at the hop.
 
 ## Afterwards
 

@@ -129,13 +129,14 @@ describe('target-window gate (B2)', () => {
  * forks, UAC, or the taskbar.
  */
 describe('VS Code opt-in policy (Phase 3)', () => {
-  it('refuses ordinary Code by default and names the switch', () => {
+  it('refuses ordinary Code by default and identifies the owner setting', () => {
     const gate = new TargetWindowGate();
     const res = gate.approve(vscodeWindow);
     expect(res.ok).toBe(false);
     if (!res.ok) {
-      expect(res.reason).toMatch(/VS Code/);
-      expect(res.reason).toMatch(/allow_vscode/);
+      expect(res.reason).toBe(
+        `refusing to control a VS Code window ("${vscodeWindow.title}"); pick a different target. Controlling VS Code is the owner's setting permissions.desktop.allow_vscode in ~/.forge/policy.yaml, which no agent can change; if the task needs VS Code itself, ask the user.`,
+      );
     }
     expect(gate.hasApproved).toBe(false);
   });

@@ -10,8 +10,8 @@ import { buildDirForTag, newBinaryPath, stagingDir } from './stagedBuild';
 /**
  * Stages 2-5 of a llama.cpp install — download, verify, extract, smoke test —
  * with no job attached. The `llamacpp_update` job action stages its build
- * through this, and so does the `install_llamacpp` agent tool, so there is one
- * pipeline whichever way a build arrives. Nothing here touches config.yaml;
+ * through this (an on-demand install is `manage_jobs` `run_now` on that job), so
+ * there is one pipeline. Nothing here touches config.yaml;
  * switching `llama_server.binary` is the caller's decision.
  *
  *   2. Download the tag's main zip + its cudart (gated by allowed hosts).

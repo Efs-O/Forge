@@ -110,7 +110,6 @@ const DROP_CASES: DropCase[] = [
   { source: 'gitTools.ts:185 restore_file checkpointed overwrite', call: { toolName: 'restore_file' } },
   { source: 'imageSearchTool.ts:103 attached image upload', call: { toolName: 'image_search', dangerous: true } },
   { source: 'generateImageTool.ts:130 generation confirmation', call: { toolName: 'generate_image', dangerous: true } },
-  { source: 'llamacppInstallTool.ts:106 install confirmation', call: { toolName: 'install_llamacpp' } },
   {
     source: 'localAgentTool.ts:198 local delegation gate',
     call: {

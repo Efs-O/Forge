@@ -86,6 +86,21 @@ export function readWindowRect(raw: unknown): DesktopWindow['rect'] | undefined 
 }
 
 /**
+ * The rect a focus target is bound to, in the same nested shape as list_windows.
+ * The gate compares input points against it, so a defaulted 0×0 rect would bind a
+ * target whose every point is "outside the approved window" — a real window, an
+ * unfalsifiable refusal, and no hint that the driver never described its geometry.
+ */
+export function requireTargetRect(raw: unknown, title: string): DesktopWindow['rect'] {
+  const rect = readWindowRect(raw);
+  if (rect) return rect;
+  throw new Error(
+    `desktop_focus_window: the driver returned malformed geometry for "${title}"; ` +
+      'cannot bind a target whose rect is unknown',
+  );
+}
+
+/**
  * Read the monitor metadata the driver reports for a monitor capture, and
  * refuse a response that cannot say WHICH display it took.
  *

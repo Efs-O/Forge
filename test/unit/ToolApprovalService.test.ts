@@ -118,7 +118,7 @@ describe('ToolApprovalService', () => {
     try {
       service.setClankerMode('job-conversation', true);
       await expect(
-        service.request('install_llamacpp', 'switch config', true, 'job-conversation'),
+        service.request('generate_image', 'generate', true, 'job-conversation'),
       ).rejects.toMatchObject({
         name: 'ToolApprovalPolicyDenied',
         message: expect.stringContaining('RESULT: failed'),

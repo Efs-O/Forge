@@ -123,7 +123,7 @@ export function makeManageJobsTool(deps: ManageJobsDeps): RegisteredTool {
             definition: {
               type: 'object',
               description:
-                'For `create` and `update` only: the job definition (a partial for `update`). Fields: ' +
+                'For `create` and `update` only: the job definition (a partial for `update`). `create` requires `name`, `schedule`, `check` and `on_change`; `enabled` defaults to true, `wake` to false, `after` to stay_awake and `action` to null. Fields: ' +
                 '`name` (string), `enabled` (bool), `wake` (bool), `after` (stay_awake|sleep_if_idle), ' +
                 '`schedule` ({kind:interval,minutes} | {kind:daily,at:"HH:MM"} | {kind:weekly,days,at}), ' +
                 '`check` ({kind:github_release,repo,asset_pattern?} | {kind:github_issue,repo,issue_number} ' +

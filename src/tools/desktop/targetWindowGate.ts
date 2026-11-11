@@ -108,7 +108,7 @@ export function policyRefusalFor(
   }
   if (isVsCodeProcessName(win.processName)) {
     if (policy.allowVsCode) return undefined;
-    return `refusing to control a VS Code window ("${win.title}"); pick a different target, or set permissions.desktop.allow_vscode: true to allow it with per-action confirmation`;
+    return `refusing to control a VS Code window ("${win.title}"); pick a different target. Controlling VS Code is the owner's setting permissions.desktop.allow_vscode in ~/.forge/policy.yaml, which no agent can change; if the task needs VS Code itself, ask the user.`;
   }
   if (/user account control|secure desktop/i.test(win.title)) {
     return 'refusing to control the secure desktop / UAC prompt';
@@ -117,6 +117,29 @@ export function policyRefusalFor(
     return 'refusing to control the taskbar';
   }
   return undefined;
+}
+
+export function focusMovedRefusal(
+  target: Readonly<Record<string, unknown>>,
+  foreground: Readonly<Record<string, unknown>>,
+): string {
+  const targetTitle = String(target['title'] ?? '');
+  const targetId = String(target['id'] ?? '');
+  const foregroundId = String(foreground['id'] ?? '');
+  const foregroundTitle = String(foreground['title'] ?? '');
+  if (foregroundId && foregroundId !== '0') {
+    return (
+      `desktop_focus_window: "${targetTitle}" (HWND ${targetId}) was focused, but ` +
+      `"${foregroundTitle}" (HWND ${foregroundId}) took the foreground right after ` +
+      '(usually a dialog the app opened). Input would be refused. Act on that window instead: ' +
+      `desktop_focus_window with window_id "${foregroundId}", or close it first.`
+    );
+  }
+  return (
+    `desktop_focus_window: "${targetTitle}" (HWND ${targetId}) was focused, but lost the ` +
+    'foreground right after and no window holds it now. Input would be refused. Pick a normal ' +
+    'application window from desktop_windows.'
+  );
 }
 
 /**

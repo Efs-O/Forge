@@ -533,6 +533,18 @@ function Invoke-Op($req) {
       $h = [IntPtr]$w.id
       $focusResult = Focus-Window $h
       if ($focusResult -eq 'refused_focus_lock') { return @{ ok = $false; reason = 'Windows refused to focus the target (focus lock): ask the user to click the window once, then retry' } }
+      if ($focusResult -eq 'ok' -or $focusResult -eq 'ok_attached') {
+        Start-Sleep -Milliseconds 200
+        $foreground = [Forge.Win32]::GetForegroundWindow()
+        if ($foreground -ne $h) {
+          $foregroundInfo = if ($foreground -eq [IntPtr]::Zero) {
+            @{ id = '0'; title = '' }
+          } else {
+            @{ id = $foreground.ToString(); title = (Get-WindowText $foreground) }
+          }
+          return @{ ok = $true; focus = 'moved'; window = (Get-WindowInfo $h); foreground = $foregroundInfo }
+        }
+      }
       return @{ ok = $true; focus = $focusResult; window = (Get-WindowInfo $h) }
     }
     'sleep' { Start-Sleep -Milliseconds ([int]$req.ms); return @{ ok = $true } }

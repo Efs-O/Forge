@@ -1,6 +1,9 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { EventEmitter } from 'events';
+import type { ChildProcess } from 'child_process';
+import type { spawn } from 'child_process';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const { openExternal } = vi.hoisted(() => ({
@@ -17,6 +20,7 @@ vi.mock('vscode', () => {
 
 import * as vscode from 'vscode';
 import { makeOpenUrlTool } from '../../src/tools/uxTools';
+import { openSystemBrowser } from '../../src/tools/systemBrowser';
 
 const root = vscode.workspace.workspaceFolders![0]!.uri.fsPath;
 const copy = (fixture: string, name: string) =>
@@ -38,13 +42,73 @@ beforeAll(() => {
 });
 afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
 
+function fakeSpawn(emit: 'spawn' | 'error' = 'spawn') {
+  const child = new EventEmitter() as ChildProcess;
+  child.unref = vi.fn();
+  const spawnProcess = vi.fn((() => {
+    queueMicrotask(() => {
+      if (emit === 'error') child.emit('error', new Error('browser missing'));
+      else child.emit('spawn');
+    });
+    return child;
+  }) as typeof spawn);
+  return { child, spawnProcess };
+}
+
 describe('open_url_in_browser workspace files', () => {
+  it('asks with the URL for HTTP(S), but not workspace HTML paths', () => {
+    const approval = makeOpenUrlTool().approval;
+    expect(approval?.({ url: 'https://example.com/' })?.detail).toBe('https://example.com/');
+    expect(approval?.({ url: 'page.html' })).toBeUndefined();
+  });
+
+  it('opens HTTP(S) URLs through the system browser and returns the exact success text', async () => {
+    const { spawnProcess } = fakeSpawn();
+    const url = 'https://example.com/';
+    const result = await makeOpenUrlTool({ spawnProcess }).handler({ url });
+    expect(result).toBe('Opened https://example.com/ in the default browser.');
+    expect(spawnProcess).toHaveBeenCalledWith(
+      process.platform === 'win32'
+        ? 'rundll32.exe'
+        : process.platform === 'darwin'
+          ? 'open'
+          : 'xdg-open',
+      process.platform === 'win32' ? ['url.dll,FileProtocolHandler', url] : [url],
+      { shell: false, detached: true, stdio: 'ignore' },
+    );
+  });
+
+  it('returns the exact system browser spawn error', async () => {
+    const { spawnProcess } = fakeSpawn('error');
+    const error = await makeOpenUrlTool({ spawnProcess })
+      .handler({ url: 'https://example.com/' })
+      .catch((caught: unknown) => caught as Error);
+    expect(error.message).toBe(
+      'open_url_in_browser: could not start the system browser: browser missing',
+    );
+  });
+
+  it.each([
+    ['win32', 'rundll32.exe', ['url.dll,FileProtocolHandler', 'https://example.com/']],
+    ['darwin', 'open', ['https://example.com/']],
+    ['linux', 'xdg-open', ['https://example.com/']],
+  ] as const)('uses the %s browser launcher argv', async (platform, command, args) => {
+    const { spawnProcess } = fakeSpawn();
+    await openSystemBrowser('https://example.com/', platform, spawnProcess);
+    expect(spawnProcess.mock.calls[0]?.[0]).toBe(command);
+    expect(spawnProcess.mock.calls[0]?.[1]).toEqual(args);
+  });
+
   it('opens workspace HTML/PDF and renders Markdown to a styled preview', async () => {
     const previewDir = path.join(root, '.forge', 'tmp', 'preview');
     fs.mkdirSync(previewDir, { recursive: true });
     const stale = path.join(previewDir, 'old.html');
     fs.writeFileSync(stale, 'old preview');
-    fs.utimesSync(stale, new Date(Date.now() - 8 * 24 * 60 * 60 * 1000), new Date(Date.now() - 8 * 24 * 60 * 60 * 1000));
+    fs.utimesSync(
+      stale,
+      new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+      new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+    );
     const tool = makeOpenUrlTool();
     await tool.handler({ url: 'page.html' });
     expect(path.basename(String(openExternal.mock.calls[0]?.[0]?.fsPath))).toBe('page.html');

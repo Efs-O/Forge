@@ -274,7 +274,6 @@ describe('lazy tool groups', () => {
       'send_file',
       'render_html_to_image',
       'get_editor_context',
-      'install_llamacpp',
       'get_power_info',
       'remember',
       'read_notebook',
@@ -310,7 +309,6 @@ describe('lazy tool groups', () => {
       lazyGroupForTool('view_image'),
       lazyGroupForTool('send_file'),
       lazyGroupForTool('get_editor_context'),
-      lazyGroupForTool('install_llamacpp'),
       lazyGroupForTool('get_power_info'),
       lazyGroupForTool('remember'),
       lazyGroupForTool('recall'),
@@ -323,7 +321,6 @@ describe('lazy tool groups', () => {
       'media',
       'media',
       'editor_ui',
-      'system',
       'system',
       'memory',
       'memory',
@@ -376,7 +373,7 @@ describe('lazy tool groups', () => {
       'memory: remember, recall, forget notes kept across conversations (remember)\n',
     );
     expect(loader?.function.description).toContain(
-      'system: this PC: power, sleep/wake, status, llama.cpp (get_power_info, get_system_status, install_llamacpp)',
+      'system: this PC: power, sleep/wake, status (get_power_info, get_system_status)',
     );
     // The media line carries searchable verbs and the exact registered names.
     expect(loader?.function.description).toMatch(

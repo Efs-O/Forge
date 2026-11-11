@@ -51,7 +51,6 @@ import { makeSystemStatusTool } from './systemStatusTool';
 import type { BackendProcess } from '../system/SystemReport';
 import { makeLoadToolGroupTool } from './toolGroupTools';
 import type { MediaToolDeps } from './media/mediaToolDeps';
-import { makeInstallLlamacppTool } from './llamacppInstallTool';
 import { makeManageJobsTool } from './jobTools';
 import { makeAskAgentTool } from './askAgentTool';
 import type { StartAgentAsk } from '../agentLinks/pendingAgentAsks';
@@ -114,8 +113,8 @@ export function registerAllTools(
   jobs?: {
     store: JobStore;
     hostFacade: () => ForgeHostFacade | undefined;
-    /** The active config.yaml: install_llamacpp's binary switch, and the
-     *  owner-only guard below. Same value extension.ts passes to both. */
+    /** The active config.yaml, for the owner-only guard below and
+     *  `manage_jobs`' CLI-agent allowance. */
     configPath?: string;
   },
   onForgetMemory?: (key: string) => void,
@@ -167,13 +166,11 @@ export function registerAllTools(
    * folder can appear after activation and a wrapped tool must not refuse a path
    * it was never shown.
    *
-   * Deliberately NOT wrapped, each one checked: `install_llamacpp` switches one
-   * field of this same file through `ConfigWriter` under its own approval card,
-   * `manage_jobs` writes `~/.forge/jobs/<id>.json` as its own state, and the
+   * Deliberately NOT wrapped, each one checked: `manage_jobs` writes `~/.forge/jobs/<id>.json` as its own state, and the
    * image tools declare no paths. Refusing those would refuse a feature, not a
    * risk — the guard is about an agent rewriting the rules it is judged by.
    * The config path comes from `jobs.configPath`, the same value extension.ts
-   * already threads to install_llamacpp. It matters only while the policy file is
+   * threads to the jobs tools. It matters only while the policy file is
    * absent: `ownerOnlySetFor` asks whether `~/.forge/policy.yaml` exists on every
    * call, from this closure, so the wall on `config.yaml` comes back the moment the
    * owner deletes that file and goes the moment it exists — with no window reload
@@ -372,11 +369,6 @@ export function registerAllTools(
         ...(jobs.configPath ? { allowCliAgents: makeAllowCliAgents(jobs.configPath) } : {}),
       }),
     );
-  }
-
-  // On-demand llama.cpp install: the jobs action's pipeline without a job.
-  if (getConfig) {
-    registry.register(makeInstallLlamacppTool({ getConfig, configPath: jobs?.configPath }));
   }
 
   // Agent messaging. Self-suppressing until `agent_bus.enabled`, so a config

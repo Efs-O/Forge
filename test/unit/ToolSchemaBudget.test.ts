@@ -131,7 +131,9 @@ import {
 // 2026-11-11: 67,978 (+16, merged) after saying attended Clanker approves manage_jobs delete.
 // 2026-11-11: 68,000 (+22, merged) after message_chat list described all chats and list_executions marked this chat's runs.
 // 2026-11-11: 67,984 (-16, merged) after diagnostics editor scope and shared editor context.
-const MEASURED_CHARS = 67_984;
+// 2026-11-11: 66,897 (-1,087) after removing install_llamacpp (the llamacpp_update job covers it).
+// 2026-11-11: 67,049 (+152) after manage_jobs names the fields create requires (Group F).
+const MEASURED_CHARS = 67_049;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.
@@ -266,7 +268,7 @@ function advertisedChars(registry: ToolRegistry): number {
 }
 
 describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
-  // Windows advertises the most (shell, install_llamacpp), so the
+  // Windows advertises the most (shell, the desktop tools), so the
   // worst case is measured as Windows whatever the CI host is.
   const realPlatform = process.platform;
   beforeEach(() =>
@@ -283,7 +285,7 @@ describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
       .map((d) => d.function.name)
       .sort();
     expect(names).toHaveLength(registry.names().length);
-    expect(names).toHaveLength(91);
+    expect(names).toHaveLength(90);
     expect(names.filter((name) => name.startsWith('browser_'))).toHaveLength(15);
     expect(names.filter((name) => name.startsWith('desktop_'))).toHaveLength(9);
     // Spot-check the six self-suppressing tools that only appear when their
@@ -293,7 +295,6 @@ describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
       'image_search',
       'manage_jobs',
       'ask_agent',
-      'install_llamacpp',
       'upscale_image',
       'set_checkin',
     ]) {
@@ -311,7 +312,7 @@ describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
     expect(Math.ceil(description.length / 4.62)).toBeLessThanOrEqual(530);
   });
 
-  it('keeps the 66-tool non-computer-use schema under the character budget', () => {
+  it('keeps the 65-tool non-computer-use schema under the character budget', () => {
     const registry = makeMaximalRegistry();
     const chars = advertisedChars(registry);
     expect({

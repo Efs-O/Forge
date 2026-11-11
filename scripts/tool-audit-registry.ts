@@ -50,7 +50,7 @@ function maximalConfig(): ForgeConfig {
 }
 
 /**
- * desktop_* and install_llamacpp advertise on Windows only. The catalog prices
+ * desktop_* advertise on Windows only. The catalog prices
  * the maximal set, and Windows advertises the most, so a Linux or macOS CI
  * runner must read it as Windows does or the committed coverage matrix drifts.
  */

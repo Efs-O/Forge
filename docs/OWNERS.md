@@ -97,6 +97,7 @@ overlaps with an existing owner, extend the owner instead.
 | Question numbering, reply parsing, answer format     | `src/util/questionAnswers.ts`            |
 | Shared question option selection rules | `src/util/questionPicks.ts` |
 | `ask_user` schema and tool handoff | `src/tools/askUserTool.ts` |
+| System browser launch for `open_url_in_browser` | `src/tools/systemBrowser.ts` |
 | Agent notification: toast + remote fan-out           | `src/sidebar/UserNotificationService.ts` |
 | Model residency polling timer                        | `src/sidebar/ResidencyPoller.ts`         |
 | Timed pause for the agent loop                       | `src/tools/waitTool.ts`                  |
@@ -912,7 +913,6 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | A stopped run the owner closed by finishing it in the job's chat    | `src/jobs/resumedRun.ts` (wired at `src/sidebar/sidebarWiring.ts`) |
 | `llamacpp_update` action (stages 6-8, switch, rollback)    | `src/jobs/actions/llamacppUpdate.ts`                           |
 | llama.cpp install pipeline (download, verify, smoke test)  | `src/jobs/actions/llamacppInstall.ts`                          |
-| `install_llamacpp` tool (on-demand install + switch)       | `src/tools/llamacppInstallTool.ts`                             |
 | Scheduler-facing llamacpp action wrapper + busy gate       | `src/jobs/actions/llamacppAction.ts`                           |
 | Staged build metadata + 24 h TTL                           | `src/jobs/actions/stagedBuild.ts`                              |
 | llamacpp IO (sha256, extractZip, runCommand, setBinary)    | `src/jobs/actions/llamacppIo.ts`                               |

@@ -33,6 +33,15 @@ export const ALL_TOOL_PERMISSIONS = [
 
 export type ToolPermission = (typeof ALL_TOOL_PERMISSIONS)[number];
 
+/** The tiers that change nothing. The loop guard's no-progress checks judge only
+ *  rounds whose tools stay inside this set (`isMutatingTool`). */
+export const READ_ONLY_PERMISSIONS: ReadonlySet<ToolPermission> = new Set([
+  'read',
+  'search',
+  'fetch',
+  'git-read',
+]);
+
 export interface ToolApprovalMetadata {
   dangerous?: boolean;
   detail?: string;
@@ -256,4 +265,14 @@ export interface RegisteredTool {
    * the dispatch refusal derive from it, so the two halves cannot drift apart.
    */
   requiresVision?: (modelName: string) => string;
+}
+
+/** A tool is mutating when its base or any additional permission is outside
+ *  `READ_ONLY_PERMISSIONS`. An unknown tool counts as read-only. Argument-dependent
+ *  permissions are not judged: the loop guard sees names, not arguments. */
+export function isMutatingTool(tool: RegisteredTool | undefined): boolean {
+  if (!tool) return false;
+  return [tool.permission, ...(tool.additionalPermissions ?? [])].some(
+    (permission) => !READ_ONLY_PERMISSIONS.has(permission),
+  );
 }

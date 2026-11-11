@@ -25,6 +25,7 @@ import {
 import {
   DENY_VSCODE,
   TargetWindowGate,
+  focusMovedRefusal,
   policyRefusalFor,
   revokeRefusedCodeTargets,
   type ApprovedWindow,
@@ -47,6 +48,7 @@ import {
   readCaptureFrame,
   readMonitorMetadata,
   readWindowRect,
+  requireTargetRect,
   str,
 } from './driverProtocol';
 import { PowerShellTransport, type DesktopTransport } from './PowerShellTransport';
@@ -288,20 +290,16 @@ export class PowerShellDesktopDriver implements DesktopDriver {
   async focusWindow(target: DesktopFocusTarget): Promise<DesktopWindow> {
     const r = await this.transport.send({ op: 'focus_window', ...targetFields(target) });
     const w = (r['window'] ?? r) as Record<string, unknown>;
+    if (r['focus'] === 'moved') {
+      this.approved = undefined;
+      this.captures.clear();
+      this.gate.clear();
+      const foreground = (r['foreground'] ?? {}) as Record<string, unknown>;
+      throw new Error(focusMovedRefusal(w, foreground));
+    }
     const startTime = optNum(w['process_start_time']);
     this.requireReadableStartTime(startTime, str(w['title']));
-    // Same nested-rect shape as list_windows. The gate below compares input
-    // points against it, so a defaulted 0×0 rect would bind a target whose every
-    // point is "outside the approved window" — a real window, an unfalsifiable
-    // refusal, and no hint that the driver never described its geometry.
-    const rect =
-      readWindowRect(w['rect']) ??
-      (() => {
-        throw new Error(
-          `desktop_focus_window: the driver returned malformed geometry for "${str(w['title'])}"; ` +
-            'cannot bind a target whose rect is unknown',
-        );
-      })();
+    const rect = requireTargetRect(w['rect'], str(w['title']));
     const approved: ApprovedWindow = {
       hwnd: str(w['id']),
       pid: num(w['pid']),

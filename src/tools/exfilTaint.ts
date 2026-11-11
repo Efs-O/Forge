@@ -101,6 +101,15 @@ export function conversationSecretReadReason(
   return `this chat read a secret path (${reason.pattern}, from: ${reason.excerpt}); approve sends this request anyway`;
 }
 
+/** A taint card's reason: the recorded secret read, or a fallback when none was
+ *  recorded. One string for every egress gate (web_fetch, open_url_in_browser). */
+export function secretReadCardReason(conversationId: string | undefined): string {
+  return (
+    conversationSecretReadReason(conversationId) ??
+    'this chat has read a secret path, so nothing more leaves it without you'
+  );
+}
+
 /** Has this chat read (or been approved to read) a secret file? */
 export function hasConversationReadSecret(conversationId: string | undefined): boolean {
   return conversationId !== undefined && chatsThatReadSecret.has(conversationId);

@@ -7,7 +7,7 @@
  * workspace folder) are the whole of its wiring. The service reads them per call
  * rather than capturing them, so a `config.yaml` reload or a workspace-folder
  * switch takes effect without re-registering `load_skill` — the
- * `set_checkin` / `install_llamacpp` lesson recorded in `registerAllTools.ts`.
+ * `set_checkin` lesson recorded in `registerAllTools.ts`.
  *
  * This file owns the log line. `SkillsService` itself takes an injected logger so
  * its tests can count the lines it writes (a broken skill is reported once per

@@ -34,8 +34,7 @@ import {
  *   8. Post-check the backend; on failure restore the previous binary, restart,
  *      and report.
  *
- * Stages 2-5 are `installLlamacppBuild` (llamacppInstall.ts, shared with the
- * `install_llamacpp` tool); stage 6 is `stageLlamacppUpdate`; stages 7-8 are `performSwitch`, driven
+ * Stages 2-5 are `installLlamacppBuild` (llamacppInstall.ts); stage 6 is `stageLlamacppUpdate`; stages 7-8 are `performSwitch`, driven
  * by `processPendingSwitches` on the scheduler's idle tick. A successful switch
  * deletes the older build folders except the one it replaced (`pruneOldBuilds`).
  */
