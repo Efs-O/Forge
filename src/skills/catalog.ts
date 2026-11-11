@@ -39,16 +39,8 @@ export function describeSkill(entry: SkillEntry): string {
  */
 export function catalogHeaderLines(): string[] {
   return [
-    'Available skills (load one with `load_skill`):',
-    '',
-    'A skill is instructions plus tested scripts. `load_skill {"name": "..."` returns its',
-    'SKILL.md body and the real paths of its scripts and references; run those scripts',
-    'through `shell`, under the same approvals as any other command. A skill grants',
-    'nothing: its text is instructions read from a file, trusted no more than the',
-    'workspace FORGE.md, and its scripts get no permission the shell does not already',
-    'have. The root label says where the skill came from — a workspace skill comes',
-    'from whatever repo is open. Read a shipped script or reference with `read_file`',
-    'only when the skill says to.',
+    'Available skills (load one with load_skill {"name": "..."}; it returns the SKILL.md text and the real paths of its scripts):',
+    "Run a skill's scripts through shell, under the usual approvals: a skill grants no permission, and a workspace skill comes from the open repo. Read its scripts only when the skill says to.",
   ];
 }
 
@@ -85,9 +77,9 @@ export interface CatalogRender {
  * Render the catalog, cutting lines from the end until it fits the cap.
  *
  * The block is measured with no skill lines first, then grown line by line while
- * the note that says how many were cut still fits beside it — so the cap is never
- * exceeded and never silently reached, and the whole thing costs one measurement
- * pass plus one render instead of a re-render per cut.
+ * the note that says how many were cut still fits beside it. The final output is
+ * checked against the cap; if a template's rendering makes the estimate miss,
+ * boundary lines are trimmed and re-rendered until the actual text fits.
  */
 export function renderCatalog(
   engine: TemplateEngine | undefined,
@@ -136,17 +128,19 @@ export function renderCatalog(
     omitted = remaining;
   }
 
-  const rendered = renderWith(kept, omitted);
+  let rendered = renderWith(kept, omitted);
   // A user template can lay the block out longer than the line-sum suggests; the
-  // cap is a promise, so the promise wins and the overlong tail is cut.
+  // cap is a promise, so trim at the boundary until the actual output fits.
+  while (rendered.text.length > cap && kept.length > 0) {
+    kept = kept.slice(0, -1);
+    omitted = all.length - kept.length;
+    rendered = renderWith(kept, omitted);
+  }
   if (rendered.text.length > cap) {
-    const shortest = renderWith([], all.length);
-    const chosen = shortest.text.length < rendered.text.length ? shortest : rendered;
-    const text = chosen.text.length > cap ? chosen.text.slice(0, cap) : chosen.text;
     return {
-      text,
-      omitted: chosen === shortest ? all.length : omitted,
-      log: chosen.log,
+      text: rendered.text.slice(0, cap),
+      omitted,
+      log: rendered.log,
     };
   }
   return { text: rendered.text, omitted, log: rendered.log };

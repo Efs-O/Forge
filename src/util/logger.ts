@@ -10,11 +10,17 @@ const LEVELS: Record<LogLevel, number> = {
 };
 
 class Logger {
-  private channel: vscode.OutputChannel;
+  private created: vscode.OutputChannel | undefined;
   private level: LogLevel = 'info';
 
-  constructor() {
-    this.channel = vscode.window.createOutputChannel('Forge');
+  /**
+   * Created on first use, not at import: a module that merely imports the
+   * logger (git discovery, reached from read_file) must load without a VS Code
+   * window, as unit tests and early activation do.
+   */
+  private get channel(): vscode.OutputChannel {
+    this.created ??= vscode.window.createOutputChannel('Forge');
+    return this.created;
   }
 
   setLevel(level: LogLevel): void {
@@ -49,7 +55,8 @@ class Logger {
   }
 
   dispose(): void {
-    this.channel.dispose();
+    this.created?.dispose();
+    this.created = undefined;
   }
 }
 

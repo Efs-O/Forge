@@ -24,8 +24,6 @@ import { lazyGroupForTool, resetLazyToolGroups } from '../../src/tools/lazyToolG
 import { ALL_TOOL_PERMISSIONS, ToolRegistry } from '../../src/tools/ToolRegistry';
 import type { ForgeConfig } from '../../src/config/types';
 
-const REPO_ROOT = path.resolve(__dirname, '..', '..');
-
 let base: string;
 let fakeExtension: string;
 let userRoot: string;
@@ -38,14 +36,23 @@ const MANIFEST =
 function writeSkill(
   root: string,
   name: string,
-  options: { body?: string; scripts?: string[]; references?: string[]; configJson?: string } = {},
+  options: {
+    body?: string;
+    scripts?: string[];
+    references?: string[];
+    configJson?: string;
+    requiresTools?: string[];
+  } = {},
 ): string {
   const folder = path.join(root, name);
   fs.mkdirSync(path.join(folder, 'scripts', 'nested'), { recursive: true });
   fs.mkdirSync(path.join(folder, 'references'), { recursive: true });
+  const requiresTools = options.requiresTools?.length
+    ? `requires_tools: ${options.requiresTools.join(', ')}\n`
+    : '';
   fs.writeFileSync(
     path.join(folder, 'SKILL.md'),
-    `---\nname: ${name}\ndescription: One line about ${name}.\n---\n\n${options.body ?? '# body\n'}`,
+    `---\nname: ${name}\ndescription: One line about ${name}.\n${requiresTools}---\n\n${options.body ?? '# body\n'}`,
     'utf8',
   );
   for (const script of options.scripts ?? []) {
@@ -81,9 +88,27 @@ function serviceFor(configOverrides: Partial<ForgeConfig> = {}): SkillsService {
   });
 }
 
+function registerLazyTool(name: string): ToolRegistry {
+  const registry = new ToolRegistry();
+  registry.register({
+    definition: {
+      type: 'function',
+      function: {
+        name,
+        description: 'Test tool.',
+        parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+      },
+    },
+    permission: 'read',
+    handler: async () => 'ok',
+  });
+  return registry;
+}
+
 const context = { beforeMutate: () => undefined };
 
 beforeEach(() => {
+  resetLazyToolGroups();
   base = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-load-skill-'));
   fakeExtension = path.join(base, 'extension');
   fs.mkdirSync(fakeExtension, { recursive: true });
@@ -98,6 +123,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetLazyToolGroups();
   fs.rmSync(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
@@ -130,7 +156,9 @@ describe('load_skill', () => {
       expect(fs.existsSync(entry), entry).toBe(true);
     }
     expect(shown).toContain(fs.realpathSync(path.join(skillFolder, 'scripts', 'run.py')));
-    expect(shown).toContain(fs.realpathSync(path.join(skillFolder, 'scripts', 'nested', 'helper.py')));
+    expect(shown).toContain(
+      fs.realpathSync(path.join(skillFolder, 'scripts', 'nested', 'helper.py')),
+    );
     expect(shown).toContain(fs.realpathSync(path.join(skillFolder, 'references', 'notes.md')));
     expect(result).toContain('shell');
     expect(result).toContain('[user]');
@@ -171,6 +199,48 @@ describe('load_skill', () => {
     expect(result).toContain('demo-skill');
     expect(result).toContain('another-skill');
     expect(result).not.toContain('no-such-skill is a known skill');
+  });
+
+  it('refuses a skill whose required tools are not registered with the exact setup guidance', async () => {
+    writeSkill(userRoot, 'needs-media', { requiresTools: ['generate_music', 'generate_video'] });
+    const tool = makeLoadSkillTool(serviceFor({ skills: { enabled: true } }));
+    expect(await tool.handler({ name: 'needs-media' }, context)).toBe(
+      'Error: load_skill: skill "needs-media" needs generate_music, generate_video, which this Forge does not offer (not configured). Its tools must be set up first.',
+    );
+  });
+
+  it('loads a skill when its required tool is registered but the lazy group is still unloaded', async () => {
+    writeSkill(userRoot, 'needs-music', { requiresTools: ['generate_music'] });
+    registerLazyTool('generate_music');
+    const service = serviceFor({ skills: { enabled: true } });
+    expect(service.catalogFor(undefined)).toContain('needs-music');
+    const result = String(
+      await makeLoadSkillTool(service).handler({ name: 'needs-music' }, context),
+    );
+    expect(result).toContain('Loaded skill needs-music');
+  });
+
+  it('identifies a missing skill name that is a registered tool group', async () => {
+    registerLazyTool('remember');
+    const tool = makeLoadSkillTool(serviceFor({ skills: { enabled: true } }));
+    expect(await tool.handler({ name: 'memory' }, context)).toBe(
+      'Error: load_skill found no skill named "memory". Known skills: demo-skill. Load a listed name, or ask the owner to add a folder under .forge/skills/. "memory" is a tool group, not a skill: load it with load_tool_group {"group": "memory"}.',
+    );
+  });
+
+  it('identifies a missing skill name that is a registered tool', async () => {
+    registerLazyTool('remember');
+    const tool = makeLoadSkillTool(serviceFor({ skills: { enabled: true } }));
+    expect(await tool.handler({ name: 'remember' }, context)).toBe(
+      'Error: load_skill found no skill named "remember". Known skills: demo-skill. Load a listed name, or ask the owner to add a folder under .forge/skills/. "remember" is a tool, not a skill: call it directly.',
+    );
+  });
+
+  it('leaves an unrelated unknown skill name unchanged', async () => {
+    const tool = makeLoadSkillTool(serviceFor({ skills: { enabled: true } }));
+    expect(await tool.handler({ name: 'quantum-fluxcapacitor' }, context)).toBe(
+      'Error: load_skill found no skill named "quantum-fluxcapacitor". Known skills: demo-skill. Load a listed name, or ask the owner to add a folder under .forge/skills/.',
+    );
   });
 
   it('an unknown name with nothing installed says so instead of listing an empty set', async () => {

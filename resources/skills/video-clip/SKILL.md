@@ -1,6 +1,7 @@
 ---
 name: video-clip
 description: Help plan a short local video clip, then render it with generate_video.
+requires_tools: generate_video
 ---
 
 # Video clip

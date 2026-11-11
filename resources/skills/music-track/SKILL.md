@@ -1,6 +1,7 @@
 ---
 name: music-track
 description: Plan a local music track with the user, then render it with generate_music.
+requires_tools: generate_music
 ---
 
 # Music track

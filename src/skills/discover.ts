@@ -43,6 +43,8 @@ export interface SkillEntry {
   name: string;
   /** The one-line `description` from the frontmatter, shown in the catalog. */
   description: string;
+  /** Optional tool names, written as a comma-separated frontmatter scalar. */
+  requiresTools: string[];
   root: SkillRootKind;
   /** The folder as it was found, before symlink resolution. */
   linkPath: string;
@@ -68,7 +70,13 @@ export interface DiscoveredSkills {
 }
 
 export type ParsedManifest =
-  | { ok: true; name: string; description: string; bodyStart: number }
+  | {
+      ok: true;
+      name: string;
+      description: string;
+      requiresTools: string[];
+      bodyStart: number;
+    }
   | { ok: false; reason: string };
 
 /** The most characters of a description the catalog line will carry. */
@@ -159,10 +167,17 @@ export function parseSkillManifest(content: string, expectedFolderName: string):
   }
   const description = values.get('description') ?? '';
   if (!description) return { ok: false, reason: 'the frontmatter has no `description:`' };
+  // Frontmatter here accepts scalar `key: value` lines only; commas let the
+  // optional field name more than one tool without adding a second YAML parser.
+  const requiresTools = (values.get('requires_tools') ?? '')
+    .split(',')
+    .map((tool) => tool.trim())
+    .filter(Boolean);
   return {
     ok: true,
     name,
     description: truncateDescription(description),
+    requiresTools,
     bodyStart: offsetAfterLines(content, closeIndex + 1),
   };
 }
@@ -330,6 +345,7 @@ export function discoverSkills(roots: readonly SkillRoot[]): DiscoveredSkills {
       const entry: SkillEntry = {
         name: parsed.name,
         description: parsed.description,
+        requiresTools: parsed.requiresTools,
         root: root.kind,
         linkPath,
         folderPath: realFolder,

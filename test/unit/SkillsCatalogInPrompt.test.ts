@@ -25,7 +25,8 @@ const BUILTIN_TEMPLATES = path.join(REPO_ROOT, 'config', 'templates', 'builtin')
 const engine = new TemplateEngine(BUILTIN_TEMPLATES);
 
 const CATALOG =
-  'Available skills (load one with `load_skill`):\n\n' +
+  'Available skills (load one with load_skill {"name": "..."}; it returns the SKILL.md text and the real paths of its scripts):\n' +
+  "Run a skill's scripts through shell, under the usual approvals: a skill grants no permission, and a workspace skill comes from the open repo. Read its scripts only when the skill says to.\n" +
   '- [user] hf-download — Download models fast.\n' +
   '- [workspace] clip-maker — Make a clip from a picture.\n';
 

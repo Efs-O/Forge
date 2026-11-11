@@ -23,6 +23,7 @@ import type { TemplateEngine } from '../llm/TemplateEngine';
 import { discoverSkills, skillRoots, type SkillEntry, type SkillRoot } from './discover';
 import { renderCatalog, SKILL_CATALOG_CHAR_CAP } from './catalog';
 import { loadSkill, type LoadedSkill } from './loadSkill';
+import { lazyGroupForTool, lazyGroupMembers } from '../tools/lazyToolGroups';
 
 export interface SkillsServiceOptions {
   getConfig: () => ForgeConfig;
@@ -131,7 +132,7 @@ export class SkillsService {
     const cache = this.discover();
     this.logSkips(cache);
     const engine = this.options.getTemplateEngine?.();
-    const rendered = renderCatalog(engine, cache.entries);
+    const rendered = renderCatalog(engine, this.availableEntries(cache.entries));
     if (rendered.log) this.log(rendered.log);
     if (conversation) {
       conversation.skillsCatalog = rendered.text;
@@ -150,15 +151,35 @@ export class SkillsService {
    */
   listCatalogEntries(): SkillEntry[] {
     if (!this.isEnabled()) return [];
-    return this.discover().entries;
+    return this.availableEntries(this.discover().entries);
+  }
+
+  /** Required tools not present in the current registry, even if their group is unloaded. */
+  unavailableRequiredTools(name: string): string[] {
+    if (!this.isEnabled()) return [];
+    const entry = this.discover().entries.find((candidate) => candidate.name === name);
+    return entry ? this.missingRequiredTools(entry) : [];
   }
 
   /** Load one skill by name, or null when no root has that name. */
   async loadSkillByName(name: string): Promise<LoadedSkill | null> {
     if (!this.isEnabled()) return null;
-    const entry = this.listCatalogEntries().find((candidate) => candidate.name === name);
-    if (!entry) return null;
+    const entry = this.discover().entries.find((candidate) => candidate.name === name);
+    if (!entry || this.missingRequiredTools(entry).length > 0) return null;
     return loadSkill(entry);
+  }
+
+  private availableEntries(entries: readonly SkillEntry[]): SkillEntry[] {
+    return entries.filter((entry) => this.missingRequiredTools(entry).length === 0);
+  }
+
+  private missingRequiredTools(entry: SkillEntry): string[] {
+    return entry.requiresTools.filter((toolName) => {
+      const group = lazyGroupForTool(toolName);
+      // Native lazy-group membership is recorded by ToolRegistry.register, not
+      // by load_tool_group, so an unloaded group's registered tools count.
+      return group !== undefined && !lazyGroupMembers(group).includes(toolName);
+    });
   }
 
   /**

@@ -158,16 +158,30 @@ describe('unknown tool name hints', () => {
 
   it('keeps the load_tool_group instruction for a retired lazy-group tool', async () => {
     const registry = new ToolRegistry();
+    registry.register(tool('git_read'));
+    registry.register(tool('load_tool_group', { advertise: hasAvailableLazyGroup }));
+
+    const result = await dispatchUnknown({ name: 'git_status', registry });
+
+    expect(result).toBe(
+      'Error: unknown tool "git_status"; it was replaced by "git_read" (operation="status"); ' +
+        'group "git" is unloaded; call load_tool_group with "git".',
+    );
+    expect(result.length).toBeLessThanOrEqual(200);
+  });
+
+  // code_intel is offered in every chat since 2026-11-11 (17be1df0), so its
+  // retired names need no load_tool_group step.
+  it('names the always-offered replacement without a group step', async () => {
+    const registry = new ToolRegistry();
     registry.register(tool('code_intel'));
     registry.register(tool('load_tool_group', { advertise: hasAvailableLazyGroup }));
 
     const result = await dispatchUnknown({ name: 'get_diagnostics', registry });
 
-    expect(result).toContain('was replaced by "code_intel"');
-    expect(result).toContain(
-      'group "code_intel" is unloaded; call load_tool_group with "code_intel"',
+    expect(result).toBe(
+      'Error: unknown tool "get_diagnostics"; it was replaced by "code_intel" (operation="diagnostics").',
     );
-    expect(result.length).toBeLessThanOrEqual(200);
   });
 
   it('suggests a unique eligible truncated name and explains an unloaded group', async () => {

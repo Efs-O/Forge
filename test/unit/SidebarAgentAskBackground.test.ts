@@ -130,13 +130,11 @@ describe('ask_agent background asks', () => {
     await flush();
     expect(deliver).toHaveBeenCalledTimes(1);
     expect(deliver.mock.calls[0]![1]).toBe(chatId);
-    expect(deliver.mock.calls[0]![0]).toMatch(
-      new RegExp(
-        `^\\*\\*Claude replied\\*\\* \\(ask_agent exchange ${exchange}: Review the plan\\)`,
-        'u',
-      ),
+    // No live link here, so the heading says a new background session answered.
+    expect(deliver.mock.calls[0]![0]).toBe(
+      `**Claude replied** (ask_agent exchange ${exchange}: Review the plan; ` +
+        'a new background Claude session answered, not a session the owner has open)\n\nLooks right.',
     );
-    expect(deliver.mock.calls[0]![0]).toContain('Looks right.');
     expect(checkpoints.commitTurn).toHaveBeenCalledTimes(1);
     expect(isAskAgentRunning(chatId)).toBe(false);
     expect(pendingAgentAsksFor(chatId)).toEqual([]);

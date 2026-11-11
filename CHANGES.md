@@ -3,6 +3,9 @@
 ## Unreleased
 
 - `image_search` now treats SerpApi's successful no-match answers as results and suggests another search instead of reporting an error.
+- Skills that require optional tools stay out of the catalog until those tools are registered; `load_skill` explains what must be configured.
+- The skills catalog now shows the correct `load_skill` call shape and a shorter guide to running skill scripts.
+- Wrong skill names that match a registered lazy tool or group now point to the direct tool call or `load_tool_group`.
 - `browser_scroll` can bring a selector or inspected element into view without choosing a scroll distance.
 - `shell.cwd` now explains that relative paths inside the command resolve from the selected working directory.
 - `read_notebook` now says it reads `.ipynb` files only; non-notebook files point to `read_file`.

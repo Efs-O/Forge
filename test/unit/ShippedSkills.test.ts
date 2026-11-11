@@ -80,7 +80,23 @@ describe('resources/skills/ (the shipped skill folder)', () => {
     }
   });
 
-  it('ships hf-download with its script, byte-identical to the owner\'s user skill', () => {
+  it('marks the media skills with the tool each one requires', () => {
+    const music = parseSkillManifest(
+      fs.readFileSync(path.join(SKILLS_ROOT, 'music-track', 'SKILL.md'), 'utf8'),
+      'music-track',
+    );
+    const video = parseSkillManifest(
+      fs.readFileSync(path.join(SKILLS_ROOT, 'video-clip', 'SKILL.md'), 'utf8'),
+      'video-clip',
+    );
+    expect(music.ok).toBe(true);
+    expect(video.ok).toBe(true);
+    if (!music.ok || !video.ok) return;
+    expect(music.requiresTools).toEqual(['generate_music']);
+    expect(video.requiresTools).toEqual(['generate_video']);
+  });
+
+  it("ships hf-download with its script, byte-identical to the owner's user skill", () => {
     const script = path.join(SKILLS_ROOT, 'hf-download', 'scripts', 'hf_parallel_dl.py');
     expect(fs.existsSync(script)).toBe(true);
     if (!fs.existsSync(USER_SKILL_SCRIPT)) {

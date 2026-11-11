@@ -15,12 +15,14 @@ import type { RegisteredTool } from './ToolRegistry';
 import { MAX_READ_FILE_CHARS, capResultText } from './resultCap';
 import { SKILL_ROOT_LABELS, type SkillEntry } from '../skills/discover';
 import type { LoadedSkill } from '../skills/loadSkill';
+import { lazyGroupNames, lazyGroupMembers } from './lazyToolGroups';
 
 /** What the tool needs: the live skill set, and one skill read by name. */
 export interface LoadSkillProvider {
   isEnabled(): boolean;
   listCatalogEntries(): SkillEntry[];
   loadSkillByName(name: string): Promise<LoadedSkill | null>;
+  unavailableRequiredTools?(name: string): string[];
 }
 
 const USAGE_SHAPE = 'load_skill {"name": "..."}';
@@ -118,12 +120,28 @@ export function makeLoadSkillTool(provider: LoadSkillProvider): RegisteredTool {
       if (!name) {
         return `Error: load_skill needs a skill name. Send \`${USAGE_SHAPE}\` with the name from the catalog.`;
       }
+      const missingTools = provider.unavailableRequiredTools?.(name) ?? [];
+      if (missingTools.length > 0) {
+        return (
+          `Error: load_skill: skill "${name}" needs ${missingTools.join(', ')}, ` +
+          'which this Forge does not offer (not configured). Its tools must be set up first.'
+        );
+      }
       const loaded = await provider.loadSkillByName(name);
       if (!loaded) {
         const entries = provider.listCatalogEntries();
+        const groupNames = lazyGroupNames();
+        const toolGroup = groupNames.find((group) => group === name);
+        const registeredTool = groupNames.some((group) => lazyGroupMembers(group).includes(name));
+        const hint = toolGroup
+          ? ` "${name}" is a tool group, not a skill: load it with load_tool_group {"group": "${name}"}.`
+          : registeredTool
+            ? ` "${name}" is a tool, not a skill: call it directly.`
+            : '';
         return (
           `Error: load_skill found no skill named "${name}". ${knownSkillsLine(entries)} ` +
-          'Load a listed name, or ask the owner to add a folder under .forge/skills/.'
+          'Load a listed name, or ask the owner to add a folder under .forge/skills/.' +
+          hint
         );
       }
       if (loaded.readError) {

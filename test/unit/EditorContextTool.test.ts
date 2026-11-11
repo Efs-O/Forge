@@ -10,6 +10,7 @@ vi.mock('vscode', () => ({
   window: {
     activeTextEditor: undefined as unknown,
     tabGroups: { all: [] as unknown[] },
+    createOutputChannel: () => ({ appendLine: () => {}, show: () => {}, dispose: () => {} }),
   },
   workspace: {
     workspaceFolders: [{ uri: { fsPath: '/ws' } }],
