@@ -25,6 +25,7 @@ import {
 import {
   DENY_VSCODE,
   TargetWindowGate,
+  focusDisabledRefusal,
   focusMovedRefusal,
   policyRefusalFor,
   revokeRefusedCodeTargets,
@@ -296,6 +297,13 @@ export class PowerShellDesktopDriver implements DesktopDriver {
       this.gate.clear();
       const foreground = (r['foreground'] ?? {}) as Record<string, unknown>;
       throw new Error(focusMovedRefusal(w, foreground));
+    }
+    if (r['focus'] === 'disabled') {
+      this.approved = undefined;
+      this.captures.clear();
+      this.gate.clear();
+      const popup = (r['popup'] ?? {}) as Record<string, unknown>;
+      throw new Error(focusDisabledRefusal(w, popup));
     }
     const startTime = optNum(w['process_start_time']);
     this.requireReadableStartTime(startTime, str(w['title']));

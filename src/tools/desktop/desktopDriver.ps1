@@ -109,6 +109,9 @@ public static class Win32 {
 
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+  [DllImport("user32.dll")] public static extern IntPtr GetLastActivePopup(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT r);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)]
   public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder s, int n);
@@ -543,6 +546,19 @@ function Invoke-Op($req) {
             @{ id = $foreground.ToString(); title = (Get-WindowText $foreground) }
           }
           return @{ ok = $true; focus = 'moved'; window = (Get-WindowInfo $h); foreground = $foregroundInfo }
+        }
+        if (-not [Forge.Win32]::IsWindowEnabled($h)) {
+          $popup = [Forge.Win32]::GetWindow($h, 6)
+          if ($popup -eq [IntPtr]::Zero) {
+            $lastActivePopup = [Forge.Win32]::GetLastActivePopup($h)
+            if ($lastActivePopup -ne $h) { $popup = $lastActivePopup }
+          }
+          $popupInfo = if ($popup -eq [IntPtr]::Zero) {
+            @{ id = '0'; title = '' }
+          } else {
+            @{ id = $popup.ToString(); title = (Get-WindowText $popup) }
+          }
+          return @{ ok = $true; focus = 'disabled'; window = (Get-WindowInfo $h); popup = $popupInfo }
         }
       }
       return @{ ok = $true; focus = $focusResult; window = (Get-WindowInfo $h) }

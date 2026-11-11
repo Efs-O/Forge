@@ -71,3 +71,70 @@ describe('desktop_focus_window foreground movement', () => {
     );
   });
 });
+
+describe('desktop_focus_window disabled-window refusal', () => {
+  it('names the popup and revokes approval so later input cannot target the disabled window', async () => {
+    const transport = new FakeTransport();
+    const driver = new PowerShellDesktopDriver(transport);
+    transport.onFocus({ ok: true, focus: 'ok', window: notepadWindow });
+    await driver.focusWindow({ kind: 'windowId', id: '0x1234' });
+
+    transport.onFocus({
+      ok: true,
+      focus: 'disabled',
+      window: notepadWindow,
+      popup: { id: '0x1902', title: 'Notepad' },
+    });
+    const focusError = await driver
+      .focusWindow({ kind: 'windowId', id: '0x1234' })
+      .catch((caught: unknown) => caught as Error);
+    expect(focusError.message).toBe(
+      'desktop_focus_window: "Untitled - Notepad" (HWND 0x1234) is disabled because "Notepad" (HWND 0x1902) is open over it (usually a dialog the app opened). Input would be refused. Act on that window instead: desktop_focus_window with window_id "0x1902", or close it first.',
+    );
+    await expect(driver.typeText('must not type')).rejects.toThrow(
+      'no approved target window; call desktop_focus_window or desktop_capture first',
+    );
+    expect(transport.sent.some((op) => op['op'] === 'type')).toBe(false);
+  });
+
+  it('names the disabled-window case when there is no popup', async () => {
+    const transport = new FakeTransport();
+    transport.onFocus({
+      ok: true,
+      focus: 'disabled',
+      window: notepadWindow,
+      popup: { id: '0', title: '' },
+    });
+    const driver = new PowerShellDesktopDriver(transport);
+    const focusError = await driver
+      .focusWindow({ kind: 'windowId', id: '0x1234' })
+      .catch((caught: unknown) => caught as Error);
+    expect(focusError.message).toBe(
+      'desktop_focus_window: "Untitled - Notepad" (HWND 0x1234) is disabled and accepts no input right now, and no window of its own is open over it. Input would be refused. Pick a normal application window from desktop_windows.',
+    );
+  });
+
+  it('approves an enabled foreground window, including a dialog focused by window_id', async () => {
+    const transport = new FakeTransport();
+    const driver = new PowerShellDesktopDriver(transport);
+    transport.onFocus({ ok: true, focus: 'ok', window: notepadWindow });
+    await expect(driver.focusWindow({ kind: 'windowId', id: '0x1234' })).resolves.toMatchObject({
+      id: '0x1234',
+      title: 'Untitled - Notepad',
+    });
+
+    const dialogWindow = {
+      ...notepadWindow,
+      id: '0x1902',
+      title: 'Open',
+      class: '#32770',
+      process_name: 'notepad',
+    };
+    transport.onFocus({ ok: true, focus: 'ok', window: dialogWindow });
+    await expect(driver.focusWindow({ kind: 'windowId', id: '0x1902' })).resolves.toMatchObject({
+      id: '0x1902',
+      title: 'Open',
+    });
+    expect(transport.sent.at(-1)).toMatchObject({ op: 'focus_window', window_id: '0x1902' });
+  });
+});

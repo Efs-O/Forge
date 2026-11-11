@@ -142,6 +142,29 @@ export function focusMovedRefusal(
   );
 }
 
+export function focusDisabledRefusal(
+  target: Readonly<Record<string, unknown>>,
+  popup: Readonly<Record<string, unknown>>,
+): string {
+  const targetTitle = String(target['title'] ?? '');
+  const targetId = String(target['id'] ?? '');
+  const popupId = String(popup['id'] ?? '0');
+  const popupTitle = String(popup['title'] ?? '');
+  if (popupId && popupId !== '0') {
+    return (
+      `desktop_focus_window: "${targetTitle}" (HWND ${targetId}) is disabled because ` +
+      `"${popupTitle}" (HWND ${popupId}) is open over it (usually a dialog the app opened). ` +
+      `Input would be refused. Act on that window instead: desktop_focus_window with window_id ` +
+      `"${popupId}", or close it first.`
+    );
+  }
+  return (
+    `desktop_focus_window: "${targetTitle}" (HWND ${targetId}) is disabled and accepts no ` +
+    'input right now, and no window of its own is open over it. Input would be refused. Pick a ' +
+    'normal application window from desktop_windows.'
+  );
+}
+
 /**
  * Revocation of the editor opt-in, applied to a driver's held state.
  *
