@@ -498,6 +498,16 @@ describe('manage_jobs — get and resolution', () => {
 });
 
 describe('manage_jobs — update', () => {
+  it('names every field it stored, as the job now reads', async () => {
+    await store.saveJob(job());
+    const out = await call({
+      action: 'update',
+      job: 'disk',
+      definition: { name: 'Disk 2', enabled: false, schedule: { kind: 'daily', at: '04:00' } },
+    });
+    expect(out).toBe('Updated job "Disk 2" [disk]: name "Disk 2"; disabled; schedule daily at 04:00.');
+  });
+
   it('applies a partial definition (only the fields present)', async () => {
     await store.saveJob(job());
     const out = await call({
@@ -505,7 +515,7 @@ describe('manage_jobs — update', () => {
       job: 'disk',
       definition: { schedule: { kind: 'interval', minutes: 45 } },
     });
-    expect(out).toContain('Updated job "Disk" [disk]');
+    expect(out).toBe('Updated job "Disk" [disk]: schedule every 45 min.');
     const loaded = await store.load('disk');
     expect(loaded?.job.schedule).toEqual({ kind: 'interval', minutes: 45 });
     // The check is untouched by a schedule-only update.

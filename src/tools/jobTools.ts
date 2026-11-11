@@ -17,6 +17,7 @@ import { appendHomeNote } from '../jobs/jobsHome';
 import { nextDue } from '../jobs/schedule';
 import { jobCreateText } from '../jobs/jobCreateText';
 import { describeJob, describeSchedule, formatWhen, lastRunOutcome } from '../jobs/jobDescribe';
+import { describeUpdatedFields } from '../jobs/jobDescribe';
 import { openDiscussChat } from '../jobs/jobDiscuss';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { CLI_AGENT_CONSENT_DETAIL, needsCliConsent } from '../jobs/cliAgentGate';
@@ -461,7 +462,7 @@ async function updateJob(
       (deps.now ?? (() => new Date()))(),
     );
   }
-  return `Updated job "${result.data.name}" [${id}].`;
+  return `Updated job "${result.data.name}" [${id}]${describeUpdatedFields(result.data, partial)}.`;
 }
 
 function assertWakeSupported(wake: boolean, platform: NodeJS.Platform): void {

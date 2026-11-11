@@ -19,6 +19,36 @@ export function describeSchedule(schedule: Job['schedule']): string {
   }
 }
 
+/**
+ * What an `update` stored, field by field, as the job now reads: the model
+ * cannot see the merged result otherwise, so "Updated job" alone left a new
+ * schedule unprovable until a separate `get`.
+ */
+export function describeUpdatedFields(job: Job, partial: Record<string, unknown>): string {
+  const keys = Object.keys(partial).filter((key) => partial[key] !== undefined);
+  const parts = keys.map((key) => {
+    switch (key) {
+      case 'name':
+        return `name "${job.name}"`;
+      case 'enabled':
+        return job.enabled ? 'enabled' : 'disabled';
+      case 'wake':
+        return `wake ${job.wake ? 'yes' : 'no'}`;
+      case 'schedule':
+        return `schedule ${describeSchedule(job.schedule)}`;
+      case 'check':
+        return `check ${describeCheck(job.check)}`;
+      case 'on_change':
+        return `on_change ${describeOnChange(job.on_change)}`;
+      case 'action':
+        return `action ${job.action ? describeAction(job.action) : 'none'}`;
+      default:
+        return `${key} set`;
+    }
+  });
+  return parts.length ? `: ${parts.join('; ')}` : '';
+}
+
 /** A short human-readable form of a check. */
 export function describeCheck(check: Job['check']): string {
   switch (check.kind) {
