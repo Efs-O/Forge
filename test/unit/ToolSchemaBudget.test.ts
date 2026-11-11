@@ -136,7 +136,8 @@ import {
 // 2026-11-11: 67,102 (+53) after manage_jobs says the job definition goes in definition.
 // 2026-11-11: 67,283 (+181) after shell says Git Bash turns a lone /switch into a path (lab pass 2 group D).
 // 2026-11-11: 67,429 (+146) after show_diff says its result carries no diff text.
-const MEASURED_CHARS = 67_429;
+// 2026-11-11: 67,656 (+227) after shell says to run PowerShell code with shell: pwsh, not nested in bash (lab pass 2 group F).
+const MEASURED_CHARS = 67_656;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.
