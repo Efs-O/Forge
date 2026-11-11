@@ -68,6 +68,10 @@ function formatDriveLine(drive: SystemReport['drives'][number], compact: boolean
   return `${pad(drive.drive, 7)}${pad(free, 16)}of ${total}`;
 }
 
+function drivesWithMedia(report: SystemReport): SystemReport['drives'] {
+  return report.drives.filter((drive) => drive.totalBytes > 0);
+}
+
 function gpuSection(report: SystemReport, compact: boolean): string[] {
   const lines: string[] = [];
   if (report.gpuError) {
@@ -157,7 +161,7 @@ function formatSidebarSystemReport(report: SystemReport): string {
   const usedRam = report.ram.totalBytes - report.ram.freeBytes;
   lines.push('');
   lines.push(`RAM  ${gib(usedRam).toFixed(1)} / ${gib(report.ram.totalBytes).toFixed(1)} GB used`);
-  for (const drive of report.drives) {
+  for (const drive of drivesWithMedia(report)) {
     lines.push(
       `${drive.drive}  ${gib(drive.freeBytes).toFixed(0)} GB free / ${gib(drive.totalBytes).toFixed(0)} GB`,
     );
@@ -178,7 +182,7 @@ export function formatSystemReport(report: SystemReport, options: FormatOptions 
       ? `RAM  ${gib(usedRam).toFixed(1)} / ${gib(report.ram.totalBytes).toFixed(1)} GB used`
       : `${pad('RAM', 7)}${gib(usedRam).toFixed(1)} / ${gib(report.ram.totalBytes).toFixed(1)} GB used`,
   );
-  for (const drive of report.drives) lines.push(formatDriveLine(drive, compact));
+  for (const drive of drivesWithMedia(report)) lines.push(formatDriveLine(drive, compact));
 
   const text = lines.join('\n');
   return options.telegramHtml ? withTelegramForgeBackendEmphasis(text, report.vramProcesses) : text;
@@ -248,7 +252,7 @@ function formatTelegramCards(report: SystemReport): string {
   lines.push(`RAM  ${gpuGb(usedRam / GIB)}/${gpuGb(report.ram.totalBytes / GIB)} GB`);
   pushSeparator(lines);
   lines.push('<b>Drives</b>');
-  const drives = report.drives.filter((drive) => drive.totalBytes > 0);
+  const drives = drivesWithMedia(report);
   const hiddenDrives = drives.length !== report.drives.length;
   for (const drive of drives) {
     const freeGb = drive.freeBytes / GIB;

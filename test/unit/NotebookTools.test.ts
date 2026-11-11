@@ -87,6 +87,12 @@ describe('notebook tools', () => {
     vscodeMocks.applyEdit.mockResolvedValue(true);
   });
 
+  it('limits read_notebook to .ipynb files in its description', () => {
+    expect(makeReadNotebookTool().definition.function.description).toBe(
+      'Read .ipynb notebook files only: return cells, source, language, and output counts. Use cell_index to read one cell.',
+    );
+  });
+
   it.each(['read_notebook', 'edit_notebook_cell'] as const)(
     '%s names the exact VS Code failure when a valid .ipynb cannot be opened',
     async (tool) => {

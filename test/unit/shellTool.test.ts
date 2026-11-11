@@ -304,6 +304,21 @@ describe('default shell', () => {
   const described = (options: Parameters<typeof makeShellTool>[0]) =>
     makeShellTool(options).describe!().function.description;
 
+  it('explains that relative command paths use cwd in both schemas', () => {
+    const tool = makeShellTool({ platform: 'win32', bashPath: String.raw`C:\Git\bin\bash.exe` });
+    const expected =
+      'Workspace-relative or absolute working directory. Omitted, every call starts in the workspace root, so a command needs no leading cd there. Set it when the project is in a subfolder. Relative paths inside the command resolve from cwd, not from the workspace root.';
+    const parameters = tool.definition.function.parameters as {
+      properties: Record<string, { description?: string }>;
+    };
+    const describedParameters = tool.describe!().function.parameters as {
+      properties: Record<string, { description?: string }>;
+    };
+
+    expect(parameters.properties['cwd']?.description).toBe(expected);
+    expect(describedParameters.properties['cwd']?.description).toBe(expected);
+  });
+
   it('is bash on Windows when Git Bash exists, and the description says so', () => {
     expect(described({ platform: 'win32', bashPath: String.raw`C:\Git\bin\bash.exe` })).toMatch(
       /^Run one command line in bash on Windows;/u,

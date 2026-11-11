@@ -153,9 +153,12 @@ export const MAX_VIDEO_FRAMES_BYTES = 12 * 1024 * 1024;
 /** Never sample the final moments: the last frame is often a fade or a cut. */
 const END_GUARD_SECONDS = 0.12;
 
-/** Below this many seconds per frame the samples stop telling you anything new. */
-const SECONDS_PER_FRAME = 5;
-const MIN_FRAMES = 3;
+/** Default sampling targets about one frame for every second of clip duration. */
+const FRAMES_PER_SECOND = 1;
+const MIN_DEFAULT_FRAMES = 4;
+const MAX_DEFAULT_FRAMES = 10;
+const VERY_SHORT_CLIP_SECONDS = 1;
+const VERY_SHORT_CLIP_MIN_FRAMES = 3;
 
 export interface VideoOptions {
   /** Hard ceiling from config. Never exceeded, whatever the caller asks for. */
@@ -225,11 +228,9 @@ function clamp(value: number, low: number, high: number): number {
  * How many stills to take.
  *
  * An explicit `requestedFrames` wins, bounded only by the configured ceiling.
- * This ordering is the whole point: the duration heuristic is a *default*, and
- * an earlier version let it silently override the caller. On a 6-11 s clip the
- * heuristic always lands on the 3-frame floor, so the `max_frames` argument was
- * a no-op for every short clip — a caller asking for 10 frames got 3 and had no
- * way to tell why.
+ * Otherwise take about one frame per second, between 4 and 10 frames. For
+ * clips of one second or less, retain the existing 3-frame floor because they
+ * may not contain four distinct decodable frames.
  */
 export function frameCountFor(
   durationSeconds: number,
@@ -238,7 +239,13 @@ export function frameCountFor(
 ): number {
   const cap = Math.max(1, Math.floor(maxFrames));
   if (requestedFrames !== undefined) return clamp(Math.floor(requestedFrames), 1, cap);
-  return clamp(Math.round(durationSeconds / SECONDS_PER_FRAME), Math.min(MIN_FRAMES, cap), cap);
+  const minimum =
+    durationSeconds <= VERY_SHORT_CLIP_SECONDS ? VERY_SHORT_CLIP_MIN_FRAMES : MIN_DEFAULT_FRAMES;
+  return clamp(
+    Math.round(durationSeconds * FRAMES_PER_SECOND),
+    Math.min(minimum, cap),
+    Math.min(MAX_DEFAULT_FRAMES, cap),
+  );
 }
 
 /**

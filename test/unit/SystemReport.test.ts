@@ -174,9 +174,11 @@ describe('buildVramProcesses', () => {
   );
 
   it('tags Forge-spawned backends, resolves the card, and sorts by size', () => {
-    const processes = buildVramProcesses(probe, [gpu({ index: 1, memoryUsedMb: 15868 })], [
-      { model: 'qwen38-27b', pid: 20336 },
-    ]);
+    const processes = buildVramProcesses(
+      probe,
+      [gpu({ index: 1, memoryUsedMb: 15868 })],
+      [{ model: 'qwen38-27b', pid: 20336 }],
+    );
 
     expect(processes[0]).toEqual({
       pid: 20336,
@@ -266,6 +268,26 @@ describe('formatSystemReport', () => {
     expect(text).toContain('N:  412 GB free / 1863 GB');
   });
 
+  it('omits zero-size drives from every non-Telegram report layout', () => {
+    const report = {
+      ...base,
+      drives: [...base.drives, { drive: 'D:', freeBytes: 0, totalBytes: 0 }],
+    };
+    const driveSection = (text: string): string => {
+      const lines = text.split(/\r?\n/u);
+      const ramLine = lines.findIndex((line) => line.startsWith('RAM'));
+      return lines.slice(ramLine + 1).join('\n');
+    };
+
+    expect(driveSection(formatSystemReport(report))).toBe('N:     412 GB free     of 1863 GB');
+    expect(driveSection(formatSystemReport(report, { compact: true }))).toBe(
+      'N:  412 GB free / 1863 GB',
+    );
+    expect(driveSection(formatSystemReport(report, { sidebar: true }))).toBe(
+      'N:  412 GB free / 1863 GB',
+    );
+  });
+
   it('separates each device block in the Telegram card', () => {
     const text = formatSystemReport(base, { telegramCards: true });
 
@@ -275,7 +297,7 @@ describe('formatSystemReport', () => {
     expect(text).toMatch(/\n\n<b>Drives<\/b>\nN:/);
     // A heading never gets separated from its own lines, and no blank line is
     // ever doubled or left at the start.
-    expect(text).toMatch(/<b>Memory<\/b>\nRAM  38\.4\/64\.0 GB/);
+    expect(text).toMatch(/<b>Memory<\/b>\nRAM {2}38\.4\/64\.0 GB/);
     expect(text).not.toMatch(/^\n/);
     expect(text).not.toMatch(/\n\n\n/);
   });
@@ -325,7 +347,10 @@ describe('get_system_status', () => {
           gpuProcesses: [{ pid: 20336, luid: 'luid-a', bytes: 14.7 * GB }],
           gpuAdapters: [{ luid: 'luid-a', bytes: 15.5 * GB }],
           processes: [{ pid: 20336, name: 'llama-server.exe' }],
-          drives: [{ drive: 'N:', free: 412 * GB, size: 1863 * GB }],
+          drives: [
+            { drive: 'D:', free: 0, size: 0 },
+            { drive: 'N:', free: 412 * GB, size: 1863 * GB },
+          ],
           gpuError: '',
         }),
       ),
@@ -350,5 +375,10 @@ describe('get_system_status', () => {
     expect(text).toContain('20336  llama-server.exe');
     expect(text).toContain('(Forge backend: qwen38-27b)');
     expect(text).toContain('N:');
+    const lines = text.split(/\r?\n/u);
+    const ramLine = lines.findIndex((line) => line.startsWith('RAM'));
+    expect(lines.slice(ramLine).join('\n')).toBe(
+      'RAM  38.4 / 64.0 GB used\nN:  412 GB free / 1863 GB',
+    );
   });
 });

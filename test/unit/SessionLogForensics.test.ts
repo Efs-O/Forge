@@ -1,12 +1,15 @@
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage, ToolCall } from '../../src/llm/types';
 
 const { fakeHome, streamModelChatCompletion } = vi.hoisted(() => {
+  // `vi.hoisted` runs before static imports, so load these builtins here.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const nodeFs = require('fs') as typeof import('fs');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const nodeOs = require('os') as typeof import('os');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const nodePath = require('path') as typeof import('path');
   return {
     fakeHome: { dir: nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'forge-forensics-')) },
@@ -145,6 +148,89 @@ describe('session log forensics', () => {
       'model',
     );
     expect(rows().filter((row) => row['type'] === 'tools_offered')).toHaveLength(3);
+  });
+
+  it.each([
+    {
+      label: 'a repeated read-only call',
+      toolName: 'list_memories',
+      arguments: '{}',
+      result: 'memory keys',
+      repeatedCalls: 2,
+      warnedCallId: 'call_2',
+      expected:
+        '[Forge warning: this read-only tool call and result repeat round 1. ' +
+        'Act on the result you already have or change approach.]\nmemory keys',
+    },
+    {
+      label: 'a repeated failure',
+      toolName: 'read_file',
+      arguments: '{"path":"a"}',
+      result: 'Error: unavailable',
+      repeatedCalls: 3,
+      warnedCallId: 'call_3',
+      expected:
+        '[Forge warning: 3 failed read_file calls in a row on a. ' +
+        'Read the error: it says what is wrong. Change the arguments or stop.]\nError: unavailable',
+    },
+  ])('writes the guard warning into the tool row for $label', async (scenario) => {
+    const logger = new SessionLogger(id, 'Forensics', 'model');
+    const messages: ChatMessage[] = [{ role: 'user', content: 'go' }];
+    let round = 0;
+    streamModelChatCompletion.mockImplementation(
+      async (
+        _url: string,
+        _request: unknown,
+        _model: unknown,
+        handlers: {
+          onDone: (reason: string | null) => void;
+          onToken: (text: string) => void;
+          onToolCalls: (calls: ToolCall[]) => void;
+        },
+      ) => {
+        round++;
+        if (round <= scenario.repeatedCalls) {
+          handlers.onToolCalls([
+            {
+              id: `call_${round}`,
+              type: 'function',
+              function: { name: scenario.toolName, arguments: scenario.arguments },
+            },
+          ]);
+          handlers.onDone('tool_calls');
+        } else {
+          handlers.onToken('done');
+          handlers.onDone('stop');
+        }
+      },
+    );
+
+    await runToolCallingLoop({
+      resolveBaseUrl: async () => 'http://localhost',
+      model: { name: 'model' },
+      messages,
+      getToolDefinitions: () =>
+        [{ type: 'function', function: { name: scenario.toolName } }] as never,
+      dispatchToolCalls: async (calls, currentMessages) => {
+        for (const call of calls) {
+          currentMessages.push({
+            role: 'tool',
+            name: scenario.toolName,
+            tool_call_id: call.id,
+            content: scenario.result,
+          });
+        }
+      },
+      onMessagesChanged: () => logger.flush(messages, 'model'),
+      signal: new AbortController().signal,
+      maxRounds: 5,
+      nativeTools: true,
+    } as never);
+
+    const warnedRow = rows().find(
+      (row) => row['role'] === 'tool' && row['tool_call_id'] === scenario.warnedCallId,
+    );
+    expect(warnedRow?.['content']).toBe(scenario.expected);
   });
 
   it('writes internal user rows and restores the flag from the session log', () => {

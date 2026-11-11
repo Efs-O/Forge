@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { describePathMiss } from '../../src/tools/pathErrorHint';
+import { readRange } from '../../src/tools/readFileRange';
 import { formatPathMiss } from '../../src/tools/pathMissText';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { execFileSync } from 'child_process';
 import { workspace } from '../support/vscode';
 import * as vscode from '../support/vscode';
 import { resolveRipgrep } from '../../src/tools/RipgrepResolver';
@@ -127,5 +129,70 @@ describe('describePathMiss', () => {
     expect(describePathMiss('read_file', 'x', 'ENOENT: no such file or directory')).toContain(
       'find_files',
     );
+  });
+
+  it('points read_file at a missing path present on another branch in a nested repository', async () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'forge-readfile-ref-')));
+    const repo = path.join(root, 'nested', 'repo');
+    fs.mkdirSync(repo, { recursive: true });
+    const previousFolders = workspace.workspaceFolders;
+    const git = (args: string[]): string =>
+      execFileSync('git', args, {
+        cwd: repo,
+        encoding: 'utf8',
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+        windowsHide: true,
+      });
+    workspace.workspaceFolders = [{ uri: { fsPath: root } }];
+    vscode.env.appRoot = resolveLiveAppRoot();
+    try {
+      git(['init', '-b', 'master']);
+      git(['config', 'user.name', 'Forge Test']);
+      git(['config', 'user.email', 'forge@test.invalid']);
+      fs.writeFileSync(path.join(repo, 'base.txt'), 'base\n');
+      git(['add', 'base.txt']);
+      git(['commit', '-m', 'Initial commit']);
+      git(['checkout', '-b', 'lab-c4']);
+      fs.writeFileSync(path.join(repo, 'feature-C4.txt'), 'branch content\n');
+      git(['add', 'feature-C4.txt']);
+      git(['commit', '-m', 'Add branch-only file']);
+      const shortSha = git(['rev-parse', '--short', 'HEAD']).trim();
+      git(['checkout', 'master']);
+
+      const requestedPath = 'nested/repo/feature-C4.txt';
+      const expected =
+        'read_file: nothing exists there. "' +
+        requestedPath +
+        '" resolved against the workspace root ' +
+        root +
+        '. ENOENT: no such file or directory, stat ' +
+        "'" +
+        path.join(root, requestedPath) +
+        "' " +
+        'The workspace root is often not the project root, so a path that looks right ' +
+        'for the project can still miss. Use find_files to locate it before retrying.' +
+        ' It is not on the current branch (master), but commit ' +
+        shortSha +
+        ' on lab-c4 has it: use git_read show to read it there, or switch_branch.';
+      let actual: string | undefined;
+      try {
+        await readRange(
+          requestedPath,
+          undefined,
+          undefined,
+          false,
+          undefined,
+          undefined,
+          undefined,
+          async () => '',
+        );
+      } catch (error) {
+        actual = error instanceof Error ? error.message : String(error);
+      }
+      expect(actual).toBe(expected);
+    } finally {
+      workspace.workspaceFolders = previousFolders;
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

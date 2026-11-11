@@ -242,12 +242,22 @@ export function makeBrowserActionTools(ctx: BrowserToolContext): RegisteredTool[
           name: 'browser_scroll',
           description:
             'Scroll the active/named tab by (delta_x, delta_y) at a viewport point, or scroll ' +
-            'a specific selector.',
+            'a specific selector. Use into_view with a selector or browser_inspect index to ' +
+            'bring an element into view without choosing a scroll distance.',
           parameters: {
             type: 'object',
             properties: {
               tab_id: { type: 'string' },
               selector: { type: 'string' },
+              into_view: {
+                type: 'object',
+                description: 'Element reference: provide exactly one of selector or index.',
+                properties: {
+                  selector: { type: 'string', description: 'CSS selector to bring into view.' },
+                  index: { type: 'number', description: 'Index from browser_inspect.' },
+                },
+                additionalProperties: false,
+              },
               x: { type: 'number' },
               y: { type: 'number' },
               delta_x: { type: 'number' },
@@ -264,6 +274,41 @@ export function makeBrowserActionTools(ctx: BrowserToolContext): RegisteredTool[
       untrustedResult: true,
       autoApprove: true,
       handler: async (args) => {
+        if (args.into_view !== undefined) {
+          if (args.delta_x !== undefined || args.delta_y !== undefined) {
+            throw new Error(
+              'browser_scroll: into_view cannot be combined with delta_x or delta_y.',
+            );
+          }
+          const reference = args.into_view;
+          if (reference === null || typeof reference !== 'object' || Array.isArray(reference)) {
+            throw new Error(
+              'browser_scroll: into_view must be an object with exactly one of selector or index.',
+            );
+          }
+          const target = reference as Record<string, unknown>;
+          const hasSelector = Object.hasOwn(target, 'selector');
+          const hasIndex = Object.hasOwn(target, 'index');
+          if (hasSelector === hasIndex) {
+            throw new Error(
+              'browser_scroll: into_view must include exactly one of selector or index.',
+            );
+          }
+          const selector = hasSelector ? target.selector : undefined;
+          const index = hasIndex ? target.index : undefined;
+          if (
+            (selector !== undefined && (typeof selector !== 'string' || selector.length === 0)) ||
+            (index !== undefined && typeof index !== 'number')
+          ) {
+            throw new Error(
+              'browser_scroll: into_view selector must be a string or index must be a number.',
+            );
+          }
+          return ctx.mgr.scrollIntoView(ctx.str(args, 'tab_id'), {
+            ...(typeof selector === 'string' ? { selector } : {}),
+            ...(typeof index === 'number' ? { index } : {}),
+          });
+        }
         const result = await ctx.mgr.scroll(
           ctx.str(args, 'tab_id'),
           { selector: ctx.str(args, 'selector'), x: num(args, 'x'), y: num(args, 'y') },

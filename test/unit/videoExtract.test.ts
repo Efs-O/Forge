@@ -221,13 +221,22 @@ describe('tailOf', () => {
 });
 
 describe('frameCountFor', () => {
-  it('scales with duration', () => {
-    expect(frameCountFor(5, 8)).toBe(3);
-    expect(frameCountFor(20, 8)).toBe(4);
-    expect(frameCountFor(30, 8)).toBe(6);
-  });
+  it.each([
+    { duration: 2, ceiling: 26, requested: undefined, expected: 4 },
+    { duration: 4, ceiling: 26, requested: undefined, expected: 4 },
+    { duration: 7, ceiling: 26, requested: undefined, expected: 7 },
+    { duration: 30, ceiling: 26, requested: undefined, expected: 10 },
+    { duration: 120, ceiling: 26, requested: undefined, expected: 10 },
+    { duration: 30, ceiling: 6, requested: undefined, expected: 6 },
+    { duration: 30, ceiling: 26, requested: 20, expected: 20 },
+  ])(
+    'selects $expected frames for a $duration-second clip with ceiling $ceiling and request $requested',
+    ({ duration, ceiling, requested, expected }) => {
+      expect(frameCountFor(duration, ceiling, requested)).toBe(expected);
+    },
+  );
 
-  it('never drops below the minimum for a very short clip', () => {
+  it('keeps the existing three-frame floor for clips of one second or less', () => {
     expect(frameCountFor(1, 8)).toBe(3);
     expect(frameCountFor(0.4, 8)).toBe(3);
   });
@@ -238,13 +247,12 @@ describe('frameCountFor', () => {
     expect(frameCountFor(1, 1)).toBe(1);
   });
 
-  // The bug this guards: the duration heuristic used to win over an explicit
-  // request, so `max_frames` did nothing on any clip under ~40s.
+  // A caller's explicit count wins over the default duration-based count.
   it('honours explicit requests over the duration heuristic', () => {
-    expect(frameCountFor(11, 8)).toBe(3);
-    expect(frameCountFor(11, 8, 6)).toBe(6);
-    expect(frameCountFor(11, 8, 8)).toBe(8);
-    expect(frameCountFor(5, 8, 8)).toBe(8);
+    expect(frameCountFor(7, 8)).toBe(7);
+    expect(frameCountFor(7, 8, 6)).toBe(6);
+    expect(frameCountFor(7, 8, 8)).toBe(8);
+    expect(frameCountFor(2, 8, 8)).toBe(8);
     expect(frameCountFor(9, 8, 2)).toBe(2);
   });
 
@@ -370,8 +378,8 @@ describe('extractFrames', () => {
       undefined,
       fakeFrameRunner(),
     );
-    expect(result.frames).toHaveLength(3);
-    expect(result.frames.map((frame) => frame.timeSeconds)).toEqual(frameTimes(0, 5, 3));
+    expect(result.frames).toHaveLength(5);
+    expect(result.frames.map((frame) => frame.timeSeconds)).toEqual(frameTimes(0, 5, 5));
     expect(result.frames[0]?.jpegBase64).toBe(Buffer.from([0xff, 0xd8, 0xff, 0xdb]).toString('base64'));
     expect(result.probe).toBe(PROBE_HD);
   });
@@ -424,7 +432,7 @@ describe('extractFrames', () => {
       return { code: 0, stdout: '', stderr: '' };
     };
     await extractFrames(TOOLS, '/clips/a.mp4', PROBE_HD, OPTIONS, controller.signal, run);
-    expect(seen).toHaveLength(3);
+    expect(seen).toHaveLength(5);
     expect(seen.every((signal) => signal === controller.signal)).toBe(true);
   });
 
@@ -573,7 +581,7 @@ describe('windowed extraction', () => {
       undefined,
       fakeFrameRunner(),
     );
-    expect(result.frames).toHaveLength(5); // round(25/5)
+    expect(result.frames).toHaveLength(10); // The one-per-second default reaches its 10-frame limit.
   });
 });
 

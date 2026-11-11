@@ -1,5 +1,18 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+- `browser_scroll` can bring a selector or inspected element into view without choosing a scroll distance.
+- `shell.cwd` now explains that relative paths inside the command resolve from the selected working directory.
+- `read_notebook` now says it reads `.ipynb` files only; non-notebook files point to `read_file`.
+- `view_video` now samples about one frame per second by default, from 4 to 10 frames; callers can select more or fewer, up to the configured ceiling.
+- System status reports now omit fixed drives with no media.
+- `git_read` status results now name the current branch, including detached HEADs.
+- `code_intel` is advertised on every turn; its lazy group now contains only the editing and search tools.
+- Tool calls with a declared argument name followed by leaked </parameter markup now repair that key; markup values get a precise plain-JSON resend refusal.
+- read_file now points to a commit on another Git ref when a missing path exists there, and tells the agent how to read or switch to it.
+- Session logs now preserve Forge's post-call warnings in tool-result rows, so the transcript matches what the model received.
+
 ## 0.17.154
 
 - apply_code_action now applies TypeScript quick fixes such as "Add import", and code_intel lists "applies" so the agent sees beforehand which actions it can apply.

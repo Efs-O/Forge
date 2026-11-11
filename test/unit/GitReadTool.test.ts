@@ -37,6 +37,12 @@ describe('git_read', () => {
     }
   });
 
+  it('describes the branch information returned by status', () => {
+    expect(makeGitReadTool().definition.function.description).toContain(
+      'status: Show working tree and index status (modified, added, deleted files). Includes the current branch. (needs: cwd?)',
+    );
+  });
+
   it('keeps the git-read permission every replaced operation had (no approval)', () => {
     const tool = makeGitReadTool();
     expect(tool.permission).toBe('git-read');

@@ -352,14 +352,9 @@ export async function runToolCallingLoop(
         options.onRoundNarration?.(assistantContent);
       const beforeDispatch = options.messages.length;
       await options.dispatchToolCalls(calls, options.messages);
-      options.onMessagesChanged?.();
+      let recoverLoop = false;
       try {
-        const warned = loopGuard.afterRound(
-          calls,
-          options.messages.slice(beforeDispatch),
-          options.isMutatingTool,
-        );
-        if (warned) options.onMessagesChanged?.();
+        loopGuard.afterRound(calls, options.messages.slice(beforeDispatch), options.isMutatingTool);
       } catch (error) {
         if (error instanceof ToolLoopDetectedError && loopRecoveries < MAX_LOOP_RECOVERIES) {
           loopRecoveries++;
@@ -368,12 +363,17 @@ export async function runToolCallingLoop(
             role: 'user',
             content: loopRecoveryNudge(error.message, MAX_LOOP_RECOVERIES - loopRecoveries),
           });
-          options.onMessagesChanged?.();
-          continue;
+          recoverLoop = true;
+        } else {
+          if (error instanceof ToolLoopDetectedError) options.onRepeatedCall?.();
+          throw error;
         }
-        if (error instanceof ToolLoopDetectedError) options.onRepeatedCall?.();
-        throw error;
+      } finally {
+        // The guard may prepend a warning to a tool result. Persist after that
+        // mutation so the session row matches the result the next request sees.
+        options.onMessagesChanged?.();
       }
+      if (recoverLoop) continue;
       const drained = await options.drainTells?.();
       if (drained && drained.messages.length > 0) {
         options.messages.push(...drained.messages);

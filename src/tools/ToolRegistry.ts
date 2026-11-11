@@ -1,6 +1,7 @@
 import type { ToolDefinition } from '../llm/types';
 import { recordNativeLazyTool } from './lazyToolGroups';
 import { advertisedValues, missingArgumentError } from './toolErrorText';
+import { repairParameterMarkup } from './toolArgumentMarkup';
 /** The declarations live in `toolContract.ts`; re-exported from here so every
  *  consumer that has always imported them from the registry keeps working. */
 export {
@@ -233,6 +234,8 @@ export class ToolRegistry {
     const { name, parameters } = tool.definition.function;
     // JSON.parse can hand back `null` for a call whose arguments were "null".
     const present: Record<string, unknown> = typeof args === 'object' && args !== null ? args : {};
+    const markupError = repairParameterMarkup(name, parameters.properties, present);
+    if (markupError) return markupError;
     // A quoted boolean is the largest single refusal class we measured (11 hits in one clean
     // window on `shell background` alone, and the same shape on `read_file numbered`), and it is
     // never ambiguous: its lowercase form is "true" or "false", and the property is declared
@@ -262,9 +265,7 @@ export class ToolRegistry {
       const fieldError = updatePlanFieldError(present);
       if (fieldError) return fieldError;
     }
-    const advertisedParameters = tool.describe
-      ? tool.describe().function.parameters
-      : tool.definition.function.parameters;
+    const advertisedParameters = tool.describe ? tool.describe().function.parameters : parameters;
     const advertisedProperties = advertisedParameters.properties;
     if (
       advertisedParameters.additionalProperties === false &&

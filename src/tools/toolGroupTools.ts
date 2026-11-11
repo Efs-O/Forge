@@ -24,7 +24,7 @@ import {
 const GROUP_PURPOSE: Readonly<Record<(typeof NATIVE_LAZY_GROUP_NAMES)[number], string>> = {
   agents: 'ask other agents, scheduled jobs, notify the user (Telegram)',
   background: 'list or stop background jobs, timed wait',
-  code_intel: 'definitions, references, renames, semantic search',
+  code_intel: 'rename symbols, apply code actions, format files, semantic search',
   computer_use: 'drive a browser or the desktop (screenshots need vision)',
   editor_ui: "the user's open editor, selection, clipboard, diffs",
   // `create_directory` is gone (2026-10-29, lane B item B3): `write_file` makes

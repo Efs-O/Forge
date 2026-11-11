@@ -56,7 +56,7 @@ export function makeReadNotebookTool(): RegisteredTool {
       function: {
         name: 'read_notebook',
         description:
-          'Read a notebook’s cells, source, language, and outputs summary. Use cell_index to read one cell.',
+          'Read .ipynb notebook files only: return cells, source, language, and output counts. Use cell_index to read one cell.',
         parameters: {
           type: 'object',
           properties: {

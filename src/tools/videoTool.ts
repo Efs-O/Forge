@@ -52,11 +52,8 @@ export function resolveVideoOptions(config: VideoConfig | undefined): VideoOptio
  * configured ceiling — which still bounds prompt cost, the thing the design
  * actually cares about.
  *
- * An earlier version lowered `maxFrames` instead. That looked equivalent and
- * was not: the count is normally derived from duration, and on any clip under
- * ~40 s the heuristic already sits at or below the cap, so lowering the cap
- * changed nothing. Asking for 10 frames on an 11 s clip returned 3, with
- * nothing in the result explaining why.
+ * An earlier version lowered `maxFrames` instead. That only changed the
+ * ceiling; it did not record the caller's requested count for the extractor.
  */
 export function applyRequestedFrameCount(options: VideoOptions, requested: unknown): VideoOptions {
   if (requested === undefined) return options;
@@ -156,14 +153,11 @@ export function summaryLine(
     start > 0 || end < probe.durationSeconds
       ? ` Sampled only ${start.toFixed(1)}s-${end.toFixed(1)}s of the clip, not all of it.`
       : '';
-  // Say why the count is what it is. Without this a caller whose request was
-  // clipped has to infer the reason, and the obvious inference is wrong.
+  // Explain an explicit request that returned fewer frames than requested.
   const why =
     requested !== undefined && requested > times.length
       ? ` You asked for ${requested}; ${times.length} is the configured ceiling (video.max_frames).`
-      : requested === undefined
-        ? ' Count was chosen from the clip length; pass max_frames to sample more densely.'
-        : '';
+      : '';
   return (
     `Video ${relativePath} — ${probe.durationSeconds.toFixed(1)}s, ${probe.width}x${probe.height}. ` +
     `${times.length} still frame${times.length === 1 ? '' : 's'} sampled at ${at}.${windowed}${pastEnd}${why} ` +
@@ -198,10 +192,10 @@ export function makeViewVideoTool(getVideoConfig?: () => VideoConfig | undefined
               minimum: 1,
               maximum: maxFrames,
               description:
-                'How many frames to sample. Omit and the count is chosen from the clip length ' +
-                '(roughly one frame per 5 seconds, minimum 3), which is sparse for a short ' +
-                'clip — an 11-second clip gets 3. Pass a number to sample more densely; it is ' +
-                `honoured exactly within the configured range 1-${maxFrames}. Each extra frame costs prompt tokens.`,
+                'How many frames to sample. Omit and Forge samples about one frame per second, ' +
+                'with a minimum of 4 and maximum of 10, clamped by video.max_frames. Pass a ' +
+                'number to choose more or fewer when you need a different count; explicit ' +
+                `requests are honoured within the configured range 1-${maxFrames}. Each extra frame costs prompt tokens.`,
             },
             frame_max_dimension: {
               type: 'integer',

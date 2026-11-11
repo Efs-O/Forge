@@ -227,7 +227,7 @@ describe('videoUnavailableMessage', () => {
   });
 });
 
-describe('max_frames reaches ffmpeg (regression: the 11s clip that always gave 3)', () => {
+describe('max_frames reaches ffmpeg', () => {
   it('passes the requested count through to extraction', async () => {
     writeClip('clips/ss01.mp4');
     await makeViewVideoTool().handler({ path: 'clips/ss01.mp4', max_frames: 10 });
@@ -254,10 +254,11 @@ describe('max_frames reaches ffmpeg (regression: the 11s clip that always gave 3
     expect(line).toContain('video.max_frames');
   });
 
-  it('says the count came from clip length when nothing was requested', () => {
+  it('reports sampled clip details without repeating default sampling guidance', () => {
     const line = summaryLine('clips/a.mp4', PROBE, [0.8, 2.5, 4.2], VIDEO_DEFAULTS);
-    expect(line).toContain('chosen from the clip length');
-    expect(line).toContain('max_frames');
+    expect(line).toBe(
+      'Video clips/a.mp4 — 5.0s, 1920x1088. 3 still frames sampled at 0.8s, 2.5s, 4.2s. These are stills, not motion: you cannot see what happens between them, and you have no audio.',
+    );
   });
 
   it('stays quiet when the request was honoured exactly', () => {
@@ -271,6 +272,15 @@ describe('max_frames reaches ffmpeg (regression: the 11s clip that always gave 3
 });
 
 describe('per-call ffmpeg overrides', () => {
+  it('describes the default count and caller-selected alternatives exactly', () => {
+    const params = makeViewVideoTool().definition.function.parameters as {
+      properties: Record<string, { description?: string }>;
+    };
+    expect(params.properties['max_frames']?.description).toBe(
+      'How many frames to sample. Omit and Forge samples about one frame per second, with a minimum of 4 and maximum of 10, clamped by video.max_frames. Pass a number to choose more or fewer when you need a different count; explicit requests are honoured within the configured range 1-26. Each extra frame costs prompt tokens.',
+    );
+  });
+
   it('advertises the three tunable knobs', () => {
     const params = makeViewVideoTool().definition.function.parameters as {
       properties: Record<string, unknown>;

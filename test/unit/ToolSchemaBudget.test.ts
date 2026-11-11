@@ -125,7 +125,10 @@ import {
 // 2026-11-10: 67,593 after documenting consistent cwd and file path resolution for Git tools.
 // 2026-11-10: 67,814 (+221) after the shell description says when and how to elevate on Windows.
 // 2026-11-11: 67,825 (+11) after clarifying which code actions can be applied.
-const MEASURED_CHARS = 67_825;
+// 2026-11-11: unchanged after browser_scroll gained into_view; browser schemas are excluded below.
+// 2026-11-11: 67,929 (+104) after clarifying shell cwd, notebook formats and video sampling.
+// 2026-11-11: 67,962 (+33, merged) after adding branch context to git_read status and describing the editing-only code_intel group.
+const MEASURED_CHARS = 67_962;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.

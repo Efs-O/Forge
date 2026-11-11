@@ -256,13 +256,7 @@ describe('registerAllTools canonical coordinator catalog', () => {
     const groups: Record<string, string[]> = {
       files: ['move_file', 'apply_line_edits', 'restore_file'],
       git: ['git_read', 'stage', 'commit', 'create_branch', 'switch_branch'],
-      code_intel: [
-        'code_intel',
-        'rename_symbol',
-        'apply_code_action',
-        'format_file',
-        'search_codebase',
-      ],
+      code_intel: ['rename_symbol', 'apply_code_action', 'format_file', 'search_codebase'],
       memory: ['remember', 'recall', 'list_memories', 'forget'],
       background: ['stop_execution', 'list_executions', 'wait'],
       agents: [
@@ -276,6 +270,16 @@ describe('registerAllTools canonical coordinator catalog', () => {
     for (const [group, members] of Object.entries(groups)) {
       for (const member of members) expect(lazyGroupForTool(member)).toBe(group);
     }
+    expect(lazyGroupForTool('code_intel')).toBeUndefined();
+    const conversationId = 'code-intel-default-advertisement';
+    const hidden = hiddenLazyToolNames(conversationId);
+    expect(hidden).not.toContain('code_intel');
+    expect(
+      registry
+        .definitions(ALL_PERMISSIONS)
+        .map((tool) => tool.function.name)
+        .filter((name) => !hidden.has(name)),
+    ).toContain('code_intel');
     expect(lazyGroupForTool('get_system_status')).toBe('system');
     // Eager, and stays so: `delete_file` is ungrouped and is the alternative
     // every rm / Remove-Item refusal names, so hiding it made the refusal point

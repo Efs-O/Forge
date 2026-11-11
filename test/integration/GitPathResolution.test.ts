@@ -62,10 +62,7 @@ describe('git cwd and path resolution', () => {
         () => makeRestoreFileTool().handler({ cwd: 'missing/dir', paths: ['config.txt'] }),
       ],
       ['commit', () => makeCommitTool().handler({ cwd: 'missing/dir', message: 'no' })],
-      [
-        'create_branch',
-        () => makeCreateBranchTool().handler({ cwd: 'missing/dir', name: 'next' }),
-      ],
+      ['create_branch', () => makeCreateBranchTool().handler({ cwd: 'missing/dir', name: 'next' })],
       ['switch_branch', () => makeSwitchBranchTool().handler({ cwd: 'missing/dir', name: 'main' })],
     ] as const;
     const expected =
@@ -86,7 +83,11 @@ describe('git cwd and path resolution', () => {
   it('refuses a diff path outside the repository selected by cwd exactly', async () => {
     let message = '';
     try {
-      await makeGitReadTool().handler({ operation: 'diff', cwd: 'demo/repo', path: '../../top.txt' });
+      await makeGitReadTool().handler({
+        operation: 'diff',
+        cwd: 'demo/repo',
+        path: '../../top.txt',
+      });
     } catch (error) {
       message = error instanceof Error ? error.message : String(error);
     }
@@ -143,9 +144,9 @@ describe('git cwd and path resolution', () => {
     ];
     for (const { cwd, file, spelling } of cases) {
       fs.writeFileSync(path.join(nested, file), 'new\n', 'utf8');
-      await expect(stage.handler({ ...(cwd ? { cwd } : {}), paths: [spelling] })).resolves.toContain(
-        'added',
-      );
+      await expect(
+        stage.handler({ ...(cwd ? { cwd } : {}), paths: [spelling] }),
+      ).resolves.toContain('added');
       expect(git(nested, ['diff', '--cached', '--name-only']).trim()).toBe(file);
       expect(git(ws, ['diff', '--cached', '--name-only'])).toBe('');
       git(nested, ['reset', '--quiet', 'HEAD', '--', file]);
@@ -187,7 +188,7 @@ describe('git cwd and path resolution', () => {
     fs.writeFileSync(path.join(nested, 'untracked.txt'), 'untracked\n', 'utf8');
     await expect(
       makeGitReadTool().handler({ operation: 'status', cwd: 'demo/repo/config.txt' }),
-    ).resolves.toBe('? untracked.txt');
+    ).resolves.toBe('On branch main.\n? untracked.txt');
     await expect(
       makeGitReadTool().handler({
         operation: 'diff',

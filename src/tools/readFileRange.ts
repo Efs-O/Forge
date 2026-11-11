@@ -7,7 +7,7 @@
 import * as fs from 'fs';
 import { mimeFromHeader } from './imageTool';
 import { MAX_DOCUMENT_READ_CHARS } from './resultCap';
-import { describePathMiss } from './pathErrorHint';
+import { describeReadFilePathMiss } from './pathErrorHint';
 import {
   isSupportedDocument,
   LEGACY_OFFICE_EXTENSIONS,
@@ -71,14 +71,14 @@ export async function readRange(
   try {
     stat = fs.statSync(filePath);
   } catch (err) {
-    throw new Error(describePathMiss('read_file', rawPath, err));
+    throw new Error(await describeReadFilePathMiss(rawPath, err));
   }
   refuseOversize(rawPath, stat.size, extension, maxTextFileBytes);
   let bytes: Buffer;
   try {
     bytes = fs.readFileSync(filePath);
   } catch (err) {
-    throw new Error(describePathMiss('read_file', rawPath, err));
+    throw new Error(await describeReadFilePathMiss(rawPath, err));
   }
   let content: string;
   if (isDocument) {

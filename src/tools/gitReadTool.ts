@@ -11,6 +11,7 @@ import { markConversationReadSecret } from './exfilTaint';
 import { resolveWorkspacePath } from '../util/WorkspacePaths';
 import { capShellOutput } from './shellOutput';
 import { DEFAULT_TOOL_OUTPUT_LIMITS } from './toolOutputLimits';
+import { resolveGitRequest, runGit } from './gitRepo';
 import {
   makeGitBlameTool,
   makeGitDiffTool,
@@ -34,6 +35,34 @@ function requireParams(operation: Operation, args: Record<string, unknown>): voi
   const missing = needed.filter((key) => args[key] === undefined || args[key] === null);
   if (missing.length)
     throw new Error(`git_read operation "${operation}" needs ${missing.join(', ')}`);
+}
+
+async function statusBranchLine(args: Record<string, unknown>): Promise<string> {
+  const cwd = typeof args['cwd'] === 'string' ? args['cwd'] : undefined;
+  const { repo } = await resolveGitRequest('git_read', cwd);
+  const header = (await runGit(repo, ['status', '--porcelain=v1', '--branch'])).split(
+    /\r?\n/u,
+    1,
+  )[0];
+  if (!header?.startsWith('## ')) {
+    throw new Error('git_read status failed: Git returned no porcelain branch header');
+  }
+
+  const branch = header.slice(3);
+  if (branch.startsWith('HEAD ')) {
+    const shortSha = (await runGit(repo, ['rev-parse', '--short', 'HEAD'])).trim();
+    if (!/^[0-9a-f]+$/iu.test(shortSha)) {
+      throw new Error('git_read status failed: Git returned no short HEAD hash');
+    }
+    return `HEAD detached at ${shortSha}.`;
+  }
+
+  const unbornPrefix = 'No commits yet on ';
+  const branchName = (
+    branch.startsWith(unbornPrefix) ? branch.slice(unbornPrefix.length) : branch
+  ).split('...', 1)[0];
+  if (!branchName) throw new Error('git_read status failed: Git returned an empty branch name');
+  return `On branch ${branchName}.`;
 }
 
 export function makeGitReadTool(
@@ -71,7 +100,7 @@ export function makeGitReadTool(
         name: 'git_read',
         description: [
           'Run one read-only git operation.',
-          'status: Show working tree and index status (modified, added, deleted files). (needs: cwd?)',
+          'status: Show working tree and index status (modified, added, deleted files). Includes the current branch. (needs: cwd?)',
           'log: Show recent commit log. (needs: cwd?, max_entries?, branch?)',
           'diff: Show diff of working tree or staged changes. (needs: cwd?, path?, staged?)',
           'blame: Show git blame for a file (line-porcelain format). (needs: cwd?, path)',
@@ -138,9 +167,10 @@ export function makeGitReadTool(
       requireParams(operation, args);
       const result = await handlers[operation](args, context);
       if (typeof result !== 'string') return result;
+      const output = operation === 'status' ? `${await statusBranchLine(args)}\n${result}` : result;
       // A whole-repo diff or show can be megabytes: keep head and tail, spill the rest.
       const capped = await capShellOutput(
-        result,
+        output,
         context?.conversationId ?? 'unknown',
         context?.toolCallId ?? 'unknown',
         context?.outputLimits?.shellInlineChars ?? DEFAULT_TOOL_OUTPUT_LIMITS.shellInlineChars,

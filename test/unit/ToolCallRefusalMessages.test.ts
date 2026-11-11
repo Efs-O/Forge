@@ -56,6 +56,26 @@ function makeRequiredTool(name: string, required: string[]): RegisteredTool {
   };
 }
 
+function makeMarkupCommitTool(): RegisteredTool {
+  return {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'commit',
+        description: 'Create a commit or amend the previous one.',
+        parameters: {
+          type: 'object',
+          properties: { message: { type: 'string' }, amend: { type: 'boolean' } },
+          required: ['message'],
+          additionalProperties: false,
+        },
+      },
+    },
+    permission: 'read',
+    handler: async () => 'unused',
+  };
+}
+
 describe('ToolRegistry.invalidArgs missing-argument refusal', () => {
   const registry = new ToolRegistry();
 
@@ -164,6 +184,54 @@ describe('ToolRegistry.invalidArgs unknown-argument refusal', () => {
     };
     expect(registry.invalidArgs(searchCode, { query: 'needle', path: 'src' })).toBe(
       'Error: search_code: unknown argument "path"; this tool takes: query, include. ' +
+        'Nothing ran. Resend the call without it, or use the argument that means what you intended.',
+    );
+  });
+
+  it.each(['amend</parameter', 'amend</parameter>'])(
+    'repairs only a declared argument followed by leaked parameter markup (%s)',
+    (key) => {
+      expect(
+        registry.invalidArgs(makeMarkupCommitTool(), { message: 'update', [key]: true }),
+      ).toBeUndefined();
+    },
+  );
+
+  it('validates the repaired value against the declared argument schema', () => {
+    expect(
+      registry.invalidArgs(makeMarkupCommitTool(), {
+        message: 'update',
+        'amend</parameter': 'yes',
+      }),
+    ).toBe(
+      'Error: commit: "amend" must be a JSON boolean, not a string. Resend the call with amend as true or false.',
+    );
+  });
+
+  it('refuses a mapped value that is tool-call markup with the exact resend instruction', () => {
+    expect(
+      registry.invalidArgs(makeMarkupCommitTool(), {
+        message: 'update',
+        'amend</parameter': '<parameter name>',
+      }),
+    ).toBe(
+      'commit: argument "amend" arrived as tool-call markup (<parameter name>), not a value. Send it again as plain JSON.',
+    );
+    expect(
+      registry.invalidArgs(makeMarkupCommitTool(), {
+        message: 'update',
+        'amend</parameter>': '<parameter name=amend>',
+      }),
+    ).toBe(
+      'commit: argument "amend" arrived as tool-call markup (<parameter name=amend>), not a value. Send it again as plain JSON.',
+    );
+  });
+
+  it('still refuses a normal unknown argument after parameter-markup repair', () => {
+    expect(
+      registry.invalidArgs(makeMarkupCommitTool(), { message: 'update', amendment: true }),
+    ).toBe(
+      'Error: commit: unknown argument "amendment"; this tool takes: message, amend. ' +
         'Nothing ran. Resend the call without it, or use the argument that means what you intended.',
     );
   });

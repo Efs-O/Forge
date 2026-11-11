@@ -20,7 +20,12 @@ describe('ToolLoopGuard', () => {
   it('warns on the first exact read-only repeat without throwing', () => {
     const guard = new ToolLoopGuard();
     expect(guard.afterRound(call('read_file', { path: 'a' }), result('same'))).toBe(false);
-    expect(guard.afterRound(call('read_file', { path: 'a' }), result('same'))).toBe(true);
+    const repeated = result('same');
+    expect(guard.afterRound(call('read_file', { path: 'a' }), repeated)).toBe(true);
+    expect(repeated[0]?.content).toBe(
+      '[Forge warning: this read-only tool call and result repeat round 1. ' +
+        'Act on the result you already have or change approach.]\nsame',
+    );
   });
 
   it('warns when a repeat matches an earlier non-adjacent round', () => {
@@ -63,8 +68,9 @@ describe('ToolLoopGuard', () => {
     expect(guard.afterRound(calls, result('Error: second'))).toBe(false);
     const third = result('Error: third');
     expect(guard.afterRound(calls, third)).toBe(true);
-    expect(third[0]?.content).toContain(
-      '[Forge warning: 3 failed read_file calls in a row on a. Read the error: it says what is wrong. Change the arguments or stop.]',
+    expect(third[0]?.content).toBe(
+      '[Forge warning: 3 failed read_file calls in a row on a. ' +
+        'Read the error: it says what is wrong. Change the arguments or stop.]\nError: third',
     );
   });
 

@@ -6,7 +6,10 @@ import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeShellTool } from '../../src/tools/shellTool';
 import { TEST_BASH } from '../support/bash';
-import { clearConversationSecretState, hasConversationReadSecret } from '../../src/tools/exfilTaint';
+import {
+  clearConversationSecretState,
+  hasConversationReadSecret,
+} from '../../src/tools/exfilTaint';
 import type { ForgeConfig } from '../../src/config/types';
 import { makeWebFetchTool } from '../../src/tools/fetchTool';
 
@@ -19,6 +22,15 @@ function offlineWebFetch(fetchImpl: (url: string) => Promise<Response>) {
     lookup: async () => [{ address: '93.184.216.34', family: 4 }],
     fetch: (url) => fetchImpl(url),
   });
+}
+
+function initializeGitRepo(root: string): void {
+  execFileSync('git', ['init', '-b', 'main'], { cwd: root });
+  execFileSync('git', ['config', 'user.name', 'Forge Test'], { cwd: root });
+  execFileSync('git', ['config', 'user.email', 'forge@test.invalid'], { cwd: root });
+  fs.writeFileSync(path.join(root, 'tracked.txt'), 'fixture\n', 'utf8');
+  execFileSync('git', ['add', 'tracked.txt'], { cwd: root });
+  execFileSync('git', ['commit', '-m', 'fixture commit'], { cwd: root });
 }
 import { makeGitReadTool } from '../../src/tools/gitReadTool';
 import {
@@ -44,29 +56,77 @@ describe('isolated process, Git, and web tool execution', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it.skipIf(!TEST_BASH)('executes shell pipelines and project scripts in the temporary workspace', async () => {
-    fs.writeFileSync(
-      path.join(root, 'package.json'),
-      JSON.stringify({
-        scripts: {
-          test: 'node -e "console.log(\'fixture tests passed\')"',
-          build: 'node -e "console.log(\'fixture build passed\')"',
-        },
-      }),
-      'utf8',
+  it.skipIf(!TEST_BASH)(
+    'executes shell pipelines and project scripts in the temporary workspace',
+    async () => {
+      fs.writeFileSync(
+        path.join(root, 'package.json'),
+        JSON.stringify({
+          scripts: {
+            test: 'node -e "console.log(\'fixture tests passed\')"',
+            build: 'node -e "console.log(\'fixture build passed\')"',
+          },
+        }),
+        'utf8',
+      );
+      await expect(
+        makeShellTool({
+          bashPath: TEST_BASH,
+          getConfig: () => ({ permissions: { exec: { shell: 'bash' } } }) as never,
+        }).handler(
+          {
+            command: `node -e "process.stdout.write('fixture command')"`,
+            cwd: '.',
+            timeout_ms: 10_000,
+          },
+          { beforeMutate: () => {} },
+        ),
+      ).resolves.toContain('fixture command');
+      await expect(
+        makeShellTool({ bashPath: TEST_BASH }).handler(
+          { command: 'npm test', cwd: '.' },
+          { beforeMutate: () => {} },
+        ),
+      ).resolves.toContain('fixture tests passed');
+      await expect(
+        makeShellTool({ bashPath: TEST_BASH }).handler(
+          { command: 'npm run build', cwd: '.' },
+          { beforeMutate: () => {} },
+        ),
+      ).resolves.toContain('fixture build passed');
+    },
+    15_000,
+  );
+
+  it('returns the branch before the clean-tree status', async () => {
+    initializeGitRepo(root);
+
+    await expect(makeGitReadTool().handler({ operation: 'status' })).resolves.toBe(
+      'On branch main.\nNo changes.',
     );
-    await expect(
-      makeShellTool({ bashPath: TEST_BASH, getConfig: () => ({ permissions: { exec: { shell: 'bash' } } } as never) }).handler({
-        command: `node -e "process.stdout.write('fixture command')"`, cwd: '.', timeout_ms: 10_000,
-      }, { beforeMutate: () => {} }),
-    ).resolves.toContain('fixture command');
-    await expect(
-      makeShellTool({ bashPath: TEST_BASH }).handler({ command: 'npm test', cwd: '.' }, { beforeMutate: () => {} }),
-    ).resolves.toContain('fixture tests passed');
-    await expect(
-      makeShellTool({ bashPath: TEST_BASH }).handler({ command: 'npm run build', cwd: '.' }, { beforeMutate: () => {} }),
-    ).resolves.toContain('fixture build passed');
-  }, 15_000);
+  });
+
+  it('returns the branch before dirty-tree paths', async () => {
+    initializeGitRepo(root);
+    fs.writeFileSync(path.join(root, 'tracked.txt'), 'changed\n', 'utf8');
+
+    await expect(makeGitReadTool().handler({ operation: 'status' })).resolves.toBe(
+      'On branch main.\nM tracked.txt',
+    );
+  });
+
+  it('returns a short detached HEAD before the clean-tree status', async () => {
+    initializeGitRepo(root);
+    execFileSync('git', ['checkout', '--detach', 'HEAD'], { cwd: root });
+    const shortSha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trim();
+
+    await expect(makeGitReadTool().handler({ operation: 'status' })).resolves.toBe(
+      `HEAD detached at ${shortSha}.\nNo changes.`,
+    );
+  });
 
   it('executes every Git handler through CLI discovery, with no Git extension present', async () => {
     const gitRead = makeGitReadTool();
@@ -85,7 +145,9 @@ describe('isolated process, Git, and web tool execution', () => {
     execFileSync('git', ['commit', '-m', 'fixture commit\n\nbody line'], { cwd: root });
     fs.writeFileSync(path.join(root, 'tracked.txt'), 'changed\n', 'utf8');
 
-    await expect(gitRead.handler({ operation: 'status' })).resolves.toBe('M tracked.txt');
+    await expect(gitRead.handler({ operation: 'status' })).resolves.toBe(
+      'On branch main.\nM tracked.txt',
+    );
 
     const log = String(await gitRead.handler({ operation: 'log', max_entries: 1 }));
     // First line of the raw body, not git's normalised subject.
@@ -101,9 +163,9 @@ describe('isolated process, Git, and web tool execution', () => {
     await expect(gitRead.handler({ operation: 'show', ref: 'HEAD' })).resolves.toContain('fixture');
     // Per-file diff and a bad ref go through the bounded async runner (U16-01):
     // a git failure is an error, not stderr returned as the result.
-    await expect(
-      gitRead.handler({ operation: 'diff', path: 'tracked.txt' }),
-    ).resolves.toContain('+changed');
+    await expect(gitRead.handler({ operation: 'diff', path: 'tracked.txt' })).resolves.toContain(
+      '+changed',
+    );
     await expect(gitRead.handler({ operation: 'show', ref: 'no-such-ref' })).rejects.toThrow(
       /git show failed/,
     );
@@ -125,7 +187,9 @@ describe('isolated process, Git, and web tool execution', () => {
     await expect(makeStageTool().handler({ paths: ['tracked.txt'] })).resolves.toContain(
       'tracked.txt',
     );
-    await expect(gitRead.handler({ operation: 'status' })).resolves.toBe('M tracked.txt [staged]');
+    await expect(gitRead.handler({ operation: 'status' })).resolves.toBe(
+      'On branch main.\nM tracked.txt [staged]',
+    );
     await expect(makeCommitTool().handler({ message: 'next' })).resolves.toBe('Committed: next');
   }, 15_000);
 

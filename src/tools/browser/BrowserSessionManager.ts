@@ -400,6 +400,33 @@ export class BrowserSessionManager {
     return `scrolled by ${deltaX},${deltaY} at ${x},${y}`;
   }
 
+  /** Bring a selector or the exact element from browser_inspect into view. */
+  async scrollIntoView(
+    tabId: string | undefined,
+    target: { selector?: string | undefined; index?: number | undefined },
+  ): Promise<string> {
+    const page = await this.resolvePage(tabId);
+    if (target.selector) {
+      await withLocatorActionTimeout('scroll', `selector "${target.selector}"`, () =>
+        page
+          .locator(target.selector!)
+          .first()
+          .scrollIntoViewIfNeeded({ timeout: LOCATOR_ACTION_TIMEOUT_MS }),
+      );
+      return `scrolled "${target.selector}" into view`;
+    }
+    if (target.index !== undefined) {
+      const el = await this.indexTarget(page, target.index, 'scroll');
+      await withLocatorActionTimeout(
+        'scroll',
+        `element ${target.index} ("${el.text || el.role}")`,
+        () => el.handle.scrollIntoViewIfNeeded({ timeout: LOCATOR_ACTION_TIMEOUT_MS }),
+      );
+      return `scrolled element ${target.index} ("${el.text || el.role}") into view`;
+    }
+    throw new Error('browser_scroll: into_view must include selector or index');
+  }
+
   async hover(
     tabId: string | undefined,
     target: {

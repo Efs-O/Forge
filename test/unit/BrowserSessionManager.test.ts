@@ -49,3 +49,78 @@ describe('BrowserSessionManager lifecycle', () => {
     expect(manager.isLaunched()).toBe(false);
   });
 });
+
+describe('BrowserSessionManager scroll into view', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('uses Playwright scrollIntoViewIfNeeded for selectors and inspected indexes', async () => {
+    const facts = {
+      role: null,
+      tag: 'button',
+      type: null,
+      ariaLabel: null,
+      title: null,
+      textContent: 'Target',
+      placeholder: null,
+      value: null,
+      contentEditable: null,
+      readOnly: false,
+      disabled: false,
+    };
+    const handle = {
+      evaluate: vi.fn(async () => ({ attached: true, visible: true, facts })),
+      scrollIntoViewIfNeeded: vi.fn(async () => undefined),
+      dispose: vi.fn(async () => undefined),
+    };
+    const locator = {
+      first: vi.fn(() => locator),
+      scrollIntoViewIfNeeded: vi.fn(async () => undefined),
+    };
+    const frame = {};
+    const page = {
+      on: vi.fn(),
+      mainFrame: () => frame,
+      url: () => 'https://example.test/',
+      title: async () => 'Example',
+      locator: vi.fn(() => locator),
+      evaluate: vi.fn(async () => [
+        {
+          index: 0,
+          selector: 'button:nth-of-type(1)',
+          bbox: { x: 0, y: 0, width: 10, height: 10 },
+          facts,
+        },
+      ]),
+      evaluateHandle: vi.fn(async () => ({
+        getProperties: async () => new Map([['0', { asElement: () => handle }]]),
+        dispose: vi.fn(async () => undefined),
+      })),
+    };
+    const context = {
+      on: vi.fn(),
+      pages: () => [page],
+      newPage: async () => page,
+    };
+    const browser = {
+      newContext: async () => context,
+      close: vi.fn(async () => undefined),
+      version: () => 'test-browser',
+    };
+    mocks.launch.mockResolvedValue(browser);
+    const manager = new BrowserSessionManager();
+    await manager.launch({ channel: 'chrome', headless: true });
+    await manager.newPage();
+
+    await expect(manager.scrollIntoView(undefined, { selector: '#target' })).resolves.toBe(
+      'scrolled "#target" into view',
+    );
+    expect(locator.scrollIntoViewIfNeeded).toHaveBeenCalledExactlyOnceWith({ timeout: 5000 });
+
+    await manager.inspect(undefined, undefined);
+    await expect(manager.scrollIntoView(undefined, { index: 0 })).resolves.toBe(
+      'scrolled element 0 ("Target") into view',
+    );
+    expect(handle.scrollIntoViewIfNeeded).toHaveBeenCalledExactlyOnceWith({ timeout: 5000 });
+    expect(handle.evaluate).toHaveBeenCalledOnce();
+  });
+});

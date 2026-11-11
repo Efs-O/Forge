@@ -28,6 +28,8 @@ const LAZY_GROUP_BY_SERVER: ReadonlyMap<string, string> = new Map([['halluscribe
  * tools each had at most 7 calls. Rare tools stay grouped to avoid paying their
  * schema cost on every conversation.
  *
+ * 2026-11-11, owner: code_intel itself is always offered; its group keeps the editing tools.
+ *
  * `media` left the eager-by-default set on 2026-10-29
  * (`docs/reports/TOOL_AUDIT_2026_10_29.md` §7): across the 53 sessions since
  * 0.17.80, `render_html_to_image`, `view_video`, `image_search` and
@@ -118,7 +120,7 @@ const NATIVE_GROUP_BY_TOOL: ReadonlyMap<string, string> = new Map([
   ...['git_read', 'stage', 'commit', 'create_branch', 'switch_branch'].map(
     (name) => [name, 'git'] as const,
   ),
-  ...['code_intel', 'rename_symbol', 'apply_code_action', 'format_file', 'search_codebase'].map(
+  ...['rename_symbol', 'apply_code_action', 'format_file', 'search_codebase'].map(
     (name) => [name, 'code_intel'] as const,
   ),
   ...['remember', 'recall', 'list_memories', 'forget'].map((name) => [name, 'memory'] as const),
