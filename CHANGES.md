@@ -1,5 +1,10 @@
 # Forge — Recent Changes
 
+## 0.17.163
+
+- `desktop_focus_window` focuses the window when another app, such as a browser just opened, holds the foreground; Windows refused it before.
+- The `shell` tool says to run PowerShell code with `shell: pwsh`, not `powershell -Command` inside Git Bash, where `$variables` are expanded first and `Start-Process notepad` finds Git's `notepad` script.
+
 ## 0.17.162
 
 - `show_diff` says its result carries no diff text, and to read the changes with `git_read diff` or `read_file`.
