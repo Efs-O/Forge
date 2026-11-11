@@ -1,5 +1,14 @@
 # Forge — Recent Changes
 
+## 0.17.165
+
+- Memories are plain markdown files, one per memory, in `~/.forge/memories/<folder>-<id>/`, each with a name, a description and its text, plus a generated `MEMORY.md` list. You and CLI agents can read and edit them; an edit counts on the next read. Existing memories move there once, on the first load, and the old copies are deleted only after every file reads back identical.
+- `remember` without a description takes the first line of the text as the description, so every memory has one.
+- `/memories` and **Forge: Show Memories** open the memory list.
+- A new chat lists up to 60 memories, newest first (was 30), each line cut at 120 characters.
+- Up to ten read-only tool calls in one round run at the same time (was four).
+- The temporary Clanker default for new chats is gone: every new chat starts with Clanker off, and a chat that default had switched on loads with it off.
+
 ## 0.17.164
 
 - The `shell` tool names its parameter: run PowerShell, or Windows programs that take /switches, by setting `"shell": "pwsh"` on the call, not by writing it into `command`.
