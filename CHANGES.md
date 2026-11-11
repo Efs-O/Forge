@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.156
+
+- `forge.sh reload --reopen-claude <sessionId>` reopens an idle Claude Code session's tab in the reloaded window; a watcher session still sends the message that wakes it.
+
 ## 0.17.155
 
 - `image_search` now treats SerpApi's successful no-match answers as results and suggests another search instead of reporting an error.
