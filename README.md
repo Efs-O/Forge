@@ -106,8 +106,11 @@ same name, the later location wins.
 
 New skills appear in the next new chat because Forge builds the catalog once per
 conversation. Skills grant no permissions: scripts run through `shell` under
-the normal approvals. Skills are on by default; set `skills.enabled: false` in
-`config.yaml` to turn them off. For a worked example to copy, see
+the normal approvals. The skill files themselves are not gated: the agent can
+write under `~/.forge/skills/` with no approval card and no policy line, so it
+can edit a skill that later steers it or another chat. Skills are on by
+default; set `skills.enabled: false` in `config.yaml` to turn them off. For a
+worked example to copy, see
 [hf-download](resources/skills/hf-download/).
 
 ## What's New
@@ -223,7 +226,11 @@ setting. Desktop tools click and type into whichever window is focused.
 
 **Memory that outlives the conversation.** `remember`, `recall`, and
 `list_memories` give the agent durable notes across sessions, separate from
-transcript history.
+transcript history. Memories are markdown files under `~/.forge/memories/`;
+older ones are moved there from VS Code storage once. If that move fails, Forge
+says so and keeps serving memories from VS Code storage: any files already
+written under `~/.forge/memories/` are not the live store, and the move will
+retry next load.
 
 **A task plan that survives compaction.** `update_plan` records the work as
 conversation state, re-injected verbatim every round and never summarized — so
