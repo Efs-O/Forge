@@ -21,6 +21,7 @@ import {
 } from '../system/PowerControl';
 import type { LlamacppAction } from './actions/llamacppAction';
 import type { PendingModelAction } from './jobModelLane';
+import type { JobsFetchCacheEntry } from './jobsFetch';
 
 export interface ScheduledJobRunDeps {
   store: JobStore;
@@ -43,7 +44,7 @@ export interface CheckOutcome {
 /** Run the check. Returns the observation, whether it changed, and a summary. */
 export async function runJobCheck(
   getConfig: () => { allowedHosts: readonly string[]; maxConcurrent: number },
-  etagCache: Map<string, string>,
+  etagCache: Map<string, JobsFetchCacheEntry>,
   llamacpp: LlamacppAction | undefined,
   jobFile: JobFile,
 ): Promise<CheckOutcome> {

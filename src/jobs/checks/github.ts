@@ -4,8 +4,8 @@ import type { GithubIssueCheck, GithubReleaseCheck } from '../jobSchema';
 /**
  * The GitHub checks: `github_release` (watch a repo's latest release) and
  * `github_issue` (watch an issue's last-updated time, so a new comment or state
- * change is a change). Both go through the gated `ctx.fetch` (D5) and treat an
- * ETag 304 as "unchanged" so they do not burn the API's rate budget.
+ * change is a change). Both go through the gated `ctx.fetch` (D5), which
+ * supplies cached bodies after ETag 304s so observations are re-derived.
  *
  * The observation is a stable JSON string of the structured value the check
  * tracks (B.2). For a release that is the tag, publish time, matching asset
@@ -97,12 +97,6 @@ export async function githubReleaseCheck(
       : `https://api.github.com/repos/${check.repo}/releases/latest`;
   const result = await ctx.fetch(url);
 
-  if (result.notModified) {
-    // A 304 means the server has nothing new; the last observation stands —
-    // including when it is null (no baseline yet), which must NOT become ''.
-    return { observation: lastObservation, changed: false, summary: 'no new release' };
-  }
-
   const release = pickRelease(result.body, channel);
   if (typeof release.tag_name !== 'string') {
     throw new Error(
@@ -154,10 +148,6 @@ export async function githubIssueCheck(
   const url = `https://api.github.com/repos/${check.repo}/issues/${check.issue_number}`;
   const result = await ctx.fetch(url);
 
-  if (result.notModified) {
-    return { observation: lastObservation, changed: false, summary: 'issue unchanged' };
-  }
-
   const issue = JSON.parse(result.body) as {
     state?: unknown;
     updated_at?: unknown;
@@ -181,7 +171,7 @@ export async function githubIssueCheck(
   let lastComment: { id: number; author: string; excerpt: string } | null = null;
   const commentsResult =
     commentCount > 0 ? await ctx.fetch(`${url}/comments?per_page=1&page=${commentCount}`) : null;
-  if (commentsResult && !commentsResult.notModified) {
+  if (commentsResult) {
     const comments = JSON.parse(commentsResult.body) as unknown;
     if (Array.isArray(comments) && comments.length > 0) {
       const comment = comments[0] as { id?: unknown; user?: { login?: unknown }; body?: unknown };
@@ -193,9 +183,6 @@ export async function githubIssueCheck(
         };
       }
     }
-  } else if (commentsResult && lastObservation) {
-    const prior = JSON.parse(lastObservation) as { last_comment?: typeof lastComment };
-    lastComment = prior.last_comment ?? null;
   }
   const observation = JSON.stringify({
     state,

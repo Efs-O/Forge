@@ -13,6 +13,7 @@ import { WakeReconciler } from './schedulerWakes';
 import { acquireSchedulerLease } from './jobLease';
 import { describeError } from '../util/describeError';
 import { makeApprovalWarnings } from './approvalJobRuleWarnings';
+import type { JobsFetchCacheEntry } from './jobsFetch';
 import type { ForgeConfig } from '../config/types';
 import { JobModelLane, type PendingModelAction } from './jobModelLane';
 import {
@@ -90,7 +91,7 @@ export class JobScheduler {
   private readonly agentTask: AgentTaskRunner | undefined;
   private readonly retitle: RetitleRunner | undefined;
   private gpuGateAbortController = new AbortController();
-  private readonly etagCache = new Map<string, string>();
+  private readonly etagCache = new Map<string, JobsFetchCacheEntry>();
   /** User-facing delivery: the outbox, the toast, and the summarize timing (B.4). */
   private readonly delivery: JobDelivery;
   /** The single writer of `ForgeScheduledWake` while this window holds the lease. */

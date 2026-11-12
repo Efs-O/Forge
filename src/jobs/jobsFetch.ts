@@ -18,7 +18,7 @@ export interface JobsFetchOptions {
   /** The host a job is allowed to reach. A job may only fetch from these. */
   allowedHosts: readonly string[];
   /** ETag cache, keyed by URL. The caller owns persistence. */
-  etagCache: Map<string, string>;
+  etagCache: Map<string, JobsFetchCacheEntry>;
   /**
    * When true, fetch fresh: do not send `If-None-Match` and do not read or
    * write the ETag cache. The `llamacpp_update` action uses this to re-read a
@@ -38,12 +38,17 @@ export interface JobsFetchOptions {
 }
 
 export interface JobsFetchResult {
-  /** True when the response was a 304 (cached, unchanged). */
+  /** True when the server answered 304 and no cached body was available. */
   notModified: boolean;
-  /** The response body, empty when `notModified`. */
+  /** The response body, including the cached body for a 304 when available. */
   body: string;
   /** The new ETag to cache, when the server sent one. */
   etag: string | null;
+}
+
+export interface JobsFetchCacheEntry {
+  etag: string;
+  body: string;
 }
 
 export class JobsFetchRefusedError extends Error {
@@ -125,14 +130,36 @@ export async function jobsFetch(url: string, options: JobsFetchOptions): Promise
   };
   const forceFresh = options.forceFresh === true;
   const cacheKey = options.cacheKeyPrefix ? `${options.cacheKeyPrefix}|${url}` : url;
-  const cachedEtag = forceFresh ? undefined : options.etagCache.get(cacheKey);
-  if (cachedEtag) headers['If-None-Match'] = cachedEtag;
+  const cached = forceFresh ? undefined : options.etagCache.get(cacheKey);
+  if (cached) headers['If-None-Match'] = cached.etag;
 
   // Gated at every hop, not only on `url` — see `fetchGated`.
   const { response, host } = await fetchGated(url, options.allowedHosts, headers, 'fetch');
 
   if (response.status === 304) {
-    return { notModified: true, body: '', etag: cachedEtag ?? null };
+    if (cached && typeof cached.body === 'string') {
+      return { notModified: false, body: cached.body, etag: cached.etag };
+    }
+    // A validator without its matching body cannot produce an observation.
+    // Retry once unconditionally so every check sees a fresh payload.
+    const freshHeaders = { ...headers };
+    delete freshHeaders['If-None-Match'];
+    const fresh = await fetchGated(url, options.allowedHosts, freshHeaders, 'fetch');
+    if (!fresh.response.ok) {
+      throw new Error(
+        `Forge: job fetch from ${fresh.host} failed with HTTP ${fresh.response.status}`,
+      );
+    }
+    const freshBody = await readTextCapped(fresh.response, options.maxBytes ?? MAX_RESPONSE_BYTES);
+    if (freshBody.truncated) {
+      throw new Error(
+        `Forge: job fetch response exceeded ${options.maxBytes ?? MAX_RESPONSE_BYTES} bytes`,
+      );
+    }
+    const freshEtag = fresh.response.headers.get('ETag');
+    if (freshEtag && !forceFresh)
+      options.etagCache.set(cacheKey, { etag: freshEtag, body: freshBody.text });
+    return { notModified: false, body: freshBody.text, etag: freshEtag };
   }
 
   if (!response.ok) {
@@ -147,7 +174,7 @@ export async function jobsFetch(url: string, options: JobsFetchOptions): Promise
   }
   const body = cappedBody.text;
   const etag = response.headers.get('ETag');
-  if (etag && !forceFresh) options.etagCache.set(cacheKey, etag);
+  if (etag && !forceFresh) options.etagCache.set(cacheKey, { etag, body });
   return { notModified: false, body, etag };
 }
 

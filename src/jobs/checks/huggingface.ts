@@ -48,10 +48,6 @@ export async function hfDiscussionCheck(
   const url = `https://huggingface.co/api/${segment}/${check.repo}/discussions/${check.discussion_number}`;
   const result = await ctx.fetch(url);
 
-  if (result.notModified) {
-    return { observation: lastObservation, changed: false, summary: 'discussion unchanged' };
-  }
-
   const thread = JSON.parse(result.body) as HfDiscussion;
   if (typeof thread.status !== 'string' || !Array.isArray(thread.events)) {
     throw new Error(

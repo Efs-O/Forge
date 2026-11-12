@@ -79,33 +79,6 @@ describe('githubReleaseCheck', () => {
     expect(again.changed).toBe(false);
   });
 
-  it('an ETag 304 counts as unchanged and keeps the last observation', async () => {
-    const last = JSON.stringify({ tag: 'b10910' });
-    const result = await githubReleaseCheck(
-      { kind: 'github_release', repo: 'ggml-org/llama.cpp' },
-      last,
-      fakeCtx(null, 'W/"etag1"'),
-    );
-    expect(result.changed).toBe(false);
-    expect(result.observation).toBe(last);
-    expect(result.summary).toBe('no new release');
-  });
-
-  it('a 304 with NO baseline keeps the baseline null, never an empty string', async () => {
-    // Reachable when a job's state file was lost while the process kept its
-    // ETag cache. Returning '' here is not null, so the NEXT run's
-    // `lastObservation !== null` test reports a spurious "changed" — which for
-    // a llamacpp_update job is a real install attempt for a release already
-    // installed.
-    const result = await githubReleaseCheck(
-      { kind: 'github_release', repo: 'ggml-org/llama.cpp' },
-      null,
-      fakeCtx(null, 'W/"etag1"'),
-    );
-    expect(result.changed).toBe(false);
-    expect(result.observation).toBeNull();
-  });
-
   it('an asset pattern filters the recorded assets', async () => {
     const result = await githubReleaseCheck(
       {
@@ -223,16 +196,6 @@ describe('githubIssueCheck', () => {
     expect(result.changed).toBe(true);
   });
 
-  it('an ETag 304 counts as unchanged', async () => {
-    const last = JSON.stringify({ state: 'open', updated_at: 'x', title: '', comments: 0 });
-    const result = await githubIssueCheck(
-      { kind: 'github_issue', repo: 'ggml-org/llama.cpp', issue_number: 1234 },
-      last,
-      fakeCtx(null, 'W/"etag2"'),
-    );
-    expect(result.changed).toBe(false);
-    expect(result.observation).toBe(last);
-  });
 });
 
 describe('hfDiscussionCheck', () => {
@@ -289,13 +252,6 @@ describe('hfDiscussionCheck', () => {
       fakeCtx(thread('closed', [comment('a', 'hi')])),
     );
     expect(closed.changed).toBe(true);
-  });
-
-  it('a 304 keeps the last observation, even a null baseline', async () => {
-    expect(await hfDiscussionCheck(check, null, fakeCtx(null))).toMatchObject({
-      observation: null,
-      changed: false,
-    });
   });
 
   it('an error payload throws with the API message', async () => {

@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JobsFetchRefusedError, jobsDownloadBinary, jobsFetch } from '../../src/jobs/jobsFetch';
+import { githubReleaseCheck } from '../../src/jobs/checks/github';
 
 const realFetch = globalThis.fetch;
 
@@ -84,7 +85,7 @@ describe('jobsFetch (D5 host gate)', () => {
     // A shared cache hands the SECOND job a 304 on its very first run, leaving
     // it with no baseline while the server says "nothing new" — a state the
     // check cannot tell apart from a real no-change.
-    const etagCache = new Map<string, string>();
+    const etagCache = new Map();
     const url = 'https://api.github.com/repos/ggml-org/llama.cpp/releases/latest';
     // A fresh Response per call: a body stream can only be read once.
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementation(() =>
@@ -116,28 +117,75 @@ describe('jobsFetch (D5 host gate)', () => {
     expect(result.notModified).toBe(false);
   });
 
-  it('sends If-None-Match when an ETag is cached, and a 304 counts as unchanged', async () => {
-    const cache = new Map<string, string>([['https://api.github.com/repo', 'W/"abc"']]);
+  it('sends If-None-Match when an ETag is cached, and a 304 returns its body', async () => {
+    const cache = new Map([[
+      'https://api.github.com/repo',
+      { etag: 'W/"abc"', body: 'cached body' },
+    ]]);
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(new Response(null, { status: 304 }));
     const result = await jobsFetch('https://api.github.com/repo', {
       allowedHosts: ['api.github.com'],
       etagCache: cache,
     });
-    expect(result.notModified).toBe(true);
-    expect(result.body).toBe('');
+    expect(result.notModified).toBe(false);
+    expect(result.body).toBe('cached body');
     const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
     const headers = (call[1] as RequestInit).headers as Record<string, string>;
     expect(headers['If-None-Match']).toBe('W/"abc"');
   });
 
   it('caches the ETag from a 200 response', async () => {
-    const cache = new Map<string, string>();
+    const cache = new Map();
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(okResponse('body', 'W/"new"'));
     await jobsFetch('https://api.github.com/repo', {
       allowedHosts: ['api.github.com'],
       etagCache: cache,
     });
-    expect(cache.get('https://api.github.com/repo')).toBe('W/"new"');
+    expect(cache.get('https://api.github.com/repo')).toEqual({ etag: 'W/"new"', body: 'body' });
+  });
+
+  it('re-derives a release observation from a cached body after a 304', async () => {
+    const url = 'https://api.github.com/repos/mw00/project-maya/releases/latest';
+    const latest = JSON.stringify({ tag_name: 'v1.1.60', published_at: '2026-11-12', assets: [] });
+    const cache = new Map();
+    const last = JSON.stringify({ tag: 'v1.1.56', published_at: null, assets: [], body: '' });
+    (globalThis.fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(okResponse(latest, '"e1"'))
+      .mockResolvedValueOnce(new Response(null, { status: 304 }))
+      .mockResolvedValueOnce(new Response(null, { status: 304 }));
+    const ctx = {
+      fetch: (requestUrl: string) =>
+        jobsFetch(requestUrl, { allowedHosts: ['api.github.com'], etagCache: cache }),
+      etagCache: cache,
+      allowedHosts: ['api.github.com'],
+    };
+
+    const first = await githubReleaseCheck({ kind: 'github_release', repo: 'mw00/project-maya' }, last, ctx);
+    expect(first).toEqual({
+      observation: JSON.stringify({ tag: 'v1.1.60', published_at: '2026-11-12', assets: [], body: '' }),
+      changed: true,
+      summary: 'latest release is v1.1.60',
+    });
+    const second = await githubReleaseCheck({ kind: 'github_release', repo: 'mw00/project-maya' }, last, ctx);
+    expect(second).toEqual(first);
+    const third = await githubReleaseCheck({ kind: 'github_release', repo: 'mw00/project-maya' }, first.observation, ctx);
+    expect(third).toEqual({ ...first, changed: false });
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1]?.[1]).toMatchObject({
+      headers: expect.objectContaining({ 'If-None-Match': '"e1"' }),
+    });
+  });
+
+  it('retries a 304 without a cached body once without If-None-Match', async () => {
+    const url = 'https://api.github.com/repo';
+    const cache = new Map([[url, { etag: '"lost"', body: undefined }]]);
+    (globalThis.fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(new Response(null, { status: 304 }))
+      .mockResolvedValueOnce(okResponse('fresh body', '"fresh"'));
+    const result = await jobsFetch(url, { allowedHosts: ['api.github.com'], etagCache: cache });
+    expect(result).toEqual({ notModified: false, body: 'fresh body', etag: '"fresh"' });
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1]?.[1]).toMatchObject({
+      headers: expect.not.objectContaining({ 'If-None-Match': expect.anything() }),
+    });
   });
 
   it('a non-2xx/304 response throws with the status', async () => {

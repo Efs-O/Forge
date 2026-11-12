@@ -6,6 +6,7 @@ import { toolUsageCheck } from './toolUsage';
 import type { CheckContext } from './checkTypes';
 import type { CheckResult } from './checkTypes';
 import type { JobFile } from '../jobSchema';
+import type { JobsFetchCacheEntry } from '../jobsFetch';
 
 /**
  * The check dispatch: given a job and its state, run the right check and
@@ -41,7 +42,7 @@ export async function runCheck(job: JobFile, ctx: CheckContext): Promise<CheckRe
 export function buildCheckContext(
   allowedHosts: readonly string[],
   jobId: string,
-  etagCache: Map<string, string>,
+  etagCache: Map<string, JobsFetchCacheEntry>,
 ): CheckContext {
   return {
     fetch: (url) => jobsFetch(url, { allowedHosts, etagCache, cacheKeyPrefix: jobId }),

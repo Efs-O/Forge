@@ -1,4 +1,4 @@
-import type { JobsFetchResult } from '../jobsFetch';
+import type { JobsFetchCacheEntry, JobsFetchResult } from '../jobsFetch';
 
 /**
  * What a check reports back to the scheduler.
@@ -6,13 +6,13 @@ import type { JobsFetchResult } from '../jobsFetch';
  * `observation` is the stable value the check tracks (a tag, a timestamp, a
  * free-space figure). The scheduler stores it as `state.last_observation` and
  * passes it back on the next run; `changed` tells the scheduler whether the
- * action should fire. A 304 / no-change run returns `changed: false` and keeps
- * the previous observation.
+ * action should fire. Checks derive observations from every fetched body,
+ * including cached bodies returned after an ETag 304.
  */
 export interface CheckResult {
   /**
    * The value to store as the new `last_observation`, or `null` when the check
-   * has nothing to record (a 304 on a job that has no baseline yet).
+   * has nothing to record.
    *
    * `null` rather than `''` is load-bearing. "Changed" is decided by
    * `lastObservation !== null` — the rule that a first run only establishes a
@@ -36,7 +36,7 @@ export interface CheckResult {
 export interface CheckContext {
   fetch(url: string): Promise<JobsFetchResult>;
   /** The ETag cache, shared across checks for the run. */
-  etagCache: Map<string, string>;
+  etagCache: Map<string, JobsFetchCacheEntry>;
   /** The allowed hosts, for error messages. */
   allowedHosts: readonly string[];
 }
