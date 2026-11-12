@@ -371,12 +371,8 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
           ...(approvalKey ? { approvalKey } : {}),
           ...(result.approvalTargets ? { approvalTargets: result.approvalTargets } : {}),
           ...(result.rule?.alternative ? { declineHint: result.rule.alternative } : {}),
-          ...(result.rule?.gateKind
-            ? {
-                gateKind: result.rule.gateKind,
-                cardReason: `Matched rule: ${result.rule.description}`,
-              }
-            : {}),
+          ...(result.rule?.gateKind ? { gateKind: result.rule.gateKind } : {}),
+          ...(result.rule ? { cardReason: `Matched rule: ${result.rule.description}` } : {}),
         };
       return undefined;
     },

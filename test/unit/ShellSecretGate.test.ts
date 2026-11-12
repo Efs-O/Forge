@@ -325,6 +325,17 @@ describe('the shell tool carries the gate to the card', () => {
     expect(card?.declineHint).toContain('permissions.secret_paths_allow');
   });
 
+  it('carries a no-gate dangerous shell rule reason into approval metadata', () => {
+    const metadata = tool.approval?.({
+      command: 'pwsh -NoProfile -ExecutionPolicy Bypass -File V:\\Maya\\local\\update-maya.ps1',
+      shell: 'bash',
+    });
+    expect(metadata?.cardReason).toBe(
+      'Matched rule: runs a script Forge could not read (V:\\Mayalocalupdate-maya.ps1: does not exist; bash removed the backslashes in V:\\Maya\\local\\update-maya.ps1: pass shell "pwsh", or write the path with forward slashes)',
+    );
+    expect(metadata?.gateKind).toBeUndefined();
+  });
+
   it('does not auto-approve a secret read, and still auto-approves a safe one', () => {
     expect(tool.autoApproveIf?.({ command: 'Get-Content .env', shell: 'pwsh' })).toBe(false);
     expect(tool.autoApproveIf?.({ command: 'ls -la', shell: 'bash' })).toBe(true);

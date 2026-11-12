@@ -50,6 +50,18 @@ describe('a refusal by policy reads as sentences', () => {
 
   const denyRules = getBuiltinDenyList().filter((rule) => rule.class === 'dangerous');
 
+  it('names a dangerous shell rule without a gate kind in an unattended job refusal', () => {
+    const message = new ToolApprovalPolicyDenied('shell', {
+      job: true,
+      why:
+        'Matched rule: runs a script Forge could not read (V:\\Mayalocalupdate-maya.ps1: does not exist; bash removed the backslashes in V:\\Maya\\local\\update-maya.ps1: pass shell "pwsh", or write the path with forward slashes)',
+      alternative: 'Inspect the script and run the reviewed commands directly.',
+    }).message;
+    expect(message).toBe(
+      'unattended: dangerous tool denied by policy: "shell". Matched rule: runs a script Forge could not read (V:\\Mayalocalupdate-maya.ps1: does not exist; bash removed the backslashes in V:\\Maya\\local\\update-maya.ps1: pass shell "pwsh", or write the path with forward slashes). Use this instead: Inspect the script and run the reviewed commands directly. Stop and report RESULT: failed naming the action you needed.',
+    );
+  });
+
   it('every deny-list refusal, in every autonomous mode', () => {
     expect(denyRules.length, 'the deny list has dangerous rules').toBeGreaterThan(0);
     for (const rule of denyRules) {
