@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
@@ -6,6 +7,9 @@ vi.mock('vscode', () => ({ workspace: { workspaceFolders: undefined } }));
 
 import { foldDrivePath } from '../../src/util/drivePath';
 import { resolveWorkspacePath } from '../../src/util/WorkspacePaths';
+import { openForgeFileRoots } from '../../src/tools/ownerPathsOpen';
+import { ownerOnlySetFor } from '../../src/tools/ownerPaths';
+import { isMutationPathOutsideWorkspace } from '../../src/sidebar/toolApprovalEvaluation';
 
 describe('workspace path containment', () => {
   // Platform-native paths: a hard-coded `C:/` is relative on the Linux and
@@ -106,11 +110,47 @@ describe('extra_file_roots', () => {
   });
 
   it('points at extra_file_roots when none are configured', () => {
+    const target = path.join(extra, 'x.txt');
     expect(() =>
-      resolveWorkspacePath(path.join(extra, 'x.txt'), {
+      resolveWorkspacePath(target, {
         workspaceRoot: workspace,
         mustBeInsideWorkspace: true,
       }),
-    ).toThrow(/add its folder to extra_file_roots/);
+    ).toThrow(
+      `Path is outside the workspace: ${target} (add its folder to extra_file_roots in config.yaml to allow it). Every path under ${extra} is refused the same way, whatever the spelling or file name: ask the user to allow the folder, or work inside the workspace.`,
+    );
+  });
+
+  it('keeps built-in roots out of the exact extra_file_roots refusal text', () => {
+    const target = path.join(base, 'elsewhere', 'x.txt');
+    const dir = path.dirname(target);
+    const roots = [extra, ...openForgeFileRoots()];
+    expect(() =>
+      resolveWorkspacePath(target, {
+        workspaceRoot: workspace,
+        mustBeInsideWorkspace: true,
+        extraRoots: roots,
+      }),
+    ).toThrow(
+      `Path is outside the workspace: ${target} (and outside extra_file_roots: ${extra}). Every path under ${dir} is refused the same way, whatever the spelling or file name: ask the user to allow the folder, or work inside the workspace.`,
+    );
+  });
+
+  it('counts an open memory write as inside for approval, while other outside paths remain outside', () => {
+    const home = path.join(base, 'home');
+    const memoryRoot = path.join(home, '.forge', 'memories');
+    const memory = path.join(memoryRoot, 'proj', 'x.md');
+    const elsewhere = path.join(base, 'elsewhere', 'x.txt');
+    for (const target of [memory, elsewhere]) fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(memory, 'x\n');
+    fs.writeFileSync(elsewhere, 'x\n');
+    const ownerSet = ownerOnlySetFor({ home, platform: process.platform });
+
+    try {
+      expect(isMutationPathOutsideWorkspace(memory, ownerSet)).toBe(false);
+      expect(isMutationPathOutsideWorkspace(elsewhere, ownerSet)).toBe(true);
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
   });
 });

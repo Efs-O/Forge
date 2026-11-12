@@ -1,8 +1,12 @@
+import * as os from 'os';
 import type { ToolCall } from '../llm/types';
 import type { RegisteredTool, ToolApprovalMetadata, ToolRegistry } from '../tools/ToolRegistry';
 import { carriesUntrustedContent, hasConversationReadSecret } from '../tools/exfilTaint';
 import { isDangerousDelete } from './deletePreview';
 import { resolveWorkspacePath, pathIsInWorkspace } from '../util/WorkspacePaths';
+import type { OwnerOnlySet } from '../tools/ownerPaths';
+import { isOpenForgeWriteTarget } from '../tools/ownerPathsOpen';
+import { normalizePathForMatch } from '../tools/secretPaths';
 import { decideUntrustedExit, type UntrustedExitInput } from './untrustedExitPolicy';
 import type { ToolDispatchRoundContext } from './toolDispatchTypes';
 
@@ -17,6 +21,17 @@ export interface ToolApprovalEvaluation {
   outsideMutationPaths: string[];
   exitInput: UntrustedExitInput;
   exitVerdict: ReturnType<typeof decideUntrustedExit>;
+}
+
+/** Paths in the explicitly open Forge memory/skill areas do not need an outside-workspace card. */
+export function isMutationPathOutsideWorkspace(filePath: string, ownerSet: OwnerOnlySet): boolean {
+  const normalized = normalizePathForMatch(filePath, ownerSet.platform);
+  return !pathIsInWorkspace(filePath) && !isOpenForgeWriteTarget(normalized, ownerSet);
+}
+
+function outsideWorkspaceMutationPaths(paths: readonly string[]): string[] {
+  const ownerSet: OwnerOnlySet = { roots: [], home: os.homedir(), platform: process.platform };
+  return paths.filter((filePath) => isMutationPathOutsideWorkspace(filePath, ownerSet));
 }
 
 export async function readToolApprovalMetadata(
@@ -47,7 +62,7 @@ export function evaluateToolApproval(
     approvalMetadata?.dangerous ?? (tc.function.name === 'delete_file' && isDangerousDelete(args));
   const rawMutationPaths = reg.mutation?.paths(args) ?? [];
   const mutationPaths = rawMutationPaths.map((filePath) => resolveWorkspacePath(filePath));
-  const outsideMutationPaths = mutationPaths.filter((filePath) => !pathIsInWorkspace(filePath));
+  const outsideMutationPaths = outsideWorkspaceMutationPaths(mutationPaths);
   const exitInput: UntrustedExitInput = {
     toolName: tc.function.name,
     dangerous: isDangerous,

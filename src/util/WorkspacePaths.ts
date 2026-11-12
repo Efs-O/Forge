@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { isPathInside } from './pathContainment';
 import { foldDrivePath } from './drivePath';
 import { WorkspacePathMissingError } from './workspacePathMissingError';
+import { openForgeFileRoots } from '../tools/ownerPathsOpen';
 
 export interface ResolveWorkspacePathOptions {
   workspaceRoot?: string;
@@ -58,6 +59,10 @@ export function resolveWorkspacePath(
   const mustBeInsideWorkspace = options.mustBeInsideWorkspace ?? false;
   if (mustBeInsideWorkspace) {
     const extra = options.extraRoots ?? [];
+    const messageRoots = extra.filter(
+      (root) =>
+        !openForgeFileRoots().some((builtIn) => path.normalize(root) === path.normalize(builtIn)),
+    );
     const inExtra = extra.some((r) => isPathInside(path.normalize(r), resolved));
     if (!inExtra) {
       if (!root) throw new Error('No workspace folder open');
@@ -66,8 +71,8 @@ export function resolveWorkspacePath(
         // spellings and file names, a round each: say the refusal is the folder's.
         throw new Error(
           `Path is outside the workspace: ${filePath}` +
-            (extra.length > 0
-              ? ` (and outside extra_file_roots: ${extra.join(', ')})`
+            (messageRoots.length > 0
+              ? ` (and outside extra_file_roots: ${messageRoots.join(', ')})`
               : ' (add its folder to extra_file_roots in config.yaml to allow it)') +
             `. Every path under ${path.dirname(resolved)} is refused the same way, whatever ` +
             'the spelling or file name: ask the user to allow the folder, or work inside the workspace.',

@@ -32,6 +32,7 @@ import {
   markHostApproved,
 } from '../tools/fetchHostApprovals';
 import { ownerOnlySetFor } from '../tools/ownerPaths';
+import { openForgeFileRoots } from '../tools/ownerPathsOpen';
 import { unattendedConversations } from './unattendedConversations';
 import { describeApprovalKeys } from './approvalKeyWords';
 import { approvalPolicyDecision, type AlwaysApprovalWriteResult } from './approvalPolicyRules';
@@ -55,8 +56,7 @@ import {
 } from './approvalKey';
 import type { ConversationRuntime } from './sessionTypes';
 
-/** The environment `approvalKey.ts` needs, assembled from what this window knows:
- *  its config, its workspace folder and the owner-only roots.
+/** Environment for `approvalKey.ts`: this window's config, workspace and owner-only roots.
  *
  *  This is the impure half of the key story on purpose — `approvalKey.ts` itself
  *  reads nothing, so the same code answers for a chat rule today and for
@@ -88,7 +88,7 @@ export function approvalEnvFor(options: {
       home,
       workspaceRoot,
       ownerOnly: set.roots,
-      extraFileRoots: config?.extra_file_roots ?? [],
+      extraFileRoots: [...(config?.extra_file_roots ?? []), ...openForgeFileRoots(home)],
     },
     config,
   };

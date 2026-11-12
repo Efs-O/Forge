@@ -1,8 +1,14 @@
 import * as path from 'path';
+import * as os from 'os';
 import { realPathOfNearestAncestor } from '../util/realPath';
 import { pathApiFor } from '../util/drivePath';
 import { normalizePathForMatch } from './secretPaths';
 import type { OwnerOnlySet } from './ownerPaths';
+
+/** Built-in file-tool roots that the owner may edit without a config entry. */
+export function openForgeFileRoots(home: string = os.homedir()): readonly string[] {
+  return [path.join(home, '.forge', 'memories'), path.join(home, '.forge', 'skills')];
+}
 
 /** Whether a ~/.forge target is one of the two owner-approved editable areas. */
 export function isOpenForgeWriteTarget(target: string, set: OwnerOnlySet): boolean {

@@ -30,6 +30,7 @@ import { openConversationSignature } from '../../src/sidebar/openConversationsPe
 import type { ApprovalRequirement } from '../../src/sidebar/approvalKey';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 import type { ForgeConfig } from '../../src/config/types';
+import { openForgeFileRoots } from '../../src/tools/ownerPathsOpen';
 
 const HOME = 'C:/Users/someone';
 const WORKSPACE = 'N:/ws/project';
@@ -59,7 +60,7 @@ function req(key: string, targets?: string[]): ApprovalRequirement {
 describe('approvalEnvFor', () => {
   it('names ~/.forge/ an owner-only root and carries the sanctioned roots through', () => {
     expect(CTX.ownerOnly.some((root) => root.includes('.forge'))).toBe(true);
-    expect(CTX.extraFileRoots).toEqual(['N:/Strata']);
+    expect(CTX.extraFileRoots).toEqual(['N:/Strata', ...openForgeFileRoots(HOME)]);
     expect(CTX.home).toBe(HOME);
     expect(CTX.workspaceRoot).toBe(WORKSPACE);
     expect(env.config?.extra_file_roots).toEqual(['N:/Strata']);

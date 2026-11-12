@@ -70,6 +70,7 @@ import type { JobStore } from '../jobs/JobStore';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import { makeApplyLineEditsTool } from './structuredEditTool';
 import { applyOwnerOnlyWriteGuard, ownerOnlySetFor, type OwnerOnlySet } from './ownerPaths';
+import { openForgeFileRoots } from './ownerPathsOpen';
 import { makeViewImageTool } from './imageTool';
 import type { PdfPageRenderer } from './imageTool';
 import { makeExportDocumentTool } from './exportDocumentTool';
@@ -140,7 +141,10 @@ export function registerAllTools(
   // config.yaml `extra_file_roots`: absolute folders outside the workspace that
   // delete_file and every file-writing tool may also reach. A getter, so a
   // config reload applies without re-registering the tools.
-  const extraRoots = (): readonly string[] => getConfig?.().extra_file_roots ?? [];
+  const extraRoots = (): readonly string[] => [
+    ...(getConfig?.().extra_file_roots ?? []),
+    ...openForgeFileRoots(),
+  ];
   // `tools.file_length_warning`, read live for the same reason: a config edit
   // changes the threshold without re-registering the tools. Absent block = off,
   // so a workspace that never set it gets the results it always got.

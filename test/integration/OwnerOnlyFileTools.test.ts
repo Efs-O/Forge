@@ -27,6 +27,7 @@ import { makeEditNotebookCellTool } from '../../src/tools/notebookTools';
 import { makeRestoreFileTool } from '../../src/tools/gitTools';
 import { ToolRegistry } from '../../src/tools/ToolRegistry';
 import { findConfigPath } from '../../src/config/ConfigLoader';
+import { openForgeFileRoots } from '../../src/tools/ownerPathsOpen';
 
 /** Windows deep-path delete, as `FileToolExecution.test.ts` needs it too. */
 function extendedPath(targetPath: string): string {
@@ -192,6 +193,50 @@ describe('Forge own configuration is refused by the file tools', () => {
       /owner/,
     );
     expect(fs.readFileSync(path.join(home, '.forge', 'note.txt'), 'utf8')).toBe('owner notes\n');
+  });
+
+  it('allows memory and skill edits through the file tools without config roots', async () => {
+    const memoryDir = path.join(home, '.forge', 'memories', 'proj');
+    const skillDir = path.join(home, '.forge', 'skills', 'demo', 'scripts');
+    fs.mkdirSync(memoryDir, { recursive: true });
+    fs.mkdirSync(skillDir, { recursive: true });
+    const memory = path.join(memoryDir, 'x.md');
+    const skill = path.join(skillDir, 'run.py');
+    const builtInRoots = () => openForgeFileRoots(home);
+
+    await wrapped(makeWriteFileTool(builtInRoots)).handler(
+      { path: memory, content: 'memory\n' },
+      context,
+    );
+    await wrapped(makeEditFileTool(builtInRoots)).handler(
+      { path: memory, old_str: 'memory', new_str: 'updated memory' },
+      context,
+    );
+    await wrapped(makeWriteFileTool(builtInRoots)).handler(
+      { path: skill, content: 'print("skill")\n' },
+      context,
+    );
+
+    expect(fs.readFileSync(memory, 'utf8')).toBe('updated memory\n');
+    expect(fs.readFileSync(skill, 'utf8')).toBe('print("skill")\n');
+  });
+
+  it('keeps policy, jobs, and out-of-scope memory paths owner-only', async () => {
+    const open = path.join(home, '.forge', 'memories', 'proj', 'x.md');
+    const refused = [
+      path.join(home, '.forge', 'policy.yaml'),
+      path.join(home, '.forge', 'jobs', 'a.json'),
+      path.join(home, '.forge', 'memories', 'proj', 'sub', 'x.md'),
+      path.join(home, '.forge', 'memories', 'proj', 'x.txt'),
+    ];
+    expect(ownerOnlyWriteTargetFor(open, set)).toBeUndefined();
+    const write = wrapped(makeWriteFileTool(() => openForgeFileRoots(home)));
+    for (const target of refused) {
+      expect(ownerOnlyWriteTargetFor(target, set)).toBeDefined();
+      await expect(write.handler({ path: target, content: 'x\n' }, context)).rejects.toThrow(
+        /owner/,
+      );
+    }
   });
 
   it('refuses before any card: ToolRegistry.invalidArgs, which ToolDispatch runs first', async () => {
