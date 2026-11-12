@@ -116,6 +116,10 @@ export function resolveChatReference(
   selfId: string,
 ): ChatReferenceResolution {
   const normalized = ref === undefined ? '' : normalizeReference(ref);
+  // A full chat id is an address, not a title search. Peer prompts embed the
+  // sender's id in the receiving chat's title; letting `includes()` run for a
+  // UUID can therefore make a reply route back into that local prompt chat.
+  const isFullChatId = CHAT_ID_PATTERN.test(normalized);
   const refWords = words(normalized);
   const queryWords = refWords.filter((word) => !FILLER_WORDS.has(word));
   // Blank, or only filler ("the other chat"). A symbol-only ref (an emoji
@@ -137,11 +141,15 @@ export function resolveChatReference(
       normalized.length >= 4
         ? chats.filter((chat) => normalizeReference(chat.id).startsWith(normalized))
         : [],
-    () => chats.filter((chat) => normalizeReference(chat.title) === normalized),
-    () => chats.filter((chat) => normalizeReference(chat.title).includes(normalized)),
+    () =>
+      isFullChatId ? [] : chats.filter((chat) => normalizeReference(chat.title) === normalized),
+    () =>
+      isFullChatId
+        ? []
+        : chats.filter((chat) => normalizeReference(chat.title).includes(normalized)),
     () => {
       // `every` on no words would match every chat.
-      if (queryWords.length === 0) return [];
+      if (isFullChatId || queryWords.length === 0) return [];
       return chats.filter((chat) => {
         const titleWords = words(normalizeReference(chat.title));
         return queryWords.every((queryWord) =>

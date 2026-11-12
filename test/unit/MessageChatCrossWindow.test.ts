@@ -42,7 +42,11 @@ function defaultChats(): ChatsReportChat[] {
   ];
 }
 
-function hostStatus(localRunning = false, localOtherCount = 1): ForgeHostStatus {
+function hostStatus(
+  localRunning = false,
+  localOtherCount = 1,
+  localOtherTitle?: string,
+): ForgeHostStatus {
   const conversation = (id: string, title: string): ForgeConversationSummary => ({
     id,
     title,
@@ -59,7 +63,10 @@ function hostStatus(localRunning = false, localOtherCount = 1): ForgeHostStatus 
     conversations: [
       conversation('sender', 'Sender'),
       ...Array.from({ length: localOtherCount }, (_, index) =>
-        conversation(index === 0 ? 'other' : `other-${index + 1}`, `Local worker ${index + 1}`),
+        conversation(
+          index === 0 ? 'other' : `other-${index + 1}`,
+          index === 0 && localOtherTitle ? localOtherTitle : `Local worker ${index + 1}`,
+        ),
       ),
     ],
     requestChains: [],
@@ -76,6 +83,7 @@ function makeSidebar(
   localRunning = false,
   localOtherCount = 1,
   latestPeerWriter?: { id: string; title: string },
+  localOtherTitle?: string,
 ): MessageChatSidebar & {
   deliverChatMessage: ReturnType<typeof vi.fn>;
   emitHostActivity: ReturnType<typeof vi.fn>;
@@ -98,7 +106,7 @@ function makeSidebar(
   );
   return {
     getHostFacade: () => ({
-      status: () => hostStatus(localRunning, localOtherCount),
+      status: () => hostStatus(localRunning, localOtherCount, localOtherTitle),
       getConversation: () => (latestPeerWriter ? { latestPeerWriter } : undefined),
       emitHostActivity,
       chatCapBlockers: () => [],
@@ -226,6 +234,8 @@ function makeCrossTool(
     /** One chat in THIS window is mid-turn, for a steer that reads this window. */
     localRunning?: boolean;
     localOtherCount?: number;
+    /** Give the local chat a peer prompt title containing a remote chat id. */
+    localOtherTitle?: string;
     latestPeerWriter?: { id: string; title: string };
   } = {},
 ) {
@@ -234,6 +244,7 @@ function makeCrossTool(
     options.localRunning === true,
     options.localOtherCount ?? 1,
     options.latestPeerWriter,
+    options.localOtherTitle,
   );
   const chats = options.chats ?? defaultChats();
   const tool = makeMessageChatTool({
@@ -308,6 +319,22 @@ describe('message_chat send to a chat in another window', () => {
     expect(sidebar.emitHostActivity).toHaveBeenCalledWith(
       expect.objectContaining({ conversationId: 'sender', kind: 'prompt' }),
     );
+  });
+
+  it('routes a UUID in a local peer-prompt title to the window that owns that chat id', async () => {
+    const { tool, sidebar } = makeCrossTool({
+      localOtherTitle: `From Forge chat "Supervisor" (${IDLE}) in repo-b`,
+    });
+    const result = String(
+      await tool.handler({ action: 'send', to: IDLE, message: 'Here is the report.' }, context),
+    );
+
+    expect(result).toContain('Queued in N:/repo-b');
+    expect(result).toContain('"Worker"');
+    expect(received).toHaveLength(1);
+    expect(received[0]?.query['conversation_id']).toBe(IDLE);
+    expect(received[0]?.body).toContain('Here is the report.');
+    expect(sidebar.deliverChatMessage).not.toHaveBeenCalled();
   });
 
   it('queues into a running peer chat without interrupting it', async () => {
