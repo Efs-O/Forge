@@ -1,5 +1,12 @@
 # Forge — Recent Changes
 
+## 0.17.167
+
+- A `message_chat` reply addressed to a chat id now reaches the window that holds that chat. It used to land in a local chat whose title contained that id, such as the one a peer message opens, and start an unplanned turn there.
+- A tool call whose argument swallowed a second parameter block from the local engine's tool-call parser is refused before it runs, instead of writing the markup into a file.
+- The outside-workspace refusal no longer tells you to add the built-in memory or skill folder when your `extra_file_roots` entry spells it with a different case, slash or trailing separator.
+- A job's release-check cache keeps at most 256 responses, so a long-running scheduler no longer grows it without bound.
+
 ## 0.17.166
 
 - Forge's file tools can read and write memory files in `~/.forge/memories/` and skills in `~/.forge/skills/` on every install, with no policy line and no approval card. The guard still refuses every other file under `~/.forge`.
