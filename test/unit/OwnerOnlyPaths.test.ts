@@ -192,6 +192,53 @@ describe('which write targets are owner-only', () => {
     );
   });
 
+  it('opens only memory markdown files inside a project folder and files inside skills', () => {
+    for (const spelling of [
+      '~/.forge/memories/Forge-5f7df423/basalt-parked-2026-11-01.md',
+      '~/.forge/memories/Qwen_fine_tuning-e6c968d1/MEMORY.md',
+      '~/.forge/skills/hf-download/SKILL.md',
+      '~/.forge/skills/new-skill/scripts/run.py',
+    ]) {
+      expect(ownerOnlyWriteTargetFor(spelling, set), `${spelling} should be open`).toBeUndefined();
+    }
+  });
+
+  it.each([
+    '~/.forge/policy.yaml',
+    '~/.forge/jobs/strata-update.json',
+    '~/.forge/sessions/x.jsonl',
+    '~/.forge/notify.ps1',
+    '~/.forge/agent-bus/forge.sh',
+    '~/.forge/memories',
+    '~/.forge/memories/Forge-5f7df423',
+    '~/.forge/memories/x.md',
+    '~/.forge/memories/Forge-5f7df423/sub/x.md',
+    '~/.forge/memories/Forge-5f7df423/x.json',
+    '~/.forge/skills',
+    '~/.forge/skills-retired/x/SKILL.md',
+    '~/.forge/memoriesX/a/b.md',
+    '~/.forge/skills/../policy.yaml',
+    '~/.forge/memories/Forge-5f7df423/../../policy.yaml',
+  ])('keeps the non-open target owner-only: %s', (spelling) => {
+    expect(ownerOnlyWriteTargetFor(spelling, set), `${spelling} should be refused`).toBeDefined();
+  });
+
+  it('gives shell writes the same open memory and skills decisions as file tools', () => {
+    expect(
+      classifyShellCommand('echo x > ~/.forge/jobs/a.json', 'bash', check).classification,
+    ).toBe('refused');
+    expect(
+      classifyShellCommand('echo x > ~/.forge/skills/a/SKILL.md', 'bash', check).classification,
+    ).not.toBe('refused');
+    expect(
+      classifyShellCommand(
+        'cd ~/.forge/memories/Forge-5f7df423 && echo x > notes.md',
+        'bash',
+        check,
+      ).classification,
+    ).not.toBe('refused');
+  });
+
   it('leaves a config.yaml outside .forge/ writable', () => {
     for (const writable of [
       'config.yaml',
@@ -375,12 +422,12 @@ describe('the shell route onto Forge own configuration', () => {
 
   it('refuses Git Bash drive spellings and literal same-line variables', () => {
     for (const command of [
-      'rm "/c/Users/someone/.forge/skills/a.py"',
-      'cp x.py "/c/Users/someone/.forge/skills/a.py"',
-      'rm "/C/Users/someone/.forge/skills/a.py"',
-      'rm "/cygdrive/c/Users/someone/.forge/skills/a.py"',
-      'D="/c/Users/someone/.forge/skills" && rm "$D/a.py"',
-      'export D="/c/Users/someone/.forge/skills"; rm "${D}/a.py"',
+      'rm "/c/Users/someone/.forge/jobs/a.py"',
+      'cp x.py "/c/Users/someone/.forge/jobs/a.py"',
+      'rm "/C/Users/someone/.forge/jobs/a.py"',
+      'rm "/cygdrive/c/Users/someone/.forge/jobs/a.py"',
+      'D="/c/Users/someone/.forge/jobs" && rm "$D/a.py"',
+      'export D="/c/Users/someone/.forge/jobs"; rm "${D}/a.py"',
     ]) {
       expect(judged(command, 'bash').classification, command).toBe('refused');
     }
@@ -573,6 +620,14 @@ describe('what a refusal says', () => {
     // The folder's own files do say where they are, because that is where they are.
     const underHome = ownerOnlyToolRefusal('delete_file', hitFor('~/.forge/note.txt'));
     expect(underHome).toContain('~/.forge/');
-    expect(underHome).toContain('such as session logs and jobs');
+    expect(underHome).toContain('it holds session logs and jobs');
+  });
+
+  it('uses the complete updated ~/.forge refusal text for policy.yaml', () => {
+    expect(
+      ownerOnlyToolRefusal('edit_file', hitFor('~/.forge/policy.yaml')),
+    ).toBe(
+      "edit_file: ~/.forge/policy.yaml is part of Forge's own files (everything under `~/.forge/` except memory files (`~/.forge/memories/<project>/<name>.md`) and skills (`~/.forge/skills/`); it holds session logs and jobs, and `policy.yaml` there is the owner's settings file, the one that says what an agent may do), which only the owner changes. Reading them with `read_file` or `search_code` is allowed. Tell the user what change you want and why, and let them make it.",
+    );
   });
 });

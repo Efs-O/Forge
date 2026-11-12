@@ -43,6 +43,32 @@ describe('a write judged by what the disk says the path is', () => {
     ).toBe('refused');
   });
 
+  it('refuses an open-area path whose real target escapes through a link', () => {
+    const forge = path.join(home, '.forge');
+    const skills = path.join(forge, 'skills');
+    fs.mkdirSync(skills);
+    const link = path.join(skills, 'evil');
+    try {
+      fs.symlinkSync(forge, link, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (['EPERM', 'EACCES', 'UNKNOWN', 'ENOSYS', 'ENOTSUP'].includes(code ?? '')) return;
+      throw error;
+    }
+    expect(
+      ownerOnlyWriteTargetFor(path.join(link, 'policy.yaml'), setFor(), workspace),
+    ).toBeDefined();
+  });
+
+  it('allows a real memory file and skill file under the temporary home', () => {
+    const memories = path.join(home, '.forge', 'memories', 'project-id');
+    const skills = path.join(home, '.forge', 'skills', 'sample');
+    fs.mkdirSync(memories, { recursive: true });
+    fs.mkdirSync(skills, { recursive: true });
+    expect(ownerOnlyWriteTargetFor(path.join(memories, 'MEMORY.md'), setFor())).toBeUndefined();
+    expect(ownerOnlyWriteTargetFor(path.join(skills, 'SKILL.md'), setFor())).toBeUndefined();
+  });
+
   it('refuses a write that names ~/.forge by its 8.3 short name', () => {
     // os.tmpdir() is a short-name path on a Windows profile whose name has a
     // space (`C:/Users/EFSOOF~1/...`); elsewhere there is no short form to test.

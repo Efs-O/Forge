@@ -108,6 +108,7 @@ overlaps with an existing owner, extend the owner instead.
 | Guarded apply + save of a language-server WorkspaceEdit | `src/tools/workspaceEditApply.ts`     |
 | Filesystem-miss error text for tools                 | `src/tools/pathErrorHint.ts`             |
 | Pure filesystem-miss error text                      | `src/tools/pathMissText.ts`              |
+| Owner-only write roots and open memory/skill exceptions | `src/tools/ownerPaths.ts` + `src/tools/ownerPathsOpen.ts` |
 | Recycle-bin refusal diagnosis + short-lived path cache | `src/tools/trashRefusal.ts`             |
 | Tool call execution + result formatting              | `src/sidebar/ToolDispatch.ts`            |
 | Early refusals that stop a tool call before approval (cancelled, bad args, unknown/withheld tool, budget) | `src/sidebar/toolCallPreflight.ts` |

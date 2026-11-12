@@ -7,6 +7,7 @@ import { pathApiFor } from '../util/drivePath';
 import { expandUserTokens, normalizePathForMatch, tokenPathCandidate } from './secretPaths';
 import { nonWriteArguments } from './shellWritePositions';
 import { isDirectoryChange } from './shellReadOnlyRules';
+import { isOpenForgeWriteTarget } from './ownerPathsOpen';
 import type { RedirectTarget } from './shellCommandParse';
 import type { RegisteredTool } from './ToolRegistry';
 
@@ -23,8 +24,9 @@ import type { RegisteredTool } from './ToolRegistry';
  * either.
  *
  * The rule as of phase 3 of the policy split (`docs/plans/SECURITY_SIMPLIFICATION_PLAN.md`):
- * everything under `~/.forge/` is changed by the owner only, in every mode, with no
- * card and no automated answer. `config.yaml` is owner-only too, but only for as long as its
+ * everything under `~/.forge/` is changed by the owner only, except memory files
+ * (`~/.forge/memories/<project>/<name>.md`) and skills (`~/.forge/skills/`), in every
+ * mode, with no card and no automated answer. `config.yaml` is owner-only while its
  * security settings are still inside it: once `~/.forge/policy.yaml` exists the
  * guards have moved out of `config.yaml`, the file opens to agents, and editing model
  * tuning — a `num_ctx`, a profile, a comment — is ordinary work rather than a rewrite
@@ -37,7 +39,7 @@ import type { RegisteredTool } from './ToolRegistry';
  * and `ConfigLoader` refuses a policy key, a model-level `start_command` or an
  * unapproved `endpoint` host left behind in `config.yaml`, so opening the config to
  * agents did not reopen the guards. An agent cannot reach either state by itself:
- * `~/.forge/` is owner-only, so it can neither create nor delete the policy file.
+ * the rest of `~/.forge/` is owner-only, so it can neither create nor delete the policy file.
  *
  * What the rule does NOT reach, each one checked rather than assumed:
  * - Forge's own code, not an agent tool call: `manage_jobs` writes
@@ -51,9 +53,6 @@ import type { RegisteredTool } from './ToolRegistry';
  *   Git Bash `/c/...` and `/cygdrive/c/...`, and literal same-line bash
  *   variables are expanded before matching; other run-time paths remain the
  *   same residual gap the secret gate documents in `secretPaths.ts`.
- * - A symlink that points INTO `.forge/` from elsewhere: the guard is lexical,
- *   like `pathContainment.ts`'s, because the thing it protects is the name the
- *   agent typed. `resolveRealWorkspacePath` still realpaths the write itself.
  * - An LSP edit that reaches a policy file while acting on another file:
  *   `rename_symbol` / `format_file` / `apply_code_action` are judged by the path
  *   the call names — the same list the checkpoint snapshots and the diff renders.
@@ -108,10 +107,9 @@ export interface OwnerOnlySetOptions {
  * The owner-only roots for one window: `~/.forge/` always, and `config.yaml` only
  * while the policy file is absent.
  *
- * `~/.forge/` is a root in full, which is what keeps `policy.yaml` owner-only beside
- * the session logs and job records in the same folder — and it is why a `config.yaml`
- * that happens to live under `~/.forge/` is still refused: the root, not the file
- * name, is what the rule protects.
+ * `~/.forge/` remains a root, which keeps `policy.yaml` owner-only beside the
+ * session logs and job records. `ownerOnlyWriteTargetFor` opens only memory files
+ * and skills after matching both the supplied path and its real path.
  *
  * `config.yaml` is the half that changes. Its policy keys and its model-level server
  * programs are what an agent could rewrite to loosen its own guards, so while those
@@ -209,7 +207,9 @@ export function ownerOnlyWriteTargetFor(
   const target = resolveArgumentTarget(supplied, set, base);
   if (!target) return undefined;
   const root = matchOwnerOnlyRoot(target, set.roots) ?? matchOwnerOnlyRootOnDisk(target, set);
-  return root ? { supplied: supplied.trim(), target, root } : undefined;
+  return root && !isOpenForgeWriteTarget(target, set)
+    ? { supplied: supplied.trim(), target, root }
+    : undefined;
 }
 
 /**
@@ -402,8 +402,9 @@ const OWNER_ONLY_SUBJECT =
 function ownerOnlyRootClause(root: string): string {
   if (root.split('/').at(-1) === FORGE_DIR) {
     return (
-      'everything under `~/.forge/`, such as session logs and jobs — `policy.yaml` there ' +
-      "is the owner's settings file, the one that says what an agent may do"
+      'everything under `~/.forge/` except memory files (`~/.forge/memories/<project>/<name>.md`) ' +
+      'and skills (`~/.forge/skills/`); it holds session logs and jobs, and `policy.yaml` there is ' +
+      "the owner's settings file, the one that says what an agent may do"
     );
   }
   return (
