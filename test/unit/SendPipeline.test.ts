@@ -266,9 +266,11 @@ describe('SendPipeline.send', () => {
 
   it('logs and ignores a throwing final outcome listener', async () => {
     const h = harness();
-    const onFinalOutcome = listenForSettled(vi.fn(() => {
-      throw new Error('observer failed');
-    }));
+    const onFinalOutcome = listenForSettled(
+      vi.fn(() => {
+        throw new Error('observer failed');
+      }),
+    );
     const loggerError = vi.spyOn(getLogger(), 'error').mockImplementation(() => undefined);
 
     const outcome = await h.pipeline.send('start');
@@ -292,7 +294,10 @@ describe('SendPipeline.send', () => {
 
     expect(h.runTurn).toHaveBeenCalledTimes(2);
     expect(onFinalOutcome).toHaveBeenCalledOnce();
-    expect(onFinalOutcome).toHaveBeenCalledWith('conv-1', expect.objectContaining({ kind: 'completed' }));
+    expect(onFinalOutcome).toHaveBeenCalledWith(
+      'conv-1',
+      expect.objectContaining({ kind: 'completed' }),
+    );
   });
 
   it('announces an accepted host-initiated turn so Stop is available', async () => {
@@ -444,7 +449,22 @@ describe('SendPipeline.send', () => {
     const outcome = await h.pipeline.send('ping');
 
     expect(outcome).toEqual({ kind: 'cancelled' });
-    expect(logTurnStopped).toHaveBeenCalledWith('cancelled', expect.any(String));
+    expect(logTurnStopped).toHaveBeenCalledWith('cancelled', expect.any(String), undefined);
+  });
+
+  it('retains a config reload cause in both the request outcome and durable log', async () => {
+    const h = harness();
+    h.runTurn.mockResolvedValueOnce({
+      kind: 'cancelled',
+      finalText: '',
+      stopReason: 'config reload',
+    });
+
+    expect(await h.pipeline.send('ping')).toEqual({
+      kind: 'cancelled',
+      stopReason: 'config reload',
+    });
+    expect(logTurnStopped).toHaveBeenCalledWith('cancelled', expect.any(String), 'config reload');
   });
 
   it.each([
@@ -452,27 +472,24 @@ describe('SendPipeline.send', () => {
     { kind: 'failed', error: 'provider failed', finalText: '' },
     { kind: 'cancelled', finalText: '' },
     { kind: 'interrupted', finalText: '' },
-  ] satisfies ForgeTurnOutcome[])(
-    'writes one turn_end for the $kind outcome',
-    async (turn) => {
-      const h = harness();
-      h.conv.model_request_count = 4;
-      h.runTurn.mockImplementationOnce(async () => {
-        h.conv.model_request_count = 7;
-        return turn;
-      });
+  ] satisfies ForgeTurnOutcome[])('writes one turn_end for the $kind outcome', async (turn) => {
+    const h = harness();
+    h.conv.model_request_count = 4;
+    h.runTurn.mockImplementationOnce(async () => {
+      h.conv.model_request_count = 7;
+      return turn;
+    });
 
-      await h.pipeline.send('turn');
+    await h.pipeline.send('turn');
 
-      expect(logTurnEnd).toHaveBeenCalledOnce();
-      expect(logTurnEnd).toHaveBeenCalledWith(
-        turn.kind,
-        3,
-        turn.kind === 'completed' ? turn.finishReason : undefined,
-        expect.any(String),
-      );
-    },
-  );
+    expect(logTurnEnd).toHaveBeenCalledOnce();
+    expect(logTurnEnd).toHaveBeenCalledWith(
+      turn.kind,
+      3,
+      turn.kind === 'completed' ? turn.finishReason : undefined,
+      expect.any(String),
+    );
+  });
 
   it('writes a blocked admission turn_end without running a provider turn', async () => {
     const h = harness();
@@ -522,14 +539,18 @@ describe('SendPipeline.send', () => {
     const h = harness({ conv: { opened_by: 'opener' } });
     const routeInternal = vi.fn();
     const reservedAtWake: boolean[] = [];
-    settledSubscriptions.push(subscribeConversationSettled(createWorkerChatWake({
-      openConversations: () => [conversation({ id: 'opener' }), h.conv],
-      routeInternal: (...args) => {
-        reservedAtWake.push(h.requestChains.isReserved('conv-1'));
-        routeInternal(...args);
-      },
-      logDrop: vi.fn(),
-    })));
+    settledSubscriptions.push(
+      subscribeConversationSettled(
+        createWorkerChatWake({
+          openConversations: () => [conversation({ id: 'opener' }), h.conv],
+          routeInternal: (...args) => {
+            reservedAtWake.push(h.requestChains.isReserved('conv-1'));
+            routeInternal(...args);
+          },
+          logDrop: vi.fn(),
+        }),
+      ),
+    );
     h.midTurnInbox.add('conv-1', { id: 'follow-up', text: 'finish the second part' });
 
     const outcome = await h.pipeline.send('start');
@@ -537,11 +558,10 @@ describe('SendPipeline.send', () => {
     expect(outcome).toMatchObject({ kind: 'completed' });
     expect(h.runTurn).toHaveBeenCalledTimes(2);
     expect(routeInternal).toHaveBeenCalledOnce();
-    expect(routeInternal).toHaveBeenCalledWith(
-      expect.stringContaining('completed'),
-      'opener',
-      { kind: 'worker-wake', workerId: 'conv-1' },
-    );
+    expect(routeInternal).toHaveBeenCalledWith(expect.stringContaining('completed'), 'opener', {
+      kind: 'worker-wake',
+      workerId: 'conv-1',
+    });
     expect(reservedAtWake).toEqual([false]);
   });
 
