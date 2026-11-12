@@ -136,6 +136,27 @@ describe('extra_file_roots', () => {
     );
   });
 
+  it('keeps a built-in root out of the refusal text however it is spelled', () => {
+    const target = path.join(base, 'elsewhere', 'x.txt');
+    const dir = path.dirname(target);
+    // A trailing separator is the same folder everywhere; case and slash
+    // direction are the same folder only on Windows, where the matcher folds them.
+    const respell = (root: string): string =>
+      process.platform === 'win32'
+        ? `${root.toUpperCase().replace(/\\/gu, '/')}/`
+        : `${root}${path.sep}`;
+    const roots = [extra, ...openForgeFileRoots().map(respell)];
+    expect(() =>
+      resolveWorkspacePath(target, {
+        workspaceRoot: workspace,
+        mustBeInsideWorkspace: true,
+        extraRoots: roots,
+      }),
+    ).toThrow(
+      `Path is outside the workspace: ${target} (and outside extra_file_roots: ${extra}). Every path under ${dir} is refused the same way, whatever the spelling or file name: ask the user to allow the folder, or work inside the workspace.`,
+    );
+  });
+
   it('counts an open memory write as inside for approval, while other outside paths remain outside', () => {
     const home = path.join(base, 'home');
     const memoryRoot = path.join(home, '.forge', 'memories');

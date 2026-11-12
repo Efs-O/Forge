@@ -5,6 +5,7 @@ import { isPathInside } from './pathContainment';
 import { foldDrivePath } from './drivePath';
 import { WorkspacePathMissingError } from './workspacePathMissingError';
 import { openForgeFileRoots } from '../tools/ownerPathsOpen';
+import { normalizePathForMatch } from '../tools/secretPaths';
 
 export interface ResolveWorkspacePathOptions {
   workspaceRoot?: string;
@@ -59,10 +60,10 @@ export function resolveWorkspacePath(
   const mustBeInsideWorkspace = options.mustBeInsideWorkspace ?? false;
   if (mustBeInsideWorkspace) {
     const extra = options.extraRoots ?? [];
-    const messageRoots = extra.filter(
-      (root) =>
-        !openForgeFileRoots().some((builtIn) => path.normalize(root) === path.normalize(builtIn)),
-    );
+    // The shared matcher, so a built-in root spelled with another case, slash
+    // or trailing separator is still kept out of the message.
+    const builtIns = new Set(openForgeFileRoots().map((r) => normalizePathForMatch(r)));
+    const messageRoots = extra.filter((root) => !builtIns.has(normalizePathForMatch(root)));
     const inExtra = extra.some((r) => isPathInside(path.normalize(r), resolved));
     if (!inExtra) {
       if (!root) throw new Error('No workspace folder open');
