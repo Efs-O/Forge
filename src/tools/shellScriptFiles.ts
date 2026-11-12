@@ -139,6 +139,19 @@ function literalPath(token: string | undefined): token is string {
   return Boolean(token && !/[\s$`(){}]/u.test(token));
 }
 
+function bashDrivePathAsTyped(command: string, parsedToken: string): string | undefined {
+  const candidates = command.matchAll(/[A-Za-z]:\\[^\s'";|&]+\.(?:ps1|sh|bash|bat|cmd)/giu);
+  for (const candidate of candidates) {
+    const token = candidate[0];
+    const start = candidate.index ?? 0;
+    const before = command[start - 1];
+    const after = command[start + token.length];
+    if ((before === "'" && after === "'") || (before === '"' && after === '"')) continue;
+    if (token.replace(/\\(.)/gu, '$1') === parsedToken) return token;
+  }
+  return undefined;
+}
+
 function startProcessTarget(tokens: readonly string[]): string | undefined {
   let filePath: string | undefined;
   let argumentListIndex = -1;
@@ -252,11 +265,18 @@ export function scriptCommandsFor(
       return { scripts, error: `runs a script this same command changes (${absolute})` };
     const inlineBody = body?.text;
     const content = inlineBody ?? read(absolute);
-    if (typeof content !== 'string')
+    if (typeof content !== 'string') {
+      const bashPathNote =
+        shell === 'bash' ? bashDrivePathAsTyped(command, launch.token) : undefined;
       return {
         scripts,
-        error: `runs a script Forge could not read (${absolute}: ${content.error})`,
+        error: `runs a script Forge could not read (${absolute}: ${content.error}${
+          bashPathNote
+            ? `; bash removed the backslashes in ${bashPathNote}: pass shell "pwsh", or write the path with forward slashes`
+            : ''
+        })`,
       };
+    }
     scripts.push({
       command: content,
       shell: scriptShell(launch.token, launch.launcher),

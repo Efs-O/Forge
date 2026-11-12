@@ -167,6 +167,36 @@ describe('shell scripts are classified from their file contents', () => {
     }
   });
 
+  it('names the bash drive-path backslash trap only for an unquoted token', () => {
+    const bashDrive = classifyShellCommand(
+      'pwsh -NoProfile -ExecutionPolicy Bypass -File V:\\Maya\\local\\update-maya.ps1',
+      'bash',
+      check({}),
+    );
+    expect(bashDrive.rule?.description).toBe(
+      'runs a script Forge could not read (V:\\Mayalocalupdate-maya.ps1: does not exist; bash removed the backslashes in V:\\Maya\\local\\update-maya.ps1: pass shell "pwsh", or write the path with forward slashes)',
+    );
+
+    const pwshDrive = classifyShellCommand('pwsh -File V:\\Maya\\x.ps1', 'pwsh', check({}));
+    expect(pwshDrive.rule?.description).toBe(
+      'runs a script Forge could not read (V:\\Maya\\x.ps1: does not exist)',
+    );
+
+    const bashRelative = classifyShellCommand('./missing.sh', 'bash', check({}));
+    expect(bashRelative.rule?.description).toBe(
+      `runs a script Forge could not read (${abs('missing.sh')}: does not exist)`,
+    );
+
+    const bashQuoted = classifyShellCommand(
+      "pwsh -File 'V:\\Maya\\x.ps1'",
+      'bash',
+      check({}),
+    );
+    expect(bashQuoted.rule?.description).toBe(
+      'runs a script Forge could not read (V:\\Maya\\x.ps1: does not exist)',
+    );
+  });
+
   it('rejects a real 300 KiB script with the production reader', () => {
     const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-script-policy-'));
     const filePath = path.join(folder, 'large.sh');
