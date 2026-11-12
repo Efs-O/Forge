@@ -1214,12 +1214,13 @@ describe('AgentTaskRunner', () => {
       expect(fs.existsSync(marker)).toBe(true);
 
       resolveSend({ kind: 'completed', finalText: 'RESULT: ok — done' });
-      await vi.waitFor(async () =>
-        expect((await store.load('agent-task'))!.state.task_run).toBeNull(),
-      );
-      await vi.waitFor(async () => expect(await store.readRuns('agent-task')).toHaveLength(1));
-      expect(runSpy).toHaveBeenCalledOnce();
+      // The runner promise resolves only after finish() clears task_run and
+      // appends the run row. Await that lifecycle boundary instead of relying
+      // on vi.waitFor's short polling timeout under the full suite's load.
       await runSpy.mock.results[0]!.value;
+      expect((await store.load('agent-task'))!.state.task_run).toBeNull();
+      expect(await store.readRuns('agent-task')).toHaveLength(1);
+      expect(runSpy).toHaveBeenCalledOnce();
       nowMs += 30_000;
       await scheduler.tick(); // the run ended: the request runs now
       expect(fs.existsSync(marker)).toBe(false);
