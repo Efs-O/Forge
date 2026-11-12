@@ -386,7 +386,7 @@ export class RemoteRuntime {
       this.appliedConfig = config;
       return;
     }
-    await this.manager.stopActive();
+    await this.manager.stopActive('config reload');
     if (this.disposed || config.remote?.enabled !== true) {
       this.coordinator.dispose();
       this.windowWatch.dispose();

@@ -64,6 +64,23 @@ describe('TurnLifecycle steering', () => {
 });
 
 describe('TurnLifecycle cancel', () => {
+  it('retains the abort cause and does not abort the next turn during old cleanup', async () => {
+    const lifecycle = new TurnLifecycle();
+    const old = new AbortController();
+    lifecycle.register('chat', old);
+    const stopping = lifecycle.cancel('chat', 'config reload');
+    expect(old.signal.reason).toBeInstanceOf(Error);
+    expect((old.signal.reason as Error).message).toBe('config reload');
+    lifecycle.settle('chat');
+    await stopping;
+    const next = new AbortController();
+    lifecycle.register('chat', next);
+    await lifecycle.waitForCancelledTurns();
+    expect(next.signal.aborted).toBe(false);
+    expect(lifecycle.terminationKind('chat')).toBeUndefined();
+    lifecycle.settle('chat');
+  });
+
   /** The Stop button used to SIGTERM llama-server on every press: a full model
    *  reload to cancel one generation, and under a shared runtime it killed the
    *  server a second window had borrowed. Aborting the request is what ends

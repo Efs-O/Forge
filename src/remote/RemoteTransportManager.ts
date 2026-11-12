@@ -340,7 +340,7 @@ export class RemoteTransportManager {
     });
   }
 
-  async stopTransport(name: string): Promise<void> {
+  async stopTransport(name: string, reason?: string): Promise<void> {
     const transport = this.active.get(name);
     if (!transport) return;
     // Load-bearing order (do not reorder): delete before notify so the sidebar
@@ -358,7 +358,7 @@ export class RemoteTransportManager {
     transport.abort.abort();
     await transport.voice?.dispose();
     try {
-      await transport.controller.stop();
+      await transport.controller.stop(reason);
     } finally {
       try {
         await transport.lease.release();
@@ -368,7 +368,7 @@ export class RemoteTransportManager {
     }
   }
 
-  async stopActive(): Promise<void> {
-    await Promise.all([...this.active.keys()].map((name) => this.stopTransport(name)));
+  async stopActive(reason?: string): Promise<void> {
+    await Promise.all([...this.active.keys()].map((name) => this.stopTransport(name, reason)));
   }
 }

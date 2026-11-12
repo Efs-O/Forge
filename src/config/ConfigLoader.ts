@@ -396,8 +396,16 @@ export function watchForgeConfigPaths(
     const watcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(path.dirname(normalized), path.basename(normalized)),
     );
-    watcher.onDidChange(schedule);
-    watcher.onDidCreate(schedule);
+    const onEvent = (uri: vscode.Uri): void => {
+      const eventPath = path.normalize(uri.fsPath);
+      const matches =
+        process.platform === 'win32'
+          ? eventPath.toLowerCase() === normalized.toLowerCase()
+          : eventPath === normalized;
+      if (matches) schedule();
+    };
+    watcher.onDidChange(onEvent);
+    watcher.onDidCreate(onEvent);
     watchers.push(watcher);
   };
 

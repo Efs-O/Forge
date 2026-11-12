@@ -8,15 +8,15 @@ export type ForgeTurnOutcome =
       incompleteReason?: string;
     }
   | { kind: 'failed'; error: string; finalText: string }
-  | { kind: 'cancelled'; finalText: string }
-  | { kind: 'interrupted'; finalText: string };
+  | { kind: 'cancelled'; finalText: string; stopReason?: string }
+  | { kind: 'interrupted'; finalText: string; stopReason?: string };
 
 /** The complete logical request, including any future compact/resume rounds. */
 export type ForgeRequestOutcome =
   | { kind: 'completed'; finalText: string }
   | { kind: 'failed'; error: string; finalText?: string }
-  | { kind: 'cancelled'; finalText?: string; incompleteReason?: string }
-  | { kind: 'interrupted'; finalText?: string; incompleteReason?: string };
+  | { kind: 'cancelled'; finalText?: string; incompleteReason?: string; stopReason?: string }
+  | { kind: 'interrupted'; finalText?: string; incompleteReason?: string; stopReason?: string };
 
 /** Session-log outcomes also include an admission refusal before a provider turn. */
 export type ForgeTurnEndKind = ForgeTurnOutcome['kind'] | ForgeRequestOutcome['kind'] | 'blocked';
@@ -35,6 +35,7 @@ export function toRequestOutcome(turn: ForgeTurnOutcome): ForgeRequestOutcome {
     case 'interrupted':
       return {
         kind: turn.kind,
+        ...(turn.stopReason ? { stopReason: turn.stopReason } : {}),
         ...(turn.finalText ? { finalText: turn.finalText } : {}),
       };
   }

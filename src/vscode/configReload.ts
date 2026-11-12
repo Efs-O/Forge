@@ -8,6 +8,7 @@
  */
 
 import * as vscode from 'vscode';
+import { isDeepStrictEqual } from 'util';
 import type { ForgeConfig } from '../config/types';
 import { watchForgeConfigPaths } from '../config/ConfigLoader';
 import { noticeStaleBuildOnConfigFailure } from './staleBuild';
@@ -43,6 +44,10 @@ export function watchForgeConfig(options: ConfigReloadOptions): vscode.Disposabl
       newConfig.active_model = prevActive;
     }
 
+    // Watchers can report duplicate events (including machine-wide policy
+    // saves). Reapplying an identical effective config needlessly runs every
+    // subsystem's lifecycle, including remote transport replacement.
+    if (isDeepStrictEqual(newConfig, options.getConfig())) return;
     options.onReloaded(newConfig);
     log.info('Forge: config reloaded');
     void vscode.window.showInformationMessage(

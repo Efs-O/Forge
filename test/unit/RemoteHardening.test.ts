@@ -1003,6 +1003,35 @@ describe('remote runtime lifecycle', () => {
     await expect(channels[0]!.emit(event())).resolves.toMatchObject({ kind: 'retry' });
   });
 
+  it('keeps transports for non-transport changes and voice output toggles', async () => {
+    const { directory } = await newStore();
+    const create = vi.fn(() => new FakeRemoteChannel());
+    const runtime = new RemoteRuntime({
+      storageDirectory: directory,
+      workspaceId: 'workspace',
+      host: host(),
+      secrets: new MemorySecrets() as unknown as vscode.SecretStorage,
+      channelFactories: { telegram: create },
+      notifyLocal: vi.fn(),
+    });
+    const config = ForgeConfigSchema.parse({
+      models: [{ name: 'm', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' }],
+      remote: { enabled: true, telegram: { enabled: true } },
+      voice: { enabled: false, output: { enabled: false } },
+    });
+    try {
+      await runtime.applyConfig(config);
+      await runtime.applyConfig({ ...config, log_level: 'debug' });
+      await runtime.applyConfig({
+        ...config,
+        voice: { ...config.voice!, output: { ...config.voice!.output, enabled: true } },
+      });
+      expect(create).toHaveBeenCalledOnce();
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it('rebuilds the voice runtime when resident model placement changes', async () => {
     const { directory } = await newStore();
     const channels: FakeRemoteChannel[] = [];

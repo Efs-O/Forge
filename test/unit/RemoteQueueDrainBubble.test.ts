@@ -71,7 +71,7 @@ interface DrainRig {
 async function drainWith(
   outcome:
     | { kind: 'completed'; finalText: string }
-    | { kind: 'cancelled' | 'interrupted'; finalText?: string }
+    | { kind: 'cancelled' | 'interrupted'; finalText?: string; stopReason?: string }
     | { kind: 'failed'; error: string },
   canDeliver: () => Promise<boolean> = async () => true,
   duringTurn?: (progress: RemoteAgentProgress) => Promise<void>,
@@ -332,6 +332,13 @@ describe('queue drain status bubble', () => {
     } finally {
       await outbox.stop();
     }
+  });
+
+  it('explains config reload interruption with a recovery action', async () => {
+    const { channel } = await drainWith({ kind: 'cancelled', stopReason: 'config reload' });
+    expect(channel.sent.map((item) => item.text)).toContain(
+      'Forge: request interrupted by a config reload. Send your request again to continue.\nWorkspace: Forge\nOriginal request: hello',
+    );
   });
 
   it('closes a cancelled turn with its own status', async () => {

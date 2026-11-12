@@ -37,6 +37,17 @@ describe('SessionLogger turn errors', () => {
       .split('\n')
       .map((line) => JSON.parse(line) as Record<string, unknown>);
 
+  it('records the initiating reason of an interrupted turn', () => {
+    const logger = new SessionLogger('c-stop', 'title', 'm1');
+    logger.logTurnStopped('cancelled', 'm1', 'config reload');
+    expect(readRows('c-stop').at(-1)).toMatchObject({
+      type: 'turn_stopped',
+      kind: 'cancelled',
+      stop_reason: 'config reload',
+      model: 'm1',
+    });
+  });
+
   // The 2026-09-09 failure: a 543-row log ended on a successful tool row, so
   // the file read as a healthy turn and the only record of the error was the
   // rendered chat.

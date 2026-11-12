@@ -267,9 +267,15 @@ export class SessionLogger {
    * writes no messages of its own, so without this row the file ends on the
    * prompt and reads as a turn that is still running, or never ran.
    */
-  logTurnStopped(kind: 'cancelled' | 'interrupted', model: string): void {
+  logTurnStopped(kind: 'cancelled' | 'interrupted', model: string, reason?: string): void {
     this.ensureHeader(model);
-    this.append({ type: 'turn_stopped', kind, timestamp_ms: Date.now(), model });
+    this.append({
+      type: 'turn_stopped',
+      kind,
+      ...(reason ? { stop_reason: reason } : {}),
+      timestamp_ms: Date.now(),
+      model,
+    });
   }
 
   /** Records the terminal outcome for one provider turn or blocked admission. */

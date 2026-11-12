@@ -200,7 +200,7 @@ export class RemoteController {
   forgetChannel(channel: RemoteInboundEvent['channel']): void {
     this.pending.clearChannel(channel);
   }
-  async stop(): Promise<void> {
+  async stop(reason = 'transport shutdown'): Promise<void> {
     this.accepting = false;
     this.commandCleanup.dispose();
     this.abort.abort();
@@ -213,7 +213,9 @@ export class RemoteController {
     this.questions.stop();
     this.contactService?.dispose();
     await Promise.allSettled(
-      [...this.activeConversations].map((conversationId) => this.host.cancel(conversationId)),
+      [...this.activeConversations].map((conversationId) =>
+        this.host.cancel(conversationId, reason),
+      ),
     );
     await Promise.allSettled([...this.drains.values()]);
     this.hostProgress.dispose();

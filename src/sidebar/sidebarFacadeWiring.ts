@@ -84,10 +84,10 @@ export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacad
     runContactPrompt: (text, systemPromptText, options) =>
       agentLoop.runContactPrompt(text, systemPromptText, options),
     cancelContactPrompts: () => agentLoop.cancelContactPrompts(),
-    cancel: async (conversationId) => {
+    cancel: async (conversationId, reason) => {
       requestChains.markCancelling(conversationId);
       deps.cancelAgentAsk?.(conversationId);
-      await agentLoop.cancel(conversationId);
+      await agentLoop.cancel(conversationId, reason);
     },
     interrupt: (conversationId) => deps.interrupt(conversationId),
     queueIntent: (conversationId) => requestChains.suppressContinuation(conversationId),

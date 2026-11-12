@@ -146,11 +146,23 @@ export class TurnLifecycle {
    *  must not tear down a server other tabs — or other windows, under a shared
    *  runtime — are still using. Backend teardown belongs to BackendPool's
    *  release/eviction path, not to ending a turn. */
-  async stopStreaming(convId?: string, stopBackend = false): Promise<void> {
+  async stopStreaming(
+    convId?: string,
+    stopBackend = false,
+    reason = 'request stopped',
+  ): Promise<void> {
+    const cause = new Error(reason);
+    cause.name = 'AbortError';
+    const abort = (id: string, ctrl: AbortController): void => {
+      if (ctrl.signal.aborted) return;
+      // Capture the synchronous caller before unwinding loses its provenance.
+      log.warn(`[TurnLifecycle] abort conversation=${id}: ${cause.stack ?? reason}`);
+      ctrl.abort(cause);
+    };
     if (convId) {
       const ctrl = this.cancelControllers.get(convId);
       if (!ctrl) return;
-      ctrl.abort();
+      abort(convId, ctrl);
       if (stopBackend) {
         try {
           await this.activeBackends.get(convId)?.stop();
@@ -162,7 +174,7 @@ export class TurnLifecycle {
       return;
     }
     for (const [id, ctrl] of this.cancelControllers) {
-      ctrl.abort();
+      abort(id, ctrl);
       if (stopBackend) {
         try {
           await this.activeBackends.get(id)?.stop();
@@ -185,8 +197,8 @@ export class TurnLifecycle {
    * the request is what actually ends generation; llama-server releases the
    * slot when the socket closes.
    */
-  cancel(convId?: string): Promise<void> {
-    return this.beginCancellation(convId, false, 'cancelled');
+  cancel(convId?: string, reason?: string): Promise<void> {
+    return this.beginCancellation(convId, false, 'cancelled', reason);
   }
 
   /** Abort only the active request and retain its loaded backend for steering. */
@@ -198,6 +210,7 @@ export class TurnLifecycle {
     convId: string | undefined,
     stopBackend: boolean,
     kind: 'cancelled' | 'interrupted',
+    reason?: string,
   ): Promise<void> {
     const cancelling = convId
       ? this.cancelControllers.has(convId)
@@ -210,7 +223,7 @@ export class TurnLifecycle {
       this.cancellingConvIds.add(id);
       this.terminationKinds.set(id, kind);
     }
-    const settled = this.stopStreaming(convId, stopBackend)
+    const settled = this.stopStreaming(convId, stopBackend, reason)
       .catch((err) => {
         log.debug(`[AgentLoop] cancellation cleanup failed: ${(err as Error).message}`);
       })

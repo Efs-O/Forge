@@ -296,13 +296,13 @@ export class AgentLoop {
     return this.lifecycle.stopStreaming(convId);
   }
 
-  cancel(convId?: string): Promise<void> {
+  cancel(convId?: string, reason?: string): Promise<void> {
     // Approvals and the standalone prompt run are AgentLoop's, not the
     // lifecycle's: a pending confirmation and a /compact summary are neither
     // of them a turn.
     this.approvals.cancelConversation(convId);
     this.abortPromptRuns(convId);
-    return this.lifecycle.cancel(convId);
+    return this.lifecycle.cancel(convId, reason);
   }
 
   /** Interrupt a turn for steering without unloading its backend/model. */
@@ -418,10 +418,16 @@ export class AgentLoop {
       ctrl,
       postC,
     };
-    if (isCloudProvider(model.provider)) {
-      return runCloudProviderTurn(this.services, request);
+    const outcome = await (isCloudProvider(model.provider)
+      ? runCloudProviderTurn(this.services, request)
+      : runLocalProviderTurn(this.services, request));
+    if (
+      (outcome.kind === 'cancelled' || outcome.kind === 'interrupted') &&
+      ctrl.signal.reason instanceof Error
+    ) {
+      return { ...outcome, stopReason: ctrl.signal.reason.message };
     }
-    return runLocalProviderTurn(this.services, request);
+    return outcome;
   }
   private commitUserPrompt(
     conv: ConversationRuntime,

@@ -230,7 +230,11 @@ export async function drainRemoteQueue(
             deps.store.finish(next.id, 'cancelled', {
               ...(outcome.finalText ? { finalText: outcome.finalText } : {}),
               notification: [
-                'Forge: request cancelled.',
+                outcome.stopReason === 'config reload'
+                  ? 'Forge: request interrupted by a config reload. Send your request again to continue.'
+                  : outcome.stopReason === 'transport shutdown'
+                    ? 'Forge: request interrupted by transport shutdown. Send your request again to continue.'
+                    : 'Forge: request cancelled.',
                 ...(deps.workspaceName ? [`Workspace: ${deps.workspaceName}`] : []),
                 `Original request: ${next.text.replace(/\s+/g, ' ').trim().slice(0, 160)}`,
                 ...(outcome.finalText ? ['', outcome.finalText] : []),

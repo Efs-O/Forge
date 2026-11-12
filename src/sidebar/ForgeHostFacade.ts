@@ -93,7 +93,7 @@ export interface ForgeHostFacade {
     options?: { web?: boolean },
   ): Promise<string>;
   cancelContactPrompts?(): void;
-  cancel(conversationId: string): Promise<void>;
+  cancel(conversationId: string, reason?: string): Promise<void>;
   /** Interrupt only the active turn so a durable steering prompt can run next. */
   interrupt(conversationId: string): Promise<void>;
   queueIntent(conversationId: string): void;
@@ -286,8 +286,8 @@ export class SidebarHostFacade implements ForgeHostFacade {
     this.deps.cancelContactPrompts?.();
   }
 
-  cancel(conversationId: string): Promise<void> {
-    return this.deps.cancel(conversationId);
+  cancel(conversationId: string, reason?: string): Promise<void> {
+    return this.deps.cancel(conversationId, reason);
   }
 
   interrupt(conversationId: string): Promise<void> {

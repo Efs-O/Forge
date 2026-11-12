@@ -320,7 +320,7 @@ export class SendPipeline {
           // ends on the last successful tool row and reads as a healthy turn.
           if (turn.kind === 'failed') this.sessionLogs.logTurnError(conv.id, turn.error);
           if (turn.kind === 'cancelled' || turn.kind === 'interrupted') {
-            this.sessionLogs.logTurnStopped(conv.id, turn.kind);
+            this.sessionLogs.logTurnStopped(conv.id, turn.kind, turn.stopReason);
           }
           const end = turnEndDetails(turn);
           const rounds = Math.max(

@@ -87,10 +87,10 @@ export class SessionLogCoordinator {
     this.loggerFor(conv).logTurnError(message, conv.active_model ?? '');
   }
 
-  logTurnStopped(convId: string, kind: 'cancelled' | 'interrupted'): void {
+  logTurnStopped(convId: string, kind: 'cancelled' | 'interrupted', reason?: string): void {
     const conv = this.getSidebar().conversations.find((c) => c.id === convId);
     if (!conv) return;
-    this.loggerFor(conv).logTurnStopped(kind, conv.active_model ?? '');
+    this.loggerFor(conv).logTurnStopped(kind, conv.active_model ?? '', reason);
   }
 
   logTurnEnd(

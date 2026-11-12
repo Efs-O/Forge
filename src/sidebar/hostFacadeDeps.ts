@@ -54,7 +54,7 @@ export interface SidebarHostFacadeDeps {
     options?: { web?: boolean },
   ) => Promise<string>;
   cancelContactPrompts?: () => void;
-  cancel: (conversationId: string) => Promise<void>;
+  cancel: (conversationId: string, reason?: string) => Promise<void>;
   interrupt: (conversationId: string) => Promise<void>;
   queueIntent: (conversationId: string) => void;
   addApprovalSink: (sink: ToolApprovalSink) => { dispose(): void };
