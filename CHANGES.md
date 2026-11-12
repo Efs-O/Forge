@@ -1,5 +1,12 @@
 # Forge — Recent Changes
 
+## 0.17.166
+
+- Forge's file tools can read and write memory files in `~/.forge/memories/` and skills in `~/.forge/skills/` on every install, with no policy line and no approval card. The guard still refuses every other file under `~/.forge`.
+- A scheduled job whose agent task failed tries the same release again on its next run; a cached "not modified" answer used to make it report "no new release" until a newer one came out.
+- When an unattended job's dangerous shell call is refused, the refusal names the rule that fired.
+- When bash strips the backslashes from a Windows script path such as `V:\Maya\local\update-maya.ps1`, the refusal says so and says to pass `shell "pwsh"` or use forward slashes.
+
 ## 0.17.165
 
 - Memories are plain markdown files, one per memory, in `~/.forge/memories/<folder>-<id>/`, each with a name, a description and its text, plus a generated `MEMORY.md` list. You and CLI agents can read and edit them; an edit counts on the next read. Existing memories move there once, on the first load, and the old copies are deleted only after every file reads back identical.
