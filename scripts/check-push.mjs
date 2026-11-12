@@ -14,11 +14,12 @@
  *   node scripts/check-push.mjs                       # the upstream range
  *   node scripts/check-push.mjs origin/main..HEAD     # an explicit range
  *   node scripts/check-push.mjs --pre-push            # from .githooks/pre-push
- *   node scripts/check-push.mjs --record-ci           # record a green CI run
+ *   node scripts/check-push.mjs --record-ci           # report whether a green run is recorded
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { readMarker } from './record-ci-pass.mjs';
 
 const TYPES = ['feat', 'fix', 'perf', 'refactor', 'docs', 'test', 'build', 'ci', 'chore'];
 const TYPE_RE = new RegExp(`^(?:${TYPES.join('|')})(\\([^()]{1,24}\\))?: \\S`);
@@ -83,10 +84,21 @@ const markerDir = join('.forge', 'ci-pass');
 const marker = join(markerDir, `${treeHash}.json`);
 
 if (recordCi) {
-  mkdirSync(markerDir, { recursive: true });
-  writeFileSync(marker, `${JSON.stringify({ tree: treeHash, at: new Date().toISOString() })}\n`);
-  console.log(`check-push: recorded a green CI run for tree ${treeHash.slice(0, 12)}`);
-  process.exit(0);
+  // Report-only since 0.17.167. This block used to write the marker without running anything,
+  // and on 2026-11-12 a green pass was recorded over a red suite, which the gate could not see.
+  // The proof is now written by `npm run ci:steps` (see scripts/record-ci-pass.mjs), which is
+  // reached only when every step before it exited 0.
+  const recorded = readMarker(markerDir, treeHash);
+  if (recorded) {
+    console.log(
+      `check-push: a green CI run is recorded for tree ${treeHash.slice(0, 12)} (at ${recorded.at}) — nothing to record`,
+    );
+    process.exit(0);
+  }
+  console.error(
+    `check-push: no recorded CI pass for tree ${treeHash.slice(0, 12)} — \`npm run ci\` records it itself; --record-ci no longer creates one`,
+  );
+  process.exit(1);
 }
 
 function upstreamRange() {
@@ -240,7 +252,7 @@ if (!existsSync(marker)) {
     warnings.push('no recorded CI pass for this tree, and FORGE_PUSH_SKIP_CI=1');
   } else {
     problems.push(
-      `no recorded CI pass for tree ${treeHash.slice(0, 12)} — run \`npm run ci && npm run check:push -- --record-ci\``,
+      `no recorded CI pass for tree ${treeHash.slice(0, 12)} — run \`npm run ci\` after the commit it certifies; the run records the pass itself`,
     );
   }
 }
