@@ -8,6 +8,24 @@ when you need one of them.
 
 ---
 
+## Finding a chat's session log
+
+The file name is the chat's **full** id, all 8-4-4-4-12 hex digits:
+`~/.forge/sessions/ec64f51f-cfa7-420a-a98d-b0705ed30c47.jsonl`. The ids that
+`message_chat` lists are not file names: `formatChatId`
+(`src/tools/chatMessageResolver.ts:186`) cuts each one to the shortest prefix
+that is unique among the open chats, often 8 digits, so a path built from one
+is a file-not-found round. Resolve a short id to the file with a prefix glob
+(`ls ~/.forge/sessions/ec64f51f*.jsonl`); if that matches more than one file,
+the prefix is not unique on disk, though it was in the list.
+
+A search across the whole folder finds which files contain a string, not whose
+files they are. `rg -l "256 entries" ~/.forge/sessions` matched the chat that
+wrote the phrase and an unrelated one that happened to contain it, and taking
+the hit as proof that a message reached a given agent was a wrong claim. Before
+you attribute a hit, read that file's `session_start` row (`title`, `model`,
+`forge_version`) and the row that holds the match.
+
 ## Finding the current session's title
 
 The raw logs carry a title, but not necessarily the current one. Every
