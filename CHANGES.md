@@ -1,5 +1,10 @@
 # Forge — Recent Changes
 
+## 0.17.168
+
+- Duplicate saves of unchanged configuration no longer reapply subsystem lifecycles, and config watchers ignore events for other paths.
+- Turns interrupted by a config-driven transport rebuild explain the interruption and how to continue. Session logs retain the stop reason, and Forge logs the abort caller for diagnosing unexplained stops.
+
 ## 0.17.167
 
 - A `message_chat` reply addressed to a chat id now reaches the window that holds that chat. It used to land in a local chat whose title contained that id, such as the one a peer message opens, and start an unplanned turn there.
