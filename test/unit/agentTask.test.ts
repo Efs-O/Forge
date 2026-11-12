@@ -1094,17 +1094,19 @@ describe('AgentTaskRunner', () => {
     await store.saveJob(job);
     jobsFetch
       .mockResolvedValueOnce({
-        notModified: false,
         body: JSON.stringify({ updated_at: '2026-01-01T03:00:00Z' }),
         etag: 'e1',
       })
       // No `comments` count on the issue, so the check makes no comments request.
       .mockResolvedValueOnce({
-        notModified: false,
         body: JSON.stringify({ updated_at: '2026-01-01T03:15:00Z' }),
         etag: 'e2',
       })
-      .mockResolvedValue({ notModified: true, body: '', etag: 'e2' });
+      // What a 304 returns: the cached body, unchanged.
+      .mockResolvedValue({
+        body: JSON.stringify({ updated_at: '2026-01-01T03:15:00Z' }),
+        etag: 'e2',
+      });
 
     let nowMs = Date.parse('2026-01-01T03:00:00');
     pool = fakePool(['qwen'], 1);

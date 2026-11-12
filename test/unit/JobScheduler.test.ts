@@ -167,7 +167,6 @@ describe('JobScheduler tick', () => {
     await scheduler.start({ immediate: false });
     // Baseline: the first run records the observation and reports no change.
     jobsFetch.mockResolvedValue({
-      notModified: false,
       body: issueBody(1),
       etag: 'e1',
     });
@@ -176,7 +175,6 @@ describe('JobScheduler tick', () => {
 
     // A new comment changes the observation; the change is delivered.
     jobsFetch.mockResolvedValue({
-      notModified: false,
       body: issueBody(2),
       etag: 'e2',
     });
@@ -217,12 +215,12 @@ describe('JobScheduler tick', () => {
     makeScheduler();
     await scheduler.start({ immediate: false });
     // Baseline: no change, nothing pending.
-    jobsFetch.mockResolvedValue({ notModified: false, body: issueBody(1), etag: 'e1' });
+    jobsFetch.mockResolvedValue({ body: issueBody(1), etag: 'e1' });
     await scheduler.tick();
 
     // A change arrives while a turn is streaming: it is recorded and the
     // summarize is deferred (the model must not fight a live turn for the GPU).
-    jobsFetch.mockResolvedValue({ notModified: false, body: issueBody(2), etag: 'e2' });
+    jobsFetch.mockResolvedValue({ body: issueBody(2), etag: 'e2' });
     busyReason = 'a turn is streaming';
     nowMs += 15 * 60_000;
     await scheduler.tick();
@@ -231,7 +229,7 @@ describe('JobScheduler tick', () => {
     expect(summarizeCalls).toHaveLength(0);
 
     // Once idle, the pending summary runs and is delivered.
-    jobsFetch.mockResolvedValue({ notModified: false, body: issueBody(2), etag: 'e2' });
+    jobsFetch.mockResolvedValue({ body: issueBody(2), etag: 'e2' });
     busyReason = undefined;
     nowMs += 15 * 60_000;
     await scheduler.tick();
@@ -273,7 +271,7 @@ describe('JobScheduler tick', () => {
     let release: () => void = () => undefined;
     jobsFetch.mockReturnValue(
       new Promise((resolve) => {
-        release = () => resolve({ notModified: false, body: issueBody(1), etag: 'e1' });
+        release = () => resolve({ body: issueBody(1), etag: 'e1' });
       }),
     );
     const first = scheduler.tick();
@@ -550,7 +548,7 @@ describe('JobScheduler maxConcurrent (AC4)', () => {
       peak = Math.max(peak, inFlight);
       await new Promise((resolve) => setTimeout(resolve, 5));
       inFlight--;
-      return { notModified: false, body: issueBody(1), etag: null };
+      return { body: issueBody(1), etag: null };
     });
     return { peak: () => peak };
   }

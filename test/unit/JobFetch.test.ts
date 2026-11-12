@@ -2,7 +2,12 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { JobsFetchRefusedError, jobsDownloadBinary, jobsFetch } from '../../src/jobs/jobsFetch';
+import {
+  JobsFetchRefusedError,
+  MAX_ETAG_CACHE_ENTRIES,
+  jobsDownloadBinary,
+  jobsFetch,
+} from '../../src/jobs/jobsFetch';
 import { githubReleaseCheck } from '../../src/jobs/checks/github';
 
 const realFetch = globalThis.fetch;
@@ -99,7 +104,7 @@ describe('jobsFetch (D5 host gate)', () => {
       cacheKeyPrefix: 'job-b',
     });
 
-    expect(second.notModified).toBe(false);
+    expect(second.body).toBe('body');
     // job-b sent no If-None-Match, because job-a's ETag is not its own.
     const lastCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.at(-1);
     const headers = (lastCall?.[1] as { headers: Record<string, string> }).headers;
@@ -114,7 +119,6 @@ describe('jobsFetch (D5 host gate)', () => {
       etagCache: new Map(),
     });
     expect(result.body).toBe('body');
-    expect(result.notModified).toBe(false);
   });
 
   it('sends If-None-Match when an ETag is cached, and a 304 returns its body', async () => {
@@ -127,7 +131,6 @@ describe('jobsFetch (D5 host gate)', () => {
       allowedHosts: ['api.github.com'],
       etagCache: cache,
     });
-    expect(result.notModified).toBe(false);
     expect(result.body).toBe('cached body');
     const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
     const headers = (call[1] as RequestInit).headers as Record<string, string>;
@@ -182,10 +185,36 @@ describe('jobsFetch (D5 host gate)', () => {
       .mockResolvedValueOnce(new Response(null, { status: 304 }))
       .mockResolvedValueOnce(okResponse('fresh body', '"fresh"'));
     const result = await jobsFetch(url, { allowedHosts: ['api.github.com'], etagCache: cache });
-    expect(result).toEqual({ notModified: false, body: 'fresh body', etag: '"fresh"' });
+    expect(result).toEqual({ body: 'fresh body', etag: '"fresh"' });
     expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1]?.[1]).toMatchObject({
       headers: expect.not.objectContaining({ 'If-None-Match': expect.anything() }),
     });
+  });
+
+  it('evicts the oldest ETag entry past the cap, and that URL then fetches fresh', async () => {
+    const cache = new Map();
+    const urlFor = (i: number): string => `https://api.github.com/repo/${i}`;
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementation((url: string) =>
+      Promise.resolve(okResponse(`body ${url}`, `"${url}"`)),
+    );
+    for (let i = 0; i <= MAX_ETAG_CACHE_ENTRIES; i++) {
+      await jobsFetch(urlFor(i), { allowedHosts: ['api.github.com'], etagCache: cache });
+    }
+    expect(cache.size).toBe(MAX_ETAG_CACHE_ENTRIES);
+    expect(cache.has(urlFor(0))).toBe(false);
+    expect(cache.has(urlFor(1))).toBe(true);
+
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      okResponse('fresh body', '"fresh"'),
+    );
+    const result = await jobsFetch(urlFor(0), { allowedHosts: ['api.github.com'], etagCache: cache });
+    expect(result).toEqual({ body: 'fresh body', etag: '"fresh"' });
+    const headers = (
+      (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as {
+        headers: Record<string, string>;
+      }
+    ).headers;
+    expect(headers['If-None-Match']).toBeUndefined();
   });
 
   it('a non-2xx/304 response throws with the status', async () => {

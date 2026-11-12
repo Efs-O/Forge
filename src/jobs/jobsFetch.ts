@@ -17,7 +17,9 @@ import { readTextCapped } from '../util/readTextCapped';
 export interface JobsFetchOptions {
   /** The host a job is allowed to reach. A job may only fetch from these. */
   allowedHosts: readonly string[];
-  /** ETag cache, keyed by URL. The caller owns persistence. */
+  /** ETag cache. Keyed by `<jobId>|<url>` once `cacheKeyPrefix` is set, so two
+   *  jobs never share an entry. This module owns writing and eviction; the
+   *  caller only owns how long the map lives. */
   etagCache: Map<string, JobsFetchCacheEntry>;
   /**
    * When true, fetch fresh: do not send `If-None-Match` and do not read or
@@ -38,8 +40,6 @@ export interface JobsFetchOptions {
 }
 
 export interface JobsFetchResult {
-  /** True when the server answered 304 and no cached body was available. */
-  notModified: boolean;
   /** The response body, including the cached body for a 304 when available. */
   body: string;
   /** The new ETag to cache, when the server sent one. */
@@ -64,6 +64,31 @@ export class JobsFetchRefusedError extends Error {
  *  anything near this is a misconfigured endpoint, not a check. */
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_REDIRECT_HOPS = 10;
+
+/** Cap on ETag cache entries. The map is shared by every job for the
+ *  scheduler's lifetime, and a key can change on every run (the issue check's
+ *  comments URL carries the comment count), so without a cap it grows forever.
+ *  Generous on purpose: a handful of URLs per job, many jobs. */
+export const MAX_ETAG_CACHE_ENTRIES = 256;
+
+/**
+ * Store a cache entry, then drop the oldest entries past the cap (`Map` keeps
+ * insertion order, so the oldest is the first key). Eviction is always safe: a
+ * missing entry only means the next request sends no `If-None-Match` and reads
+ * a fresh 200 body — it can never produce a wrong observation.
+ */
+export function setEtagCacheEntry(
+  cache: Map<string, JobsFetchCacheEntry>,
+  key: string,
+  entry: JobsFetchCacheEntry,
+): void {
+  cache.delete(key);
+  cache.set(key, entry);
+  for (const oldest of cache.keys()) {
+    if (cache.size <= MAX_ETAG_CACHE_ENTRIES) break;
+    cache.delete(oldest);
+  }
+}
 
 /** Assert a URL's host is allowed, returning the lowercased host. */
 function gateHost(url: string, allowedHosts: readonly string[], what: string): string {
@@ -115,11 +140,6 @@ async function fetchGated(
 }
 
 /**
- * Read a response body as text, enforcing a byte cap as it streams so an
- * enormous body is never fully materialised. `response.text()` has no cap and
- * would happily buffer a gigabyte.
- */
-/**
  * Fetch a URL, gated by `allowed_hosts` and ETag-cached. Throws
  * `JobsFetchRefusedError` when the host is not allowed.
  */
@@ -138,7 +158,7 @@ export async function jobsFetch(url: string, options: JobsFetchOptions): Promise
 
   if (response.status === 304) {
     if (cached && typeof cached.body === 'string') {
-      return { notModified: false, body: cached.body, etag: cached.etag };
+      return { body: cached.body, etag: cached.etag };
     }
     // A validator without its matching body cannot produce an observation.
     // Retry once unconditionally so every check sees a fresh payload.
@@ -158,8 +178,8 @@ export async function jobsFetch(url: string, options: JobsFetchOptions): Promise
     }
     const freshEtag = fresh.response.headers.get('ETag');
     if (freshEtag && !forceFresh)
-      options.etagCache.set(cacheKey, { etag: freshEtag, body: freshBody.text });
-    return { notModified: false, body: freshBody.text, etag: freshEtag };
+      setEtagCacheEntry(options.etagCache, cacheKey, { etag: freshEtag, body: freshBody.text });
+    return { body: freshBody.text, etag: freshEtag };
   }
 
   if (!response.ok) {
@@ -174,8 +194,8 @@ export async function jobsFetch(url: string, options: JobsFetchOptions): Promise
   }
   const body = cappedBody.text;
   const etag = response.headers.get('ETag');
-  if (etag && !forceFresh) options.etagCache.set(cacheKey, { etag, body });
-  return { notModified: false, body, etag };
+  if (etag && !forceFresh) setEtagCacheEntry(options.etagCache, cacheKey, { etag, body });
+  return { body, etag };
 }
 
 /** A release asset as the `llamacpp_update` action needs it. */
@@ -206,9 +226,6 @@ export async function jobsFetchReleaseByTag(
 ): Promise<ReleaseByTag> {
   const url = `https://api.github.com/repos/${repo}/releases/tags/${tag}`;
   const result = await jobsFetch(url, { ...options, forceFresh: true });
-  if (result.notModified) {
-    throw new Error(`Forge: could not read release ${tag} for ${repo} (304)`);
-  }
   const release = JSON.parse(result.body) as {
     tag_name?: unknown;
     assets?: Array<{ name?: unknown; digest?: unknown; browser_download_url?: unknown }>;

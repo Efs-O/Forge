@@ -4,12 +4,9 @@ import { hfDiscussionCheck } from '../../src/jobs/checks/huggingface';
 import type { CheckContext } from '../../src/jobs/checks/checkTypes';
 import type { JobsFetchResult } from '../../src/jobs/jobsFetch';
 
-/** A fake gated fetch that returns a fixed body (or a 304). */
-function fakeCtx(body: string | null, etag?: string): CheckContext {
-  const result: JobsFetchResult =
-    body === null
-      ? { notModified: true, body: '', etag: etag ?? null }
-      : { notModified: false, body, etag: etag ?? null };
+/** A fake gated fetch that returns a fixed body. */
+function fakeCtx(body: string, etag?: string): CheckContext {
+  const result: JobsFetchResult = { body, etag: etag ?? null };
   return {
     fetch: async () => result,
     etagCache: new Map(),
@@ -120,11 +117,10 @@ describe('githubIssueCheck', () => {
     issue.fetch = async (url) =>
       url.includes('/comments?')
         ? {
-            notModified: false,
             body: JSON.stringify([{ id: 9, user: { login: 'forge' }, body: 'x'.repeat(250) }]),
             etag: null,
           }
-        : { notModified: false, body: ISSUE_BODY, etag: null };
+        : { body: ISSUE_BODY, etag: null };
     const result = await githubIssueCheck(
       { kind: 'github_issue', repo: 'ggml-org/llama.cpp', issue_number: 1234 },
       null,
@@ -145,11 +141,10 @@ describe('githubIssueCheck', () => {
       urls.push(url);
       return url.includes('/comments?')
         ? {
-            notModified: false,
             body: JSON.stringify([{ id: 12, user: { login: 'b' }, body: 'newest' }]),
             etag: null,
           }
-        : { notModified: false, body: ISSUE_BODY, etag: null };
+        : { body: ISSUE_BODY, etag: null };
     };
     await githubIssueCheck(
       { kind: 'github_issue', repo: 'ggml-org/llama.cpp', issue_number: 1234 },
@@ -170,7 +165,7 @@ describe('githubIssueCheck', () => {
     const issue = fakeCtx(body);
     issue.fetch = async (url) => {
       urls.push(url);
-      return { notModified: false, body, etag: null };
+      return { body, etag: null };
     };
     const result = await githubIssueCheck(
       { kind: 'github_issue', repo: 'ggml-org/llama.cpp', issue_number: 1 },
