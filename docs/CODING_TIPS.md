@@ -31,13 +31,11 @@ Read this whole file before your first read, search, edit, write, command, commi
 9. a bash double-quoted string holding backticks → bash runs them as command substitution, so the program gets text I did not write. wrap the body in single quotes or a quoted heredoc
 10. a scan run with `cwd` inside `~/.forge/sessions` → refused: any command there may write into Forge's files. run it from the workspace and pass absolute paths
 11. `probe && next && next` where the probe is meant to fail → the chain stops and the later commands never run. join probes with `;`
-12. `shell background: true` with `timeout_ms: 900000` → refused: `"timeout_ms" must be within 1000 to 600000`. the ceiling is 600000 even for a background job
-13. `stop_execution` on a finished job → its own `status: failed, exit_code: 1`, which reads like your stop. a real interruption is `terminated`, `exit_code: null` — quote that, not the code
-14. a 2nd gated call after one card expired → `... needs the approval that went unanswered earlier in this turn (15 min), so no new card was shown` → only the first card burns time
-15. a gated call batched with later gated calls → those cards and results still wait for the first; an expired card silences only that approval key. since 0.17.171 ungated calls run on
-16. expecting one approval to cover a tool or a turn → each gated call raises its own card and waits the full `approval_timeout_minutes`; budget one answer per gated call
-17. a heredoc terminator with a command after it (`MSG; echo ok`) → the terminator is never seen, so the command text lands in the commit message. keep the terminator alone on its line
-18. a result's field names are not its input names (`next_stdout_cursor` vs `stdout_cursor`) → refused: unknown arguments. the refusal lists the valid names; resend with those
+12. a 2nd gated call after one card expired → `... needs the approval that went unanswered earlier in this turn, so no new card was shown` → only the first card burns time
+13. a gated call batched with later gated calls → those cards and results still wait for the first; an expired card silences only that approval key. since 0.17.171 ungated calls run on
+14. expecting one approval to cover a tool or a turn → each gated call raises its own card and waits the full `approval_timeout_minutes`; budget one answer per gated call
+15. a heredoc terminator with a command after it (`MSG; echo ok`) → the terminator is never seen, so the command text lands in the commit message. keep the terminator alone on its line
+16. a result's field names are not its input names (`next_stdout_cursor` vs `stdout_cursor`) → refused: unknown arguments. the refusal lists the valid names; resend with those
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies only the tree it was written for. run the suite *after* the commit it is meant to certify, or the tip has no proof
