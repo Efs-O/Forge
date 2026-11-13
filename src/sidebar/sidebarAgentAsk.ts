@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { agentTargetCatalog, agentTargetIdentity } from '../agentLinks/agentTargets';
 import type { CheckpointStack } from '../checkpoint/CheckpointStack';
 import { AgentLinksConfigSchema } from '../config/agentBusSchema';
 import type { ForgeConfig } from '../config/types';
@@ -162,8 +163,27 @@ export function createSidebarAgentAsk(options: {
     const conversation = findConversation(options.getSidebar(), conversationId);
     if (!conversation) return 'Error: ask_agent: this chat is not available in this window.';
     const message = request.message.trim();
+    const queuedRequest = { ...request, message };
+    let targetIdentity: string | undefined;
+    if (request.targetId) {
+      try {
+        const selected = agentTargetCatalog.pin(
+          queuedRequest,
+          conversationId,
+          options.workspaceRoot ?? '',
+          request.targetId,
+        );
+        if (selected.agent !== request.agent)
+          return 'Error: CLI target belongs to a different agent; nothing was sent.';
+        targetIdentity = agentTargetIdentity(selected);
+      } catch (error) {
+        return `Error: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    }
     const queue = pendingAgentAsksForAgent(conversationId, request.agent);
-    const busy = queue.find((entry) => entry.message === message);
+    const busy = queue.find(
+      (entry) => entry.message === message && entry.targetIdentity === targetIdentity,
+    );
     if (busy)
       return renderAskStillPending(
         request.agent,
@@ -176,7 +196,8 @@ export function createSidebarAgentAsk(options: {
       conversationId,
       agent: request.agent,
       message,
-      request: { ...request, message },
+      request: queuedRequest,
+      ...(targetIdentity ? { targetIdentity } : {}),
       startedAt: Date.now(),
       controller: new AbortController(),
       ...(tail ? { queuedAfterExchangeId: tail.exchangeId } : {}),

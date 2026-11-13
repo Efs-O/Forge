@@ -60,6 +60,9 @@ export interface AskAgentRuntime {
      *  all, so nothing is resumed. Used for a Codex first ask, where the link
      *  is only Forge's placeholder and its "id" is not a thread Codex can find. */
     startNew?: boolean;
+    /** Validated, task-scoped Codex selection; never persisted as a default. */
+    model?: string;
+    effort?: string;
     sessionTitle: string;
     signal: AbortSignal;
     onAccepted?: () => void;

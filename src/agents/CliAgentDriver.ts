@@ -46,6 +46,7 @@ export interface CliAgentRunOptions {
   createSessionId?: string;
   sessionTitle?: string;
   model?: string;
+  effort?: string;
   cwd: string;
   timeoutMs?: number;
   signal?: AbortSignal;
@@ -98,6 +99,7 @@ export class CliAgentDriver {
         ...(options.createSessionId ? { createSessionId: options.createSessionId } : {}),
         ...(options.sessionTitle ? { sessionTitle: options.sessionTitle } : {}),
         ...(options.model ? { model: options.model } : {}),
+        ...(options.effort ? { effort: options.effort } : {}),
       }),
     ];
 

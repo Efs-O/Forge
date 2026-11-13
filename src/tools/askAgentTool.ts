@@ -10,6 +10,7 @@ const requestSchema = z
     agent: agentKindSchema,
     message: z.string().min(1).max(MAX_QUESTION_CHARS),
     subject: z.string().min(1).max(160).optional(),
+    target_id: z.string().uuid().optional(),
   })
   .strict();
 
@@ -28,7 +29,7 @@ export function makeAskAgentTool(options: {
       function: {
         name: 'ask_agent',
         description:
-          'Ask the Claude, Codex, or Copilot session linked to this chat; a missing link creates one. Returns at once; reply arrives here as a message. Keep working; do not ask again. If blocked, end your turn; reply starts a new one. Do not edit files you asked it to change. For local/cloud models, use ask_local_agent.',
+          'Ask the Claude, Codex, or Copilot session linked to this chat; a missing link creates one. For a specific model/effort or session, call list_agent_targets and pass its target_id; never edit config to select an agent. Returns at once; reply arrives here as a message. Keep working; do not ask again. If blocked, end your turn; reply starts a new one. Do not edit files you asked it to change. For local/cloud models, use ask_local_agent.',
         parameters: {
           type: 'object',
           properties: {
@@ -40,6 +41,11 @@ export function makeAskAgentTool(options: {
             },
             message: { type: 'string', minLength: 1, maxLength: MAX_QUESTION_CHARS },
             subject: { type: 'string', minLength: 1, maxLength: 160 },
+            target_id: {
+              type: 'string',
+              description:
+                'Exact target_id returned by list_agent_targets in this chat. Applies to this ask only; preserves chat links and saved defaults.',
+            },
           },
           required: ['agent', 'message'],
           additionalProperties: false,
@@ -62,6 +68,7 @@ export function makeAskAgentTool(options: {
         agent: parsed.agent,
         message: parsed.message,
         ...(parsed.subject ? { subject: parsed.subject } : {}),
+        ...(parsed.target_id ? { targetId: parsed.target_id } : {}),
       });
     },
   };

@@ -38,6 +38,7 @@ interface CliInvocationOptions {
   createSessionId?: string;
   sessionTitle?: string;
   model?: string;
+  effort?: string;
 }
 
 export interface CliAdapter {

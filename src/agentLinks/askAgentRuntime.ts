@@ -235,6 +235,8 @@ export function makeAskAgentRuntime(options: {
       prompt,
       createSessionId,
       startNew,
+      model: selectedModel,
+      effort,
       sessionTitle,
       signal,
       onAccepted,
@@ -243,12 +245,14 @@ export function makeAskAgentRuntime(options: {
       try {
         const config = options.getConfig();
         const executable = await resolveCliExecutable(cliFor(config, agent), cliName(agent));
+        signal.throwIfAborted();
         const model =
-          agent === 'codex'
+          selectedModel ??
+          (agent === 'codex'
             ? config.agent_bus?.codex_model
             : agent === 'copilot'
               ? busConfig(config).copilot_model
-              : undefined;
+              : undefined);
         // Which session the CLI runs on: an id Forge pre-created, nothing at all
         // when the caller asked for a new session (`startNew`, which wins over
         // the link — the CLI names the session and reports it back), or the
@@ -270,6 +274,7 @@ export function makeAskAgentRuntime(options: {
           ...(onAccepted ? { onSpawned: onAccepted } : {}),
           onSessionId,
           ...(model ? { model } : {}),
+          ...(effort ? { effort } : {}),
           ...(options.waitLimitMs ? { timeoutMs: options.waitLimitMs } : {}),
         });
         const mapped = toRunResult(result);

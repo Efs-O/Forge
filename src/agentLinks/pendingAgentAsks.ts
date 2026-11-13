@@ -25,6 +25,7 @@ export interface PendingAgentAsk {
   agent: AgentKind;
   message: string;
   request: AskAgentRequest;
+  targetIdentity?: string;
   startedAt: number;
   controller: AbortController;
   queuedAfterExchangeId?: string;

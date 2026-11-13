@@ -748,6 +748,9 @@ overlaps with an existing owner, extend the owner instead.
 | Concern                                                 | Owner                                |
 | ------------------------------------------------------- | ------------------------------------ |
 | `config.yaml` schema (Zod)                              | `src/config/schema.ts`               |
+| Runtime CLI target discovery and expiring chat-scoped target ids | `src/agentLinks/agentTargets.ts` |
+| Explicit CLI target execution without changing links or defaults | `src/agentLinks/selectedAgentAsk.ts` |
+| Model-facing CLI target discovery tool | `src/tools/listAgentTargetsTool.ts` |
 | Model config schema (model/profile/active/group field)  | `src/config/modelSchema.ts`          |
 | Remote config schema (queue/auth/attachments/aliases)   | `src/config/remoteSchema.ts`         |
 | Shared Zod primitives (groups/spawn/sampling)           | `src/config/schemaShared.ts`         |

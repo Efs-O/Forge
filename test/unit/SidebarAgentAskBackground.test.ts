@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AskAgentRunResult, AskAgentRuntime } from '../../src/agentLinks/askAgentService';
 import { isAskAgentRunning } from '../../src/agentLinks/askAgentService';
+import { agentTargetCatalog } from '../../src/agentLinks/agentTargets';
 import {
   BACKGROUND_ASK_LIMIT_MS,
   pendingAgentAsksFor,
@@ -107,6 +108,64 @@ const waitForRun = (signal: AbortSignal) =>
 const runFor = (signal: AbortSignal) => runs.find((run) => run.signal === signal)!;
 
 describe('ask_agent background asks', () => {
+  it('keeps an accepted queued selection across rediscovery and suppresses its semantic duplicate', async () => {
+    const { asker } = setup();
+    await asker.start(chatId, { agent: 'codex', message: 'Long first task' });
+    const target = {
+      agent: 'codex' as const,
+      kind: 'new_task' as const,
+      cwd: 'C:/repo',
+      title: 'Runtime',
+      model: 'runtime-model',
+      effort: 'high',
+    };
+    const [first] = agentTargetCatalog.publish(chatId, 'C:/repo', [target]);
+    await asker.start(chatId, { agent: 'codex', message: 'Review', targetId: first!.targetId });
+    const selected = pendingAgentAsksFor(chatId)[1]!;
+    const [rediscovered] = agentTargetCatalog.publish(chatId, 'C:/repo', [target]);
+    const duplicate = await asker.start(chatId, {
+      agent: 'codex',
+      message: 'Review',
+      targetId: rediscovered!.targetId,
+    });
+    expect(duplicate).toContain('nothing new was sent');
+    expect(pendingAgentAsksFor(chatId)).toHaveLength(2);
+    runs[0]!.settle({ status: 'completed', finalText: 'First done' });
+    await waitForRun(selected.controller.signal);
+    expect(runtime.runHeadless).toHaveBeenLastCalledWith(
+      expect.objectContaining({ model: 'runtime-model', effort: 'high', startNew: true }),
+    );
+    asker.cancel(chatId);
+  });
+  it('queues identical briefs for different selected targets instead of suppressing one', async () => {
+    const { asker } = setup();
+    const targets = agentTargetCatalog.publish(
+      chatId,
+      'C:/repo',
+      ['first-model', 'second-model'].map((model) => ({
+        agent: 'codex' as const,
+        kind: 'new_task' as const,
+        cwd: 'C:/repo',
+        title: model,
+        model,
+        effort: 'high',
+      })),
+    );
+    await asker.start(chatId, {
+      agent: 'codex',
+      message: 'Review',
+      targetId: targets[0]!.targetId,
+    });
+    const second = await asker.start(chatId, {
+      agent: 'codex',
+      message: 'Review',
+      targetId: targets[1]!.targetId,
+    });
+    expect(second).toContain('it starts when exchange');
+    expect(pendingAgentAsksFor(chatId)).toHaveLength(2);
+    expect(pendingAgentAsksFor(chatId)[1]!.request.targetId).toBe(targets[1]!.targetId);
+    asker.cancel(chatId);
+  });
   beforeEach(async () => {
     for (const run of runs.splice(0)) run.settle({ status: 'cancelled', finalText: '' });
     await flush();
@@ -193,7 +252,9 @@ describe('ask_agent background asks', () => {
     await flush();
     const secondSignal = pendingAgentAsksFor(chatId)[0]!.controller.signal;
     await waitForRun(secondSignal);
-    expect(runs.filter((run) => run.signal === firstSignal || run.signal === secondSignal)).toHaveLength(2);
+    expect(
+      runs.filter((run) => run.signal === firstSignal || run.signal === secondSignal),
+    ).toHaveLength(2);
     expect(deliver).toHaveBeenCalledTimes(1);
     expect(deliver.mock.calls[0]![0]).toContain('first reply');
     runFor(secondSignal).settle({ status: 'completed', finalText: 'second reply' });

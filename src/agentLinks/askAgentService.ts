@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { askSelectedAgent } from './selectedAgentAsk';
 import type { ForgeConfig } from '../config/types';
 import type { AgentLinksConfig } from '../config/agentBusSchema';
 import type { CheckpointSession } from '../checkpoint/CheckpointStack';
@@ -20,10 +21,7 @@ export { renderAskAgentResult } from './askAgentResult';
 export type { AskAgentResult } from './askAgentResult';
 import type { AskAgentOrigin } from './liveSessionDelivery';
 import { waitForLive, type AskAgentRunResult, type AskAgentRuntime } from './liveSessionDelivery';
-// The transport contract and the live-delivery helper belong to
-// `liveSessionDelivery.ts`, which the relay and the inbound reply lifecycle
-// also use. They are re-exported here so the ask lifecycle keeps one import
-// point for its consumers; that module is their owner and implementation.
+// Shared transport contract, also used by relay and inbound reply delivery.
 export { deliverAgentReply } from './liveSessionDelivery';
 export type { AskAgentRunResult, AskAgentRuntime } from './liveSessionDelivery';
 import type { ConversationRuntime } from '../sidebar/sessionTypes';
@@ -45,6 +43,7 @@ export interface AskAgentRequest {
   message: string;
   subject?: string;
   origin?: AskAgentOrigin;
+  targetId?: string;
 }
 
 export interface AskAgentServiceOptions {
@@ -192,7 +191,9 @@ export function makeAskAgentHandler(options: AskAgentServiceOptions) {
         { status: 'failed', finalText: '', error: refusal },
         false,
       );
-    const workspaceRoot = get(context.conversation, request.agent)?.cwd ?? context.workspaceRoot;
+    const workspaceRoot = request.targetId
+      ? context.workspaceRoot
+      : (get(context.conversation, request.agent)?.cwd ?? context.workspaceRoot);
     if (!workspaceRoot)
       return structuredResult(
         request.agent,
@@ -215,7 +216,9 @@ export function makeAskAgentHandler(options: AskAgentServiceOptions) {
     try {
       if (request.agent === 'copilot')
         capture = await snapshotWorkspaceBefore(context.checkpoint, workspaceRoot, context.signal);
-      return await ask(request, context, options, createSessionId);
+      return request.targetId
+        ? await askSelectedAgent(request, context, options)
+        : await ask(request, context, options, createSessionId);
     } catch (error) {
       return structuredResult(
         request.agent,
@@ -260,15 +263,9 @@ async function ask(
   const label = agentDisplayName(agent);
   const title = description(request, context.conversation.title);
   let linked = get(context.conversation, agent);
-  // One writer per Codex thread. A `forge-created` Codex link is an `exec`
-  // thread, which the VS Code Codex panel never lists (its `thread/list` read
-  // defaults to interactive sources), so the panel cannot show it — and opening
-  // the panel on it takes the thread's writer lock, the very lock the headless
-  // resume then fails to take. No panel serves it either, so `codex queue` would
-  // wait for a reader that never comes: Forge resumes a Codex thread it started
-  // itself headlessly, without a liveness check, and never opens a panel on one.
-  // `user-set` and `first-inbound` links are panel-owned threads and keep
-  // today's panel behaviour.
+  // Forge-created exec threads have no panel reader; opening a panel would
+  // also take their writer lock. Resume those headlessly, keeping panel-owned
+  // user-set/first-inbound links on the live transport.
   const headlessOnly = agent === 'codex' && linked?.origin === 'forge-created';
   const panel =
     options.getLinkConfig().open_panel === 'every_ask' && agent !== 'copilot' && !headlessOnly;

@@ -14,6 +14,45 @@ const WRITER_CONFLICT =
 
 const SESSION = '01a1b28d-10ee-7421-946f-55d392bf385a';
 
+it('does not launch a CLI when Stop arrives during executable resolution', async () => {
+  const run = vi.fn(async () => ({ status: 'completed', finalText: 'ok' }));
+  const controller = new AbortController();
+  const pending = runtimeWith(run).runHeadless({
+    agent: 'codex',
+    link: link('codex'),
+    prompt: 'Review',
+    startNew: true,
+    model: 'runtime-model',
+    effort: 'high',
+    sessionTitle: 'Task',
+    signal: controller.signal,
+    onSessionId: vi.fn(),
+  });
+  controller.abort();
+  await pending;
+  expect(run).not.toHaveBeenCalled();
+});
+
+it('forwards explicit model and effort to a fresh driver run without resuming a link', async () => {
+  const run = vi.fn(async () => ({ status: 'completed', finalText: 'ok' }));
+  await runtimeWith(run).runHeadless({
+    agent: 'codex',
+    link: link('codex'),
+    prompt: 'Review',
+    startNew: true,
+    model: 'runtime-model',
+    effort: 'ultra',
+    sessionTitle: 'Task',
+    signal: new AbortController().signal,
+    onSessionId: vi.fn(),
+  });
+  expect(run).toHaveBeenCalledWith(
+    expect.objectContaining({ model: 'runtime-model', effort: 'ultra' }),
+  );
+  expect(run.mock.calls[0]?.[0]).not.toHaveProperty('sessionId');
+  expect(run.mock.calls[0]?.[0]).not.toHaveProperty('createSessionId');
+});
+
 function runtimeWith(run: (options: CliAgentRunOptions) => Promise<unknown>) {
   return makeAskAgentRuntime({
     // An existing absolute path, so the CLI resolver accepts it as is.
@@ -102,11 +141,15 @@ describe('ask_agent headless session selection', () => {
   });
 
   it('does not call a writer conflict on a new-session run a locked resume', async () => {
-    const { outcome } = await headlessRun('codex', { startNew: true }, {
-      status: 'failed',
-      finalText: '',
-      error: WRITER_CONFLICT,
-    });
+    const { outcome } = await headlessRun(
+      'codex',
+      { startNew: true },
+      {
+        status: 'failed',
+        finalText: '',
+        error: WRITER_CONFLICT,
+      },
+    );
     expect(outcome.sessionLocked).toBeUndefined();
     expect(outcome.status).toBe('failed');
   });

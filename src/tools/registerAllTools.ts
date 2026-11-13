@@ -52,6 +52,7 @@ import { makeLoadToolGroupTool } from './toolGroupTools';
 import type { MediaToolDeps } from './media/mediaToolDeps';
 import { makeManageJobsTool } from './jobTools';
 import { makeAskAgentTool } from './askAgentTool';
+import { makeListAgentTargetsTool } from './listAgentTargetsTool';
 import type { StartAgentAsk } from '../agentLinks/pendingAgentAsks';
 import { makeMessageChatTool, type MessageChatSidebar } from './messageChatTool';
 import { makeReadToolResultTool } from './toolResultTools';
@@ -383,6 +384,7 @@ export function registerAllTools(
     }),
   );
   if (getConfig) {
+    registry.register(makeListAgentTargetsTool(getConfig));
     registry.register(
       makeAskAgentTool({
         getConfig,

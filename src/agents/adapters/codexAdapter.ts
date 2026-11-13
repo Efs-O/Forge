@@ -16,6 +16,8 @@ export const codexAdapter: CliAdapter = {
       ? ['exec', 'resume', options.sessionId, task, '--json', '--skip-git-repo-check']
       : ['exec', task, '--json', '--skip-git-repo-check', '--sandbox', 'danger-full-access'];
     if (options?.model) args.push('--model', options.model);
+    if (options?.effort)
+      args.push('-c', `model_reasoning_effort=${JSON.stringify(options.effort)}`);
     return args;
   },
   handleLine(line, ctx) {

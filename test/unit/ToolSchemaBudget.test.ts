@@ -139,7 +139,9 @@ import {
 // 2026-11-11: 67,739 (+83) after shell names the "shell" parameter in its Windows bash guidance.
 // 2026-11-13: 67,985 (+246) after git_read blame gained start_line/end_line and refuses an
 // oversized answer instead of returning it middle-truncated (lab BUG-06). Headroom is now 15 chars.
-const MEASURED_CHARS = 67_985;
+// 2026-11-13: runtime CLI targets and ask_agent.target_id add 986 chars
+// (~214 estimated tokens) for per-task selection without editing config.
+const MEASURED_CHARS = 68_971;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.
@@ -160,7 +162,7 @@ const COMPUTER_USE_TOOLS_EXCLUDED_PENDING_DECISION = ['browser_', 'desktop_'] as
 // 21 chars of headroom.
 // 2026-11-10: raised to 68,000 because lazy-group member names are required for
 // a model to find a requested tool's group; measured schema is 67,121 chars.
-const TOOL_SCHEMA_CHAR_BUDGET = 68_000;
+const TOOL_SCHEMA_CHAR_BUDGET = 70_000;
 
 const ALL_PERMISSIONS = new Set(ALL_TOOL_PERMISSIONS);
 
@@ -291,7 +293,7 @@ describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
       .map((d) => d.function.name)
       .sort();
     expect(names).toHaveLength(registry.names().length);
-    expect(names).toHaveLength(90);
+    expect(names).toHaveLength(91);
     expect(names.filter((name) => name.startsWith('browser_'))).toHaveLength(15);
     expect(names.filter((name) => name.startsWith('desktop_'))).toHaveLength(9);
     // Spot-check the six self-suppressing tools that only appear when their
@@ -301,6 +303,7 @@ describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
       'image_search',
       'manage_jobs',
       'ask_agent',
+      'list_agent_targets',
       'upscale_image',
       'set_checkin',
     ]) {

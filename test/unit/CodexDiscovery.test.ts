@@ -39,6 +39,38 @@ function discovery(): CodexDiscovery {
 }
 
 describe('CodexDiscovery (P4: scriptable thread/list against the app-server)', () => {
+  it('follows model pages and refuses incomplete or malformed discovery', async () => {
+    const create = (flag: string) =>
+      new CodexDiscovery({
+        executable: process.execPath,
+        argsPrefix: [fixture, flag],
+        cwd: process.cwd(),
+        timeoutMs: 5000,
+      });
+    const paginated = await create('--model-pages').discoverTargets('new_task');
+    expect(
+      paginated.models.map((model) => model.supportedReasoningEfforts[0]!.reasoningEffort),
+    ).toEqual(['high', 'max']);
+    expect(paginated.threads).toEqual([]);
+    await expect(create('--invalid-models').discoverTargets('new_task')).rejects.toThrow();
+    await expect(create('--model-loop').discoverTargets('new_task')).rejects.toThrow(
+      'pagination limit',
+    );
+  });
+  it('discovers model capabilities dynamically without a built-in model or effort list', async () => {
+    const d = discovery();
+    const result = await d.discoverTargets();
+    expect(result.models).toEqual([
+      {
+        id: 'runtime-id',
+        model: 'runtime-model',
+        displayName: 'Runtime model',
+        supportedReasoningEfforts: [{ reasoningEffort: 'high' }, { reasoningEffort: 'ultra' }],
+      },
+    ]);
+    expect(result.threads).toHaveLength(2);
+    expect((d as unknown as { child: unknown }).child).toBeUndefined();
+  });
   it('lists the live threads from the app-server and parses the versioned contract', async () => {
     const d = discovery();
     const result = await d.discover();

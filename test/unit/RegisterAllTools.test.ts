@@ -67,6 +67,7 @@ const EXPECTED_NATIVE_NAMES = [
   'git_read',
   'image_search',
   'insert_code',
+  'list_agent_targets',
   'list_delegation_targets',
   'list_directory',
   'list_executions',
@@ -234,6 +235,7 @@ describe('registerAllTools canonical coordinator catalog', () => {
           name !== 'image_search' &&
           // ask_agent needs the absent agent_bus block.
           name !== 'ask_agent' &&
+          name !== 'list_agent_targets' &&
           // set_checkin needs the absent elapsed_time_note block.
           name !== 'set_checkin' &&
           // desktop_* drive Win32 input and capture; registered everywhere,
@@ -257,6 +259,7 @@ describe('registerAllTools canonical coordinator catalog', () => {
       memory: ['remember', 'recall', 'list_memories', 'forget'],
       background: ['stop_execution', 'list_executions', 'wait'],
       agents: [
+        'list_agent_targets',
         'ask_agent',
         'ask_local_agent',
         'list_delegation_targets',

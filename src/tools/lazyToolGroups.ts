@@ -123,9 +123,14 @@ const NATIVE_GROUP_BY_TOOL: ReadonlyMap<string, string> = new Map([
   ),
   ...['remember', 'recall', 'list_memories', 'forget'].map((name) => [name, 'memory'] as const),
   ...['stop_execution', 'list_executions', 'wait'].map((name) => [name, 'background'] as const),
-  ...['ask_agent', 'ask_local_agent', 'list_delegation_targets', 'manage_jobs', 'notify_user'].map(
-    (name) => [name, 'agents'] as const,
-  ),
+  ...[
+    'ask_agent',
+    'ask_local_agent',
+    'list_agent_targets',
+    'list_delegation_targets',
+    'manage_jobs',
+    'notify_user',
+  ].map((name) => [name, 'agents'] as const),
   ['get_system_status', 'system'],
 ]);
 

@@ -120,6 +120,32 @@ if (process.argv.includes('app-server')) {
       });
       return;
     }
+    if (message.method === 'model/list') {
+      if (process.argv.includes('--invalid-models')) {
+        line({ id: message.id, result: { data: [{ model: 'missing-capabilities' }] } });
+        return;
+      }
+      const paginated = process.argv.includes('--model-pages');
+      const looping = process.argv.includes('--model-loop');
+      line({
+        id: message.id,
+        result: {
+          data: [
+            {
+              id: 'runtime-id',
+              model: 'runtime-model',
+              displayName: 'Runtime model',
+              supportedReasoningEfforts: [
+                { reasoningEffort: paginated && message.params.cursor ? 'max' : 'high' },
+                { reasoningEffort: 'ultra' },
+              ],
+            },
+          ],
+          nextCursor: looping || (paginated && !message.params.cursor) ? 'next-page' : null,
+        },
+      });
+      return;
+    }
     if (message.method === 'thread/list') {
       // The versioned contract (ThreadListResponse): data: Thread[]. A couple
       // of fixture threads so the discovery test can assert parsing + matching.

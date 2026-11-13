@@ -30,6 +30,25 @@ function fakeContext() {
   return { ctx, text, status, final: () => final, error: () => error, sessionId: () => sessionId };
 }
 
+it('passes a task-scoped Codex model and effort as argv without changing CLI config', () => {
+  expect(
+    codexAdapter.buildArgs('Review this task', { model: 'runtime-model', effort: 'ultra' }),
+  ).toEqual([
+    'exec',
+    'Review this task',
+    '--json',
+    '--skip-git-repo-check',
+    '--sandbox',
+    'danger-full-access',
+    '--model',
+    'runtime-model',
+    '-c',
+    'model_reasoning_effort="ultra"',
+  ]);
+  expect(codexAdapter.buildArgs('Next task')).not.toContain('--model');
+  expect(codexAdapter.buildArgs('Next task')).not.toContain('-c');
+});
+
 describe('claudeAdapter', () => {
   // Forge launches the CLI and then gets out of its way: Claude owns its own
   // tools and agent loop, so no permission narrowing and no allow-list. `plan`
@@ -111,9 +130,7 @@ describe('codexAdapter', () => {
   });
 
   it('uses exec resume for an existing thread and selects the configured model', () => {
-    expect(
-      codexAdapter.buildArgs('continue', { sessionId: 'thread-1', model: 'gpt-5' }),
-    ).toEqual([
+    expect(codexAdapter.buildArgs('continue', { sessionId: 'thread-1', model: 'gpt-5' })).toEqual([
       'exec',
       'resume',
       'thread-1',
@@ -242,9 +259,7 @@ describe('inferCliAgentName', () => {
 
   it('infers copilot from a bare name and a Windows shim path', () => {
     expect(inferCliAgentName('copilot')).toBe('copilot');
-    expect(inferCliAgentName('C:\\Users\\me\\AppData\\Roaming\\npm\\copilot.cmd')).toBe(
-      'copilot',
-    );
+    expect(inferCliAgentName('C:\\Users\\me\\AppData\\Roaming\\npm\\copilot.cmd')).toBe('copilot');
   });
 
   it('infers claude from a bare name', () => {

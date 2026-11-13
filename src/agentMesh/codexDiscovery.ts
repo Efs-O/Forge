@@ -1,4 +1,6 @@
 import * as readline from 'readline';
+import { z } from 'zod';
+import { collectStderrTail } from '../agents/CliAgentDriver';
 import { spawnCliProcess, terminateProcessTree, waitForCliProcessExit } from '../agents/cliProcess';
 import { codexAppServerArgs } from '../agents/codexAppServerArgs';
 import { JsonRpcPending, JsonRpcResponseError, routeJsonRpcLine } from '../agents/jsonRpcStdio';
@@ -54,6 +56,14 @@ export interface CodexDiscoveryResult {
   threads: DiscoveredThread[];
 }
 
+const modelSchema = z.object({
+  id: z.string().min(1),
+  model: z.string().min(1),
+  displayName: z.string(),
+  supportedReasoningEfforts: z.array(z.object({ reasoningEffort: z.string().min(1) })),
+});
+export type DiscoveredCodexModel = z.infer<typeof modelSchema>;
+
 /** F-11: a bound on how many `thread/list` pages to follow (avoids an infinite
  * cursor loop on a misbehaving app-server). */
 const MAX_PAGES = 50;
@@ -71,22 +81,53 @@ export class CodexDiscovery {
   constructor(private readonly options: CodexDiscoveryOptions) {}
 
   async discover(): Promise<CodexDiscoveryResult> {
+    return this.withServer(() => this.listThreads());
+  }
+
+  /** One bounded process supplies models and workspace sessions; no model is run. */
+  async discoverTargets(
+    kind?: 'new_task' | 'existing_session',
+  ): Promise<CodexDiscoveryResult & { models: DiscoveredCodexModel[] }> {
     return this.withServer(async () => {
-      // F-11: follow the pagination cursor so a matching thread on a later page
-      // is not invisible (a no-match/one-match decision would otherwise be
-      // wrong). The caller matches by cwd/name in-process.
-      const threads: DiscoveredThread[] = [];
+      if (kind === 'existing_session')
+        return { models: [], ...(await this.listThreads(this.options.cwd)) };
+      const models: DiscoveredCodexModel[] = [];
       let cursor: string | undefined;
       for (let page = 0; page < MAX_PAGES; page++) {
-        const result = await this.request('thread/list', {
-          ...(cursor ? { cursor } : {}),
-        });
-        threads.push(...this.parseThreads(result));
-        cursor = this.nextCursor(result);
-        if (!cursor) break;
+        const result = z
+          .object({
+            data: z.array(modelSchema),
+            nextCursor: z.string().nullable().optional(),
+          })
+          .parse(await this.request('model/list', { ...(cursor ? { cursor } : {}) }));
+        models.push(...result.data);
+        cursor = result.nextCursor ?? undefined;
+        if (!cursor)
+          return {
+            models,
+            threads: kind === 'new_task' ? [] : (await this.listThreads(this.options.cwd)).threads,
+          };
       }
-      return { threads };
+      throw new Error('Codex model discovery exceeded its pagination limit.');
     });
+  }
+
+  private async listThreads(cwd?: string): Promise<CodexDiscoveryResult> {
+    // F-11: follow the pagination cursor so a matching thread on a later page
+    // is not invisible (a no-match/one-match decision would otherwise be
+    // wrong). The caller matches by cwd/name in-process.
+    const threads: DiscoveredThread[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const result = await this.request('thread/list', {
+        ...(cwd ? { cwd } : {}),
+        ...(cursor ? { cursor } : {}),
+      });
+      threads.push(...this.parseThreads(result));
+      cursor = this.nextCursor(result);
+      if (!cursor) return { threads };
+    }
+    throw new Error('Codex thread discovery exceeded its pagination limit.');
   }
 
   /** Check whether a single stored thread id can be read from the app-server. */
@@ -115,6 +156,7 @@ export class CodexDiscovery {
 
   /** Shared app-server lifecycle, handshake, timeout and teardown. */
   private async withServer<T>(operation: () => Promise<T>): Promise<T> {
+    this.options.signal?.throwIfAborted();
     const child = spawnCliProcess({
       executable: this.options.executable,
       args: codexAppServerArgs({
@@ -125,6 +167,7 @@ export class CodexDiscovery {
       stdin: 'pipe',
     });
     this.child = child;
+    collectStderrTail(child);
     this.input = child.stdout
       ? readline.createInterface({ input: child.stdout, crlfDelay: Infinity })
       : undefined;
@@ -136,9 +179,10 @@ export class CodexDiscovery {
         : `Codex app-server exited with code ${exit.code ?? '?'} before thread/list completed.`;
       this.pending.rejectAll(new Error(this.protocolError));
     });
-    if (this.options.signal) {
-      this.options.signal.addEventListener('abort', () => this.dispose(), { once: true });
-    }
+    const onAbort = (): void => {
+      void this.dispose();
+    };
+    this.options.signal?.addEventListener('abort', onAbort, { once: true });
     // F-11: a hard bound on the whole request. Without it a hung app-server
     // (a response that never arrives) leaves the operation awaiting forever, so
     // its `finally` never runs and the throwaway process leaks. The timer
@@ -161,6 +205,7 @@ export class CodexDiscovery {
       this.notify('initialized');
       return await operation();
     } finally {
+      this.options.signal?.removeEventListener('abort', onAbort);
       if (timeout) clearTimeout(timeout);
       await this.dispose();
     }

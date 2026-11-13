@@ -1,6 +1,6 @@
 # Forge Tool Coverage Matrix
 
-Generated: 2026-10-29T11:08:42.655Z
+Generated: 2026-11-13T08:50:23.896Z
 
 This matrix covers native tools only; MCP servers are not started during generation. The inventory and permissions come from the live registry built by `registerAllTools.ts`. “Harness” means schema emission is available but not executed by default.
 
@@ -53,6 +53,7 @@ This matrix covers native tools only; MCP servers are not started during generat
 | git_read | native | git-read | harness | automated | opt-in | read-only |
 | image_search | native | search | harness | automated | opt-in | search |
 | insert_code | native | write | harness | automated | opt-in | write |
+| list_agent_targets | native | delegate | harness | automated | opt-in | delegate |
 | list_delegation_targets | native | delegate | harness | automated | opt-in | delegate |
 | list_directory | native | read | harness | automated | opt-in | read-only |
 | list_executions | native | headless | harness | automated | opt-in | headless |
