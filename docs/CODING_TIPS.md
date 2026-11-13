@@ -7,7 +7,7 @@ Read this whole file before your first read, search, edit, write, command, commi
 ## READ
 1. `read_file` with a guessed `end_line` → refused: start_line is past end_line. read whole, or take the range from a search hit, never from memory
 2. `web_fetch` with `find=` on a large file → it searches only the window it returns, so "No match" proves nothing. curl the raw URL to /tmp and `rg` the file locally
-2. first `code_intel` call of a session → `No symbol provider answered ... may still be starting` → the file has symbols; retry it once and it answers in full → do not fall back to whole-file reads
+3. first `code_intel` call of a session → `No symbol provider answered ... may still be starting` → the file has symbols; retry it once and it answers in full → do not fall back to whole-file reads
 
 ## SEARCH
 1. `rg -l "a string" <folder>` → proves it exists somewhere, not whose file it is. read the record that names the file before attributing the hit
@@ -35,7 +35,7 @@ Read this whole file before your first read, search, edit, write, command, commi
 12. a 2nd gated call after one card expired → `... needs the approval that went unanswered earlier in this turn, so no new card was shown` → only the first card burns time
 13. a gated call batched with later gated calls → those cards and results still wait for the first; an expired card silences only that approval key. since 0.17.171 ungated calls run on
 14. expecting one approval to cover a tool or a turn → each gated call raises its own card and waits the full `approval_timeout_minutes`; budget one answer per gated call
-15. a heredoc terminator with a command after it (`MSG; echo ok`) → the terminator is never seen, so the command text lands in the commit message. keep the terminator alone on its line
+15. a heredoc terminator with a command after it (`MSG; echo ok`) → never seen as a terminator: the command text lands in the commit message and never runs. keep it alone on its line
 16. a result's field names are not its input names (`next_stdout_cursor` vs `stdout_cursor`) → refused: unknown arguments. the refusal lists the valid names; resend with those
 
 ## GIT
@@ -49,11 +49,10 @@ Read this whole file before your first read, search, edit, write, command, commi
 4. a rename that lengthens an identifier → a line passes printWidth 100 and fails the formatter gate. after any rename: `git diff -U0 | grep '^+' | awk 'length > 101'`, re-wrap in the same pass
 5. `apply_line_edits` with `expected_lines` invented rather than copied → refused: has N lines but the range is M. the refusal prints the current lines verbatim; copy them from there
 6. `apply_line_edits` on `docs/TOOL_COVERAGE.md` → `ToolHarness.test.ts` diffs it against a fresh generation and normalises only `Generated:`. restore_file it after a demo
-7. `replace_selection` with no active editor → refused: `no active editor`. It takes no path, so `get_editor_context` first — `Open tabs: (none)` means nothing can be written
-8. a multi-line string edit that drops the `+` between two literals → the parse error names a later line, not the missing one. after editing a joined description, re-read the block
-9. an `edit_file` whose `new_str` turns out to be the text already there → reports Applied, nothing changes, and the fix I meant never lands. diff the file, not the reply
-10. an `edit_file` whose `old_str` is a header plus its first body line, `new_str` only the header → the body line is deleted. same when appending a numbered tip: re-include the anchored item
-11. deleting entries from a numbered list by replacing a block → the renumbering duplicated one entry and silently dropped another. rewrite the section's whole tail, then read it back
+7. a multi-line string edit that drops the `+` between two literals → the parse error names a later line, not the missing one. after editing a joined description, re-read the block
+8. an `edit_file` whose `new_str` turns out to be the text already there → reports Applied, nothing changes, and the fix I meant never lands. diff the file, not the reply
+9. an `edit_file` whose `old_str` is a header plus its first body line, `new_str` only the header → the body line is deleted. same when appending a numbered tip: re-include the anchored item
+10. deleting entries from a numbered list by replacing a block → the renumbering duplicated one entry and silently dropped another. rewrite the section's whole tail, then read it back
 
 ## TEST
 1. a harness that emits tool calls but never dispatches them → proves schema compatibility only. dispatch writes, deletes and commits before claiming behaviour is verified
