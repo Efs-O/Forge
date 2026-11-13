@@ -1,5 +1,24 @@
 # Forge — Recent Changes
 
+## 0.17.171
+
+- A new install ships `permissions.approval_timeout_minutes: 10`, so a card nobody answers is declined in ten minutes instead of holding the turn open forever. Configs written before this release keep waiting forever, exactly as before; deleting the line from a new config restores that.
+- An approval's timeout clock starts when its card is SHOWN, not when it is queued. A second card used to expire unseen while the first was still unanswered, so the first ignored card of a batch could silently swallow the rest of the round.
+- An unanswered card now silences the approval it was asked for, not the whole chat. An ignored `schedule_wake` card stopped every later approval in the turn from ever showing a card: `manage_jobs create` came back `Not run` with nothing to answer. A later call needing a DIFFERENT approval gets its own card again.
+- A call that needs no approval no longer waits behind someone else's card. A gated call that touches no workspace file is parked while its card waits, and the local reads behind it run on; results still reach the model in the order the calls were made, and a gated write still runs before the read of the file it wrote.
+- A gated call whose card you answered now says so in its own result — `[you approved this call after 4m11s]`. The lab's student read `web_fetch`'s "approved for the rest of it" as automatic and reported "auto-approved, no card" to the supervisor after waiting five minutes for one.
+- `message_chat` says that a chat which has ingested untrusted content is asked to approve an outgoing send, and `read_file` says a secret path asks the owner first, so an agent can budget for the card instead of sitting on it. The advertised schema is 69,214 characters.
+- The notice that a card is queued behind another names how many are waiting and says to answer them in order.
+- `format_file` now runs the formatter the project chose for itself — its own Prettier, when `package.json` declares one — and every result names the formatter that ran and counts the lines it changed. The lab's student formatted a file `npx prettier --check` had already passed and the editor's formatter rewrote 165 of them; the result said only `Formatted: a.ts`. A rewrite of more than 40 lines and a fifth of the file is called out by name.
+- `code_intel` says when no symbol provider answered at all, instead of the same `No symbols found.` it gives an empty file: a language server still starting no longer reads as a file with no symbols.
+- A job whose check is `none` no longer delivers an `on_change` notification on every tick. It has no observation to report, so the lab's student got a phone ping each cycle for a job that could never see anything; `manage_jobs get` now says so, and `on_change` is where a job's notifications are muted.
+- The file tools expand `~`, `$HOME`, `$env:USERPROFILE` and `%USERPROFILE%`. `list_directory "~/.forge/jobs"` used to answer `nothing exists there`, having looked for a folder literally named `~` beside the workspace.
+- `get_power_info` labels the per-interface line `Wake-on-Lan:` and the timer line `Armed wake timer:`. The old pair, `Wake armed:` and `Armed wake:`, let one phrase mean two different things in the same block.
+- `read_clipboard` wraps what it returns in `UNTRUSTED_CONTENT` markers and marks the chat as carrying outside content, the way the web tools do; `web_search` now puts those markers on the text as well as in the metadata that sets the flag.
+- `notify_user` names what would have reached the phone, when nothing did.
+- `replace_selection` refuses an empty selection and names the file it would have written, instead of inserting at the cursor and reporting a replacement.
+- The advertised tool schema grows from 69,210 to 69,673 characters (about 100 estimated tokens) for the reporting text above. Its budget rises from 70,000 to 70,600.
+
 ## 0.17.170
 
 - Forge discovers available Codex models and their supported reasoning efforts at runtime. Asking for a specific model and effort now uses a separate task session through `list_agent_targets` and `ask_agent.target_id`, preserving saved defaults and the chat's existing links.
