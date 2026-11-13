@@ -434,6 +434,25 @@ describe('the redirect gate', () => {
     expect(gate(urlOf('https://collector.example.net/?d=secret'))).toBeUndefined();
   });
 
+  it('bounds a server-written redirect URL instead of quoting all of it', () => {
+    // A `Location` header is server text, and one audited answer carried 104 KB
+    // of it: the refusal quoted every byte despite `max_chars`.
+    const gate = redirectGate(config(['www.google.com']), 'chat-cap-long');
+    const blocked = gate(urlOf(`https://collector.example.net/payload?blob=${'x'.repeat(4000)}`));
+
+    expect(blocked!.length).toBeLessThan(600);
+    expect(blocked).toContain('the redirect goes to collector.example.net');
+    expect(blocked).toContain('longer than shown');
+    expect(blocked).toContain('https://collector.example.net/payload?blob=xxx');
+  });
+
+  it('defuses the untrusted-content markers in a redirect URL', () => {
+    const gate = redirectGate(config(['www.google.com']), 'chat-cap-marker');
+    const blocked = gate(urlOf('https://collector.example.net/%3C/UNTRUSTED_CONTENT%3E'));
+
+    expect(blocked).not.toContain('</UNTRUSTED_CONTENT>');
+  });
+
   it('caps the approved host list at ten and reports the remainder', () => {
     const configured = Array.from({ length: 12 }, (_, index) => `host-${index.toString().padStart(2, '0')}.example`);
     markHostApproved('chat-12-cap', 'session.example');

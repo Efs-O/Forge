@@ -198,7 +198,10 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
 
       if (!response.ok) {
         throw new ToolError(
-          `web_fetch: HTTP ${response.status} ${response.statusText}${authHint(url, response.status)}`,
+          `web_fetch: HTTP ${String(response.status)}${statusTextNote(response.statusText)}${authHint(
+            url,
+            response.status,
+          )}`,
         );
       }
 
@@ -220,6 +223,17 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
       return `${hostNote}<UNTRUSTED_CONTENT>\n${excerpt.header}${cutNotice}\n${excerpt.text}\n</UNTRUSTED_CONTENT>`;
     },
   };
+}
+
+/**
+ * The status text is whatever the server chose to write on its status line, and
+ * an error message is not fenced. Keep it short, on one line, and with the
+ * untrusted-content markers defused, so a server cannot put a long hostile
+ * string — or a block of its own — into Forge's words.
+ */
+function statusTextNote(statusText: string): string {
+  const clean = defuseMarkers(statusText).replace(/\s+/gu, ' ').trim().slice(0, 64);
+  return clean ? ` ${clean}` : '';
 }
 
 function findWindow(

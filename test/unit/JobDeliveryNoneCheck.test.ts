@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { JobDelivery } from '../../src/jobs/JobDelivery';
+import { applyJobBackoff } from '../../src/jobs/jobRunLifecycle';
 import type { Job } from '../../src/jobs/jobSchema';
 
 /**
@@ -31,6 +32,7 @@ const jobOf = (check: Job['check'], onChange: Job['on_change']): Job =>
     id: 'lane-1',
     name: 'lane 1',
     enabled: true,
+    schedule: { kind: 'interval', minutes: 30 },
     check,
     on_change: onChange,
   }) as unknown as Job;
@@ -210,5 +212,148 @@ describe('a check that does observe something', () => {
       'Job "lane 1": could not summarize the recorded change (model busy); retrying with backoff.',
     ]);
     expect(store.patches.at(-1)).toMatchObject({ summary_failures: 1 });
+  });
+});
+
+describe('a definition that predates the check that produced the result', () => {
+  it('delivers nothing when the job became none while the check ran', async () => {
+    // jobRunLifecycle hands down the definition it loaded before the check; the
+    // store now reads `none`, and that is what must decide.
+    const stale = jobOf(watchingCheck, notifyOn);
+    const current = jobOf(noneCheck, notifyOn);
+    const store = { load: async () => ({ job: current, state: {} }) } as never;
+
+    const result = await delivery(store).deliverForChange(stale, {
+      observation: '9',
+      changed: true,
+      summary: 'free space dropped',
+    });
+
+    expect(result).toEqual({ delivered: 0, summaryPending: false });
+    expect(toasts).toEqual([]);
+    expect(outboxFiles()).toEqual([]);
+  });
+
+  it('says the change is still pending when the job was paused mid-check (audit A8)', async () => {
+    const stale = jobOf(watchingCheck, summarizeOn);
+    const current = jobOf(watchingCheck, summarizeOn);
+    current.enabled = false;
+    const store = { load: async () => ({ job: current, state: {} }) } as never;
+
+    const result = await delivery(store).deliverForChange(stale, {
+      observation: '9',
+      changed: true,
+      summary: 'ignored',
+    });
+
+    // Not delivered, and not lost: the resume re-summarises the recorded change.
+    expect(result).toEqual({ delivered: 0, summaryPending: true });
+    expect(toasts).toEqual([]);
+  });
+});
+
+describe('a pause is not a mute', () => {
+  it('leaves a finished pending summary pending, sends nothing, and clears nothing', async () => {
+    const job = jobOf(watchingCheck, summarizeOn);
+    const store = storeFor(job, { ...pending });
+    const d = delivery(store, async () => {
+      job.enabled = false; // the owner paused the job while the model wrote
+      return 'a finished summary';
+    });
+
+    await d.processPendingSummaries();
+
+    expect(toasts).toEqual([]);
+    expect(outboxFiles()).toEqual([]);
+    // The A8 contract: a paused job keeps its recorded change for the resume.
+    expect(store.patches).toEqual([]);
+  });
+
+  it('leaves a failed pending summary pending, sends no notice, and clears nothing', async () => {
+    const job = jobOf(watchingCheck, summarizeOn);
+    const store = storeFor(job, { ...pending });
+    const d = delivery(store, async () => {
+      job.enabled = false;
+      throw new Error('model busy');
+    });
+
+    await d.processPendingSummaries();
+
+    expect(toasts).toEqual([]);
+    expect(store.patches).toEqual([]);
+  });
+});
+
+describe('a failure notice for a job the owner stopped mid-run', () => {
+  // The third consecutive failure is the one that reports `failing:`; the state
+  // handed to applyJobBackoff is one short of it.
+  const twoFailures = { consecutive_failures: 2 };
+  const at = () => new Date('2026-11-13T12:00:00Z');
+
+  function backoffStore(live: Job) {
+    const patches: Array<Record<string, unknown>> = [];
+    const runs: Array<Record<string, unknown>> = [];
+    return {
+      patches,
+      runs,
+      store: {
+        patchState: (_id: string, patch: Record<string, unknown>) => patches.push(patch),
+        appendRun: async (_id: string, row: Record<string, unknown>) => {
+          runs.push(row);
+        },
+        load: async () => ({ job: live, state: twoFailures }),
+      },
+    };
+  }
+
+  it('says nothing for a check-only job switched to none, and still backs off', async () => {
+    const stale = jobOf(watchingCheck, notifyOn);
+    const harness = backoffStore(jobOf(noneCheck, notifyOn));
+
+    await applyJobBackoff(
+      harness.store as never,
+      delivery(storeFor(jobOf(noneCheck, notifyOn))),
+      at,
+      { job: stale, state: twoFailures } as never,
+      'check timed out',
+    );
+
+    expect(toasts).toEqual([]);
+    expect(harness.patches.at(-1)).toMatchObject({ consecutive_failures: 3 });
+    expect(harness.runs.at(-1)).toMatchObject({ outcome: 'skipped', delivered: 0 });
+  });
+
+  it('still reports for a job with an action — action reports are not suppressed', async () => {
+    const withAction = (job: Job): Job => ({ ...job, action: { kind: 'agent_task', task: 'go' } });
+    const harness = backoffStore(withAction(jobOf(noneCheck, notifyOn)));
+
+    await applyJobBackoff(
+      harness.store as never,
+      delivery(storeFor(withAction(jobOf(noneCheck, notifyOn)))),
+      at,
+      { job: withAction(jobOf(watchingCheck, notifyOn)), state: twoFailures } as never,
+      'the runner died',
+    );
+
+    expect(toasts).toEqual(['Job "lane 1": failing: the runner died']);
+  });
+});
+
+describe('liveCheckTarget', () => {
+  it('answers with the live job while it wants check notifications', async () => {
+    const job = jobOf(watchingCheck, notifyOn);
+    expect(await delivery(storeFor(job)).liveCheckTarget('lane-1')).toBe(job);
+  });
+
+  it('answers with nothing for a none check, a paused job, or a deleted one', async () => {
+    expect(
+      await delivery(storeFor(jobOf(noneCheck, notifyOn))).liveCheckTarget('lane-1'),
+    ).toBeUndefined();
+    const paused = jobOf(watchingCheck, notifyOn);
+    paused.enabled = false;
+    expect(await delivery(storeFor(paused)).liveCheckTarget('lane-1')).toBeUndefined();
+    expect(
+      await delivery({ load: async () => undefined } as never).liveCheckTarget('lane-1'),
+    ).toBeUndefined();
   });
 });

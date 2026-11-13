@@ -7,7 +7,7 @@
  * fields are private, so the class passes them at the call site).
  */
 
-import type { JobFile, RunRow } from './jobSchema';
+import type { Job, JobFile, RunRow } from './jobSchema';
 import type { JobStore } from './JobStore';
 import type { JobDelivery } from './JobDelivery';
 import { nextDue } from './schedule';
@@ -150,19 +150,28 @@ export async function executeScheduledJob(
       await recordUnwiredActionRun(deps.store, deps.delivery, deps.now, jobFile, wasLate, error);
       return;
     }
-    if (!(await deps.store.load(job.id))) return;
-    const change = await deps.delivery.deliverForChange(job, result);
+    // The check was async: re-read the definition so a job the owner changed
+    // mid-check is reported as it now reads, not as it read when the run began.
+    const fresh = await deps.store.load(job.id);
+    if (!fresh) return;
+    const change = await deps.delivery.deliverForChange(fresh.job, result);
     let delivered = change.delivered;
     if (
       state.consecutive_failures >= BACKOFF_THRESHOLD &&
       job.action?.kind !== 'agent_task' &&
       job.action?.kind !== 'retitle'
     ) {
-      await deps.delivery.deliver(
-        job,
-        `recovered after ${state.consecutive_failures} consecutive failures`,
-      );
-      delivered++;
+      // A fact about the CHECK, so it goes only where check notifications are
+      // still wanted (`check: none` delivers nothing; an action report does not
+      // ask, and is delivered under `action.report` regardless).
+      const checkTarget = await deps.delivery.liveCheckTarget(job.id);
+      if (checkTarget) {
+        await deps.delivery.deliver(
+          checkTarget,
+          `recovered after ${state.consecutive_failures} consecutive failures`,
+        );
+        delivered++;
+      }
     }
     const nextSummaryPending = result.changed ? change.summaryPending : state.summary_pending;
     const row: RunRow = {
@@ -250,8 +259,22 @@ export async function applyJobBackoff(
   // Report once, on the run that crosses the threshold. Later
   // failures keep extending the backoff silently; the recovery (a success
   // after backoff) is reported by the next successful run.
+  // The definition in hand can predate the run that failed, so it is re-read:
+  // a check-only job the owner switched to `none` (or paused, or deleted) owes
+  // no `failing:` notice. A job with an action still reports, because the
+  // failure may belong to the action, and action reports are never suppressed
+  // by `check: none`.
+  let reportTarget: Job | undefined;
+  try {
+    reportTarget = await delivery.liveCheckTarget(job.id);
+  } catch {
+    reportTarget = job; // the store could not answer: report on the definition in hand
+  }
+  if (!reportTarget && job.action) reportTarget = job;
   const delivered =
-    count === BACKOFF_THRESHOLD ? await delivery.tryDeliver(job, `failing: ${message}`) : 0;
+    count === BACKOFF_THRESHOLD && reportTarget
+      ? await delivery.tryDeliver(reportTarget, `failing: ${message}`)
+      : 0;
   await store.appendRun(job.id, {
     at: at.getTime(),
     late: false,

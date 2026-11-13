@@ -1,4 +1,5 @@
 import { hasConversationReadSecret, secretReadCardReason } from './exfilTaint';
+import { defuseMarkers } from './untrustedText';
 import type { ForgeConfig } from '../config/types';
 
 /**
@@ -417,6 +418,20 @@ export function hostApprovedForChat(
  * ToolDispatch for the same approval flow as a direct `web_fetch` call; this
  * message is retained for handlers running without that dispatcher callback.
  */
+/**
+ * A redirect target is server-written text, and a server can make it enormous:
+ * one audited answer carried a 104 KB `Location` and the refusal quoted every
+ * byte of it despite `max_chars`. Show what the owner needs to act on — the
+ * whole URL when it is short, otherwise the origin and a bounded, marker-defused
+ * path — and say when the rest was left out.
+ */
+function briefUrl(url: URL): { shown: string; clipped: boolean } {
+  const full = defuseMarkers(url.toString());
+  if (full.length <= 200) return { shown: full, clipped: false };
+  const path = defuseMarkers(`${url.pathname}${url.search}`);
+  return { shown: `${url.origin}${path.slice(0, 80)}…`, clipped: true };
+}
+
 export function redirectGate(
   config: ForgeConfig | undefined,
   conversationId: string | undefined,
@@ -425,10 +440,12 @@ export function redirectGate(
   return (url: URL) => {
     const host = normalizedHostname(url);
     if (approved(host)) return undefined;
+    const { shown, clipped } = briefUrl(url);
     return (
       `the redirect goes to ${host}, a host not approved in this chat, so it was ` +
       `not followed. ${approvedHostsSummary(config, conversationId)} ` +
-      `To get another host approved, call web_fetch with ${url.toString()} directly; that asks the user.`
+      `To get another host approved, call web_fetch with ${shown} directly; that asks the user.` +
+      (clipped ? ' The URL was longer than shown, so ask with the exact one you meant.' : '')
     );
   };
 }

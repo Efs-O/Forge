@@ -86,6 +86,41 @@ export class JobDelivery {
   }
 
   /**
+   * What the job wants NOW, re-read from disk. A check and a summary are both
+   * slow, and the owner can change their mind while either runs.
+   *
+   * A `check: none` job reports a change on every tick because nothing can
+   * observe anything (see `checks/runCheck.ts`). Delivering that is a live
+   * notification each cycle: the lab's student created one such job and got a
+   * phone ping every tick. `changed` stays true so an `agent_task` action still
+   * runs on schedule; only the delivery is suppressed. Mute or restore a job's
+   * notifications with `on_change`, never by inventing a check.
+   *
+   * `keep` is the paused case: audit A8 says a paused job keeps its recorded
+   * change pending until it is resumed, so a pause must never clear it. Only
+   * `none` or a deleted job clears.
+   */
+  private async liveIntent(
+    jobId: string,
+  ): Promise<{ kind: 'deliver'; job: Job } | { kind: 'keep' } | { kind: 'clear' }> {
+    const current = await this.deps.store.load(jobId);
+    if (!current || current.job.check.kind === 'none') return { kind: 'clear' };
+    if (!current.job.enabled) return { kind: 'keep' };
+    return { kind: 'deliver', job: current.job };
+  }
+
+  /**
+   * The job's CURRENT definition when it still wants a CHECK notification, or
+   * undefined when the owner switched its check to `none`, paused it, or deleted
+   * it. Callers that report a fact about the check — not about an action, which
+   * reports under `action.report` regardless — must ask before delivering.
+   */
+  async liveCheckTarget(jobId: string): Promise<Job | undefined> {
+    const intent = await this.liveIntent(jobId);
+    return intent.kind === 'deliver' ? intent.job : undefined;
+  }
+
+  /**
    * Run the job's `on_change` for a change and deliver it. Returns how many
    * outbox items were delivered and whether a summarize is still pending (the
    * change was recorded but the model is busy, so the summary waits for idle).
@@ -95,41 +130,33 @@ export class JobDelivery {
     result: { observation: string | null; changed: boolean; summary: string },
   ): Promise<ChangeDelivery> {
     if (!result.changed) return { delivered: 0, summaryPending: false };
-    // A `check: none` job reports a change on every tick because nothing can
-    // observe anything (see `checks/runCheck.ts`). Delivering that is a live
-    // notification each cycle: the lab's student created one such job and got a
-    // phone ping every tick. `changed` stays true so an `agent_task` action still
-    // runs on schedule; only the delivery is suppressed. Mute or restore a job's
-    // notifications with `on_change`, never by inventing a check.
-    if (job.check.kind === 'none') return { delivered: 0, summaryPending: false };
-    if (job.on_change.kind === 'summarize') {
+    // The definition reaching here can predate the check that produced this
+    // result, so it is re-read before anything is said: a job switched to
+    // `none`, paused, or deleted while the check ran must not notify.
+    const target = await this.liveIntent(job.id);
+    if (target.kind !== 'deliver') {
+      // Paued keeps the change pending for the resume (A8); `none`/deleted has
+      // nothing left to keep.
+      return { delivered: 0, summaryPending: target.kind === 'keep' };
+    }
+    const live = target.job;
+    if (live.on_change.kind === 'summarize') {
       // A summarize runs only when no turn is streaming, so it never fights a
       // live chat for the GPU. If busy, record the change and defer; the next
       // idle tick summarizes it.
       if (this.deps.busy() !== undefined) return { delivered: 0, summaryPending: true };
-      const summary = await this.summarizeChange(job, result.observation ?? '');
-      // The owner can switch the job to `none` while the model writes this.
-      const live = await this.stillWantsDelivery(job.id);
-      if (!live) return { delivered: 0, summaryPending: false };
-      await this.deliver(live, summary);
+      const summary = await this.summarizeChange(live, result.observation ?? '');
+      // The owner can change their mind while the model writes this.
+      const after = await this.liveIntent(job.id);
+      if (after.kind !== 'deliver') {
+        return { delivered: 0, summaryPending: after.kind === 'keep' };
+      }
+      await this.deliver(after.job, summary);
       return { delivered: 1, summaryPending: false };
     }
     // notify: deliver the check's own summary.
-    await this.deliver(job, result.summary);
+    await this.deliver(live, result.summary);
     return { delivered: 1, summaryPending: false };
-  }
-
-  /**
-   * Re-read the job after a model call and report whether it still wants this
-   * delivery. A summary is slow, and the owner can disable the job, switch its
-   * check to `none` (which delivers nothing), or delete it while the model is
-   * writing; a notification nobody is asking for any more must not reach the
-   * phone. Returns the live definition to deliver AS, or undefined to skip.
-   */
-  private async stillWantsDelivery(jobId: string): Promise<Job | undefined> {
-    const current = await this.deps.store.load(jobId);
-    if (!current || !current.job.enabled || current.job.check.kind === 'none') return undefined;
-    return current.job;
   }
 
   /**
@@ -164,15 +191,20 @@ export class JobDelivery {
       try {
         summary = await this.summarizeChange(job, state.last_observation ?? '');
       } catch (err) {
-        const liveOnFail = await this.stillWantsDelivery(job.id);
-        if (!liveOnFail) {
-          // Disabled, switched to `none`, or deleted while the summary was
-          // attempted: nothing is left to retry, and no failure notice is owed.
+        const after = await this.liveIntent(job.id);
+        if (after.kind === 'clear') {
+          // Switched to `none`, or deleted, while the summary was attempted:
+          // nothing is left to retry, and no failure notice is owed.
           this.deps.store.patchState(job.id, {
             summary_pending: false,
             summary_failures: 0,
             summary_retry_at: null,
           });
+          continue;
+        }
+        if (after.kind === 'keep') {
+          // Paused mid-attempt: the change stays pending for the resume (A8),
+          // and a paused job owes no failure notice.
           continue;
         }
         const failures = state.summary_failures + 1;
@@ -183,15 +215,15 @@ export class JobDelivery {
         });
         if (failures === 1) {
           await this.deliver(
-            liveOnFail,
+            after.job,
             `could not summarize the recorded change (${(err as Error).message}); ` +
               'retrying with backoff.',
           );
         }
         continue;
       }
-      const live = await this.stillWantsDelivery(job.id);
-      if (!live) {
+      const afterSuccess = await this.liveIntent(job.id);
+      if (afterSuccess.kind === 'clear') {
         // The owner stopped the notifications while the model wrote this
         // summary. The answer exists; it is simply not sent.
         this.deps.store.patchState(job.id, {
@@ -201,8 +233,13 @@ export class JobDelivery {
         });
         continue;
       }
+      if (afterSuccess.kind === 'keep') {
+        // Paused while the model wrote it: not sent, and still pending for the
+        // resume (A8) — clearing here would lose the recorded change.
+        continue;
+      }
       const recovered = state.summary_failures > 0 ? 'summary (recovered): ' : '';
-      await this.deliver(live, `${recovered}${summary}`);
+      await this.deliver(afterSuccess.job, `${recovered}${summary}`);
       this.deps.store.patchState(job.id, {
         summary_pending: false,
         summary_failures: 0,
