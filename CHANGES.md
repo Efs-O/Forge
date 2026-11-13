@@ -1,5 +1,11 @@
 # Forge — Recent Changes
 
+## 0.17.170
+
+- Forge discovers available Codex models and their supported reasoning efforts at runtime. Asking for a specific model and effort now uses a separate task session through `list_agent_targets` and `ask_agent.target_id`, preserving saved defaults and the chat's existing links.
+- Existing Claude and Codex workspace sessions can be selected by exact identity. Unavailable recipients produce an error instead of silently switching sessions. Accepted queued selections survive rediscovery, repeated requests keep duplicate protection, and Stop prevents dispatch during availability checks.
+- The maximum advertised tool schema grows from 67,985 to 68,971 characters (about 214 estimated tokens) to expose CLI target discovery and selection. Its budget rises from 68,000 to 70,000 characters; the new tool stays in the optional agents group.
+
 ## 0.17.169
 
 - `git_read blame` takes `start_line` and `end_line`, and a whole-file blame that will not fit inline is now refused with the range to ask for instead of coming back cut in half with a success exit code. This was the lab's flagship silent-wrong-answer: the lines that answer the question were simply gone.
