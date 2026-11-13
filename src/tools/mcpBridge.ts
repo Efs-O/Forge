@@ -5,6 +5,7 @@ import type { ToolPermission, ToolRegistry, RegisteredTool } from './ToolRegistr
 import type { McpServerConfig } from '../config/types';
 import { DEFAULT_MAX_RESULT_CHARS, capResultText } from './resultCap';
 import { lazyGroupForServer, recordLazyGroupTool } from './lazyToolGroups';
+import { forgeMcpToolName, mcpSchemaGaps, type McpToolName } from './mcpProviderContract';
 
 /** Minimal logging surface — matches util/logger's Logger so callers can pass getLogger() directly. */
 export interface McpBridgeLogger {
@@ -38,9 +39,16 @@ export function extractTextContent(content: McpCallToolResult['content']): strin
 /**
  * Converts one MCP tool listing into a Forge RegisteredTool. Pure aside from
  * the injected `callTool`, so it is testable without spawning a real server.
+ *
+ * `name` is the provider-facing pair: the advertised name is what the model is
+ * told and what the registry dispatches, while `callTool` receives the name the
+ * server itself used. `tool_permissions` is keyed by the server's own name,
+ * because that is the name the user writes in their config; the advertised name
+ * is accepted too, so a mapping never silently drops a permission.
  */
 export function mcpToolToRegisteredTool(
   serverName: string,
+  name: McpToolName,
   tool: McpToolListing,
   callTool: (args: Record<string, unknown>) => Promise<McpCallToolResult>,
   toolPermissions: Record<string, ToolPermission> = {},
@@ -50,12 +58,12 @@ export function mcpToolToRegisteredTool(
     definition: {
       type: 'function',
       function: {
-        name: tool.name,
+        name: name.advertised,
         description: tool.description ?? '',
         parameters: (tool.inputSchema ?? {}) as Record<string, unknown>,
       },
     },
-    permission: toolPermissions[tool.name] ?? 'read',
+    permission: toolPermissions[name.external] ?? toolPermissions[name.advertised] ?? 'read',
     /** Every MCP server is a program Forge did not write, and its reply is its
      *  own text — often fetched from the internet by that program — so a bridged
      *  tool's result counts as outside content whatever its name is. Declared
@@ -110,26 +118,50 @@ async function connectOne(
     const lazyGroup = lazyGroupForServer(server.name);
     let bridged = 0;
     for (const tool of tools) {
+      // The server's own name may be one no backend accepts, or one another
+      // server already answered to. Both are mapped; the call below still uses
+      // the server's name, so the mapping is invisible to the server.
+      const name = forgeMcpToolName(
+        tool.name,
+        (candidate) => registry.get(candidate) !== undefined,
+      );
+      if (name.mapped) {
+        log.info(
+          `MCP server "${server.name}": advertising "${name.advertised}" for "${name.external}" ` +
+            '(the server name is not one every backend accepts, or it is already taken)',
+        );
+      }
+      const gaps = mcpSchemaGaps(tool.inputSchema);
+      if (gaps.length > 0) {
+        log.warn(
+          `MCP server "${server.name}" tool "${name.advertised}": constrained decoding does not ` +
+            `enforce ${gaps.join('; ')} — the model may send anything there`,
+        );
+      }
       try {
         registry.register(
           mcpToolToRegisteredTool(
             server.name,
+            name,
             tool,
             (args) =>
-              client.callTool({ name: tool.name, arguments: args }) as Promise<McpCallToolResult>,
+              client.callTool({
+                name: name.external,
+                arguments: args,
+              }) as Promise<McpCallToolResult>,
             server.tool_permissions,
             server.max_result_chars ?? DEFAULT_MAX_RESULT_CHARS,
           ),
         );
         // After register(): a duplicate name throws above, and a tool that is
         // not in the registry must never be counted as a hideable member.
-        if (lazyGroup) recordLazyGroupTool(lazyGroup, tool.name);
+        if (lazyGroup) recordLazyGroupTool(lazyGroup, name.advertised);
         bridged += 1;
       } catch (err) {
         // ToolRegistry.register throws on a duplicate name — skip that one
         // tool rather than failing the whole server.
         log.warn(
-          `MCP server "${server.name}": skipping tool "${tool.name}" — ${(err as Error).message}`,
+          `MCP server "${server.name}": skipping tool "${name.external}" — ${(err as Error).message}`,
         );
       }
     }

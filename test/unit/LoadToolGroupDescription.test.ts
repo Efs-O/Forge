@@ -5,6 +5,7 @@ import {
   resetLazyToolGroups,
 } from '../../src/tools/lazyToolGroups';
 import { mcpToolToRegisteredTool } from '../../src/tools/mcpBridge';
+import { forgeMcpToolName } from '../../src/tools/mcpProviderContract';
 import { makeLoadToolGroupTool } from '../../src/tools/toolGroupTools';
 import { ToolRegistry, type ToolPermission } from '../../src/tools/ToolRegistry';
 
@@ -31,6 +32,7 @@ describe('load_tool_group description', () => {
       registry.register(
         mcpToolToRegisteredTool(
           'sample-mcp',
+          forgeMcpToolName(name),
           { name, inputSchema: { type: 'object' } },
           async () => ({ content: [{ type: 'text', text: 'ok' }] }),
         ),

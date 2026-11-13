@@ -14,6 +14,7 @@ import {
 } from '../../src/tools/lazyToolGroups';
 import { makeLoadToolGroupTool } from '../../src/tools/toolGroupTools';
 import { mcpToolToRegisteredTool } from '../../src/tools/mcpBridge';
+import { forgeMcpToolName } from '../../src/tools/mcpProviderContract';
 import { ToolRegistry, type ToolPermission } from '../../src/tools/ToolRegistry';
 import { ToolBudget } from '../../src/tools/ToolBudget';
 
@@ -49,9 +50,12 @@ function bridge(registry: ToolRegistry, serverName: string, toolNames: string[])
   const group = lazyGroupForServer(serverName);
   for (const name of toolNames) {
     registry.register(
-      mcpToolToRegisteredTool(serverName, { name, inputSchema: { type: 'object' } }, async () => ({
-        content: [{ type: 'text', text: 'ok' }],
-      })),
+      mcpToolToRegisteredTool(
+        serverName,
+        forgeMcpToolName(name),
+        { name, inputSchema: { type: 'object' } },
+        async () => ({ content: [{ type: 'text', text: 'ok' }] }),
+      ),
     );
     if (group) recordLazyGroupTool(group, name);
   }
