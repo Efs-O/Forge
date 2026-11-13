@@ -5,7 +5,11 @@ import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { makeSearchCodeTool } from '../../src/tools/searchCodeTool';
 import { ToolRegistry } from '../../src/tools/ToolRegistry';
-import { clearConversationSecretState, hasConversationReadSecret } from '../../src/tools/exfilTaint';
+import {
+  clearConversationSecretState,
+  hasConversationReadSecret,
+} from '../../src/tools/exfilTaint';
+import { removeTreeWhenFree } from '../support/removeTempTree';
 import type { ForgeConfig } from '../../src/config/types';
 
 describe('isolated search_code process execution', () => {
@@ -17,11 +21,11 @@ describe('isolated search_code process execution', () => {
     vscode.workspace.workspaceFolders.splice(0, Infinity, { uri: vscode.Uri.file(root) });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vscode.workspace.workspaceFolders.splice(0);
     // A cancelled search rejects before the killed child (cwd = root) has
     // exited, and Windows refuses to remove a directory a process sits in.
-    fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await removeTreeWhenFree(root);
   });
 
   function tool() {
@@ -58,8 +62,10 @@ describe('isolated search_code process execution', () => {
   // The schema is what the model is asked to fill in; four new fields that only
   // the handler honoured would let a backend send nothing at all.
   it('advertises the output modes, context, case and offset it accepts', () => {
-    const properties = tool().definition.function.parameters
-      ?.properties as Record<string, Record<string, unknown>>;
+    const properties = tool().definition.function.parameters?.properties as Record<
+      string,
+      Record<string, unknown>
+    >;
     expect(properties['output']).toMatchObject({
       type: 'string',
       enum: ['content', 'files', 'count'],

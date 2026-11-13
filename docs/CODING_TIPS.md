@@ -60,7 +60,7 @@ Read this whole file before your first read, search, edit, write, command, commi
 2. a flaky test → do not raise the timeout. await the promise that ends the work, then assert: fix it at the lifecycle boundary
 3. comparing objects by serialized source order → false failures on property order. compare by value; array order is meaningful
 4. `expect(x).toHaveLengthLessThanOrEqual(n)` → no such matcher, so the assertion itself throws. `expect(x.length).toBeLessThanOrEqual(n)`
-5. `fs.rmSync(tempDir, { recursive, maxRetries: 10 })` after killing a child → EPERM is not in the retried set, so the retries do nothing. poll until the directory is removable, then remove
+5. `fs.rmSync` on a killed child's cwd → EPERM is not in `maxRetries`' retried set, so the retries do nothing. use `removeTreeWhenFree` (test/support/removeTempTree.ts): polls until removable
 
 ## PATHS
 1. `~/.forge/sessions/<short-id>.jsonl` → no such file: logs carry the full 8-4-4-4-12 chat id. resolve a short id with a prefix glob
