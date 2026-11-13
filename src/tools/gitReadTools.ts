@@ -6,6 +6,7 @@
  */
 
 import * as fs from 'fs';
+import { z } from 'zod';
 import type { RegisteredTool } from './ToolRegistry';
 import { readLiveGitStatus, resolveGitRequest, repoRelative, runGit } from './gitRepo';
 import { formatGitLog, gitLogArgs, gitShowArgs, isEmptyHistoryError } from './gitLog';
@@ -160,6 +161,16 @@ export function makeGitBlameTool(): RegisteredTool {
           properties: {
             path: { type: 'string', description: 'File path (absolute or workspace-relative).' },
             cwd: cwdParameter,
+            start_line: {
+              type: 'integer',
+              minimum: 1,
+              description: 'First line (1-based).',
+            },
+            end_line: {
+              type: 'integer',
+              minimum: 1,
+              description: 'Last line, inclusive.',
+            },
           },
           required: ['path'],
           additionalProperties: false,
@@ -170,10 +181,31 @@ export function makeGitBlameTool(): RegisteredTool {
     handler: async (args) => {
       const requestedPath = args['path'] as string;
       const cwd = args['cwd'] as string | undefined;
+      const range = z
+        .object({
+          start_line: z.number().int().positive().optional(),
+          end_line: z.number().int().positive().optional(),
+        })
+        .refine(
+          (value) => value.end_line === undefined || value.end_line >= (value.start_line ?? 1),
+          {
+            message: 'git_read blame: end_line must be at least start_line',
+          },
+        )
+        .parse(args);
       const { repo, paths } = await resolveGitRequest('git_read', cwd, [requestedPath]);
+      const rangeArgs =
+        range.start_line !== undefined || range.end_line !== undefined
+          ? ['-L', `${range.start_line ?? 1},${range.end_line ?? ''}`]
+          : [];
       return (
-        (await runGit(repo, ['blame', '--line-porcelain', '--', repoRelative(repo, paths[0]!)])) ||
-        '(no output)'
+        (await runGit(repo, [
+          'blame',
+          '--line-porcelain',
+          ...rangeArgs,
+          '--',
+          repoRelative(repo, paths[0]!),
+        ])) || '(no output)'
       );
     },
   };

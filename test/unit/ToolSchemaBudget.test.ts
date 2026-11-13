@@ -137,7 +137,9 @@ import {
 // 2026-11-11: 67,283 (+181) after shell says Git Bash turns a lone /switch into a path (lab pass 2 group D).
 // 2026-11-11: 67,429 (+146) after show_diff says its result carries no diff text.
 // 2026-11-11: 67,739 (+83) after shell names the "shell" parameter in its Windows bash guidance.
-const MEASURED_CHARS = 67_739;
+// 2026-11-13: 67,985 (+246) after git_read blame gained start_line/end_line and refuses an
+// oversized answer instead of returning it middle-truncated (lab BUG-06). Headroom is now 15 chars.
+const MEASURED_CHARS = 67_985;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.

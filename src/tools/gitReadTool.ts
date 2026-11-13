@@ -103,7 +103,7 @@ export function makeGitReadTool(
           'status: Show working tree and index status (modified, added, deleted files). Includes the current branch. (needs: cwd?)',
           'log: Show recent commit log. (needs: cwd?, max_entries?, branch?)',
           'diff: Show diff of working tree or staged changes. (needs: cwd?, path?, staged?)',
-          'blame: Show git blame for a file (line-porcelain format). (needs: cwd?, path)',
+          'blame: Show git blame for a file (line-porcelain format). Oversized answers are refused, not truncated. (needs: cwd?, path, start_line?, end_line?)',
           'show: Show a commit or object (git show <ref>). The ref accepts the <ref>:<path> form, so "HEAD~1:src/app.ts" prints that file as it was in the previous commit — the way to read a past version of a file without checking anything out. (needs: cwd?, ref)',
         ].join('\n'),
         parameters: {
@@ -132,6 +132,16 @@ export function makeGitReadTool(
             max_entries: { type: 'integer', description: 'Max commits to return. Default 20.' },
             branch: { type: 'string', description: 'Branch or ref to log. Optional.' },
             staged: { type: 'boolean', description: 'If true, show staged diff. Default false.' },
+            start_line: {
+              type: 'integer',
+              minimum: 1,
+              description: 'blame: first line (1-based).',
+            },
+            end_line: {
+              type: 'integer',
+              minimum: 1,
+              description: 'blame: last line, inclusive.',
+            },
           },
           required: ['operation'],
           additionalProperties: false,
@@ -168,12 +178,21 @@ export function makeGitReadTool(
       const result = await handlers[operation](args, context);
       if (typeof result !== 'string') return result;
       const output = operation === 'status' ? `${await statusBranchLine(args)}\n${result}` : result;
+      const inlineLimit =
+        context?.outputLimits?.shellInlineChars ?? DEFAULT_TOOL_OUTPUT_LIMITS.shellInlineChars;
+      if (operation === 'blame' && output.length > inlineLimit) {
+        throw new Error(
+          `git_read blame: output exceeds the ${inlineLimit}-character inline limit. ` +
+            'Request a smaller range with start_line and end_line (for example, start_line: 1, end_line: 20). ' +
+            'No blame lines were returned; use git_read log for commit history.',
+        );
+      }
       // A whole-repo diff or show can be megabytes: keep head and tail, spill the rest.
       const capped = await capShellOutput(
         output,
         context?.conversationId ?? 'unknown',
         context?.toolCallId ?? 'unknown',
-        context?.outputLimits?.shellInlineChars ?? DEFAULT_TOOL_OUTPUT_LIMITS.shellInlineChars,
+        inlineLimit,
       );
       // A secret printed here is a secret this chat has read, allow-listed or
       // not: `git show HEAD:.env` of a path the owner put in
