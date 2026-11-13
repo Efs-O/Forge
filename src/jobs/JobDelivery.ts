@@ -108,12 +108,28 @@ export class JobDelivery {
       // idle tick summarizes it.
       if (this.deps.busy() !== undefined) return { delivered: 0, summaryPending: true };
       const summary = await this.summarizeChange(job, result.observation ?? '');
-      await this.deliver(job, summary);
+      // The owner can switch the job to `none` while the model writes this.
+      const live = await this.stillWantsDelivery(job.id);
+      if (!live) return { delivered: 0, summaryPending: false };
+      await this.deliver(live, summary);
       return { delivered: 1, summaryPending: false };
     }
     // notify: deliver the check's own summary.
     await this.deliver(job, result.summary);
     return { delivered: 1, summaryPending: false };
+  }
+
+  /**
+   * Re-read the job after a model call and report whether it still wants this
+   * delivery. A summary is slow, and the owner can disable the job, switch its
+   * check to `none` (which delivers nothing), or delete it while the model is
+   * writing; a notification nobody is asking for any more must not reach the
+   * phone. Returns the live definition to deliver AS, or undefined to skip.
+   */
+  private async stillWantsDelivery(jobId: string): Promise<Job | undefined> {
+    const current = await this.deps.store.load(jobId);
+    if (!current || !current.job.enabled || current.job.check.kind === 'none') return undefined;
+    return current.job;
   }
 
   /**
@@ -148,6 +164,17 @@ export class JobDelivery {
       try {
         summary = await this.summarizeChange(job, state.last_observation ?? '');
       } catch (err) {
+        const liveOnFail = await this.stillWantsDelivery(job.id);
+        if (!liveOnFail) {
+          // Disabled, switched to `none`, or deleted while the summary was
+          // attempted: nothing is left to retry, and no failure notice is owed.
+          this.deps.store.patchState(job.id, {
+            summary_pending: false,
+            summary_failures: 0,
+            summary_retry_at: null,
+          });
+          continue;
+        }
         const failures = state.summary_failures + 1;
         const delay = Math.min(SUMMARY_RETRY_MAX_MS, SUMMARY_RETRY_BASE_MS * 2 ** (failures - 1));
         this.deps.store.patchState(job.id, {
@@ -156,15 +183,26 @@ export class JobDelivery {
         });
         if (failures === 1) {
           await this.deliver(
-            job,
+            liveOnFail,
             `could not summarize the recorded change (${(err as Error).message}); ` +
               'retrying with backoff.',
           );
         }
         continue;
       }
+      const live = await this.stillWantsDelivery(job.id);
+      if (!live) {
+        // The owner stopped the notifications while the model wrote this
+        // summary. The answer exists; it is simply not sent.
+        this.deps.store.patchState(job.id, {
+          summary_pending: false,
+          summary_failures: 0,
+          summary_retry_at: null,
+        });
+        continue;
+      }
       const recovered = state.summary_failures > 0 ? 'summary (recovered): ' : '';
-      await this.deliver(job, `${recovered}${summary}`);
+      await this.deliver(live, `${recovered}${summary}`);
       this.deps.store.patchState(job.id, {
         summary_pending: false,
         summary_failures: 0,

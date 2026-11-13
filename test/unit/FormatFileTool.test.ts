@@ -292,6 +292,43 @@ describe("format_file prefers the formatter the project chose", () => {
     expect(cmds.executeCommand).toHaveBeenCalledOnce();
   });
 
+  it('does not credit the editor formatter when nothing answered', async () => {
+    // The fallback reason is attached to whichever outcome it describes.
+    // "the editor's formatter answered instead" here would be the same
+    // overclaim this tool exists to stop: the provider returned undefined.
+    ws.openTextDocument.mockResolvedValue(docForDisk());
+    cmds.executeCommand.mockResolvedValue(undefined);
+
+    const out = await format('a.ts');
+
+    expect(out).toContain('could not find its CLI in node_modules');
+    expect(out).toContain('no editor formatter answered either');
+    expect(out).not.toContain('answered instead');
+  });
+
+  it('says the editor formatter made no change when it returned an empty list', async () => {
+    installFormatter('console.error("boom");process.exit(2);');
+    ws.openTextDocument.mockResolvedValue(docForDisk());
+    cmds.executeCommand.mockResolvedValue([]);
+
+    const out = await format('a.ts');
+
+    expect(out).toContain("the project's own Prettier failed (boom)");
+    expect(out).toContain("the editor's formatter returned no edits");
+    expect(out).not.toContain('answered instead');
+  });
+
+  it('credits the editor formatter only when it actually returned edits', async () => {
+    installFormatter('console.error("boom");process.exit(2);');
+    ws.openTextDocument.mockResolvedValue(docForDisk());
+    providerAnswers();
+
+    const out = await format('a.ts');
+
+    expect(out).toContain("the project's own Prettier failed (boom)");
+    expect(out).toContain("the editor's formatter answered instead");
+  });
+
   it('uses the editor formatter without a note when the project declares nothing', async () => {
     fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'proj' }), 'utf8');
     ws.openTextDocument.mockResolvedValue(docForDisk());

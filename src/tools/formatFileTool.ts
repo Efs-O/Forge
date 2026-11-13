@@ -290,7 +290,7 @@ export function makeFormatFileTool(extraRoots: () => readonly string[] = () => [
           filePath,
           editorLabel,
           context,
-          `Note: the project's own Prettier failed (${failure}); the editor's formatter answered instead.`,
+          `the project's own Prettier failed (${failure})`,
         );
       }
       return formatWithEditorProvider(
@@ -300,7 +300,7 @@ export function makeFormatFileTool(extraRoots: () => readonly string[] = () => [
         context,
         formatter === undefined
           ? undefined
-          : "Note: package.json declares prettier, but Forge could not find its CLI in node_modules; the editor's formatter answered instead.",
+          : 'package.json declares prettier, but Forge could not find its CLI in node_modules',
       );
     },
   };
@@ -308,15 +308,18 @@ export function makeFormatFileTool(extraRoots: () => readonly string[] = () => [
 
 /**
  * The editor's formatter, with every refusal it can produce named. Extracted from
- * the handler so the project-formatter branch above can fall into it with a note
- * explaining why Forge did not use the project's own tool.
+ * the handler so the project-formatter branch above can fall into it with a
+ * `reason` explaining why Forge did not use the project's own tool. The reason
+ * is composed into the sentence only for the outcome it describes: claiming the
+ * editor's formatter "answered instead" when it, too, never answered would be
+ * the same overclaim this tool exists to stop.
  */
 async function formatWithEditorProvider(
   doc: vscode.TextDocument,
   filePath: string,
   editorLabel: string,
   context?: Parameters<RegisteredTool['handler']>[1],
-  note?: string,
+  reason?: string,
 ): Promise<string> {
   // Re-asked here, not only at the top of the handler: the project formatter may
   // have run first, and the user can type in that window.
@@ -338,7 +341,7 @@ async function formatWithEditorProvider(
     // file was already formatted.
     return withNote(
       `No formatting edits returned; a formatter may not be available: ${filePath}`,
-      note,
+      reason ? `Note: ${reason}, and no editor formatter answered either.` : undefined,
     );
   }
   if (context?.abortSignal?.aborted) {
@@ -350,7 +353,10 @@ async function formatWithEditorProvider(
     throw new Error(`format_file: ${filePath} changed while formatting; no edits were applied`);
   }
   if (edits.length === 0)
-    return withNote(`No changes: the formatter returned no edits: ${filePath}`, note);
+    return withNote(
+      `No changes: the formatter returned no edits: ${filePath}`,
+      reason ? `Note: ${reason}; the editor's formatter returned no edits.` : undefined,
+    );
 
   const before = doc.getText();
   const workspaceEdit = new vscode.WorkspaceEdit();
@@ -376,5 +382,11 @@ async function formatWithEditorProvider(
         'the change is present in the editor buffer only',
     );
   }
-  return describeChange(filePath, before, doc.getText(), editorLabel, note);
+  return describeChange(
+    filePath,
+    before,
+    doc.getText(),
+    editorLabel,
+    reason ? `Note: ${reason}; the editor's formatter answered instead.` : undefined,
+  );
 }

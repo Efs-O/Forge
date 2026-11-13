@@ -10,14 +10,24 @@
 const MARKER = /<\/?\s*UNTRUSTED_CONTENT\s*>/giu;
 
 /**
+ * Defuse the wrapper's own markers in text that has to be shown INSIDE the
+ * fence. A caller-supplied phrase — `web_fetch`'s `find`, which the result
+ * echoes back — is not outside content, but a closing marker inside it still
+ * ends the block early, so it is stripped before it is printed.
+ */
+export function defuseMarkers(text: string): string {
+  return text.replace(MARKER, '[marker removed]');
+}
+
+/**
  * `whatItIs` says in one line what the block is — the model needs the source of
  * the text, not just the fact that it is fenced.
  */
 export function wrapUntrusted(body: string, whatItIs: string): string {
   return (
     '<UNTRUSTED_CONTENT>\n' +
-    `${whatItIs}\n` +
-    `${body.replace(MARKER, '[marker removed]')}\n` +
+    `${defuseMarkers(whatItIs)}\n` +
+    `${defuseMarkers(body)}\n` +
     '</UNTRUSTED_CONTENT>'
   );
 }

@@ -2,6 +2,7 @@ import { lookup as dnsLookup } from 'dns/promises';
 import type { RegisteredTool } from './ToolRegistry';
 import { ToolApprovalRefusal } from './toolContract';
 import { htmlToText } from '../util/htmlText';
+import { defuseMarkers } from './untrustedText';
 import { readTextCapped } from '../util/readTextCapped';
 import {
   allowedHostsFor,
@@ -230,7 +231,12 @@ function findWindow(
   const match = new RegExp(escaped, 'iu').exec(text);
   if (!match) {
     return {
-      header: `No match for ${JSON.stringify(find)}; returned the first ${String(maxChars)} characters.`,
+      // The caller's phrase is echoed back INSIDE the fence, so a closing
+      // marker in it would end the block early and everything after it would
+      // read as Forge's own words. The search itself uses the phrase as given.
+      header: `No match for ${JSON.stringify(defuseMarkers(find))}; returned the first ${String(
+        maxChars,
+      )} characters.`,
       text: text.slice(0, maxChars),
     };
   }
