@@ -42,16 +42,15 @@ interface ParallelReadCall {
 export interface ToolDispatchEffects {
   messages: ChatMessage[];
   post: (msg: HostToWebview) => void;
-  failureTracker: Pick<ToolFailureTracker, 'record' | 'reset'>;
+  /** Only the success reset travels here. A tool's own error no longer changes
+   *  the protocol (audit R1), so dispatch records no failures at all. */
+  failureTracker: Pick<ToolFailureTracker, 'reset'>;
 }
 
 export interface BufferedToolDispatchEffects extends ToolDispatchEffects {
   historyLength: number;
   posts: HostToWebview[];
-  failureTrackerUpdates: Array<{
-    kind: 'record' | 'reset';
-    conversationId: string | undefined;
-  }>;
+  failureTrackerResets: Array<string | undefined>;
 }
 
 export function isParallelReadOnlyTool(name: string): boolean {
@@ -120,18 +119,17 @@ export function createBufferedToolDispatchEffects(
   history: readonly ChatMessage[],
 ): BufferedToolDispatchEffects {
   const posts: HostToWebview[] = [];
-  const failureTrackerUpdates: BufferedToolDispatchEffects['failureTrackerUpdates'] = [];
+  const failureTrackerResets: BufferedToolDispatchEffects['failureTrackerResets'] = [];
   const messages = [...history];
   return {
     messages,
     post: (msg) => posts.push(msg),
     failureTracker: {
-      record: (conversationId) => failureTrackerUpdates.push({ kind: 'record', conversationId }),
-      reset: (conversationId) => failureTrackerUpdates.push({ kind: 'reset', conversationId }),
+      reset: (conversationId) => failureTrackerResets.push(conversationId),
     },
     historyLength: history.length,
     posts,
-    failureTrackerUpdates,
+    failureTrackerResets,
   };
 }
 
@@ -139,12 +137,10 @@ export function createBufferedToolDispatchEffects(
 export function commitBufferedToolDispatchEffects(
   buffered: BufferedToolDispatchEffects,
   messages: ChatMessage[],
-  failureTracker: Pick<ToolFailureTracker, 'record' | 'reset'>,
+  failureTracker: Pick<ToolFailureTracker, 'reset'>,
   post: (msg: HostToWebview) => void,
 ): void {
-  for (const update of buffered.failureTrackerUpdates) {
-    failureTracker[update.kind](update.conversationId);
-  }
+  for (const conversationId of buffered.failureTrackerResets) failureTracker.reset(conversationId);
   for (const msg of buffered.posts) post(msg);
   messages.push(...buffered.messages.slice(buffered.historyLength));
 }
@@ -175,7 +171,7 @@ export async function dispatchWithParallelReads(
   context: ToolDispatchRoundContext,
   toolRegistry: ToolRegistry,
   messages: ChatMessage[],
-  failureTracker: Pick<ToolFailureTracker, 'record' | 'reset'>,
+  failureTracker: Pick<ToolFailureTracker, 'reset'>,
   post: (msg: HostToWebview) => void,
   dispatchSerial: (call: ToolCall, approval?: CachedToolApproval) => Promise<void>,
   dispatchBuffered: (

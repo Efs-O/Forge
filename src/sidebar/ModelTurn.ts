@@ -185,11 +185,10 @@ export async function runModelTurn(
   const runtimeCaps = await ctx.capabilities(model, await resolveBaseUrl());
   const thinkingKwargs = canUseThinkingKwargs(model, runtimeCaps);
   const stripThinkingChannels = shouldStripThinking(model, config);
-  if (useStrip) {
+  if (useStrip)
     void vscode.window.showWarningMessage(
-      'Forge: tool calls disabled after repeated failures. Restart chat to re-enable.',
+      `Forge: ${ctx.failureTracker.streak(conv.id)} native tool calls from this model failed to parse in this chat, so tools are now sent to it as text — which still works. A tool call that runs clears this.`,
     );
-  }
   warnAboutModel(ctx, model, config, runtimeCaps, thinkingKwargs);
 
   const maxRounds = resolveMaxToolRounds(model);
@@ -410,11 +409,13 @@ export async function runModelTurn(
           message:
             'Forge: agent is repeating the same tool call — stopping to avoid a loop. Try rephrasing your request or use /compact if the context is full.',
         }),
-      onNativeFallback: () =>
+      onNativeFallback: () => {
+        ctx.failureTracker.recordNativeParseFailure(conv.id);
         ctx.warnOnce(
           `${model.name}:native-tool-json`,
           `Forge: llama-server rejected this model's native tool-call JSON. Retrying with Forge's JSON fallback tool format.`,
-        ),
+        );
+      },
       onUsage: (usage, request) => {
         reportRequestUsage({
           conv,

@@ -163,7 +163,7 @@ function makeLoop(
   const failureTracker = {
     shouldStrip: vi.fn().mockReturnValue(false),
     reset: vi.fn(),
-    record: vi.fn(),
+    recordNativeParseFailure: vi.fn(),
   } as unknown as ToolFailureTracker;
 
   const events: SidebarProviderEvents = {

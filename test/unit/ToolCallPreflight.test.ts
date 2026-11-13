@@ -53,7 +53,7 @@ describe('invalid tool-call JSON preflight', () => {
   beforeEach(() => {
     registry = new ToolRegistry();
     failureTracker = {
-      record: vi.fn(),
+      recordNativeParseFailure: vi.fn(),
       reset: vi.fn(),
       shouldStrip: vi.fn().mockReturnValue(false),
     } as unknown as ToolFailureTracker;
@@ -101,7 +101,7 @@ describe('invalid tool-call JSON preflight', () => {
     expect(messages[1]?.content).toBe(
       `Error: search_code: the arguments are not valid JSON (${message}). ${advice}`,
     );
-    expect(failureTracker.record).toHaveBeenCalled();
+    expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
   });
 
   it('names leaked markup without a preceding field opening', async () => {
@@ -116,7 +116,7 @@ describe('invalid tool-call JSON preflight', () => {
     expect(messages[1]?.content).toBe(
       `Error: read_file: the arguments are not valid JSON (${parserMessage(raw)}). ${advice}`,
     );
-    expect(failureTracker.record).toHaveBeenCalled();
+    expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
   });
 
   it('explains raw newlines and tabs inside JSON strings', async () => {
@@ -127,7 +127,7 @@ describe('invalid tool-call JSON preflight', () => {
       `Error: read_file: the arguments are not valid JSON (${parserMessage(raw)}). ` +
         'Write each newline inside a string as \\n and each tab as \\t, then resend.',
     );
-    expect(failureTracker.record).toHaveBeenCalled();
+    expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
   });
 
   it('uses generic JSON advice when markup accompanies a different parser error', async () => {
@@ -138,7 +138,7 @@ describe('invalid tool-call JSON preflight', () => {
       `Error: read_file: the arguments are not valid JSON (${parserMessage(raw)}). ` +
         'Resend the arguments as one complete JSON object.',
     );
-    expect(failureTracker.record).toHaveBeenCalled();
+    expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
   });
 
   it('allows valid JSON string values containing tool-call markup', async () => {
@@ -160,7 +160,7 @@ describe('invalid tool-call JSON preflight', () => {
       expect.anything(),
     );
     expect(messages[1]?.content).toBe('written');
-    expect(failureTracker.record).not.toHaveBeenCalled();
+    expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
   });
 
   it('uses generic complete-object advice when no specific cause matches', () => {

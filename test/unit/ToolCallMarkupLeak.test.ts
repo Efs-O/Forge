@@ -54,7 +54,7 @@ describe('a tool call whose value swallowed a parameter block', () => {
   beforeEach(() => {
     registry = new ToolRegistry();
     failureTracker = {
-      record: vi.fn(),
+      recordNativeParseFailure: vi.fn(),
       reset: vi.fn(),
       shouldStrip: vi.fn().mockReturnValue(false),
     } as unknown as ToolFailureTracker;
@@ -119,7 +119,7 @@ describe('a tool call whose value swallowed a parameter block', () => {
         'the tool are not what was meant. Resend the call with one parameter block per argument ' +
         'and no markup inside any value.',
     );
-    expect(failureTracker.record).toHaveBeenCalled();
+    expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
   });
 
   it('refuses a nested edit value that carries a block naming one of the tool parameters', async () => {

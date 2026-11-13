@@ -121,7 +121,7 @@ function parameterNames(reg: RegisteredTool): readonly string[] {
 }
 
 export type ToolCallPreflight =
-  | { kind: 'refused'; result: ToolHandlerResult; recordFailure: boolean }
+  | { kind: 'refused'; result: ToolHandlerResult }
   | { kind: 'ready'; args: Record<string, unknown>; reg: RegisteredTool };
 
 export function preflightToolCall(
@@ -140,14 +140,14 @@ export function preflightToolCall(
   let args: Record<string, unknown>;
   if (input.signal?.aborted) {
     result = 'Error: tool execution cancelled';
-    return { kind: 'refused', result, recordFailure: false };
+    return { kind: 'refused', result };
   }
   try {
     const parsed: unknown = JSON.parse(tc.function.arguments);
     if (parsed === null || Array.isArray(parsed) || typeof parsed !== 'object') {
       const got = parsed === null ? 'null' : Array.isArray(parsed) ? 'array' : typeof parsed;
       result = `Error: ${tc.function.name}: arguments must be a JSON object, got ${got}.`;
-      return { kind: 'refused', result, recordFailure: true };
+      return { kind: 'refused', result };
     }
     args = parsed as Record<string, unknown>;
   } catch (error) {
@@ -155,7 +155,7 @@ export function preflightToolCall(
     result =
       `Error: ${tc.function.name}: the arguments are not valid JSON (${parserMessage}). ` +
       invalidJsonAdvice(tc.function.arguments, parserMessage);
-    return { kind: 'refused', result, recordFailure: true };
+    return { kind: 'refused', result };
   }
 
   if (tc.function.name === '__tool_call_error__' && typeof args['__error'] === 'string') {
@@ -164,7 +164,7 @@ export function preflightToolCall(
     // added when the model sent the text without it.
     const reported = args['__error'];
     result = reported.startsWith('Error:') ? reported : `Error: ${reported}`;
-    return { kind: 'refused', result, recordFailure: true };
+    return { kind: 'refused', result };
   }
 
   // Registered but withheld from this model (e.g. view_image without a
@@ -172,7 +172,7 @@ export function preflightToolCall(
   // instead, so the model does not go hunting for a substitute.
   const unavailable = input.unavailableTools?.get(tc.function.name);
   if (unavailable) {
-    return { kind: 'refused', result: unavailable, recordFailure: false };
+    return { kind: 'refused', result: unavailable };
   }
 
   const reg = input.toolRegistry.get(tc.function.name);
@@ -185,25 +185,25 @@ export function preflightToolCall(
       input.convId,
       input.unavailableTools,
     );
-    return { kind: 'refused', result, recordFailure: false };
+    return { kind: 'refused', result };
   }
   const invalid = input.toolRegistry.invalidArgs(reg, args, {
     ...(input.convId !== undefined ? { conversationId: input.convId } : {}),
     clankerMode: input.clankerMode,
   });
   if (invalid) {
-    return { kind: 'refused', result: invalid, recordFailure: true };
+    return { kind: 'refused', result: invalid };
   }
   // Valid JSON, but the engine's parser folded a second parameter block into one
   // of the values, so running this call would act on text the model never meant
   // as an argument — an edit would write the markup straight into the file.
   const leaked = markupLeakInArgs(tc.function.name, args, parameterNames(reg));
   if (leaked) {
-    return { kind: 'refused', result: leaked, recordFailure: true };
+    return { kind: 'refused', result: leaked };
   }
   const budgetBlock = input.budget?.check(tc.function.name);
   if (budgetBlock) {
-    return { kind: 'refused', result: budgetBlock, recordFailure: false };
+    return { kind: 'refused', result: budgetBlock };
   }
 
   return { kind: 'ready', args, reg };

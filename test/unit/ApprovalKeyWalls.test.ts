@@ -143,7 +143,7 @@ function buildDispatch(rules: string[]) {
     } as unknown as CheckpointStack,
     { markPending: vi.fn() } as unknown as KeepUndoCodeLensProvider,
     {
-      record: vi.fn(),
+      recordNativeParseFailure: vi.fn(),
       reset: vi.fn(),
       shouldStrip: vi.fn().mockReturnValue(false),
     } as unknown as ToolFailureTracker,

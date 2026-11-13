@@ -186,7 +186,6 @@ export class ToolDispatch {
           clankerMode,
         });
         if (pre.kind === 'refused') {
-          if (pre.recordFailure) effects.failureTracker.record(convId);
           this.postResult(tc, toolResultText(pre.result), undefined, convId, effects.post);
           messages.push(toolResultMessage(tc, toolResultContent(pre.result), startedAt));
           continue;
@@ -302,7 +301,7 @@ export class ToolDispatch {
       } catch (err) {
         const policyDenied = err instanceof ToolApprovalPolicyDenied;
         const approvalRefused = err instanceof ToolApprovalRefusal;
-        if (!policyDenied && !approvalRefused) effects.failureTracker.record(convId);
+        // Nothing is recorded here: a failed call is not a protocol failure.
         // A schema refusal is formatted, not printed: Zod's own message is a JSON
         // array of issues, which the model reads as data and re-sends unchanged.
         // `toolErrorText.ts` owns the one place every thrown tool error becomes a

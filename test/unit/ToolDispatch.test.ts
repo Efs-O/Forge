@@ -141,7 +141,7 @@ describe('ToolDispatch', () => {
     } as unknown as KeepUndoCodeLensProvider;
 
     failureTracker = {
-      record: vi.fn(),
+      recordNativeParseFailure: vi.fn(),
       reset: vi.fn(),
       shouldStrip: vi.fn().mockReturnValue(false),
     } as unknown as ToolFailureTracker;
@@ -248,7 +248,7 @@ describe('ToolDispatch', () => {
     expect(messages[0]?.content).toBe(
       'User declined: web_fetch. The user said no to this action: do not do the same thing another way (another tool, command or path) unless they ask for it. Redirect host: collector.example.net.',
     );
-    expect(failureTracker.record).not.toHaveBeenCalled();
+    expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
   });
 
   it('uses attended Clanker and unattended policy decisions for redirect hosts', async () => {
@@ -337,7 +337,7 @@ describe('ToolDispatch', () => {
       expect(deniedMessages[0]?.content).toBe(
         'unattended: approval key denied by policy: "web_fetch". Add net:collector.example.net to approvals.unattended_bus.allow in ~/.forge/policy.yaml. new host for this chat: collector.example.net. Nobody is present to approve it, so do not retry it. Continue with safe steps or report the step as not done.',
       );
-      expect(failureTracker.record).not.toHaveBeenCalled();
+      expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
     } finally {
       marker.dispose();
     }
@@ -473,9 +473,10 @@ describe('ToolDispatch', () => {
     });
   });
 
-  it('attributes a malformed-arguments failure to the conversation', async () => {
-    // record() with no id piled every chat's failures into one shared bucket,
-    // so one bad model disabled tool calling in tabs it never touched.
+  it('does not let a bad argument change the tool protocol', async () => {
+    // Audit R1: this used to count toward "this model cannot call tools". A
+    // malformed argument reached the tool, so the protocol worked; only a
+    // server that rejects the native call itself may change the format.
     const messages: ChatMessage[] = [];
     await dispatch.dispatch(
       [
@@ -492,7 +493,8 @@ describe('ToolDispatch', () => {
 
     expect(messages[0]?.content).toContain('the arguments are not valid JSON');
     expect(messages[0]?.content).toContain('Unexpected end of JSON input');
-    expect(failureTracker.record).toHaveBeenCalledWith('conv-a');
+    expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
+    expect(failureTracker.reset).not.toHaveBeenCalled();
   });
 
   it('clears the conversation streak after a tool call that ran', async () => {
@@ -516,7 +518,7 @@ describe('ToolDispatch', () => {
     );
 
     expect(failureTracker.reset).toHaveBeenCalledWith('conv-a');
-    expect(failureTracker.record).not.toHaveBeenCalled();
+    expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
   });
 
   it('does not clear the streak for a refusal or a declined call', async () => {
@@ -546,7 +548,7 @@ describe('ToolDispatch', () => {
 
     expect(messages[0]?.content).toContain('User declined');
     expect(failureTracker.reset).not.toHaveBeenCalled();
-    expect(failureTracker.record).not.toHaveBeenCalled();
+    expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
   });
 
   it('passes multimodal tool results back to the model while displaying text', async () => {
@@ -843,7 +845,7 @@ describe('ToolDispatch', () => {
 
     expect(messages.at(-1)?.content).toContain('Moved to');
     expect(messages.at(-1)?.content).not.toContain('EISDIR');
-    expect(failureTracker.record).not.toHaveBeenCalled();
+    expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
   });
 
   it('snapshots a structured multi-edit exactly once before its handler', async () => {
@@ -980,7 +982,7 @@ describe('ToolDispatch', () => {
       'conv-b',
     );
 
-    expect(failureTracker.record).toHaveBeenCalledWith('conv-b');
+    expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
     expect(checkpoints.snapshotBefore).not.toHaveBeenCalled();
     expect(messages.at(-1)?.content).toMatch(
       /^Error: apply_line_edits edits one file per call/u,
@@ -1340,7 +1342,7 @@ describe('ToolDispatch', () => {
     expect(handler).not.toHaveBeenCalled();
     expect(messages[0]?.content).toContain('unattended: dangerous tool denied by policy');
     expect(messages[0]?.content).toContain('RESULT: failed');
-    expect(failureTracker.record).not.toHaveBeenCalled();
+    expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
   });
 
   it('refuses malformed JSON with the parser error and a complete-object correction', async () => {
@@ -1366,7 +1368,7 @@ describe('ToolDispatch', () => {
 
     await dispatch.dispatch([call], allowed, transcript);
 
-    expect(failureTracker.record).toHaveBeenCalled();
+    expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
     expect(call.function.arguments).toBe(raw);
     expect(transcript[0]?.tool_calls?.[0]?.function.arguments).toBe(raw);
     expect(transcript[1]?.content).toBe(
@@ -1408,7 +1410,7 @@ describe('ToolDispatch', () => {
       `Error: read_file: the arguments are not valid JSON (${parserMessage(raw)}). ` +
         'Write each literal backslash as \\\\ and resend.',
     );
-    expect(failureTracker.record).toHaveBeenCalled();
+    expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
   });
 
   it('refuses a top-level array as not an arguments object', async () => {
@@ -1553,7 +1555,7 @@ describe('ToolDispatch', () => {
 
     await dispatch.dispatch(toolCalls, allowed, messages as never);
 
-    expect(failureTracker.record).toHaveBeenCalled();
+    expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
     expect(messages[0].content).toMatch(/boom/);
   });
 

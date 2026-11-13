@@ -12,16 +12,26 @@ export function stripTools(request: ChatCompletionRequest): ChatCompletionReques
 }
 
 /**
- * Tracks consecutive tool-call failures per conversation.
- * After THRESHOLD failures, recommends strip mode.
+ * Tracks, per conversation, the ONE failure that says something about the
+ * protocol rather than about one call: the server could not parse the native
+ * tool call this model just made. After THRESHOLD of those in one chat, Forge
+ * stops sending that model native tool definitions and sends the fenced text
+ * format instead — the recovery `agent/ToolCallingLoop` already implements.
+ *
+ * What deliberately does NOT count, because each says something else (audit R1:
+ * counting them let one bad afternoon in one chat look like a model that cannot
+ * call tools at all, and the notice said "tools disabled" when text tool calls
+ * were working the whole time):
+ *   - a tool's own error — a missing file, a bad path: the call reached the
+ *     tool, so the protocol worked;
+ *   - arguments that failed the tool's schema: the server parsed the call;
+ *   - a decline, a policy refusal, an approval timeout: a human said no;
+ *   - a truncated call: out of output room is an environment limit, and
+ *     `agent/ToolCallingLoop` keeps it out of this counter for the same reason.
  *
  * The key is the conversation id, and `reset` must follow every successful tool
  * call: without either, one chat's bad afternoon disabled tool calling in every
  * other tab and kept it disabled forever, because the count only ever went up.
- * A truncated tool call must NOT be recorded here — running out of output room
- * is an environment limit, not the model failing at tool calls (see
- * `agent/ToolCallingLoop`, which deliberately keeps truncation out of this
- * counter).
  */
 export class ToolFailureTracker {
   private readonly failures = new Map<string, number>();
@@ -30,8 +40,14 @@ export class ToolFailureTracker {
   /** Used when a caller has no conversation to attribute the failure to. */
   static readonly DEFAULT_KEY = '__default__';
 
-  record(conversationId = ToolFailureTracker.DEFAULT_KEY): void {
+  /** The server rejected this model's native tool-call JSON. */
+  recordNativeParseFailure(conversationId = ToolFailureTracker.DEFAULT_KEY): void {
     this.failures.set(conversationId, (this.failures.get(conversationId) ?? 0) + 1);
+  }
+
+  /** How many parse failures this chat has — the notice the user sees quotes it. */
+  streak(conversationId = ToolFailureTracker.DEFAULT_KEY): number {
+    return this.failures.get(conversationId) ?? 0;
   }
 
   /**

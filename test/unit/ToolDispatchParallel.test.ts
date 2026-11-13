@@ -87,7 +87,7 @@ describe('ToolDispatch parallel read batches', () => {
     toolRegistry = new ToolRegistry();
     trackerUpdates = [];
     failureTracker = {
-      record: vi.fn((id?: string) => trackerUpdates.push(`record:${id ?? ''}`)),
+      recordNativeParseFailure: vi.fn((id?: string) => trackerUpdates.push(`parse:${id ?? ''}`)),
       reset: vi.fn((id?: string) => trackerUpdates.push(`reset:${id ?? ''}`)),
       shouldStrip: vi.fn().mockReturnValue(false),
     } as unknown as ToolFailureTracker;
@@ -437,7 +437,7 @@ describe('ToolDispatch parallel read batches', () => {
     expect(messages.map((message) => message.content)).toEqual(
       calls.map(() => 'Error: tool execution cancelled'),
     );
-    expect(failureTracker.record).not.toHaveBeenCalled();
+    expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
     expect(failureTracker.reset).not.toHaveBeenCalled();
     expect(post.mock.calls.map(([event]) => event.toolCallId)).toEqual(calls.map((call) => call.id));
     expect(vscode.workspace.openTextDocument).not.toHaveBeenCalled();
@@ -466,7 +466,7 @@ describe('ToolDispatch parallel read batches', () => {
     );
 
     expect(completed).toEqual(['failure', 'success']);
-    expect(trackerUpdates).toEqual(['reset:failure-order', 'record:failure-order']);
+    expect(trackerUpdates).toEqual(['reset:failure-order']);
     expect(messages.map((message) => message.tool_call_id)).toEqual(['success', 'failure']);
     expect(messages[1]?.content).toContain('read failed');
   });
