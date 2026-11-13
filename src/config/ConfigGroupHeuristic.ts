@@ -32,6 +32,7 @@ const SCALAR_GROUP_KEYS = [
   'capabilities',
   'max_output_tokens',
   'max_tool_rounds',
+  'text_tool_calls',
   'tools',
 ] as const;
 

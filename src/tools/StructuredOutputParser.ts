@@ -28,6 +28,21 @@ export interface ParsedToolCall {
   error?: string;
 }
 
+/**
+ * Which shapes count as a tool call in one round's text. See
+ * `TextToolCallMode.textToolCallForms` for who chooses them and why.
+ */
+export interface StructuredOutputForms {
+  /** Read ```json blocks as calls. Off when the round offered native tools. */
+  jsonFence: boolean;
+  /** Read the provider marker shapes (Ollama, Hermes/XML) as calls. */
+  markers: boolean;
+}
+
+export const ALL_FORMS: StructuredOutputForms = { jsonFence: true, markers: true };
+export const MARKER_FORMS: StructuredOutputForms = { jsonFence: false, markers: true };
+export const NO_FORMS: StructuredOutputForms = { jsonFence: false, markers: false };
+
 const PARSE_ERROR_TOOL = '__tool_call_error__';
 
 const OLLAMA_TOOL_CALL_BEGIN = '<｜tool▁call▁begin｜>';
@@ -73,11 +88,14 @@ const OLLAMA_TOOL_WRAPPER_RE = new RegExp(
 export function parseStructuredOutput(
   text: string,
   toolNames?: ReadonlySet<string>,
+  forms: StructuredOutputForms = ALL_FORMS,
 ): ParsedToolCall[] {
   const results: ParsedToolCall[] = [];
-  collectJsonFenceToolCalls(text, results, toolNames);
-  collectOllamaMarkerToolCalls(text, results);
-  collectHermesToolCalls(text, results);
+  if (forms.jsonFence) collectJsonFenceToolCalls(text, results, toolNames);
+  if (forms.markers) {
+    collectOllamaMarkerToolCalls(text, results);
+    collectHermesToolCalls(text, results);
+  }
   return results;
 }
 
@@ -97,8 +115,15 @@ export class StructuredOutputStripper {
   private hiddenDepth = 0;
   /** Body of an open `<tool_call>` span, or null outside one. */
   private hermesBody: string | null = null;
+  private readonly forms: StructuredOutputForms;
+
+  /** `forms.markers` off: nothing in this text is a call, so nothing is hidden. */
+  constructor(forms: StructuredOutputForms = ALL_FORMS) {
+    this.forms = forms;
+  }
 
   push(raw: string): string {
+    if (!this.forms.markers) return raw;
     const [processed, nextCarry] = stripCarry(raw, this.carry);
     this.carry = nextCarry;
     return this.consume(processed);
@@ -106,6 +131,7 @@ export class StructuredOutputStripper {
 
   /** The held tail was only the start of a marker if more text followed; it is text. */
   flush(): string {
+    if (!this.forms.markers) return '';
     // An unclosed <tool_call> is not a call; the full-text pass keeps it too.
     const tail =
       this.hermesBody !== null
@@ -168,20 +194,25 @@ export class StructuredOutputStripper {
 export function stripStructuredOutputFromFullText(
   text: string,
   toolNames?: ReadonlySet<string>,
+  forms: StructuredOutputForms = ALL_FORMS,
 ): string {
-  const hasRejectedMarkerCall = parseStructuredOutput(text).some(
+  const hasRejectedMarkerCall = parseStructuredOutput(text, undefined, forms).some(
     (call) => call.error !== undefined,
   );
-  const withoutMarkers = hasRejectedMarkerCall
-    ? text
-    : text.replace(OLLAMA_TOOL_CALL_RE, '').replace(OLLAMA_TOOL_WRAPPER_RE, '');
+  const withoutMarkers =
+    !forms.markers || hasRejectedMarkerCall
+      ? text
+      : text.replace(OLLAMA_TOOL_CALL_RE, '').replace(OLLAMA_TOOL_WRAPPER_RE, '');
 
   const isFenceCall = (match: string, body: string): string => {
     const call = fenceCall(body, toolNames);
     return call !== null && call.error === undefined ? '' : match;
   };
   const isCall = (match: string, body: string): string => (isHermesCall(body) ? '' : match);
-  return withoutMarkers.replace(JSON_FENCE_RE, isFenceCall).replace(HERMES_TOOL_CALL_RE, isCall);
+  const withoutFences = forms.jsonFence
+    ? withoutMarkers.replace(JSON_FENCE_RE, isFenceCall)
+    : withoutMarkers;
+  return forms.markers ? withoutFences.replace(HERMES_TOOL_CALL_RE, isCall) : withoutFences;
 }
 
 function fenceCall(body: string, toolNames?: ReadonlySet<string>): ParsedToolCall | null {

@@ -362,6 +362,7 @@ export function resolveRequestModel(
     ),
     capabilities: pick(d.capabilities, model.capabilities, p.capabilities),
     max_tool_rounds: pick(d.max_tool_rounds, model.max_tool_rounds, p.max_tool_rounds),
+    text_tool_calls: pick(d.text_tool_calls, model.text_tool_calls, p.text_tool_calls),
     tool_groups: pick(d.tool_groups, model.tool_groups) ?? { eager: [] },
   });
 }

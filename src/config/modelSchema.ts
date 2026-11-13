@@ -8,6 +8,7 @@ import {
   ReasoningEffortSchema,
   SamplingSchema,
   SpawnSchema,
+  TextToolCallModeSchema,
   ToolCallLimitsSchema,
   ToolGroupsSchema,
 } from './schemaShared';
@@ -41,6 +42,7 @@ export const ProfileSchema = z.object({
   strip_thinking_channels: z.boolean().optional(),
   capabilities: CapabilitiesSchema.optional(),
   max_tool_rounds: z.number().int().positive().optional(),
+  text_tool_calls: TextToolCallModeSchema.optional(),
 });
 
 /**
@@ -232,6 +234,7 @@ export const ModelConfigSchema = z.object({
   tool_call_limits: ToolCallLimitsSchema.optional(),
   max_output_tokens: z.number().int().positive().optional(),
   max_tool_rounds: z.number().int().positive().optional(),
+  text_tool_calls: TextToolCallModeSchema.optional(),
   tool_groups: ToolGroupsSchema.optional(),
 });
 

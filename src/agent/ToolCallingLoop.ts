@@ -3,6 +3,7 @@ import { ThinkingChannelStripper } from '../llm/ThinkingChannelStripper';
 import type { ChatCompletionRequest, ToolCall } from '../llm/types';
 import { StructuredOutputStripper } from '../tools/StructuredOutputParser';
 import { extractFallbackToolCalls } from '../tools/ToolCallFallback';
+import { textToolCallForms } from '../tools/TextToolCallMode';
 import { MIN_ROUND_HEADROOM_TOKENS, reasoningReserve } from '../util/contextBudget';
 import { getLogger } from '../util/logger';
 import {
@@ -176,7 +177,12 @@ export async function runToolCallingLoop(
     let rawReasoning = '';
     const streamedAssistant = new StreamedAssistantTurn(options.messages);
     let thinking = options.stripThinkingChannels ? new ThinkingChannelStripper() : null;
-    let structured = new StructuredOutputStripper();
+    // Which shapes of this round's text may become a tool call at all. A round
+    // that offered native tools gets no ```json interpretation, so a tool
+    // example in an explanation cannot run a real mutation (audit F1).
+    let usedNativeTools = built.usesNativeTools;
+    let forms = textToolCallForms(options.model, usedNativeTools);
+    let structured = new StructuredOutputStripper(forms);
     let html = new HtmlDocumentBoilerplateStripper();
     const tokenHandler = (token: string): void => {
       rawAssistant += token;
@@ -258,10 +264,14 @@ export async function runToolCallingLoop(
       }
       if (!isNativeToolJsonParseError(err) || !built.usesNativeTools) throw err;
       options.onNativeFallback?.();
+      // The retry carries no native tools and does send the fenced-JSON
+      // instructions, so text is now the only channel whatever the model says.
+      usedNativeTools = false;
+      forms = textToolCallForms(options.model, false);
       rawAssistant = '';
       rawReasoning = '';
       thinking = options.stripThinkingChannels ? new ThinkingChannelStripper() : null;
-      structured = new StructuredOutputStripper();
+      structured = new StructuredOutputStripper(forms);
       html = new HtmlDocumentBoilerplateStripper();
       ({ outputRoom, extraMarginTokens } = measureOutput(built.fallbackRequest));
       const fallbackRefusal = exhaustion();
@@ -288,17 +298,19 @@ export async function runToolCallingLoop(
       options.onToken?.(trailing, streamedAssistant.createdAt);
     }
 
-    // Only a ```json block naming a real tool is a call; any other is shown.
+    // Only a shape the round accepts, naming a real tool, is a call; anything
+    // else stays in the answer as the text the user asked for.
     const toolNames = new Set(toolDefinitions.map((d) => d.function.name));
     const strip = options.stripThinkingChannels ?? false;
-    const assistantContent = sanitizeText(rawAssistant, strip, toolNames);
+    const assistantContent = sanitizeText(rawAssistant, strip, toolNames, forms);
     const assistantReasoning = options.stripThinkingChannels
       ? ''
-      : sanitizeText(rawReasoning, false, toolNames);
+      : sanitizeText(rawReasoning, false, toolNames, forms);
+    const mayReadText = forms.jsonFence || forms.markers;
     const calls = streamed.toolCalls?.length
       ? streamed.toolCalls
-      : toolDefinitions.length > 0 && rawAssistant
-        ? extractFallbackToolCalls(rawAssistant, toolDefinitions)
+      : toolDefinitions.length > 0 && rawAssistant && mayReadText
+        ? extractFallbackToolCalls(rawAssistant, toolDefinitions, forms)
         : null;
     const maxTokens = request.max_tokens;
     const earlyLengthStop =

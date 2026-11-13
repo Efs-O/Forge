@@ -75,6 +75,8 @@ export interface GroupConfig {
   max_output_tokens?: number;
   /** Tool rounds per sidebar turn for models in this group. See ModelConfig. */
   max_tool_rounds?: number;
+  /** Which text shapes may become a tool call. See ModelConfig. */
+  text_tool_calls?: 'auto' | 'text' | 'native';
   tool_groups?: { eager: string[] };
   /** Tool-name allowlist for models in this group. */
   tools?: string[];
@@ -94,6 +96,8 @@ export interface ProfileConfig {
   capabilities?: ('tool-call' | 'vision' | 'long-context')[];
   /** Tool rounds per sidebar turn. Set on `defaults` to cover every model. */
   max_tool_rounds?: number;
+  /** Which text shapes may become a tool call. See ModelConfig. */
+  text_tool_calls?: 'auto' | 'text' | 'native';
 }
 
 export interface DefaultsConfig extends ProfileConfig {
@@ -157,6 +161,16 @@ export interface ModelConfig {
    * round cannot evict an image the user just attached.
    */
   image_retention_turns?: number;
+  /**
+   * How Forge may read a tool call out of this model's own text. `auto` (the
+   * default): the provider markers always count, a ```json fence only when the
+   * round offered no native tools — in a native answer a fence is an example the
+   * model is showing the user, and running it mutated files for real. `text`:
+   * every shape counts, for a backend that ignores the `tools` array. `native`:
+   * only native tool events count, so nothing in the text can run a tool.
+   * Resolved per round in `tools/TextToolCallMode.ts`.
+   */
+  text_tool_calls?: 'auto' | 'text' | 'native';
   /**
    * Log file of a server Forge does not spawn (Strata, a hand-started
    * llama-server). Forge follows it into the "Forge - <display name> log"

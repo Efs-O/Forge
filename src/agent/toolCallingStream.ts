@@ -2,7 +2,11 @@ import { streamModelChatCompletion } from '../llm/ChatClient';
 import type { ChatCompletionRequest, ToolCall } from '../llm/types';
 import { stripHtmlDocumentBoilerplateFromFullText } from '../llm/HtmlDocumentBoilerplateStripper';
 import { stripThinkingFromFullText } from '../llm/ThinkingChannelStripper';
-import { stripStructuredOutputFromFullText } from '../tools/StructuredOutputParser';
+import {
+  ALL_FORMS,
+  stripStructuredOutputFromFullText,
+  type StructuredOutputForms,
+} from '../tools/StructuredOutputParser';
 import type { ToolCallingLoopOptions } from './ToolCallingLoop';
 import { snapshotPromptRequest } from '../util/contextBudget';
 import { fingerprintRequest } from '../sessions/requestFingerprint';
@@ -11,9 +15,10 @@ export function sanitizeText(
   text: string,
   stripThinking: boolean,
   toolNames?: ReadonlySet<string>,
+  forms: StructuredOutputForms = ALL_FORMS,
 ): string {
   const withoutThinking = stripThinking ? stripThinkingFromFullText(text) : text;
-  const withoutStructured = stripStructuredOutputFromFullText(withoutThinking, toolNames);
+  const withoutStructured = stripStructuredOutputFromFullText(withoutThinking, toolNames, forms);
   return stripHtmlDocumentBoilerplateFromFullText(withoutStructured);
 }
 

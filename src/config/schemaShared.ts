@@ -9,6 +9,8 @@ import { z } from 'zod';
 export const CacheTypeSchema = z.union([z.number().int().min(0).max(8), z.string().min(1)]);
 
 export const ReasoningEffortSchema = z.enum(['xhigh', 'high', 'medium', 'low', 'none']);
+/** How a model's own text may be read as a tool call; see ModelConfig. */
+export const TextToolCallModeSchema = z.enum(['auto', 'text', 'native']);
 
 export const SamplingSchema = z.object({
   temperature: z.number().optional(),
@@ -75,6 +77,7 @@ export const GroupSchema = z.object({
   capabilities: CapabilitiesSchema.optional(),
   max_output_tokens: z.number().int().positive().optional(),
   max_tool_rounds: z.number().int().positive().optional(),
+  text_tool_calls: TextToolCallModeSchema.optional(),
   tool_groups: ToolGroupsSchema.optional(),
   tools: z.array(z.string().min(1)).optional(),
   tool_call_limits: ToolCallLimitsSchema.optional(),
