@@ -1,10 +1,10 @@
 import type { ChatCompletionRequest, StreamChunk, ToolCall } from './types';
 import {
   ToolCallTruncatedError,
-  argumentsAreIncomplete,
   isTruncationParseError,
   parseErrorColumn,
 } from './ToolCallTruncatedError';
+import { StreamedToolCallAccumulator, type ToolCallDelta } from './StreamedToolCallAccumulator';
 import { imageUnsupportedMessage, isImageUnsupportedError } from './imageUnsupportedError';
 import { getLogger } from '../util/logger';
 import { withDescribedCause } from '../util/describeError';
@@ -83,14 +83,6 @@ export interface StreamHandlers {
 /** Some servers (including some Ollama OpenAI-compat paths) emit `finish_reason: ""` on interim chunks — must not terminate the stream. */
 function hasTerminalFinishReason(finishReason: string | null | undefined): finishReason is string {
   return typeof finishReason === 'string' && finishReason.trim().length > 0;
-}
-
-/** Partial delta shape for a streamed tool call. index is stream-only. */
-interface ToolCallDelta {
-  index?: number;
-  id?: string;
-  type?: 'function';
-  function?: { name?: string; arguments?: string };
 }
 
 /**
@@ -224,18 +216,16 @@ export async function streamChatCompletion(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  let toolCallsFlushed = false;
   let readCount = 0;
   let sseFrameCount = 0;
   let bytesRead = 0;
   let textChars = 0;
   let reasoningChars = 0;
-  let toolDeltaCount = 0;
   const streamSummary = (): string =>
     `id=${requestId} elapsed_ms=${Date.now() - startedAt} ` +
     `ttfb_ms=${watchdog.ttfbMs ?? '?'} reads=${readCount} ` +
     `sse_frames=${sseFrameCount} bytes=${bytesRead} text_chars=${textChars} ` +
-    `reasoning_chars=${reasoningChars} tool_deltas=${toolDeltaCount} ` +
+    `reasoning_chars=${reasoningChars} tool_deltas=${toolCalls.deltas} ` +
     `finish_reason=${terminalFinishReason ?? '?'}`;
   const watchdog = new StreamWatchdog(
     '[OpenAIClient]',
@@ -246,45 +236,33 @@ export async function streamChatCompletion(
     createStallProbe(baseUrl, fetchImpl),
   );
   // key = index, accumulates partial tool call fragments
-  const toolAccum = new Map<
-    number,
-    {
-      id: string;
-      name: string;
-      arguments: string;
-      argDeltas: number;
-      lastProgressAt?: number;
-    }
-  >();
-  const reportProgress = (index: number, final = false): void => {
-    const acc = toolAccum.get(index);
-    if (!acc || !handlers.onToolCallProgress || acc.argDeltas === 0) return;
-    const now = Date.now();
-    if (!final && acc.lastProgressAt !== undefined && now - acc.lastProgressAt < 250) return;
-    acc.lastProgressAt = now;
-    handlers.onToolCallProgress({
-      index,
-      id: acc.id,
-      name: acc.name,
-      argChars: acc.arguments.length,
-      argDeltas: acc.argDeltas,
-      arguments: acc.arguments,
-    });
-  };
+  const toolCalls = new StreamedToolCallAccumulator(
+    handlers.onToolCallProgress,
+    handlers.onToolCalls,
+  );
 
-  const flushAccumulatedToolCalls = (): void => {
-    if (toolCallsFlushed) return;
-    toolCallsFlushed = true;
-    for (const index of toolAccum.keys()) reportProgress(index, true);
-    if (!handlers.onToolCalls || toolAccum.size === 0) return;
-    const calls: ToolCall[] = [...toolAccum.entries()]
-      .sort(([a], [b]) => a - b)
-      .map(([, acc]) => ({
-        id: acc.id,
-        type: 'function' as const,
-        function: { name: acc.name, arguments: acc.arguments },
-      }));
-    handlers.onToolCalls(calls);
+  /**
+   * Turn an accumulated call that cannot have arrived whole into the typed
+   * recovery, whichever frame ended the stream — `[DONE]`, a terminal
+   * `finish_reason`, or the connection simply closing. `strict` is a `length`
+   * finish; see `StreamedToolCallAccumulator.incompleteCall`.
+   */
+  const raiseIncompleteCall = (reason: string | null, strict: boolean): boolean => {
+    const cut = toolCalls.incompleteCall(strict);
+    if (!cut) return false;
+    log.warn(
+      `[OpenAIClient] truncated tool call ${streamSummary()} ` +
+        `tool=${cut.name || '?'} approx_arg_chars=${cut.arguments.length}`,
+    );
+    fail(
+      new ToolCallTruncatedError({
+        toolName: cut.name,
+        toolCallId: cut.id,
+        partialArguments: cut.arguments,
+        ...(reason ? { finishReason: reason } : {}),
+      }),
+    );
+    return true;
   };
 
   try {
@@ -314,7 +292,8 @@ export async function streamChatCompletion(
         if (data === '[DONE]') {
           // Some backends (notably Ollama OpenAI-compat) end streams here without a prior
           // finish_reason chunk carrying tool_calls — flush any accumulated deltas first.
-          flushAccumulatedToolCalls();
+          if (raiseIncompleteCall(terminalFinishReason, false)) return;
+          toolCalls.flush();
           log.info(`[OpenAIClient] stream done ${streamSummary()}`);
           complete(terminalFinishReason);
           return;
@@ -372,95 +351,53 @@ export async function streamChatCompletion(
         if (!choice) continue;
 
         const delta = choice.delta;
-        const content = delta?.content;
-        if (typeof content === 'string' && content.length > 0) {
+        const content = typeof delta?.content === 'string' ? delta.content : '';
+        if (content.length > 0) {
           watchdog.delta('content');
           clientClock.firstToken();
           textChars += content.length;
           handlers.onToken(content);
-        } else if (
-          typeof delta?.reasoning_content === 'string' &&
-          delta.reasoning_content.length > 0
-        ) {
+        }
+        // Content and reasoning are separate channels, so a single delta can
+        // carry both; the old `if / else if` dropped the reasoning half of the
+        // pair. The two reasoning spellings are alternatives, never both, so
+        // one provider's text is never counted or emitted twice.
+        const reasoning =
+          typeof delta?.reasoning_content === 'string' && delta.reasoning_content.length > 0
+            ? delta.reasoning_content
+            : typeof delta?.reasoning === 'string' && delta.reasoning.length > 0
+              ? delta.reasoning
+              : '';
+        if (reasoning.length > 0) {
           watchdog.delta('reasoning');
           clientClock.firstToken();
-          reasoningChars += delta.reasoning_content.length;
-          if (handlers.onReasoning) handlers.onReasoning(delta.reasoning_content);
-          else handlers.onToken(delta.reasoning_content);
-        } else if (typeof delta?.reasoning === 'string' && delta.reasoning.length > 0) {
-          watchdog.delta('reasoning');
-          clientClock.firstToken();
-          reasoningChars += delta.reasoning.length;
-          if (handlers.onReasoning) handlers.onReasoning(delta.reasoning);
-          else handlers.onToken(delta.reasoning);
+          reasoningChars += reasoning.length;
+          if (handlers.onReasoning) handlers.onReasoning(reasoning);
+          else handlers.onToken(reasoning);
         }
 
         // Accumulate streamed tool_call fragments by index.
         const deltaToolCalls = (choice.delta as { tool_calls?: ToolCallDelta[] }).tool_calls;
         if (deltaToolCalls) {
-          if (
-            deltaToolCalls.some(
-              (call) =>
-                typeof call.function?.arguments === 'string' && call.function.arguments.length > 0,
-            )
-          ) {
+          if (StreamedToolCallAccumulator.carriesArguments(deltaToolCalls)) {
             watchdog.delta('tool_args');
           }
-          for (const tc of deltaToolCalls) {
-            toolDeltaCount += 1;
-            const idx = tc.index ?? 0;
-            if (!toolAccum.has(idx)) {
-              toolAccum.set(idx, { id: '', name: '', arguments: '', argDeltas: 0 });
-            }
-            const acc = toolAccum.get(idx)!;
-            if (tc.id) acc.id = tc.id;
-            // Only `arguments` is streamed in fragments; the name arrives whole
-            // in the delta that opens the call. Appending every name delta
-            // assumed otherwise, so a provider that repeats the name on each
-            // chunk produced "search_codesearch_code" — an unknown tool, and a
-            // wasted round, every single time (measured on gemma4:31b-cloud).
-            // Genuine fragmentation still concatenates: only a repeat of what
-            // is already accumulated is dropped.
-            const incomingName = tc.function?.name;
-            if (incomingName && !acc.name.includes(incomingName)) acc.name += incomingName;
-            if (tc.function?.arguments) {
-              acc.arguments += tc.function.arguments;
-              acc.argDeltas += 1;
-              reportProgress(idx);
-            }
-          }
+          toolCalls.apply(deltaToolCalls);
         }
 
         if (hasTerminalFinishReason(choice.finish_reason)) {
           // A `length` finish with tool deltas still in flight means generation
           // hit the output ceiling mid-arguments. Flushing that dispatched a
           // half-written call — in practice `{}` — which the dispatcher then
-          // reported as malformed, hiding the real cause. Raise it as
-          // truncation instead. Args that still parse are complete and safe to
-          // flush, whatever the finish reason says.
-          const truncated =
-            choice.finish_reason === 'length'
-              ? [...toolAccum.values()].find((acc) => argumentsAreIncomplete(acc.arguments))
-              : undefined;
-          if (truncated) {
-            log.warn(
-              `[OpenAIClient] truncated tool call ${streamSummary()} ` +
-                `tool=${truncated.name || '?'} approx_arg_chars=${truncated.arguments.length}`,
-            );
-            fail(
-              new ToolCallTruncatedError({
-                toolName: truncated.name,
-                toolCallId: truncated.id,
-                partialArguments: truncated.arguments,
-                finishReason: choice.finish_reason,
-              }),
-            );
+          // reported as malformed, hiding the real cause. Args that still parse
+          // are complete and safe to flush, whatever the finish reason says.
+          if (raiseIncompleteCall(choice.finish_reason, choice.finish_reason === 'length')) {
             return;
           }
           // Ollama often emits finish_reason "stop" on the terminal chunk even when tool_calls
           // were streamed (OpenAI-style servers usually send "tool_calls"). Flush whenever we
           // have accumulated tool deltas so Forge can still dispatch native tools.
-          flushAccumulatedToolCalls();
+          toolCalls.flush();
           terminalFinishReason = choice.finish_reason;
         }
       }
@@ -468,18 +405,8 @@ export async function streamChatCompletion(
     if (watchdog.stalled) return;
     // Stream ended without [DONE] or a terminal finish_reason (server crash or
     // dropped connection) — settle anyway so the agent loop never hangs.
-    const incomplete = [...toolAccum.values()].find((acc) => argumentsAreIncomplete(acc.arguments));
-    if (incomplete) {
-      fail(
-        new ToolCallTruncatedError({
-          toolName: incomplete.name,
-          toolCallId: incomplete.id,
-          partialArguments: incomplete.arguments,
-        }),
-      );
-      return;
-    }
-    flushAccumulatedToolCalls();
+    if (raiseIncompleteCall(terminalFinishReason, false)) return;
+    toolCalls.flush();
     log.warn(`[OpenAIClient] stream ended without terminal frame ${streamSummary()}`);
     complete(terminalFinishReason);
   } catch (err) {

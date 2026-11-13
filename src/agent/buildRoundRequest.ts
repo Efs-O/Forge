@@ -67,10 +67,15 @@ export function buildRoundRequest(input: RoundRequestInput): RoundRequest {
     }),
     input.outputRoom,
   );
+  const primary = input.stripAllTools ? stripTools(merged) : merged;
   return {
-    request: normalizeRequestForModel(input.stripAllTools ? stripTools(merged) : merged, model),
+    request: normalizeRequestForModel(primary, model),
+    // The retry is the SAME round with the tools taken away: it keeps the
+    // sampling this model was configured with (temperature, top_p, seed, stop,
+    // the output cap). Built from `base` it lost all of it, so a recovery round
+    // ran at a different temperature than the one that just failed.
     fallbackRequest: normalizeRequestForModel(
-      stripTools({ ...base, messages: fallbackMessages }),
+      stripTools({ ...primary, messages: fallbackMessages }),
       model,
     ),
     usesNativeTools: nativeDefinitions.length > 0,
