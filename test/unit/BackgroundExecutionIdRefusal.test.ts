@@ -8,12 +8,10 @@ import { BackgroundExecutionManager } from '../../src/tools/BackgroundExecutionM
  * after `FINISHED_EXECUTION_TTL_MS`, so both of those belong in the refusal.
  */
 describe('an execution id that misses', () => {
-  it('names list_executions and says how a finished job leaves its list', async () => {
+  it('states the TTL, capacity eviction and window scope without promising retention', async () => {
     const manager = new BackgroundExecutionManager();
-    await expect(manager.stop('exec-does-not-exist')).rejects.toThrow(/list_executions/);
-    await expect(manager.stop('exec-does-not-exist')).rejects.toThrow(/finished job/);
     await expect(manager.stop('exec-does-not-exist')).rejects.toThrow(
-      /another chat or window/,
+      'unknown execution id "exec-does-not-exist". Call `list_executions` for the jobs retained in this window, including jobs from its other chats. A finished job is retained for up to 10 minutes; it may be evicted earlier when the 32-job limit is reached. Reloading the window clears this in-memory list. Jobs from another window are not listed here.',
     );
   });
 });

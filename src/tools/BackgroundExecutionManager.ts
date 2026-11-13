@@ -321,7 +321,7 @@ export class BackgroundExecutionManager {
       // A bare "unknown execution id" named nothing the agent could act on, so the
       // refusal says how an id dies and which tool lists the ids that do exist.
       throw new Error(
-        `unknown execution id "${id}". No job with that id is running in this window; call \`list_executions\` for the ids that are. A finished job leaves that list 10 minutes after it ends, and one started by another chat or window was never in it.`,
+        `unknown execution id "${id}". Call \`list_executions\` for the jobs retained in this window, including jobs from its other chats. A finished job is retained for up to 10 minutes; it may be evicted earlier when the 32-job limit is reached. Reloading the window clears this in-memory list. Jobs from another window are not listed here.`,
       );
     return execution;
   }
