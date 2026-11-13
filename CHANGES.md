@@ -1,5 +1,15 @@
 # Forge — Recent Changes
 
+## 0.17.169
+
+- `git_read blame` takes `start_line` and `end_line`, and a whole-file blame that will not fit inline is now refused with the range to ask for instead of coming back cut in half with a success exit code. This was the lab's flagship silent-wrong-answer: the lines that answer the question were simply gone.
+- A tool result logged without a name now takes its name from the call carrying that exact id in the same transcript, so per-tool counts read from the session logs stop under-reading. Names are never guessed from error text and never taken from another session.
+- An approval queued behind another card, and an approval that times out, now post a notice naming the tool and the chat, saying the call was not run and that the turn continues unless you press Stop. A parked lane is visible instead of silent.
+- The `unknown execution id` refusal states what `list_executions` really retains: up to 10 minutes, less once the 32-job limit evicts, cleared by a window reload, scoped to that window's chats.
+- The starter `FORGE.md` a new workspace gets now names both commit shapes — stage then commit for the commit tool, flags before `--` for shell git — so an agent following the instruction no longer walks into the commit tool's "nothing is staged" refusal.
+
+Five fixes from the model-error lab; the lab's remaining findings were judged by design or already fixed, with the reasons recorded per bug.
+
 ## 0.17.168
 
 - Duplicate saves of unchanged configuration no longer reapply subsystem lifecycles, and config watchers ignore events for other paths.
