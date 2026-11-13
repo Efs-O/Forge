@@ -301,7 +301,17 @@ export class SessionLogger {
     this.ensureHeader(model);
 
     const newMessages = messages.slice(this.writtenCount);
+    // Resumed legacy transcripts can omit result names. Recover only from this
+    // transcript's exact call id, never from result text or row position.
+    const toolNames = new Map(
+      messages
+        .slice(0, this.writtenCount)
+        .flatMap((message) =>
+          (message.tool_calls ?? []).map((call) => [call.id, call.function.name] as const),
+        ),
+    );
     for (const msg of newMessages) {
+      for (const call of msg.tool_calls ?? []) toolNames.set(call.id, call.function.name);
       this.writtenCount++;
       if (msg.role === 'system') continue;
 
@@ -366,7 +376,8 @@ export class SessionLogger {
       if (msg.role === 'user' && msg.internal === true) line['internal'] = true;
       if (msg.role === 'user' && msg.midTurn === true) line['delivered'] = 'mid_turn';
       if (msg.role === 'tool' && msg.tool_call_id) line['tool_call_id'] = msg.tool_call_id;
-      if (msg.role === 'tool' && msg.name) line['name'] = msg.name;
+      const toolName = msg.name ?? (msg.tool_call_id ? toolNames.get(msg.tool_call_id) : undefined);
+      if (msg.role === 'tool' && toolName) line['name'] = toolName;
       if (msg.role === 'user' && typeof msg.turnContext === 'string') {
         line['turn_context'] = msg.turnContext;
       }
@@ -376,7 +387,7 @@ export class SessionLogger {
       // guard — and a guard added later is recorded without touching it. Cards are
       // recorded by `gateEventLog.ts` through the approval sink, not here.
       if (msg.role === 'tool') {
-        const refusal = buildGateRefusalRow(msg.name ?? '', content ?? '', this.sessionId, model);
+        const refusal = buildGateRefusalRow(toolName ?? '', content ?? '', this.sessionId, model);
         if (refusal) this.append({ ...refusal });
       }
     }

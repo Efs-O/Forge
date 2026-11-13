@@ -37,6 +37,78 @@ describe('SessionLogger turn errors', () => {
       .split('\n')
       .map((line) => JSON.parse(line) as Record<string, unknown>);
 
+  it('recovers legacy result names by exact call id across flushes, scoped to this transcript', () => {
+    for (const [id, name] of [
+      ['legacy-a', 'edit_file'],
+      ['legacy-b', 'read_file'],
+    ]) {
+      const logger = new SessionLogger(id!, 'title', 'm1');
+      const prefix: ChatMessage[] = [
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            { id: 'same-id', type: 'function', function: { name: name!, arguments: '{}' } },
+          ],
+        },
+      ];
+      logger.flush(prefix, 'm1');
+      logger.flush(
+        [
+          ...prefix,
+          {
+            role: 'tool',
+            tool_call_id: 'same-id',
+            content: 'Error: failure',
+          },
+        ],
+        'm1',
+      );
+      expect(readRows(id!).find((row) => row.role === 'tool')).toMatchObject({
+        tool_call_id: 'same-id',
+        name,
+      });
+    }
+  });
+
+  it('does not guess a missing name from result text or another call id', () => {
+    const logger = new SessionLogger('legacy-miss', 'title', 'm1');
+    logger.flush(
+      [
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            { id: 'known', type: 'function', function: { name: 'read_file', arguments: '{}' } },
+          ],
+        },
+        { role: 'tool', tool_call_id: 'other', content: 'Error: edit_file failed' },
+      ],
+      'm1',
+    );
+    expect(readRows('legacy-miss').find((row) => row.role === 'tool')).not.toHaveProperty('name');
+  });
+
+  it('does not let a later reuse of a call id rename an earlier result', () => {
+    const logger = new SessionLogger('reused-id', 'title', 'm1');
+    const messages: ChatMessage[] = ['edit_file', 'read_file'].flatMap((name) => [
+      {
+        role: 'assistant' as const,
+        content: null,
+        tool_calls: [
+          { id: 'reused', type: 'function' as const, function: { name, arguments: '{}' } },
+        ],
+      },
+      { role: 'tool' as const, tool_call_id: 'reused', content: 'Error: failed' },
+    ]);
+    logger.flush(messages, 'm1');
+    expect(
+      readRows('reused-id')
+        .filter((row) => row.role === 'tool')
+        .map((row) => row.name),
+    ).toEqual(['edit_file', 'read_file']);
+  });
+
   it('records the initiating reason of an interrupted turn', () => {
     const logger = new SessionLogger('c-stop', 'title', 'm1');
     logger.logTurnStopped('cancelled', 'm1', 'config reload');
