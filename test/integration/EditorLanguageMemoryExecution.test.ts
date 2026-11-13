@@ -192,7 +192,13 @@ describe('isolated editor, language, search, and memory tool execution', () => {
     await makeShowNotificationTool().handler({ message: 'notice', level: 'warning' });
     expect(notification).toHaveBeenCalledWith('notice');
     await makeCopyToClipboardTool().handler({ text: 'clipboard fixture' });
-    await expect(makeReadClipboardTool().handler({})).resolves.toBe('clipboard fixture');
+    const clipboardText = String(await makeReadClipboardTool().handler({}));
+    // The clipboard is another program's text, so it arrives marked as untrusted:
+    // a prompt copied out of another chat must not read as Forge's own instruction.
+    expect(clipboardText).toContain('clipboard fixture');
+    expect(clipboardText.startsWith('<UNTRUSTED_CONTENT>')).toBe(true);
+    expect(clipboardText.endsWith('</UNTRUSTED_CONTENT>')).toBe(true);
+    expect(makeReadClipboardTool().untrustedResult).toBe(true);
     await expect(
       makeOpenUrlTool({ spawnProcess }).handler({ url: 'https://example.com/' }),
     ).resolves.toBe('Opened https://example.com/ in the default browser.');

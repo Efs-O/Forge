@@ -10,7 +10,9 @@ models:
     num_ctx: 32768
 
 permissions:
-  # approval_timeout_minutes: 30 # Optional: stop waiting for unanswered approvals after 30 minutes.
+  # An approval card nobody answers is declined after this many minutes, so a
+  # turn cannot sit open forever. Delete the line to wait forever instead.
+  approval_timeout_minutes: 10
   # A coding agent needs to run builds and tests. Every write, delete, command
   # and git action still asks for confirmation unless /clanker is on. Each new
   # browser origin is approved once per session; desktop control of VS Code

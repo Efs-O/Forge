@@ -259,7 +259,27 @@ export function makeGetDocumentSymbolsTool(): RegisteredTool {
         uri,
       );
       context?.abortSignal?.throwIfAborted();
-      if (!result?.length) return 'No symbols found.';
+      if (result === undefined) {
+        // `undefined` means no provider answered at all: a language server still
+        // starting, or a file type with no symbol provider. That is a different
+        // answer from "this file has no symbols", and one string for both let a
+        // model conclude the file was empty while it was still being parsed.
+        return (
+          `No symbol provider answered for ${String(args['path'] ?? 'this file')}. ` +
+          'The language server may still be starting — ask again in a few seconds, or use ' +
+          'search_code. A file type with no symbol provider answers the same way.'
+        );
+      }
+      if (result.length === 0) {
+        // VS Code answers `[]` both for "this file has no symbols" and for "no
+        // symbol provider is running yet"; the API cannot tell them apart, so
+        // neither can this. Say the hedge rather than assert either half.
+        return (
+          'No symbols found. That is not proof the file has none: a language server that has not ' +
+          'finished starting answers the same way. If you expected symbols here, ask again in a ' +
+          'few seconds, or use search_code.'
+        );
+      }
       return `${formatSymbolTree(result).join('\n')}\n\n${POSITION_NOTE}`;
     },
   };
@@ -291,7 +311,18 @@ export function makeGetWorkspaceSymbolsTool(): RegisteredTool {
         'vscode.executeWorkspaceSymbolProvider',
         query,
       );
-      if (!result?.length) return 'No symbols found.';
+      if (result === undefined) {
+        return (
+          `No workspace symbol provider answered for "${query}". ` +
+          'The language server may still be starting — ask again in a few seconds, or use search_code.'
+        );
+      }
+      if (result.length === 0) {
+        return (
+          `No symbols match "${query}". That is not proof none exist: a language server that has ` +
+          'not finished starting answers the same way. Ask again in a few seconds, or use search_code.'
+        );
+      }
       return formatWorkspaceSymbols(result);
     },
   };

@@ -209,7 +209,7 @@ describe('formatWakeInfo', () => {
       ...base,
       adapters: [{ ...base.adapters[0]!, wakeArmed: false, magicPacketEnabled: false }],
     });
-    expect(text).toContain('Wake armed: NO');
+    expect(text).toContain('Wake-on-Lan: NO');
     expect(text).toContain('Magic pkt:  DISABLED');
   });
 
@@ -224,7 +224,7 @@ describe('formatWakeInfo', () => {
       ...base,
       scheduledWakes: [{ hour: 6, minute: 0, days: 'daily' }],
     });
-    expect(text).toContain('Scheduled:    06:00 (daily)');
+    expect(text).toContain('Scheduled:         06:00 (daily)');
   });
 
   it('shows multiple recurring wakes', () => {
@@ -240,6 +240,6 @@ describe('formatWakeInfo', () => {
   });
 
   it('shows none when no scheduled task exists', () => {
-    expect(formatWakeInfo(base)).toContain('Scheduled:    none');
+    expect(formatWakeInfo(base)).toContain('Scheduled:         none');
   });
 });

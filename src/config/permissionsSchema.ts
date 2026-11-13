@@ -19,6 +19,10 @@ import { BrowserPermissionSchema, DesktopPermissionSchema } from './browserSchem
  * covers both files.
  */
 const PermissionsShape = z.object({
+  /** How long an approval card may sit unanswered before it resolves as a
+   *  timeout. Absent means FOREVER — the behaviour of every config written
+   *  before 0.17.171. A new install ships 10 minutes (`StarterConfig.ts`),
+   *  because a first session is exactly where nobody is watching the cards. */
   approval_timeout_minutes: z.number().int().min(1).max(1440).optional(),
   /** Removed with the approval stand-in in Forge 0.17.117. Declared only so the
    *  refine below can refuse a leftover BY name; it accepts anything, because

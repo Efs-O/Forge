@@ -3,6 +3,7 @@ import type { ChatMessage, ToolCall } from '../llm/types';
 import type { ToolRegistry } from '../tools/ToolRegistry';
 import type { ToolFailureTracker } from '../tools/StripTools';
 import { isJsonObject, parseJson } from '../tools/jsonInput';
+import { READ_ONLY_PERMISSIONS } from '../tools/toolContract';
 import {
   evaluateToolApproval,
   readToolApprovalMetadata,
@@ -148,7 +149,27 @@ export function commitBufferedToolDispatchEffects(
   messages.push(...buffered.messages.slice(buffered.historyLength));
 }
 
-/** Runs the maximal consecutive native-read runs, dispatching every boundary call in place. */
+/** One dispatch whose result is held back so the model still sees results in call
+ *  order while a parked call waits for its card. `promise` never rejects: the
+ *  failure is recorded on the slot and rethrown when the slot reaches the head of
+ *  the queue, which is the position its own error would have been reported in. */
+interface HeldDispatch {
+  effects: BufferedToolDispatchEffects;
+  promise: Promise<void>;
+  settled: boolean;
+  failed: boolean;
+  error?: unknown;
+}
+
+/** Runs the maximal consecutive native-read runs, dispatching every boundary call in place.
+ *
+ *  A gated call that touches no workspace file is PARKED: its card opens and its
+ *  dispatch runs on while the round carries on with the local reads behind it, so
+ *  a read never waits for an owner who may be minutes away (2026-11-13 lab: one
+ *  ungated call waited 12 min behind someone else's card). A call that mutates is
+ *  never parked, and a call that must keep its position waits for everything
+ *  parked ahead of it — so a write still runs before the read of the file it wrote.
+ */
 export async function dispatchWithParallelReads(
   calls: readonly ToolCall[],
   context: ToolDispatchRoundContext,
@@ -163,49 +184,171 @@ export async function dispatchWithParallelReads(
     effects: BufferedToolDispatchEffects,
   ) => Promise<void>,
 ): Promise<void> {
+  /** Results waiting their turn, oldest call first. */
+  const held: HeldDispatch[] = [];
+  const commitHead = (): void => {
+    const head = held.shift();
+    if (!head) return;
+    if (head.failed) throw head.error;
+    commitBufferedToolDispatchEffects(head.effects, messages, failureTracker, post);
+  };
+  /** Commit everything the front of the queue has made ready, in call order. */
+  const commitReady = (): void => {
+    while (held.length > 0 && held[0]!.settled) commitHead();
+  };
+  /** Run the held results out, but never let one of them replace an error that is
+   *  already in flight: the round is failing, and the first error is the one worth
+   *  reporting. Every slot still commits, so no tool result goes missing. */
+  const drainHeldQuietly = async (): Promise<void> => {
+    while (held.length > 0) {
+      const head = held[0]!;
+      if (!head.settled) await head.promise;
+      try {
+        commitHead();
+      } catch {
+        /* the caller's error outranks this one */
+      }
+    }
+  };
+  /** Run the round out: every held result must reach the model before the round ends. */
+  const drainHeld = async (): Promise<void> => {
+    while (held.length > 0) {
+      const head = held[0]!;
+      if (!head.settled) await head.promise;
+      commitHead();
+    }
+  };
+  /** Hold a dispatch that has already started, so it commits at its own position. */
+  const hold = (effects: BufferedToolDispatchEffects, run: () => Promise<void>): void => {
+    const slot: HeldDispatch = {
+      effects,
+      settled: false,
+      failed: false,
+      promise: Promise.resolve(),
+    };
+    slot.promise = run().then(
+      () => {
+        slot.settled = true;
+      },
+      (error: unknown) => {
+        slot.failed = true;
+        slot.settled = true;
+        slot.error = error;
+      },
+    );
+    held.push(slot);
+  };
+  /** Emit one buffered result: straight out when nothing is parked ahead of it,
+   *  otherwise held so the parked call keeps its place in what the model reads. */
+  const emit = (effects: BufferedToolDispatchEffects): void => {
+    if (held.length === 0) {
+      commitBufferedToolDispatchEffects(effects, messages, failureTracker, post);
+      return;
+    }
+    held.push({ effects, settled: true, failed: false, promise: Promise.resolve() });
+    commitReady();
+  };
+
   let callIndex = 0;
   let pendingCheck: ParallelReadCheck | undefined;
-  while (callIndex < calls.length) {
-    const call = calls[callIndex]!;
-    const check = context.signal?.aborted
-      ? { eligible: false }
-      : (pendingCheck ?? (await checkParallelReadCall(call, context, toolRegistry)));
-    pendingCheck = undefined;
-    if (!check.eligible) {
-      await dispatchSerial(call, check.approval);
-      callIndex += 1;
-      continue;
-    }
-
-    const run: ParallelReadCall[] = [{ toolCall: call, approval: check.approval }];
-    let nextIndex = callIndex + 1;
-    while (nextIndex < calls.length && !context.signal?.aborted) {
-      const nextCall = calls[nextIndex]!;
-      const nextCheck = await checkParallelReadCall(nextCall, context, toolRegistry);
-      if (!nextCheck.eligible) {
-        pendingCheck = nextCheck;
-        break;
+  try {
+    while (callIndex < calls.length) {
+      const call = calls[callIndex]!;
+      const check = context.signal?.aborted
+        ? { eligible: false }
+        : (pendingCheck ?? (await checkParallelReadCall(call, context, toolRegistry)));
+      pendingCheck = undefined;
+      if (!check.eligible) {
+        // A boundary call keeps its position: anything parked ahead of it runs first.
+        await drainHeld();
+        if (canParkForApproval(call, toolRegistry, context)) {
+          const effects = createBufferedToolDispatchEffects(messages);
+          hold(effects, () => dispatchBuffered(call, check.approval, effects));
+        } else {
+          await dispatchSerial(call, check.approval);
+        }
+        callIndex += 1;
+        continue;
       }
-      run.push({ toolCall: nextCall, approval: nextCheck.approval });
-      nextIndex += 1;
-    }
 
-    if (run.length === 1) {
-      await dispatchSerial(call, check.approval);
-    } else {
-      const outcomes = await runParallelReadBatch(run, context.signal, async (candidate) => {
-        const effects = createBufferedToolDispatchEffects(messages);
-        await dispatchBuffered(candidate.toolCall, candidate.approval, effects);
-        return effects;
-      });
-      for (const outcome of outcomes) {
-        if (outcome.kind === 'failed') throw outcome.error;
-        if (outcome.kind === 'not-started') break;
-        commitBufferedToolDispatchEffects(outcome.value, messages, failureTracker, post);
+      const run: ParallelReadCall[] = [{ toolCall: call, approval: check.approval }];
+      let nextIndex = callIndex + 1;
+      while (nextIndex < calls.length && !context.signal?.aborted) {
+        const nextCall = calls[nextIndex]!;
+        const nextCheck = await checkParallelReadCall(nextCall, context, toolRegistry);
+        if (!nextCheck.eligible) {
+          pendingCheck = nextCheck;
+          break;
+        }
+        run.push({ toolCall: nextCall, approval: nextCheck.approval });
+        nextIndex += 1;
       }
+
+      if (run.length === 1) {
+        if (held.length === 0) {
+          await dispatchSerial(call, check.approval);
+        } else {
+          const effects = createBufferedToolDispatchEffects(messages);
+          await dispatchBuffered(call, check.approval, effects);
+          emit(effects);
+        }
+      } else {
+        const outcomes = await runParallelReadBatch(run, context.signal, async (candidate) => {
+          const effects = createBufferedToolDispatchEffects(messages);
+          await dispatchBuffered(candidate.toolCall, candidate.approval, effects);
+          return effects;
+        });
+        for (const outcome of outcomes) {
+          if (outcome.kind === 'failed') {
+            if (held.length === 0) throw outcome.error;
+            held.push({
+              effects: createBufferedToolDispatchEffects(messages),
+              settled: true,
+              failed: true,
+              error: outcome.error,
+              promise: Promise.resolve(),
+            });
+            break;
+          }
+          if (outcome.kind === 'not-started') break;
+          emit(outcome.value);
+        }
+      }
+      callIndex = nextIndex;
     }
-    callIndex = nextIndex;
+  } catch (error) {
+    // A parked call still owes the model a tool-result row: commit whatever the
+    // parked calls produced before this error propagates. A transcript with a call
+    // that never answered is worse than the error the caller is about to report,
+    // and the caller already has the worse of the two errors in hand.
+    await drainHeldQuietly();
+    throw error;
   }
+  await drainHeld();
+}
+
+/**
+ * May this call be parked while its card waits? Only a call that changes nothing:
+ * the permission tiers the loop guard already treats as read-only, and a tool that
+ * declares no mutation. That is what makes the rule safe rather than guessed —
+ * `shell`, `desktop_press` and `ask_local_agent` all sit outside those tiers, and
+ * each can write a workspace file without saying so in its schema (review, 2026-11-13:
+ * parking a gated `shell` let a later read answer from BEFORE the command wrote).
+ * The call must also be one that can actually raise a card, or parking a plain read
+ * would run it early for no reason and reorder every existing round.
+ * One parked call at a time: the second gated call in a round keeps today's behaviour.
+ */
+function canParkForApproval(
+  call: ToolCall,
+  toolRegistry: ToolRegistry,
+  context: ToolDispatchRoundContext,
+): boolean {
+  if (context.signal?.aborted) return false;
+  const reg = toolRegistry.get(call.function.name);
+  if (!reg) return false;
+  if (reg.mutation !== undefined || reg.workspaceStateMutation === true) return false;
+  if (!READ_ONLY_PERMISSIONS.has(reg.permission)) return false;
+  return reg.approval !== undefined || reg.reachesOut !== undefined;
 }
 
 export type ParallelBatchOutcome<T> =

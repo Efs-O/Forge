@@ -141,7 +141,17 @@ import {
 // oversized answer instead of returning it middle-truncated (lab BUG-06). Headroom is now 15 chars.
 // 2026-11-13: runtime CLI targets and ask_agent.target_id add 986 chars
 // (~214 estimated tokens) for per-task selection without editing config.
-const MEASURED_CHARS = 68_971;
+// 2026-11-13: 69,210 (+239) after two approval-cost clauses: message_chat says a chat that
+// ingested untrusted content is asked to approve an outgoing send, and read_file says a secret
+// path asks the owner first (tool-reliability Phase 1.5, lab BUG-14/BUG-15). The message_chat
+// clause first claimed a clipboard read counted as untrusted content; `read_clipboard` does not
+// declare `untrustedResult`, so dispatch cannot mark it — the claim was cut (Codex review).
+// Headroom 790.
+// 2026-11-13: 69,673 (+463) for the Phase 2 reporting text: read_clipboard says its text
+// arrives marked untrusted, and format_file says it runs the project's own formatter and
+// counts the lines it changed (tool-reliability B1, B6). Ceiling raised 70,000 → 70,600 with
+// the owner's CHANGES.md note, because honest reporting is the point of the release.
+const MEASURED_CHARS = 69_673;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.
@@ -162,7 +172,9 @@ const COMPUTER_USE_TOOLS_EXCLUDED_PENDING_DECISION = ['browser_', 'desktop_'] as
 // 21 chars of headroom.
 // 2026-11-10: raised to 68,000 because lazy-group member names are required for
 // a model to find a requested tool's group; measured schema is 67,121 chars.
-const TOOL_SCHEMA_CHAR_BUDGET = 70_000;
+// 2026-11-13: 70,600 — the tool-reliability release adds reporting text that a model has to
+// read (which formatter ran, how many lines it changed, that clipboard text is untrusted).
+const TOOL_SCHEMA_CHAR_BUDGET = 70_600;
 
 const ALL_PERMISSIONS = new Set(ALL_TOOL_PERMISSIONS);
 

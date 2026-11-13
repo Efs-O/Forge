@@ -676,9 +676,12 @@ Jobs and `--unattended` agent-bus turns cannot show an approval card or use chat
 rules or Clanker. To allow a keyed action there, the owner adds it under
 `approvals.jobs.<job-id>.allow` or `approvals.unattended_bus.allow` in
 `~/.forge/policy.yaml`; a refusal names the exact line, and a rule for a removed
-job produces a load warning naming that job id. Approval cards have no hidden
-timeout: set `permissions.approval_timeout_minutes` in policy.yaml if you want
-one. Thirty minutes is suggested; when unset, a card waits until you answer.
+job produces a load warning naming that job id. Approval cards expire: a fresh
+install writes `permissions.approval_timeout_minutes: 10` into `~/.forge/policy.yaml`,
+so an unanswered card times out after 10 minutes and the tool result says so. On an
+older install the key is absent — there a card waits until you answer, until you set
+it. The value must be between 1 and 1440 minutes; to keep waiting forever, leave the
+key out.
 
 Say plainly what that lock does and does not do, because it is easy to over-trust. It
 stops Forge's own writers being used as a proxy for the agent, and it stops your own

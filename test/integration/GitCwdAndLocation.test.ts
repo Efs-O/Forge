@@ -276,6 +276,31 @@ describe('LSP tools prime the language service', () => {
     vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue([]);
     await expect(
       makeCodeIntelTool().handler({ operation: 'document_symbols', path: 'Game.js' }, undefined),
-    ).resolves.toBe('No symbols found.');
+    ).resolves.toMatch(/No symbols found\. That is not proof the file has none/u);
+  });
+
+  it('says so when no provider answered at all', async () => {
+    // One string used to cover "the file has no symbols" and "nothing has
+    // answered yet": the student concluded the first while the language server
+    // was still starting, and stopped looking at a file that had the class.
+    vi.spyOn(vscode.workspace, 'openTextDocument').mockResolvedValue({} as never);
+    vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
+    await expect(
+      makeCodeIntelTool().handler({ operation: 'document_symbols', path: 'Game.js' }, undefined),
+    ).resolves.toMatch(/^No symbol provider answered for Game\.js/u);
+  });
+
+  it('says so when the workspace symbol provider never answered', async () => {
+    vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
+    await expect(
+      makeCodeIntelTool().handler({ operation: 'workspace_symbols', query: 'Game' }, undefined),
+    ).resolves.toMatch(/^No workspace symbol provider answered for "Game"/u);
+  });
+
+  it('says the provider answered when it answered with none', async () => {
+    vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue([]);
+    await expect(
+      makeCodeIntelTool().handler({ operation: 'workspace_symbols', query: 'Game' }, undefined),
+    ).resolves.toMatch(/No symbols match "Game"\. That is not proof none exist/u);
   });
 });

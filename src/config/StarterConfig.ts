@@ -17,9 +17,15 @@ export interface StarterLlamaCppModel {
 // do the visible terminal and shell scripts. Existing configs are unchanged:
 // an absent key still means off.
 // Chat-to-chat new-chat and steer actions also stay off until opted in.
-// `approval_timeout_minutes` stays absent so unanswered approvals wait forever
-// unless the owner opts in through config.yaml.
+// `approval_timeout_minutes` ships ON (owner, 0.17.171): a card nobody answers
+// is declined after 10 minutes instead of holding the turn open forever. A new
+// user's first session is the one place nobody is guaranteed to be watching —
+// the 2026-11-13 lab measured 12 cards and 67 minutes of waiting in five runs,
+// seven of them never answered. An existing config with no key still waits
+// forever; deleting the line from a new one restores that.
+const APPROVAL_TIMEOUT_MINUTES_FOR_NEW_INSTALLS = 10;
 const DEFAULT_PERMISSIONS: NonNullable<ForgeConfig['permissions']> = {
+  approval_timeout_minutes: APPROVAL_TIMEOUT_MINUTES_FOR_NEW_INSTALLS,
   fs: { read: true, write: true, delete: true },
   net: { search: false, fetch: true },
   exec: { headless: true },

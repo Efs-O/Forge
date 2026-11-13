@@ -274,7 +274,10 @@ another.
 
 A \`say\` that starts a turn in an attended chat can stop on a tool-approval
 card. The owner answers it in the sidebar or the chat's bound Telegram.
-Nobody answers it, the card keeps waiting; with no \`permissions.approval_timeout_minutes\` set that is a hung turn, so \`wait\` exits 124 with the chat still busy. Read \`status\` before concluding anything.
+Nobody answers it, the card keeps waiting until
+\`permissions.approval_timeout_minutes\` expires it — a new install ships 10
+minutes, an older config has no key and waits forever, so \`wait\` exits 124
+with the chat still busy. Read \`status\` before concluding anything.
 
 ## Claude to Codex or Copilot
 

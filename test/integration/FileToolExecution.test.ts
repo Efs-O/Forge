@@ -325,4 +325,24 @@ describe('isolated file and directory tool execution', () => {
       'did not apply the edit',
     );
   });
+
+  it('refuses an empty selection instead of reporting a replacement', async () => {
+    // An empty selection has nothing to replace: `b.replace` on it inserts at the
+    // cursor, and the old result still claimed a replacement — in a file the
+    // caller cannot see and did not choose.
+    const file = path.join(root, 'empty-selection.ts');
+    fs.writeFileSync(file, 'unchanged\n', 'utf8');
+    const edit = vi.fn(async () => true);
+    (vscode.window as unknown as { activeTextEditor: unknown }).activeTextEditor = {
+      document: { uri: vscode.Uri.file(file), isDirty: false },
+      selection: { isEmpty: true },
+      edit,
+    };
+
+    await expect(makeReplaceSelectionTool().handler({ text: 'inserted' })).rejects.toThrow(
+      /nothing is selected in empty-selection\.ts/u,
+    );
+    expect(edit).not.toHaveBeenCalled();
+    expect(fs.readFileSync(file, 'utf8')).toBe('unchanged\n');
+  });
 });

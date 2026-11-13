@@ -47,7 +47,9 @@ custom_instructions: >-
 # that off with /clanker. Review this block before your first session and set
 # anything you do not want to false (or delete the line).
 permissions:
-  # approval_timeout_minutes: 30 # Optional: stop waiting for unanswered approvals after 30 minutes.
+  # A card nobody answers is declined after this many minutes. New installs get
+  # 10; delete the line here (or in config.yaml) to wait forever instead.
+  approval_timeout_minutes: 10
   # Secret-path patterns added to the built-in defaults, and the escape hatch:
   # exact files something may still read despite them.
   # secret_paths: ["**/.env.production"]

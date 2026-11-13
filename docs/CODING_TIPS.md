@@ -13,8 +13,10 @@ Read this whole file before your first read, search, edit, write, command, commi
 3. a lifetime failure rate → may describe a retired tool or an old build. date it by build and quant (`session_start.forge_version`) before quoting it
 4. `rg -c`/`grep -rc` to rank files by mentions → counts matching LINES, not mentions; two files tie at 5 that are 7 and 6 apart. for mentions: `grep -o -e PATTERN | sort | uniq -c`
 5. a control run that reuses the flag it contrasts (`rg -il` where the control needed `rg -l`) → both print the same number and read as agreement. a vacuous control exits 0; no scorer sees it
-6. `rg -rn PATTERN src` → `-r` eats the `n` as its replacement, so every match prints as the letter `n` and the line reads like a real hit. for line numbers use `rg -n`
+6. `rg -rn PATTERN src` (with or without a replacement) → `-r` always eats the `n`, so every match prints as the letter `n` and reads like a hit. for line numbers use `rg -n`
 7. `rg -F "phrase"` as the proof nothing was missed → it skips gitignored files silently, so the proof is hollow. pass `--no-ignore` (`include_ignored: true`) or name the file
+8. `search_sessions` returning `total_matches: 0` → not proof the archive lacks the topic. probe with a term you expect to hit (`project: "Forge"` → 672) and check `date_from` before reporting a gap
+9. a follow-up search that drops one alternative from the `rg -l "a|b"` that listed the file → it matched the other one; the narrow search is empty and reads as a phantom. repeat the whole pattern
 
 ## RUN
 1. `cd "C:/Users/…/sessions" && python -c "…"` → refused: the write is judged from the folder the command started in. pass `cwd: "C:/Users/…/sessions"` and the command alone
@@ -26,8 +28,11 @@ Read this whole file before your first read, search, edit, write, command, commi
 7. `json.loads` on every line of a session log → one bad line kills the scan halfway through the file. guard each line with `try/except` and keep going
 8. `cd ../other && { … ; } > rel/file.txt; tail rel/file.txt` → a `cd` inside the line moves the cwd for every command after it, so `tail` reads the wrong folder. give later commands absolute paths
 9. a bash double-quoted string holding backticks → bash runs them as command substitution, so the program gets text I did not write. wrap the body in single quotes or a quoted heredoc
-10. a scan run with `cwd` inside `~/.forge/sessions` → refused: any command there may write into Forge's files. run it from the workspace and pass absolute paths
+10. any command after `cd` into `~/.forge/…` — even `ls -la glob` → refused: the read-only table does not class it as a read. run from the workspace, pass absolute paths
 11. `probe && next && next` where the probe is meant to fail → the chain stops and the later commands never run. join probes with `;`
+12. a gated call batched with later gated calls → those cards and results still wait for the first; an expired card silences only that approval key. since 0.17.171 ungated calls run on
+13. `shell background: true` with `timeout_ms: 900000` → refused: `"timeout_ms" must be within 1000 to 600000`. the ceiling is 600000 even for a background job
+14. `stop_execution` on a finished job → its own `status: failed, exit_code: 1`, which reads like your stop. a real interruption is `terminated`, `exit_code: null` — quote that, not the code
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies only the tree it was written for. run the suite *after* the commit it is meant to certify, or the tip has no proof
@@ -39,16 +44,24 @@ Read this whole file before your first read, search, edit, write, command, commi
 3. an `old_str` rebuilt from two wrapped lines of a paragraph → refused: not found. the file holds a newline where the display wrapped; anchor one line, newlines and all
 4. a rename that lengthens an identifier → a line passes printWidth 100 and fails the formatter gate. after any rename: `git diff -U0 | grep '^+' | awk 'length > 101'`, re-wrap in the same pass
 5. `apply_line_edits` with `expected_lines` invented rather than copied → refused: has N lines but the range is M. the refusal prints the current lines verbatim; copy them from there
+6. `apply_line_edits` on `docs/TOOL_COVERAGE.md` → `ToolHarness.test.ts` diffs it against a fresh generation and normalises only `Generated:`. restore_file it after a demo
+7. `format_file` on a tracked file → VS Code's formatter, not the repo's Prettier: 165 lines rewritten in a prettier-clean file, and `npx prettier --check` then fails. restore_file it
+8. `replace_selection` with no active editor → refused: `no active editor`. It takes no path, so `get_editor_context` first — `Open tabs: (none)` means nothing can be written
+9. a multi-line string edit that drops the `+` between two literals → the parse error names a later line, not the missing one. after editing a joined description, re-read the block
+10. an `edit_file` whose `new_str` turns out to be the text already there → reports Applied, nothing changes, and the fix I meant never lands. diff the file, not the reply
+11. an `edit_file` whose `old_str` spans a function header plus its first body line, `new_str` only the header → the body line is deleted. repeat it in `new_str`
 
 ## TEST
 1. a harness that emits tool calls but never dispatches them → proves schema compatibility only. dispatch writes, deletes and commits before claiming behaviour is verified
 2. a flaky test → do not raise the timeout. await the promise that ends the work, then assert: fix it at the lifecycle boundary
 3. comparing objects by serialized source order → false failures on property order. compare by value; array order is meaningful
 4. `expect(x).toHaveLengthLessThanOrEqual(n)` → no such matcher, so the assertion itself throws. `expect(x.length).toBeLessThanOrEqual(n)`
+5. `fs.rmSync(tempDir, { recursive, maxRetries: 10 })` after killing a child → EPERM is not in the retried set, so the retries do nothing. poll until the directory is removable, then remove
 
 ## PATHS
 1. `~/.forge/sessions/<short-id>.jsonl` → no such file: logs carry the full 8-4-4-4-12 chat id. resolve a short id with a prefix glob
 2. `ls ~/.forge/logs/*` in `shell` → refused: a glob under `~/.forge/` counts as changing Forge's files. read them with `read_file`, `list_directory` or `find_files`
+3. `find_files "~/.forge/**"` → still anchored at the workspace root: the resolver expands `~` (0.17.171) but a glob outside the workspace opens no file. pass an absolute path
 
 ## FORENSICS
 1. pairing calls with results → pair the `tool_calls` row with the `tool` rows that follow it, positionally; the rendered chat hides tool failures entirely
@@ -60,3 +73,14 @@ Read this whole file before your first read, search, edit, write, command, commi
 7. counting recorded lines by a pattern anchored on a backtick → only the template line ever matches; agents write `- tool:`. anchor on the word tool:, allow an optional dash, skip the template
 8. blaming a mistake on a filtered log window from memory → the rows I "remember" may be hours older. print each hit's wall-clock time before attributing it
 9. a Fisher p quoted without its variant → the same 2×2 gives 0.21 strict vs 1.0 standard two-sided. name the variant; re-run the same function, never a library default
+10. a tool call with no result row for minutes → not a hang: an unanswered approval card writes its `gate` row only when answered or expired (15 min here). read the `gate` rows first
+11. a tool-result string quoted from a rep's staging file → it is the build that rep ran, not the current one. read the source before filing it as a live defect
+
+## DELEGATE
+1. `notify_user` with a `user_prompt` field → refused: `unknown argument "user_prompt"; this tool takes: message`. only the Blender tools echo it; resend with `message` alone
+2. `notify_user` with no remote chat bound → `Shown in the VS Code window only`: a local toast, never a phone ping. do not report that the user was notified remotely
+3. `manage_jobs` check `{kind: "none"}` → runs the action every tick and, since 0.17.171, delivers nothing; `get` says so. mute or restore with `on_change`, never by inventing a check
+4. `manage_jobs run_now` → runs in whichever window holds the scheduler lease (here the real repo's), ~40 s later. verify in `jobs/runs/<name>.jsonl`; do not re-call `run_now`
+5. `ask_agent` → "started a new background thread", not the owner's open panel chat, despite the description saying "the session linked to this chat". `/link` binds one first
+6. `list_delegation_targets` → lists VRAM-loading local models beside cloud ones; picking a local one loads weights and fights the chat model for the GPU. prefer the cloud list
+7. `manage_jobs create` is gated but `list` is not → after an expired card the create returns `Not run`; prove the aftermath with `list` + `list_directory C:/Users/<name>/.forge/jobs`

@@ -47,7 +47,8 @@ describe('starter config generation', () => {
     expect(ForgeConfigSchema.parse(config).models).toHaveLength(2);
     expect(config.active_model).toBe('a');
     expect(config.defaults?.tool_groups).toBeUndefined();
-    expect(config.permissions?.approval_timeout_minutes).toBeUndefined();
+    // A new install must not be able to sit on an unanswered card forever.
+    expect(config.permissions?.approval_timeout_minutes).toBe(10);
   });
 
   it('generates a schema-valid multi-model Ollama config', () => {

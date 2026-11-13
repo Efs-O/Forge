@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { expandLeadingUserToken } from './secretPaths';
 
 /**
  * Turns a filesystem error into one the model can act on.
@@ -35,6 +36,16 @@ export function formatPathMiss(
     return (
       `${tool}: nothing exists there. "${requestedPath}" is absolute, so it was used as given. ` +
       `${message} ${sameNameHint(tool, sameNamePath)}Use find_files to locate it before retrying.`
+    );
+  }
+  const expanded = expandLeadingUserToken(requestedPath);
+  if (expanded !== requestedPath) {
+    // The resolver expands a leading `~` or `%USERPROFILE%` (0.17.171), so the
+    // sentence below about a workspace root would name the wrong base.
+    return (
+      `${tool}: nothing exists there. "${requestedPath}" names the current user's folder, so it ` +
+      `was looked for at ${expanded}. ${message} ${sameNameHint(tool, sameNamePath)}` +
+      'Use find_files to locate it before retrying.'
     );
   }
   // Show the request and the resolution separately: seeing only one of them is

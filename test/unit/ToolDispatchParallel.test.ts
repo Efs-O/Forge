@@ -258,7 +258,7 @@ describe('ToolDispatch parallel read batches', () => {
     expect(messages).toEqual([]);
   });
 
-  it('runs a read that needs approval serially in its original position', async () => {
+  it('lets a local read run on while a gated call waits for its card', async () => {
     const steps: string[] = [];
     toolRegistry.register(
       readTool(
@@ -279,12 +279,19 @@ describe('ToolDispatch parallel read batches', () => {
         return 'entries';
       }),
     );
-    requestApproval.mockImplementation(async () => {
-      steps.push('approval');
-      return 'approved';
-    });
+    let releaseApproval: () => void = () => undefined;
+    requestApproval.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          steps.push('approval');
+          releaseApproval = () => {
+            steps.push('approval:answered');
+            resolve('approved');
+          };
+        }),
+    );
 
-    await dispatch.dispatch(
+    const round = dispatch.dispatch(
       [
         makeToolCall('read_file', { path: '.env' }, 'secret'),
         makeToolCall('list_directory', { path: '.' }, 'listing'),
@@ -293,16 +300,112 @@ describe('ToolDispatch parallel read batches', () => {
       messages,
       'approval-order',
     );
+    await pause(5);
+
+    // The card is still unanswered, and the read nobody had to ask about is done.
+    expect(steps).toContain('listing:end');
+    expect(steps).not.toContain('secret:end');
+
+    releaseApproval();
+    await round;
 
     expect(steps).toEqual([
       'approval',
-      'secret:start',
-      'secret:end',
       'listing:start',
       'listing:end',
+      'approval:answered',
+      'secret:start',
+      'secret:end',
     ]);
     expect(requestApproval).toHaveBeenCalledOnce();
+    // Running out of order does not let the model READ them out of order.
     expect(messages.map((message) => message.tool_call_id)).toEqual(['secret', 'listing']);
+  });
+
+  it('never parks a gated call that changes the workspace', async () => {
+    const steps: string[] = [];
+    toolRegistry.register({
+      ...readTool(
+        'write_file',
+        async () => {
+          steps.push('write:start');
+          await pause(20);
+          steps.push('write:end');
+          return 'Written: x.ts';
+        },
+        () => ({ dangerous: true, detail: 'outside the workspace' }),
+      ),
+      permission: 'write',
+      mutation: { paths: () => ['x.ts'] },
+    });
+    toolRegistry.register(
+      readTool('read_file', async () => {
+        steps.push('read:start');
+        steps.push('read:end');
+        return 'contents';
+      }),
+    );
+    let releaseApproval: () => void = () => undefined;
+    requestApproval.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          steps.push('approval');
+          releaseApproval = () => resolve('approved');
+        }),
+    );
+
+    const round = dispatch.dispatch(
+      [
+        makeToolCall('write_file', { path: 'x.ts' }, 'w'),
+        makeToolCall('read_file', { path: 'x.ts' }, 'r'),
+      ],
+      allowed,
+      messages,
+      'mutation-order',
+    );
+    await pause(5);
+    // The read must not run against the file as it was before the write that is
+    // still sitting on someone's approval card.
+    expect(steps).not.toContain('read:start');
+    releaseApproval();
+    await round;
+    expect(steps).toEqual(['approval', 'write:start', 'write:end', 'read:start', 'read:end']);
+    expect(messages.map((message) => message.tool_call_id)).toEqual(['w', 'r']);
+  });
+
+  it('says who approved a gated call, and how long the wait cost', async () => {
+    toolRegistry.register(
+      readTool(
+        'web_fetch',
+        async () => 'fetched',
+        () => ({ reachesOut: 'net', detail: 'https://example.com' }),
+      ),
+    );
+    requestApproval.mockImplementation(
+      async (
+        _name: string,
+        _detail: string,
+        _dangerous: boolean,
+        _conv: string | undefined,
+        _signal: AbortSignal | undefined,
+        options?: { grant?: { waitedMs?: number } },
+      ) => {
+        if (options?.grant) options.grant.waitedMs = 251_000;
+        return 'approved';
+      },
+    );
+
+    await dispatch.dispatch(
+      [makeToolCall('web_fetch', { url: 'https://example.com' }, 'f')],
+      allowed,
+      messages,
+      'grant-note',
+    );
+
+    const content = messages[0]?.content;
+    expect(typeof content === 'string' ? content : '').toContain(
+      '[you approved this call after 4m11s]',
+    );
   });
 
   it('cancels the whole batch and appends cancelled results in call order', async () => {

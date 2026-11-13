@@ -192,7 +192,7 @@ export function formatWakeInfo(info: WakeInfo): string {
     lines.push(`  MAC:        ${adapter.macAddress}`);
     if (adapter.ipAddress) lines.push(`  IP:         ${adapter.ipAddress}`);
     if (adapter.broadcast) lines.push(`  Broadcast:  ${adapter.broadcast}   (UDP port 9)`);
-    lines.push(`  Wake armed: ${adapter.wakeArmed ? 'yes' : 'NO'}`);
+    lines.push(`  Wake-on-Lan: ${adapter.wakeArmed ? 'yes' : 'NO'}`);
     lines.push(
       `  Magic pkt:  ${
         adapter.magicPacketEnabled === null
@@ -204,9 +204,9 @@ export function formatWakeInfo(info: WakeInfo): string {
     );
     lines.push('');
   }
-  lines.push(`Sleep states: ${info.availableStates.join(', ') || 'none reported'}`);
+  lines.push(`Sleep states:      ${info.availableStates.join(', ') || 'none reported'}`);
   lines.push(
-    `Wake timers:  ${
+    `Wake timers:       ${
       info.wakeTimersAllowed === null
         ? 'unknown'
         : info.wakeTimersAllowed
@@ -214,7 +214,9 @@ export function formatWakeInfo(info: WakeInfo): string {
           : 'DISABLED on the active power scheme'
     }`,
   );
-  lines.push(`Armed wake:   ${info.armedWake ?? 'none'}`);
+  // `Armed wake timer:`, never `Armed wake:` — the per-adapter line above is the
+  // NIC's own capability, and the old spelling let a model read one as the other.
+  lines.push(`Armed wake timer:  ${info.armedWake ?? 'none'}`);
   if (info.scheduledWakes && info.scheduledWakes.length > 0) {
     const desc = info.scheduledWakes
       .map((w) => {
@@ -224,9 +226,9 @@ export function formatWakeInfo(info: WakeInfo): string {
         return `${time} (${days})`;
       })
       .join('; ');
-    lines.push(`Scheduled:    ${desc}`);
+    lines.push(`Scheduled:         ${desc}`);
   } else {
-    lines.push(`Scheduled:    none`);
+    lines.push(`Scheduled:         none`);
   }
   lines.push('');
   // Said plainly every time, because it is the thing people expect to be false.

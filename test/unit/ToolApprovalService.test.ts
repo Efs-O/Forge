@@ -16,7 +16,10 @@ vi.mock('vscode', () => ({
 
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
-import { ToolApprovalPolicyDenied } from '../../src/sidebar/toolApprovalOutcome';
+import {
+  ToolApprovalPolicyDenied,
+  type ApprovalGrantRecord,
+} from '../../src/sidebar/toolApprovalOutcome';
 import { ToolApprovalService } from '../../src/sidebar/ToolApprovalService';
 import { chatClankerRecords } from '../../src/sidebar/chatClanker';
 import { chatRules } from '../../src/sidebar/chatApprovalRules';
@@ -540,9 +543,9 @@ describe('ToolApprovalService', () => {
     await expect(next).resolves.toBe('approved');
   });
 
-  it('starts queued approval timeouts at request time', async () => {
+  it('starts a queued approval timeout only when that card is shown', async () => {
     vi.useFakeTimers();
-    let minutes = 2;
+    let minutes = 30;
     const notices: HostToWebview[] = [];
     const service = new ToolApprovalService(
       (message) => {
@@ -560,11 +563,29 @@ describe('ToolApprovalService', () => {
       type: 'notice',
       conversationId: 'second',
       message:
-        'Forge: write_file is waiting for owner approval behind another card. This turn remains active; use Stop to cancel it.',
+        'Forge: write_file is waiting for owner approval behind 1 other card. Answer them in ' +
+        'order and this turn continues; use Stop to cancel it.',
     });
 
-    await vi.advanceTimersByTimeAsync(60_000);
+    // The queued card has never been on screen: its owner has not been asked yet,
+    // so three times its own timeout elapses and it is still waiting to be shown.
+    // Before 0.17.171 it expired unseen here.
+    await vi.advanceTimersByTimeAsync(180_000);
+    let queuedSettled = false;
+    void queued.then(() => {
+      queuedSettled = true;
+    });
+    expect(queuedSettled).toBe(false);
 
+    expect(service.pending()?.conversationId).toBe('first');
+    const request = service.pending();
+    if (!request) throw new Error('first approval was not active');
+    service.resolve(request.id, 'approve');
+    await expect(active).resolves.toBe('approved');
+    expect(service.pending()?.conversationId).toBe('second');
+
+    // Only now does the second card's own clock apply.
+    await vi.advanceTimersByTimeAsync(60_000);
     await expect(queued).resolves.toEqual({ kind: 'timeout', minutes: 1 });
     expect(notices).toContainEqual({
       type: 'notice',
@@ -573,11 +594,70 @@ describe('ToolApprovalService', () => {
       message:
         'Forge: owner approval for write_file timed out after 1 min. That call was not run. This turn will continue with the remaining steps; use Stop to cancel the turn.',
     });
-    expect(service.pending()?.conversationId).toBe('first');
-    const request = service.pending();
-    if (!request) throw new Error('first approval was not active');
-    service.resolve(request.id, 'approve');
-    await expect(active).resolves.toBe('approved');
+  });
+
+  it('shows a fresh card for a different approval after one went unanswered', async () => {
+    vi.useFakeTimers();
+    const posted: HostToWebview[] = [];
+    const service = new ToolApprovalService(
+      (message) => posted.push(message),
+      () => ({}) as never,
+      undefined,
+      () => 1,
+    );
+    const ignored = service.request('schedule_wake', 'wake', true, 'conv');
+    await vi.advanceTimersByTimeAsync(60_000);
+    await expect(ignored).resolves.toEqual({ kind: 'timeout', minutes: 1 });
+
+    // The same approval again: no second card, the turn already lost that one.
+    await expect(service.request('schedule_wake', 'wake again', true, 'conv')).resolves.toEqual({
+      kind: 'timeout',
+      minutes: 1,
+      carried: true,
+    });
+
+    // A DIFFERENT approval is a question nobody has been given a chance to answer.
+    const next = service.request('manage_jobs', 'create', true, 'conv');
+    let settled = false;
+    void next.then(() => {
+      settled = true;
+    });
+    expect(settled).toBe(false);
+    const card = service.pending();
+    if (!card) throw new Error('an unrelated approval was silenced by someone else’s timeout');
+    expect(card.toolName).toBe('manage_jobs');
+    service.resolve(card.id, 'approve');
+    await expect(next).resolves.toBe('approved');
+  });
+
+  it('reports the owner wait through the grant box, measured from when the card was shown', async () => {
+    vi.useFakeTimers();
+    const service = new ToolApprovalService(() => undefined, () => ({}) as never);
+    const grant: ApprovalGrantRecord = {};
+    const pending = service.request(
+      'web_fetch',
+      'https://example.com',
+      false,
+      'conv',
+      undefined,
+      { grant },
+    );
+    const card = service.pending();
+    if (!card) throw new Error('approval card was not shown');
+    await vi.advanceTimersByTimeAsync(5_000);
+    service.resolve(card.id, 'approve');
+    await expect(pending).resolves.toBe('approved');
+    expect(grant.waitedMs).toBe(5_000);
+    // A call no card was shown for reports no wait at all.
+    const unanswered: ApprovalGrantRecord = {};
+    const declined = service.request('write_file', 'x', true, 'conv', undefined, {
+      grant: unanswered,
+    });
+    const second = service.pending();
+    if (!second) throw new Error('second approval card was not shown');
+    service.resolve(second.id, 'decline');
+    await expect(declined).resolves.toBe('declined');
+    expect(unanswered.waitedMs).toBeUndefined();
   });
 
   it('reads a changed timeout setting for each new approval', async () => {

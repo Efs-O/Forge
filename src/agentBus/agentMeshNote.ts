@@ -172,8 +172,8 @@ not saved and the approval stays chat-only. Jobs and \`--unattended\` bus turns
 have no card and use only \`approvals.jobs.<id>.allow\` or
 \`approvals.unattended_bus.allow\`; an unmatched refusal names the exact policy
 line, so report it to the owner instead of retrying. The owner may set
-\`permissions.approval_timeout_minutes\`; 30 minutes is suggested, but Forge
-doesn't add a hidden timeout.
+\`permissions.approval_timeout_minutes\`: a new install ships 10 minutes, and a
+config with no key still waits forever.
 
 This section belongs to Forge: keep your own rules outside these two comment lines, and
 to remove the note delete everything between them. Forge refreshes this section when its

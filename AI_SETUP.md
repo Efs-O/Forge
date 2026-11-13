@@ -239,8 +239,8 @@ writes `approvals.always` through Forge; no agent tool can write
 `~/.forge/policy.yaml`. If that file is locked, the rule remains chat-only. Jobs
 and `--unattended` bus turns have no card and use only their owner policy allow
 lists; an unmatched refusal names the exact line to add, so do not retry it.
-The owner may set `permissions.approval_timeout_minutes`; 30 minutes is
-suggested, but Forge adds no hidden timeout.
+The owner may set `permissions.approval_timeout_minutes`: a new install ships 10
+minutes, and a config with no key still waits forever.
 
 Read the complete usage header of the installed `forge.sh`; there is no `join`
 command. `say` follows that agent's previously selected Forge chat, while

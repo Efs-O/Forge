@@ -123,7 +123,8 @@ export function makeReadFileTool(deps: ReadFileDeps = {}): RegisteredTool {
           'context. Use reads (up to 10 items of {path, start_line, end_line}) to read several ' +
           'files or ranges in ONE call — each section is headed by its path and range, and a ' +
           'path that fails reports in its own section without losing the others. Exactly one of ' +
-          'path or reads.',
+          'path or reads. A path matching a secret pattern (permissions.secret_paths) asks the ' +
+          'owner first.',
         parameters: {
           type: 'object',
           properties: {

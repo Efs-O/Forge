@@ -17,6 +17,51 @@ export type ToolApprovalOutcome =
   | 'declined'
   | { kind: 'timeout'; minutes: number; carried?: true };
 
+/** Anything that is not a granted approval: the outcomes `toolApprovalResult` words. */
+export type UngrantedApprovalOutcome =
+  | 'declined'
+  | { kind: 'timeout'; minutes: number; carried?: true };
+
+/** `41s`, `5m09s`, `12m` — the wait an approval cost, in the shape a card's
+ *  answer takes in a sentence. Minutes first, because a card that gets answered
+ *  at all usually waited minutes, which is the whole point of reporting it. */
+export function formatApprovalWait(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  if (total < 60) return `${total}s`;
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return seconds === 0 ? `${minutes}m` : `${minutes}m${String(seconds).padStart(2, '0')}s`;
+}
+
+/** The line a granted card approval adds to the tool result, or '' when nobody
+ *  waited. One place, so every gated tool attributes the wait the same way instead
+ *  of each tool inventing its own claim about who said yes (BUG-14: `web_fetch`
+ *  said "approved for the rest of it" and the model read that as automatic). */
+export function approvalGrantNote(waitedMs: number | undefined): string {
+  if (waitedMs === undefined) return '';
+  return `[you approved this call after ${formatApprovalWait(waitedMs)}]`;
+}
+
+/**
+ * What an unanswered approval silences: the exact approval this call needs.
+ *
+ * A card that offered "Allow for this chat" carries the keys it would store, and
+ * those keys are what a later call would re-ask for, so they are the honest
+ * identity of "the same approval". With no offer to go on, the tool and the gate
+ * that raised the card are the best answer available — enough to keep an ignored
+ * `schedule_wake` from silencing `manage_jobs create`, which is what the old
+ * one-mark-per-chat used to do (2026-11-13 lab, rep 21).
+ */
+export function approvalCarryKey(
+  toolName: string,
+  options?: Pick<ToolApprovalCallOptions, 'allowForChat' | 'policyApprovalKey' | 'gateKind'>,
+): string {
+  const offered = options?.allowForChat?.keys;
+  if (offered && offered.length > 0) return `keys:${[...offered].sort().join('|')}`;
+  if (options?.policyApprovalKey) return `key:${options.policyApprovalKey}`;
+  return `tool:${toolName}${options?.gateKind ? `:gate:${options.gateKind}` : ''}`;
+}
+
 /**
  * Format a declined or timed-out approval for the model's tool-result row.
  *
@@ -28,14 +73,11 @@ export type ToolApprovalOutcome =
  * can change what the owner clicks, and in the unattended refusal below, where
  * nobody is there to say no at all.
  */
-export function toolApprovalResult(
-  toolName: string,
-  outcome: Exclude<ToolApprovalOutcome, 'approved'>,
-): string {
+export function toolApprovalResult(toolName: string, outcome: UngrantedApprovalOutcome): string {
   return typeof outcome === 'string'
     ? `User declined: ${toolName}. The user said no to this action: do not do the same thing another way (another tool, command or path) unless they ask for it.`
     : outcome.carried
-      ? `Not run: an approval earlier in this turn went unanswered for ${outcome.minutes} min, so no card was shown for this ${toolName} call. Do not retry it this turn. Finish the remaining steps, then list this one as not done in your final reply.`
+      ? `Not run: this ${toolName} call needs the approval that went unanswered earlier in this turn (${outcome.minutes} min), so no new card was shown. Do not retry it this turn. Finish the remaining steps, then list this one as not done in your final reply.`
       : `Not run: nobody answered the approval for ${toolName} within ${outcome.minutes} min. ` +
         'Do not retry it this turn. Finish the remaining steps, then list this one as not done in your final reply.';
 }
@@ -144,4 +186,17 @@ export interface ToolApprovalCallOptions {
   /** Set only for a keyed unattended call that policy did not allow. */
   policyAllowPath?: string;
   policyApprovalKey?: string;
+  /** A box the caller hands in and reads back. The queue writes the owner's wait
+   *  into it when it answers this call from a card, so the wait can reach the
+   *  tool result while the outcome stays the plain `'approved'` string every
+   *  consumer already compares against — no second ledger to consult. */
+  grant?: ApprovalGrantRecord;
+}
+
+/** What the queue reports back through `ToolApprovalCallOptions.grant`. */
+export interface ApprovalGrantRecord {
+  /** Set when a card was shown and answered: how long the owner took, measured
+   *  from the moment the card was SHOWN. A card that queued behind another was
+   *  not on screen for its share of the turn, so that share is not charged here. */
+  waitedMs?: number;
 }

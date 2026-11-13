@@ -38,12 +38,8 @@ import {
 } from './memoryTools';
 import { makeProblemWatcher } from './editDiagnostics';
 import { makeEditFileTool } from './editFileTool';
-import {
-  makeMoveFileTool,
-  makeDeleteFileTool,
-  makeFormatFileTool,
-  makeRenameSymbolTool,
-} from './fileEditTools';
+import { makeMoveFileTool, makeDeleteFileTool, makeRenameSymbolTool } from './fileEditTools';
+import { makeFormatFileTool } from './formatFileTool';
 import { bundledRipgrepDir } from './RipgrepResolver';
 import { makeShellTool } from './shellTool';
 import { makeSystemStatusTool } from './systemStatusTool';

@@ -5,7 +5,7 @@ import { isPathInside } from './pathContainment';
 import { foldDrivePath } from './drivePath';
 import { WorkspacePathMissingError } from './workspacePathMissingError';
 import { openForgeFileRoots } from '../tools/ownerPathsOpen';
-import { normalizePathForMatch } from '../tools/secretPaths';
+import { expandLeadingUserToken, normalizePathForMatch } from '../tools/secretPaths';
 
 export interface ResolveWorkspacePathOptions {
   workspaceRoot?: string;
@@ -46,7 +46,13 @@ export function resolveWorkspacePath(
   options: ResolveWorkspacePathOptions = {},
 ): string {
   const root = options.workspaceRoot ?? defaultWorkspaceRoot();
-  const input = foldDrivePath(filePath);
+  // `~`, `$HOME` and `%USERPROFILE%` at the START of a path are how a model spells
+  // the home folder. Left alone they resolve against the workspace root, so
+  // `~/.forge/jobs` came back "nothing exists there" — a refusal that reads like a
+  // fact about the folder. Only a leading token is expanded: a `~` or `$HOME` in
+  // the middle of a path is the caller's own directory name, and expanding it
+  // there invented a folder that was never typed.
+  const input = foldDrivePath(expandLeadingUserToken(filePath));
   if (path.isAbsolute(input) && options.allowAbsolute === false) {
     throw new Error(`Absolute paths are not allowed: ${filePath}`);
   }
@@ -88,7 +94,10 @@ export function resolveWorkspaceUri(
   options: ResolveWorkspacePathOptions = {},
 ): vscode.Uri {
   const root = options.workspaceRoot ?? defaultWorkspaceRoot();
-  if (!root && !path.isAbsolute(filePath)) throw new Error('No workspace folder open.');
+  // The expanded form is what decides whether a workspace root is needed: a bare
+  // `~` is absolute once expanded, so it must not be refused for want of a folder.
+  if (!root && !path.isAbsolute(expandLeadingUserToken(filePath)))
+    throw new Error('No workspace folder open.');
   return vscode.Uri.file(resolveWorkspacePath(filePath, options));
 }
 

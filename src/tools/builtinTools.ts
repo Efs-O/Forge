@@ -197,6 +197,15 @@ export function makeReplaceSelectionTool(): RegisteredTool {
     handler: async (args) => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) throw new Error('replace_selection: no active editor');
+      if (editor.selection.isEmpty) {
+        // An empty selection has nothing to replace: `b.replace` on it inserts at
+        // the cursor, and the result then claimed a replacement the caller never
+        // asked for, in a file the caller cannot see. Refuse and name the file.
+        throw new Error(
+          `replace_selection: nothing is selected in ${vscode.workspace.asRelativePath(editor.document.uri)}, so there is nothing to replace. ` +
+            'Select the text to replace, or use insert_code to add text at the cursor, or edit_file with an explicit path.',
+        );
+      }
       const saved = await editAndSave('replace_selection', editor, (b) =>
         b.replace(editor.selection, args['text'] as string),
       );

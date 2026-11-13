@@ -18,10 +18,10 @@ import { makeEditFileTool } from '../../src/tools/editFileTool';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
 import {
   makeDeleteFileTool,
-  makeFormatFileTool,
   makeMoveFileTool,
   makeRenameSymbolTool,
 } from '../../src/tools/fileEditTools';
+import { makeFormatFileTool } from '../../src/tools/formatFileTool';
 import { makeApplyCodeActionTool } from '../../src/tools/codeActionTools';
 import { makeEditNotebookCellTool } from '../../src/tools/notebookTools';
 import { makeRestoreFileTool } from '../../src/tools/gitTools';

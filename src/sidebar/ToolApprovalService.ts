@@ -17,11 +17,12 @@ import {
   type UnattendedConversationRegistry,
 } from './unattendedConversations';
 import {
-  ToolApprovalPolicyDenied,
+  approvalCarryKey,
+  type ApprovalGrantRecord,
   type ToolApprovalCallOptions,
   type ToolApprovalOutcome,
 } from './toolApprovalOutcome';
-import { unattendedFlaggedExitDetails, unattendedTaintGateDetails } from './untrustedExitPolicy';
+import { answerBeforeCard } from './approvalAutoAnswer';
 import { ApprovalTimeoutState } from './approvalTimeoutState';
 import { approvalEventForConversation } from './approvalEventLookup';
 import type { ChatClankerRecords } from './chatClanker';
@@ -51,6 +52,15 @@ interface PendingApproval extends ToolApprovalRequestEvent {
   /** The card is now waiting for the owner and has said so once. */
   waitingForOwner?: boolean;
   cardReason?: string;
+  /** What an unanswered card silences: see `approvalCarryKey`. */
+  carryKey: string;
+  /** The timeout this card was asked for, kept until the card is SHOWN. */
+  timeoutMinutes?: number;
+  /** When this card reached the owner. The wait reported back to the model runs
+   *  from here, not from the request: a card queued behind another was invisible. */
+  activatedAt?: number;
+  /** The caller's box: the owner's wait is written into it on an approval answer. */
+  grant?: ApprovalGrantRecord;
 }
 
 export class ToolApprovalService {
@@ -175,69 +185,19 @@ export class ToolApprovalService {
   ): Promise<ToolApprovalOutcome> {
     if (signal?.aborted) return Promise.resolve('declined');
     const clankerEnabled = conversationId ? this.getClankerModeForApproval(conversationId) : false;
+    // An unanswered card silences this one approval, not the whole chat: a later
+    // call that needs a DIFFERENT approval still gets its own card.
+    const carryKey = approvalCarryKey(toolName, options);
     if (conversationId) {
-      const timedOut = this.timeouts.timedOutResult(conversationId);
+      const timedOut = this.timeouts.timedOutResult(conversationId, carryKey);
       if (timedOut) return Promise.resolve(timedOut);
     }
-    if (conversationId && this.unattended.has(conversationId) && options?.policyAllowPath) {
-      return Promise.reject(
-        new ToolApprovalPolicyDenied(toolName, {
-          job: this.unattended.jobMeta(conversationId) !== undefined,
-          allowPath: options.policyAllowPath,
-          ...(options.policyApprovalKey ? { approvalKey: options.policyApprovalKey } : {}),
-          ...unattendedFlaggedExitDetails(options),
-        }),
-      );
-    }
-    /* An unattended taint gate requires an owner. Refuse before the dangerous-call
-     * branch below can approve it without a card nobody is there to answer. */
-    if (
-      options?.gateKind === 'taintGate' &&
-      conversationId &&
-      this.unattended.has(conversationId)
-    ) {
-      return Promise.reject(
-        new ToolApprovalPolicyDenied(toolName, {
-          job: this.unattended.jobMeta(conversationId) !== undefined,
-          ...unattendedTaintGateDetails(options, conversationId),
-        }),
-      );
-    }
-    if (conversationId && this.unattended.has(conversationId)) {
-      if (dangerous) {
-        const job = this.unattended.jobMeta(conversationId) !== undefined;
-        // Nothing here can answer it, so refuse at once — naming the pattern and
-        // the alternative — and let the run carry on. A deny-list command
-        // (`gateKind: 'denyList'`) lands here too, refused whatever an
-        // automated answer would have said, with the tool it should use in
-        // `options.alternative`.
-        return Promise.reject(
-          new ToolApprovalPolicyDenied(toolName, {
-            job,
-            ...(options?.cardReason ? { why: options.cardReason } : {}),
-            ...(options?.alternative ? { alternative: options.alternative } : {}),
-          }),
-        );
-      }
-      return Promise.resolve('approved');
-    }
-    /* Clanker covers every remaining call except deny-listed destructive shell
-     * commands, Forge guard files, and secret reads followed by egress. Dangerous
-     * alone is not a stop; the owner wall runs earlier and deny-list gates are tagged. */
-    if (
-      conversationId &&
-      options?.clankerStop !== true &&
-      options?.gateKind !== 'denyList' &&
-      clankerEnabled
-    ) {
-      this.autoApproved({
-        toolName,
-        ...(detail ? { detail } : {}),
-        conversationId,
-        answeredBy: 'clanker',
-      });
-      return Promise.resolve('approved');
-    }
+    const autoAnswer = answerBeforeCard(toolName, detail, dangerous, conversationId, options, {
+      unattended: this.unattended,
+      clankerEnabled,
+      autoApproved: (event) => this.autoApproved(event),
+    });
+    if (autoAnswer !== 'needs-card') return autoAnswer;
     if (!this.getView() && this.sinks.size === 0) {
       return Promise.reject(
         new Error(`Forge: sidebar is unavailable for tool approval (${toolName}).`),
@@ -261,13 +221,13 @@ export class ToolApprovalService {
         ...(options?.cardReason ? { cardReason: options.cardReason } : {}),
         ...(options?.allowForChat ? { allowForChat: options.allowForChat } : {}),
         ...(options?.alwaysInProject ? { alwaysInProject: options.alwaysInProject } : {}),
+        carryKey,
+        ...(timeoutMinutes !== undefined ? { timeoutMinutes } : {}),
+        ...(options?.grant ? { grant: options.grant } : {}),
       };
-      if (timeoutMinutes !== undefined) {
-        pending.timer = setTimeout(
-          () => this.timeout(pending, timeoutMinutes),
-          timeoutMinutes * 60_000,
-        );
-      }
+      // The timer starts when the card is shown, not when it is queued: a card
+      // sitting behind another one the owner never saw used to expire unseen, so
+      // the first unanswered card of a batch could silently swallow the rest.
       if (signal) {
         pending.abortListener = () => this.cancel(pending.id);
         signal.addEventListener('abort', pending.abortListener, { once: true });
@@ -275,9 +235,14 @@ export class ToolApprovalService {
       this.queue.push(pending);
       if (pending.conversationId) this.onApprovalStart?.(pending.conversationId);
       if (this.active) {
+        // The card in front of this one, plus any queued before it. This call's own
+        // entry is already in the queue, so the length is exactly the count to name.
+        const behind = this.queue.length;
         this.post({
           type: 'notice',
-          message: `Forge: ${toolName} is waiting for owner approval behind another card. This turn remains active; use Stop to cancel it.`,
+          message:
+            `Forge: ${toolName} is waiting for owner approval behind ${String(behind)} other ` +
+            `card${behind === 1 ? '' : 's'}. Answer them in order and this turn continues; use Stop to cancel it.`,
           ...(conversationId ? { conversationId } : {}),
         });
       }
@@ -325,6 +290,11 @@ export class ToolApprovalService {
       resolution?.chatRuleErrors,
       resolution?.approvalNotice,
     );
+    // The wait the model hears about is the owner's, measured from the moment the
+    // card was on screen — not the queue's, and not the handler's.
+    if (answer !== 'decline' && item.grant && item.activatedAt !== undefined) {
+      item.grant.waitedMs = Date.now() - item.activatedAt;
+    }
     this.pump();
   }
 
@@ -371,14 +341,24 @@ export class ToolApprovalService {
     this.post({
       type: 'notice',
       severity: 'warning',
-      message: `Forge: owner approval for ${item.toolName} timed out after ${minutes} min. That call was not run. This turn will continue with the remaining steps; use Stop to cancel the turn.`,
+      message:
+        `Forge: owner approval for ${item.toolName} timed out after ${minutes} min. That call was ` +
+        'not run. This turn will continue with the remaining steps; use Stop to cancel the turn.',
       ...(conversationId ? { conversationId } : {}),
     });
-    if (conversationId) this.timeouts.record(conversationId, minutes);
+    if (conversationId) this.timeouts.record(conversationId, item.carryKey, minutes);
     this.finish(item, { kind: 'timeout', minutes }, 'timeout');
     if (conversationId) {
+      // Only the cards asking for THAT approval die with it. A card asking for
+      // something else is still a question nobody has been given a chance to
+      // answer, so it stays in the queue and the pump shows it next.
       for (const queued of [...this.queue]) {
-        if (queued.conversationId !== conversationId || !this.removePending(queued)) continue;
+        if (
+          queued.conversationId !== conversationId ||
+          queued.carryKey !== item.carryKey ||
+          !this.removePending(queued)
+        )
+          continue;
         this.finish(queued, { kind: 'timeout', minutes }, 'timeout');
       }
     }
@@ -445,6 +425,15 @@ export class ToolApprovalService {
     }
     this.queue.shift();
     this.active = next;
+    // The card is on screen now: start its clock and remember the moment, so the
+    // wait reported to the model is the owner's and not the queue's.
+    next.activatedAt = Date.now();
+    if (next.timeoutMinutes !== undefined) {
+      next.timer = setTimeout(
+        () => this.timeout(next, next.timeoutMinutes ?? 0),
+        next.timeoutMinutes * 60_000,
+      );
+    }
     const event = this.eventOf(next);
     if (this.getView()) {
       void vscode.commands.executeCommand('workbench.view.extension.forge-sidebar');

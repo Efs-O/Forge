@@ -88,6 +88,32 @@ export function secretPathAllowListFor(config: ForgeConfig | undefined, home: st
     .map((value) => normalizePathForMatch(expandUserTokens(value, home)));
 }
 
+/** A token is leading only when the next character is a separator or the end. */
+const LEADING_USER_TOKENS: readonly RegExp[] = [
+  /^~(?=[\\/]|$)/u,
+  /^\$env:USERPROFILE(?=[\\/])/iu,
+  /^\$env:HOME(?=[\\/])/iu,
+  /^\$HOME(?=[\\/])/u,
+  /^%USERPROFILE%(?=[\\/])/iu,
+];
+
+/**
+ * The conservative form, for a path a tool is about to OPEN.
+ *
+ * `expandUserTokens` is written for MATCHING, where a token anywhere in a
+ * pattern names the same home folder. A resolver that expands the same token in
+ * the middle of a path invents a folder nobody typed: `src/~/x` became
+ * `src/C:/Users/<name>/x` on Windows. Only a token at the very start names a
+ * user folder; everything after it is the caller's own spelling.
+ */
+export function expandLeadingUserToken(value: string, home = os.homedir()): string {
+  const homeNoSlash = home.replace(/[\\/]+$/u, '');
+  for (const pattern of LEADING_USER_TOKENS) {
+    if (pattern.test(value)) return value.replace(pattern, () => homeNoSlash);
+  }
+  return value;
+}
+
 /** `~`, `$HOME`, `$env:USERPROFILE` (PowerShell), `%USERPROFILE%` (cmd). */
 export function expandUserTokens(value: string, home = os.homedir()): string {
   const homeNoSlash = home.replace(/[\\/]+$/u, '');

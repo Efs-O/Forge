@@ -270,7 +270,9 @@ export function makeNotifyUserTool(
         ? `Message delivered to the VS Code window and ${chats} remote chat(s).`
         : 'Shown in the VS Code window only. No remote chat is bound to this ' +
             'conversation, so the user did NOT receive it on their phone. Do not ' +
-            'claim you notified them remotely.';
+            'claim you notified them remotely. A phone ping needs a chat that a ' +
+            'remote conversation started or is bound to; the owner can switch one ' +
+            'to this chat from Telegram with `/chat <n-or-name>`.';
     },
   };
 }

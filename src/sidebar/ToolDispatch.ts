@@ -24,8 +24,10 @@ import type { QuestionAnswerRecord } from '../util/questionAnswers';
 import type { ChatRuleApproval } from './chatApprovalRules';
 import { getLogger } from '../util/logger';
 import {
+  approvalGrantNote,
   ToolApprovalPolicyDenied,
   toolApprovalResult,
+  type ApprovalGrantRecord,
   type ToolApprovalCallOptions,
   type ToolApprovalOutcome,
 } from './toolApprovalOutcome';
@@ -192,6 +194,9 @@ export class ToolDispatch {
         args = pre.args;
         const handlerArgs = pre.args;
         const reg = pre.reg;
+        // The queue writes the owner's answer time into this box; the call's own
+        // result then says a human was asked and what the wait cost (BUG-14).
+        const grant: ApprovalGrantRecord = {};
 
         // A path argument ending in whitespace is a stray space, not a filename
         // (pathArgTrim.ts). Repair it here, before the approval metadata, `mutation.paths`
@@ -213,7 +218,7 @@ export class ToolDispatch {
           this.toolRegistry,
         );
         const { mutationPaths } = evaluation;
-        const outcome = await this.requestToolApproval(tc, args, evaluation, context);
+        const outcome = await this.requestToolApproval(tc, args, evaluation, context, grant);
         if (outcome !== 'approved') {
           result = toolApprovalResult(tc.function.name, outcome);
           this.postResult(tc, toolResultText(result), undefined, convId, effects.post);
@@ -235,7 +240,7 @@ export class ToolDispatch {
           ...(tc.function.name === 'web_fetch'
             ? {
                 authorizeFetchRedirect: (url: string) =>
-                  this.requestFetchRedirectApproval(url, tc, handlerArgs, reg, context),
+                  this.requestFetchRedirectApproval(url, tc, handlerArgs, reg, context, grant),
               }
             : {}),
           toolCallId: tc.id,
@@ -249,6 +254,11 @@ export class ToolDispatch {
         // model cannot see is a lie by omission, and on POSIX a trailing space is legal.
         const pathNote = trailingPathSpaceNote(repairedPathArgs);
         if (pathNote && typeof result === 'string') result = `${result}\n${pathNote}`;
+        // A card the owner answered: say so, and how long it cost, next to the
+        // result it unlocked. Without this the model has seen a 5-minute card and
+        // reports "auto-approved, no card" to whoever asks what the run cost.
+        const grantNote = approvalGrantNote(grant.waitedMs);
+        if (grantNote && typeof result === 'string') result = `${result}\n${grantNote}`;
 
         if (reg.mutation) {
           this.codeLens.markPending(mutationPaths);
@@ -319,6 +329,7 @@ export class ToolDispatch {
     args: Record<string, unknown>,
     reg: RegisteredTool,
     context: ToolDispatchRoundContext,
+    grant: ApprovalGrantRecord,
   ): Promise<void> {
     const redirectArgs = { ...args, url };
     const cached = await readToolApprovalMetadata(reg, redirectArgs, context.convId);
@@ -333,7 +344,7 @@ export class ToolDispatch {
     const metadata = evaluation.approvalMetadata;
     if (!metadata) throw new Error('web_fetch redirect approval metadata is missing.');
     if (metadata.cardTextOnly) return;
-    const outcome = await this.requestToolApproval(tc, redirectArgs, evaluation, context);
+    const outcome = await this.requestToolApproval(tc, redirectArgs, evaluation, context, grant);
     if (outcome !== 'approved') {
       throw new ToolApprovalRefusal(
         `${toolApprovalResult(tc.function.name, outcome)} Redirect host: ${new URL(url).hostname}.`,
@@ -347,6 +358,7 @@ export class ToolDispatch {
     args: Record<string, unknown>,
     evaluation: ReturnType<typeof evaluateToolApproval>,
     context: ToolDispatchRoundContext,
+    grant: ApprovalGrantRecord,
   ): Promise<ToolApprovalOutcome> {
     const { approvalMetadata, isDangerous, exitInput, exitVerdict } = evaluation;
     const chatRule =
@@ -368,13 +380,20 @@ export class ToolDispatch {
     const detail =
       approvalMetadata?.detail ??
       (tc.function.name === 'delete_file' ? await describeDelete(args) : fallbackDetail);
+    const callOptions = approvalCallOptions(
+      approvalMetadata,
+      exitVerdict,
+      chatRule,
+      exitInput.reachesOut,
+    );
+    callOptions.grant = grant;
     return this.requestApproval(
       tc.function.name,
       detail,
       isDangerous,
       context.convId,
       context.signal,
-      approvalCallOptions(approvalMetadata, exitVerdict, chatRule, exitInput.reachesOut),
+      callOptions,
     );
   }
 

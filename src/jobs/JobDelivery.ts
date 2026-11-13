@@ -95,6 +95,13 @@ export class JobDelivery {
     result: { observation: string | null; changed: boolean; summary: string },
   ): Promise<ChangeDelivery> {
     if (!result.changed) return { delivered: 0, summaryPending: false };
+    // A `check: none` job reports a change on every tick because nothing can
+    // observe anything (see `checks/runCheck.ts`). Delivering that is a live
+    // notification each cycle: the lab's student created one such job and got a
+    // phone ping every tick. `changed` stays true so an `agent_task` action still
+    // runs on schedule; only the delivery is suppressed. Mute or restore a job's
+    // notifications with `on_change`, never by inventing a check.
+    if (job.check.kind === 'none') return { delivered: 0, summaryPending: false };
     if (job.on_change.kind === 'summarize') {
       // A summarize runs only when no turn is streaming, so it never fights a
       // live chat for the GPU. If busy, record the change and defer; the next
@@ -125,6 +132,17 @@ export class JobDelivery {
     const jobs = await this.deps.store.loadAll();
     for (const { job, state } of jobs) {
       if (!state.summary_pending || !job.enabled) continue;
+      if (job.check.kind === 'none') {
+        // A change recorded before this suppression existed, or by a job since
+        // switched to `none`: there is nothing to summarise, so the flag is
+        // cleared rather than delivered on every idle tick.
+        this.deps.store.patchState(job.id, {
+          summary_pending: false,
+          summary_failures: 0,
+          summary_retry_at: null,
+        });
+        continue;
+      }
       if (state.summary_retry_at !== null && now < state.summary_retry_at) continue;
       let summary: string;
       try {

@@ -63,7 +63,7 @@ export function describeCheck(check: Job['check']): string {
     case 'tool_usage':
       return 'tool_usage (daily files in ~/.forge/tool-usage/, about 5 KB a day)';
     case 'none':
-      return 'none (runs every tick)';
+      return 'none (runs every tick; on_change delivers nothing)';
   }
 }
 

@@ -278,6 +278,9 @@ describe('notify_user tool', () => {
     const result = await tool.handler({ message: 'build done' }, ctx('c1'));
     expect(result).toContain('did NOT receive it on their phone');
     expect(result).toContain('Do not claim you notified them remotely');
+    // And what would have worked, because the model has to decide what to do next.
+    expect(result).toContain('a chat that a remote conversation started or is bound to');
+    expect(result).toContain('/chat <n-or-name>');
   });
 
   it('writes an unattended notification to the job outbox', async () => {
