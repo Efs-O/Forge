@@ -6,6 +6,7 @@ Read this whole file before your first read, search, edit, write, command, commi
 
 ## READ
 1. `read_file` with a guessed `end_line` → refused: start_line is past end_line. read whole, or take the range from a search hit, never from memory
+2. `web_fetch` with `find=` on a large file → it searches only the window it returns, so "No match" proves nothing. curl the raw URL to /tmp and `rg` the file locally
 2. first `code_intel` call of a session → `No symbol provider answered ... may still be starting` → the file has symbols; retry it once and it answers in full → do not fall back to whole-file reads
 
 ## SEARCH
@@ -52,6 +53,7 @@ Read this whole file before your first read, search, edit, write, command, commi
 8. a multi-line string edit that drops the `+` between two literals → the parse error names a later line, not the missing one. after editing a joined description, re-read the block
 9. an `edit_file` whose `new_str` turns out to be the text already there → reports Applied, nothing changes, and the fix I meant never lands. diff the file, not the reply
 10. an `edit_file` whose `old_str` is a header plus its first body line, `new_str` only the header → the body line is deleted. same when appending a numbered tip: re-include the anchored item
+11. deleting entries from a numbered list by replacing a block → the renumbering duplicated one entry and silently dropped another. rewrite the section's whole tail, then read it back
 
 ## TEST
 1. a harness that emits tool calls but never dispatches them → proves schema compatibility only. dispatch writes, deletes and commits before claiming behaviour is verified
