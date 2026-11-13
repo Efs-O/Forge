@@ -34,6 +34,7 @@ Read this whole file before your first read, search, edit, write, command, commi
 13. `shell background: true` with `timeout_ms: 900000` → refused: `"timeout_ms" must be within 1000 to 600000`. the ceiling is 600000 even for a background job
 14. `stop_execution` on a finished job → its own `status: failed, exit_code: 1`, which reads like your stop. a real interruption is `terminated`, `exit_code: null` — quote that, not the code
 15. a heredoc terminator with a command after it (`MSG; echo ok`) → the terminator is never seen, so the command text lands in the commit message. keep the terminator alone on its line
+16. a result's field names are not its input names (`next_stdout_cursor` vs `stdout_cursor`) → refused: unknown arguments. the refusal lists the valid names; resend with those
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies only the tree it was written for. run the suite *after* the commit it is meant to certify, or the tip has no proof
