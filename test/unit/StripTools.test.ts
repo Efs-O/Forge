@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ToolFailureTracker } from '../../src/tools/StripTools';
+import { stripDecision, ToolFailureTracker } from '../../src/tools/StripTools';
 
 describe('ToolFailureTracker threshold', () => {
   it('does not strip before the threshold', () => {
@@ -50,9 +50,11 @@ describe('ToolFailureTracker threshold', () => {
     // "Consecutive" has to mean consecutive: a model that recovered after
     // nine bad calls must not stay one call from losing its tools.
     const tracker = new ToolFailureTracker();
-    for (let i = 0; i < ToolFailureTracker.THRESHOLD - 1; i++) tracker.recordNativeParseFailure('a');
+    for (let i = 0; i < ToolFailureTracker.THRESHOLD - 1; i++)
+      tracker.recordNativeParseFailure('a');
     tracker.reset('a');
-    for (let i = 0; i < ToolFailureTracker.THRESHOLD - 1; i++) tracker.recordNativeParseFailure('a');
+    for (let i = 0; i < ToolFailureTracker.THRESHOLD - 1; i++)
+      tracker.recordNativeParseFailure('a');
     expect(tracker.shouldStrip('a')).toBe(false);
     tracker.recordNativeParseFailure('a');
     expect(tracker.shouldStrip('a')).toBe(true);
@@ -87,5 +89,35 @@ describe('what the streak does not count', () => {
       (name) => name !== 'constructor' && !['reset', 'shouldStrip', 'streak'].includes(name),
     );
     expect(raisers).toEqual(['recordNativeParseFailure']);
+  });
+});
+
+describe('stripDecision', () => {
+  /** A chat that has just passed the threshold. */
+  function brokenChat(): ToolFailureTracker {
+    const tracker = new ToolFailureTracker();
+    for (let i = 0; i < ToolFailureTracker.THRESHOLD; i++) tracker.recordNativeParseFailure('a');
+    return tracker;
+  }
+
+  it('sends tools as text once the streak passes the threshold', () => {
+    expect(stripDecision(brokenChat(), 'a', {})).toEqual({
+      strip: true,
+      warning: expect.stringContaining('sent to it as text'),
+    });
+  });
+
+  it('keeps native tools for a model with no text channel, and says why', () => {
+    const decision = stripDecision(brokenChat(), 'a', { text_tool_calls: 'native' });
+    // Stripping would hand this model a format it refuses to read: the next turn
+    // would offer tools that can only run nowhere.
+    expect(decision.strip).toBe(false);
+    expect(decision.warning).toContain('stay native');
+  });
+
+  it('says nothing below the threshold', () => {
+    const tracker = new ToolFailureTracker();
+    tracker.recordNativeParseFailure('a');
+    expect(stripDecision(tracker, 'a', {})).toEqual({ strip: false, warning: undefined });
   });
 });

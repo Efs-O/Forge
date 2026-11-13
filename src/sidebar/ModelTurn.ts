@@ -20,7 +20,7 @@ import type { MidTurnDrainResult } from '../agent/MidTurnInbox';
 import type { CheckinStage } from '../agent/elapsedTimeNote';
 import { createContextTrimState } from '../agent/toolResultContext';
 import type { ToolDispatch } from './ToolDispatch';
-import type { ToolFailureTracker } from '../tools/StripTools';
+import { stripDecision, type ToolFailureTracker } from '../tools/StripTools';
 import type { TurnLifecycle } from './TurnLifecycle';
 import { createOutputBudgetTracker } from '../util/contextBudget';
 import { announceMissingImages } from './imageNotices';
@@ -179,16 +179,13 @@ export async function runModelTurn(
   // One budget per turn — model is already resolveRequestModel()'d
   // (group tools/tool_call_limits merged) by the caller.
   const budget = new ToolBudget(model);
-  const useStrip = ctx.failureTracker.shouldStrip(conv.id);
+  const stripChoice = stripDecision(ctx.failureTracker, conv.id, model);
   // One probe per turn is right — capabilities describe the model, not the
   // port it happens to be on — but it must still start from a live endpoint.
   const runtimeCaps = await ctx.capabilities(model, await resolveBaseUrl());
   const thinkingKwargs = canUseThinkingKwargs(model, runtimeCaps);
   const stripThinkingChannels = shouldStripThinking(model, config);
-  if (useStrip)
-    void vscode.window.showWarningMessage(
-      `Forge: ${ctx.failureTracker.streak(conv.id)} native tool calls from this model failed to parse in this chat, so tools are now sent to it as text — which still works. A tool call that runs clears this.`,
-    );
+  if (stripChoice.warning) void vscode.window.showWarningMessage(stripChoice.warning);
   warnAboutModel(ctx, model, config, runtimeCaps, thinkingKwargs);
 
   const maxRounds = resolveMaxToolRounds(model);
@@ -291,7 +288,7 @@ export async function runModelTurn(
       writeChunkLimit: writeLimit,
       holdUntilTruncation: [{ tool: 'write_file', property: 'mode' }],
       nativeTools,
-      stripAllTools: useStrip || model.strip_tools === true,
+      stripAllTools: stripChoice.strip || model.strip_tools === true,
       includeUsage: true,
       canUseThinkingKwargs: thinkingKwargs,
       stripThinkingChannels,

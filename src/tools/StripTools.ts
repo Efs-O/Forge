@@ -1,4 +1,6 @@
 import type { ChatCompletionRequest } from '../llm/types';
+import type { ModelConfig } from '../config/types';
+import { nativeOnlyToolCalls } from './TextToolCallMode';
 
 /**
  * Returns a copy of the request with tools removed.
@@ -62,4 +64,37 @@ export class ToolFailureTracker {
   shouldStrip(conversationId = ToolFailureTracker.DEFAULT_KEY): boolean {
     return (this.failures.get(conversationId) ?? 0) >= ToolFailureTracker.THRESHOLD;
   }
+}
+
+/**
+ * What the threshold means for one model, decided in one place.
+ *
+ * The recovery is "send this model tools as text". A model set to
+ * `text_tool_calls: native` has no text channel — stripping would hand it a
+ * format it refuses to read, and the next turn would offer it tools that run
+ * nowhere. So for that model the native schemas stay, each broken call is
+ * refused where it happens, and the user hears why nothing changed.
+ */
+export function stripDecision(
+  tracker: ToolFailureTracker,
+  conversationId: string,
+  model: Pick<ModelConfig, 'text_tool_calls'>,
+): { strip: boolean; warning: string | undefined } {
+  if (!tracker.shouldStrip(conversationId)) return { strip: false, warning: undefined };
+  const streak = tracker.streak(conversationId);
+  if (nativeOnlyToolCalls(model)) {
+    return {
+      strip: false,
+      warning:
+        `Forge: ${streak} native tool calls from this model failed to parse in this chat. ` +
+        'Its tools stay native: text_tool_calls is set to native, so this model has no text ' +
+        'channel to fall back to.',
+    };
+  }
+  return {
+    strip: true,
+    warning:
+      `Forge: ${streak} native tool calls from this model failed to parse in this chat, so tools ` +
+      'are now sent to it as text — which still works. A tool call that runs clears this.',
+  };
 }
