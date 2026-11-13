@@ -148,8 +148,21 @@ export function makeStopExecutionTool(): RegisteredTool {
     // was — gating the stop harder than the start only adds friction.
     autoApprove: true,
     handler: async (args) => {
-      const observation = await backgroundExecutionManager.stop(args['execution_id'] as string);
-      return formatBackgroundObservation(observation, 0, {});
+      const id = args['execution_id'] as string;
+      const observation = await backgroundExecutionManager.stop(id);
+      const text = formatBackgroundObservation(observation, 0, {});
+      // A job that had already ended answers with its own outcome, and that
+      // outcome reads like a stop went wrong: `status: failed, exit_code: 1` is
+      // how the job finished, not what this call did. Only an interruption
+      // reports `terminated` with a null exit code, so say which one this is.
+      if (observation.status !== 'terminated') {
+        return (
+          `${text}\nnote: this job had already ended on its own (exit_code: ` +
+          `${observation.exitCode}); stop_execution did not interrupt it. Only an interrupted ` +
+          'job reports status "terminated" with exit_code null.'
+        );
+      }
+      return text;
     },
   };
 }
