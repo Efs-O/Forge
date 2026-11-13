@@ -274,6 +274,13 @@ export class ToolApprovalService {
       }
       this.queue.push(pending);
       if (pending.conversationId) this.onApprovalStart?.(pending.conversationId);
+      if (this.active) {
+        this.post({
+          type: 'notice',
+          message: `Forge: ${toolName} is waiting for owner approval behind another card. This turn remains active; use Stop to cancel it.`,
+          ...(conversationId ? { conversationId } : {}),
+        });
+      }
       this.pump();
       if (ownerOnly) this.announceWaitingForOwner(pending);
     });
@@ -361,6 +368,12 @@ export class ToolApprovalService {
   private timeout(item: PendingApproval, minutes: number): void {
     if (!this.removePending(item)) return;
     const conversationId = item.conversationId;
+    this.post({
+      type: 'notice',
+      severity: 'warning',
+      message: `Forge: owner approval for ${item.toolName} timed out after ${minutes} min. That call was not run. This turn will continue with the remaining steps; use Stop to cancel the turn.`,
+      ...(conversationId ? { conversationId } : {}),
+    });
     if (conversationId) this.timeouts.record(conversationId, minutes);
     this.finish(item, { kind: 'timeout', minutes }, 'timeout');
     if (conversationId) {

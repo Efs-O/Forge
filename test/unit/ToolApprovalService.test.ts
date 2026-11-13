@@ -543,8 +543,11 @@ describe('ToolApprovalService', () => {
   it('starts queued approval timeouts at request time', async () => {
     vi.useFakeTimers();
     let minutes = 2;
+    const notices: HostToWebview[] = [];
     const service = new ToolApprovalService(
-      () => undefined,
+      (message) => {
+        notices.push(message);
+      },
       () => ({}) as never,
       undefined,
       () => minutes,
@@ -553,10 +556,23 @@ describe('ToolApprovalService', () => {
     const active = service.request('write_file', 'active', true, 'first');
     minutes = 1;
     const queued = service.request('write_file', 'queued', true, 'second');
+    expect(notices).toContainEqual({
+      type: 'notice',
+      conversationId: 'second',
+      message:
+        'Forge: write_file is waiting for owner approval behind another card. This turn remains active; use Stop to cancel it.',
+    });
 
     await vi.advanceTimersByTimeAsync(60_000);
 
     await expect(queued).resolves.toEqual({ kind: 'timeout', minutes: 1 });
+    expect(notices).toContainEqual({
+      type: 'notice',
+      severity: 'warning',
+      conversationId: 'second',
+      message:
+        'Forge: owner approval for write_file timed out after 1 min. That call was not run. This turn will continue with the remaining steps; use Stop to cancel the turn.',
+    });
     expect(service.pending()?.conversationId).toBe('first');
     const request = service.pending();
     if (!request) throw new Error('first approval was not active');

