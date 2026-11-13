@@ -61,7 +61,7 @@ Fill in the blanks below; delete any rule that does not fit this project.
 - Before you start editing, run git status. Changes you did not make mean another agent or person may be working here: find out who (message_chat reaches another Forge chat) or ask the user, and agree who owns which files before you edit.
 - If files you did not touch keep changing, your edits are undone, or a commit picks up changes that are not yours: stop. Do not revert, overwrite or tidy the other changes; contact the other agent or ask the user, and agree on ownership first.
 - Parallel lanes need separate worktrees when they edit overlapping files or one runs a full gate while another edits. Agree who lands first; the second lane owns resolving any rebase. For separate files and a short edit, one worktree is enough.
-- Commit only your own files by naming them (git commit -- <files>), never git add -A or git add .
+- Commit only your own files, never git add -A. Commit tool: stage, then commit (it has no file-list form). Shell git: flags first - git commit -m "msg" -- <files>.
 
 ## Remembering past sessions
 - Past chats on this machine are logged in \`~/.forge/sessions/<chat-id>.jsonl\` — every tool call and result, with the chat's title as of that run. Search those raw logs first for anything about this workspace; the HalluScribe tools (\`load_tool_group\` \`halluscribe\`) search past AI sessions more widely but can be behind the logs, so they are the second stop, not the first.
