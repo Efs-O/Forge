@@ -73,4 +73,32 @@ describe('mcpSchemaGaps', () => {
       }),
     ).toEqual([]);
   });
+
+  it('ignores annotation data and legacy maps that are not schemas', () => {
+    expect(
+      mcpSchemaGaps({
+        type: 'object',
+        properties: { a: { type: 'string' } },
+        'x-ui': { format: 'email', not: 'label' },
+        dependencies: { oneOf: ['other'] },
+        default: { oneOf: true },
+        examples: [{ not: 'a sentence' }],
+      }),
+    ).toEqual([]);
+  });
+
+  it('reports a real not, and still walks inside it', () => {
+    expect(mcpSchemaGaps({ not: { type: 'string', format: 'uri' } })).toEqual([
+      '$: not',
+      'not: format "uri"',
+    ]);
+  });
+
+  it('walks a real allOf list and reports what is inside it', () => {
+    expect(
+      mcpSchemaGaps({
+        allOf: [{ properties: { a: { type: 'array', uniqueItems: true } } }],
+      }),
+    ).toEqual(['allOf[0].properties.a: uniqueItems']);
+  });
 });

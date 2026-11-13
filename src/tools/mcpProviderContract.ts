@@ -93,19 +93,35 @@ const UNIMPLEMENTED_KEYWORDS: readonly string[] = [
  *  ignores every other `format`, so a `format: "email"` is a comment only. */
 const IMPLEMENTED_FORMATS: ReadonlySet<string> = new Set(['date', 'time', 'date-time', 'uuid']);
 
-/** Keywords whose value is data rather than a schema — never walked into. */
-const DATA_KEYWORDS: ReadonlySet<string> = new Set(['enum', 'const', 'default', 'examples']);
-
-/** Keywords whose value is a map of name to schema. Their keys are the model's
- *  words, not schema keywords, so a property called `oneOf` is not the `oneOf`
- *  keyword and must not be reported. */
-const SCHEMA_MAP_KEYS: ReadonlySet<string> = new Set([
+/**
+ * Where a subschema can sit inside a schema node. Only these positions are
+ * walked: an MCP server's schema may carry annotation data (`x-ui: {...}`,
+ * a legacy `dependencies` map, a `default` value), and treating any object as a
+ * schema turns a property merely NAMED `oneOf` into the `oneOf` keyword.
+ */
+const SUBSCHEMA_MAP_KEYS: readonly string[] = [
   'properties',
   'patternProperties',
   '$defs',
   'definitions',
   'dependentSchemas',
-]);
+];
+
+/** Keywords whose value is one subschema (or, for `items`, an array of them). */
+const SUBSCHEMA_KEYS: readonly string[] = [
+  'items',
+  'additionalItems',
+  'additionalProperties',
+  'contains',
+  'propertyNames',
+  'if',
+  'then',
+  'else',
+  'not',
+];
+
+/** Keywords whose value is a list of subschemas. */
+const SUBSCHEMA_LIST_KEYS: readonly string[] = ['allOf', 'anyOf', 'oneOf'];
 
 /**
  * The constructs in one external schema that constrained decoding will drop, as
@@ -133,15 +149,26 @@ function visitSchema(node: unknown, path: string, gaps: string[]): void {
   if (typeof format === 'string' && !IMPLEMENTED_FORMATS.has(format)) {
     gaps.push(`${here}: format "${format}"`);
   }
-  for (const [key, value] of Object.entries(record)) {
-    if (DATA_KEYWORDS.has(key)) continue;
-    if (SCHEMA_MAP_KEYS.has(key)) {
-      const children = (value ?? {}) as Record<string, unknown>;
-      for (const [childName, child] of Object.entries(children)) {
-        visitSchema(child, `${path ? `${path}.` : ''}${key}.${childName}`, gaps);
-      }
-      continue;
+  const child = (key: string): string => (path ? `${path}.${key}` : key);
+  for (const key of SUBSCHEMA_MAP_KEYS) {
+    const map = record[key];
+    if (!map || typeof map !== 'object' || Array.isArray(map)) continue;
+    for (const [name, subschema] of Object.entries(map as Record<string, unknown>)) {
+      visitSchema(subschema, `${child(key)}.${name}`, gaps);
     }
-    visitSchema(value, path ? `${path}.${key}` : key, gaps);
+  }
+  for (const key of SUBSCHEMA_KEYS) {
+    if (!(key in record)) continue;
+    const value = record[key];
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => visitSchema(item, `${child(key)}[${index}]`, gaps));
+    } else {
+      visitSchema(value, child(key), gaps);
+    }
+  }
+  for (const key of SUBSCHEMA_LIST_KEYS) {
+    const list = record[key];
+    if (!Array.isArray(list)) continue;
+    list.forEach((item, index) => visitSchema(item, `${child(key)}[${index}]`, gaps));
   }
 }
