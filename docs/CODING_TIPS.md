@@ -48,10 +48,9 @@ Read this whole file before your first read, search, edit, write, command, commi
 5. `apply_line_edits` with `expected_lines` invented rather than copied → refused: has N lines but the range is M. the refusal prints the current lines verbatim; copy them from there
 6. `apply_line_edits` on `docs/TOOL_COVERAGE.md` → `ToolHarness.test.ts` diffs it against a fresh generation and normalises only `Generated:`. restore_file it after a demo
 7. `format_file` on a tracked file → VS Code's formatter, not the repo's Prettier: 165 lines rewritten in a prettier-clean file, and `npx prettier --check` then fails. restore_file it
-8. `replace_selection` with no active editor → refused: `no active editor`. It takes no path, so `get_editor_context` first — `Open tabs: (none)` means nothing can be written
-9. a multi-line string edit that drops the `+` between two literals → the parse error names a later line, not the missing one. after editing a joined description, re-read the block
-10. an `edit_file` whose `new_str` turns out to be the text already there → reports Applied, nothing changes, and the fix I meant never lands. diff the file, not the reply
-11. an `edit_file` whose `old_str` spans a function header plus its first body line, `new_str` only the header → the body line is deleted. repeat it in `new_str`
+8. a multi-line string edit that drops the `+` between two literals → the parse error names a later line, not the missing one. after editing a joined description, re-read the block
+9. an `edit_file` whose `new_str` turns out to be the text already there → reports Applied, nothing changes, and the fix I meant never lands. diff the file, not the reply
+10. an `edit_file` whose `old_str` spans a function header plus its first body line, `new_str` only the header → the body line is deleted. repeat it in `new_str`
 
 ## TEST
 1. a harness that emits tool calls but never dispatches them → proves schema compatibility only. dispatch writes, deletes and commits before claiming behaviour is verified

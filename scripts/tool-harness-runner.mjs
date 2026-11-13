@@ -13,8 +13,6 @@ import {
 const EXAMPLE_ARGS = {
   read_file: { path: 'package.json', start_line: 1, end_line: 20 },
   write_file: { path: '.forge/tool-test-write.txt', content: 'Forge tool-call smoke test\n' },
-  replace_selection: { text: 'Forge tool-call smoke test' },
-  insert_code: { text: '// Forge tool-call smoke test', line: 0 },
   list_directory: { path: 'src' },
   find_files: { pattern: 'src/**/*.ts', max_results: 5 },
   search_code: { query: 'ToolRegistry', include: 'src/**/*.ts', max_results: 5 },

@@ -66,7 +66,6 @@ const EXPECTED_NATIVE_NAMES = [
   'get_system_status',
   'git_read',
   'image_search',
-  'insert_code',
   'list_agent_targets',
   'list_delegation_targets',
   'list_directory',
@@ -91,7 +90,6 @@ const EXPECTED_NATIVE_NAMES = [
   'remember',
   'rename_symbol',
   'render_html_to_image',
-  'replace_selection',
   'restore_file',
   'schedule_wake',
   'search_code',
@@ -335,7 +333,7 @@ describe('registerAllTools canonical coordinator catalog', () => {
     expect(names).not.toContain('web_search');
     expect(names).not.toContain('ask_local_agent');
     expect(names).not.toContain('list_delegation_targets');
-    expect(names).toHaveLength(57);
+    expect(names).toHaveLength(55);
   });
 
   // send_file's only outbound step is api.telegram.org, so a profile with

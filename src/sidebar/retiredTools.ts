@@ -29,6 +29,11 @@ export const RETIRED_TOOLS: Readonly<
   go_to_definition: { tool: 'code_intel', note: 'operation="definition"' },
   find_references: { tool: 'code_intel', note: 'operation="references"' },
   find_implementations: { tool: 'code_intel', note: 'operation="implementations"' },
+  // The two active-editor writers, retired 2026-11-13 (19 and 13 calls in the whole
+  // archive, all of them harness probes). A model that still reaches for one is
+  // sent to the tool that names the file it writes.
+  replace_selection: { tool: 'edit_file', note: 'an explicit path and old_str/new_str' },
+  insert_code: { tool: 'edit_file', note: 'an explicit path and old_str/new_str' },
 };
 
 export function retiredToolResult(

@@ -4,8 +4,6 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  makeInsertCodeTool,
-  makeReplaceSelectionTool,
   makeWriteFileTool,
 } from '../../src/tools/builtinTools';
 import { makeReadFileTool } from '../../src/tools/readFileTool';
@@ -288,61 +286,4 @@ describe('isolated file and directory tool execution', () => {
     expect(fs.readFileSync(target, 'utf8')).toBe('current\n');
   });
 
-  it('executes active-editor replacement and insertion through controlled adapters', async () => {
-    const replace = vi.fn();
-    const insert = vi.fn();
-    const save = vi.fn(async () => true);
-    let applies = true;
-    const editor = {
-      document: { uri: vscode.Uri.file(path.join(root, 'editor.ts')), isDirty: false, save },
-      selection: new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 3)),
-      edit: async (
-        callback: (builder: { replace: typeof replace; insert: typeof insert }) => void,
-      ) => {
-        callback({ replace, insert });
-        return applies;
-      },
-    };
-    (vscode.window as unknown as { activeTextEditor: typeof editor }).activeTextEditor = editor;
-
-    await makeReplaceSelectionTool().handler({ text: 'replacement' });
-    await makeInsertCodeTool().handler({ text: 'const value = 1;', line: 2 });
-    expect(replace).toHaveBeenCalledWith(editor.selection, 'replacement');
-    expect(insert).toHaveBeenCalledWith(new vscode.Position(2, 0), 'const value = 1;\n');
-    // A clean buffer is saved so the checkpoint, and Undo, cover the edit (U15-02).
-    expect(save).toHaveBeenCalledTimes(2);
-
-    // A buffer holding the user's own unsaved edits is never saved by a tool.
-    editor.document.isDirty = true;
-    await expect(makeInsertCodeTool().handler({ text: 'x', line: 0 })).resolves.toContain(
-      'Undo does not cover this edit',
-    );
-    expect(save).toHaveBeenCalledTimes(2);
-
-    // A refused edit is an error, not a reported write (U15-05).
-    applies = false;
-    await expect(makeReplaceSelectionTool().handler({ text: 'y' })).rejects.toThrow(
-      'did not apply the edit',
-    );
-  });
-
-  it('refuses an empty selection instead of reporting a replacement', async () => {
-    // An empty selection has nothing to replace: `b.replace` on it inserts at the
-    // cursor, and the old result still claimed a replacement — in a file the
-    // caller cannot see and did not choose.
-    const file = path.join(root, 'empty-selection.ts');
-    fs.writeFileSync(file, 'unchanged\n', 'utf8');
-    const edit = vi.fn(async () => true);
-    (vscode.window as unknown as { activeTextEditor: unknown }).activeTextEditor = {
-      document: { uri: vscode.Uri.file(file), isDirty: false },
-      selection: { isEmpty: true },
-      edit,
-    };
-
-    await expect(makeReplaceSelectionTool().handler({ text: 'inserted' })).rejects.toThrow(
-      /nothing is selected in empty-selection\.ts/u,
-    );
-    expect(edit).not.toHaveBeenCalled();
-    expect(fs.readFileSync(file, 'utf8')).toBe('unchanged\n');
-  });
 });

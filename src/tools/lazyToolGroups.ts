@@ -99,8 +99,6 @@ const NATIVE_GROUP_BY_TOOL: ReadonlyMap<string, string> = new Map([
   ].map((name) => [name, 'media'] as const),
   ...[
     'get_editor_context',
-    'replace_selection',
-    'insert_code',
     'show_diff',
     'open_file',
     'open_url_in_browser',

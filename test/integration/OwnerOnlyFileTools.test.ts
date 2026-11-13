@@ -10,10 +10,6 @@ import {
   type OwnerOnlySet,
 } from '../../src/tools/ownerPaths';
 import { makeReadFileTool, makeWriteFileTool } from '../../src/tools/builtinTools';
-import {
-  makeInsertCodeTool,
-  makeReplaceSelectionTool,
-} from '../../src/tools/builtinTools';
 import { makeEditFileTool } from '../../src/tools/editFileTool';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
 import {
@@ -297,40 +293,6 @@ describe('Forge own configuration is refused by the file tools', () => {
         /Tell the user what change you want and why/,
       );
     }
-    // The two active-editor tools are judged by the file the editor is on: with
-    // the owner's config open, a write through the editor is refused too, and
-    // with any other file open it is not.
-    const editorTools = [makeReplaceSelectionTool(), makeInsertCodeTool()].map((tool) =>
-      wrapped(tool),
-    );
-    for (const tool of editorTools) registry.register(tool);
-    const editorOnConfig = {
-      document: { uri: { fsPath: path.join(workspace, '.forge', 'config.yaml') } },
-      selection: { isEmpty: true },
-    };
-    (vscode.window as unknown as { activeTextEditor: unknown }).activeTextEditor = editorOnConfig;
-    for (const tool of editorTools) {
-      const args =
-        tool.definition.function.name === 'insert_code'
-          ? { text: 'x', line: 0 }
-          : { text: 'x' };
-      expect(
-        registry.invalidArgs(tool, args),
-        `${tool.definition.function.name} must refuse the open config`,
-      ).toMatch(/is part of Forge/);
-    }
-    (vscode.window as unknown as { activeTextEditor: unknown }).activeTextEditor = {
-      document: { uri: { fsPath: path.join(workspace, 'notes.txt') } },
-      selection: { isEmpty: true },
-    };
-    for (const tool of editorTools) {
-      const args =
-        tool.definition.function.name === 'insert_code'
-          ? { text: 'x', line: 0 }
-          : { text: 'x' };
-      expect(registry.invalidArgs(tool, args)).toBeUndefined();
-    }
-    (vscode.window as unknown as { activeTextEditor: unknown }).activeTextEditor = undefined;
   });
 
   it('lets the agent edit its own workspace config once policy.yaml exists', async () => {

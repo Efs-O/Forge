@@ -151,7 +151,12 @@ import {
 // arrives marked untrusted, and format_file says it runs the project's own formatter and
 // counts the lines it changed (tool-reliability B1, B6). Ceiling raised 70,000 → 70,600 with
 // the owner's CHANGES.md note, because honest reporting is the point of the release.
-const MEASURED_CHARS = 69_673;
+// Reference measurement updated 2026-11-13: `replace_selection` and `insert_code`
+// are retired (19 and 13 calls in the whole session archive, every one a harness
+// probe, against 10,969 uses of `edit_file`), so the maximal catalog is 89 tools
+// and the non-computer-use set is 65 — 68,575 chars, 1,098 less than the 69,673
+// of 0.17.171. The retired names answer with a pointer to `edit_file`.
+const MEASURED_CHARS = 68_575;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.
@@ -305,7 +310,7 @@ describe('tool schema CI budget (TOOL_SCHEMA_GROWTH_PLAN.md Step 1)', () => {
       .map((d) => d.function.name)
       .sort();
     expect(names).toHaveLength(registry.names().length);
-    expect(names).toHaveLength(91);
+    expect(names).toHaveLength(89);
     expect(names.filter((name) => name.startsWith('browser_'))).toHaveLength(15);
     expect(names.filter((name) => name.startsWith('desktop_'))).toHaveLength(9);
     // Spot-check the six self-suppressing tools that only appear when their

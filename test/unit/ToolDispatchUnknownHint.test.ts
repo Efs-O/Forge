@@ -138,10 +138,16 @@ describe('unknown tool name hints', () => {
   // checks what is still there, and one edit did silently drop `exec_command`
   // when `append_file` was added. These three names are the ones a saved chat
   // can still replay, so they are asserted by name.
-  it('keeps the retired names a saved chat replays: exec_command, append_file, create_directory', async () => {
+  it('keeps the retired names a saved chat replays: exec_command, append_file, create_directory, replace_selection, insert_code', async () => {
     const registry = new ToolRegistry();
-    for (const name of ['shell', 'write_file']) registry.register(tool(name));
-    for (const name of ['exec_command', 'append_file', 'create_directory']) {
+    for (const name of ['shell', 'write_file', 'edit_file']) registry.register(tool(name));
+    for (const name of [
+      'exec_command',
+      'append_file',
+      'create_directory',
+      'replace_selection',
+      'insert_code',
+    ]) {
       expect(RETIRED_TOOLS, name).toHaveProperty(name);
     }
 
@@ -154,6 +160,14 @@ describe('unknown tool name hints', () => {
     const dir = await dispatchUnknown({ name: 'create_directory', registry });
     expect(dir).toContain('was replaced by "write_file"');
     expect(dir).toContain('shell mkdir for a bare folder');
+    // The two active-editor writers went on 2026-11-13. A chat written before
+    // that still replays their calls, and a model that reaches for one has to be
+    // sent to the tool that names the file it writes.
+    for (const name of ['replace_selection', 'insert_code']) {
+      const result = await dispatchUnknown({ name, registry });
+      expect(result, name).toContain('was replaced by "edit_file"');
+      expect(result, name).toContain('an explicit path and old_str/new_str');
+    }
   });
 
   it('keeps the load_tool_group instruction for a retired lazy-group tool', async () => {

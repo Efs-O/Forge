@@ -3,13 +3,7 @@ import type { RegisteredTool, ToolRegistry } from './ToolRegistry';
 import type { SearchConfig, ForgeConfig } from '../config/types';
 import type { LocalDelegationService } from '../delegation/LocalDelegationService';
 import { makeLocalAgentTool, makeListDelegationTargetsTool } from './localAgentTool';
-import {
-  makeReadFileTool,
-  makeWriteFileTool,
-  makeReplaceSelectionTool,
-  makeInsertCodeTool,
-  makeGetEditorContextTool,
-} from './builtinTools';
+import { makeReadFileTool, makeWriteFileTool, makeGetEditorContextTool } from './builtinTools';
 import { makeFindFilesTool } from './dirTools';
 import { makeSearchCodeTool } from './searchCodeTool';
 import { makeListDirectoryTool } from './listDirectoryTool';
@@ -210,8 +204,6 @@ export function registerAllTools(
   // gating on it would silently drop the tool wherever it is not supplied.
   registry.register(makeViewVideoTool(getConfig ? () => getConfig().video : undefined));
   registry.register(guarded(makeWriteFileTool(extraRoots, lengthWarning, watchProblems)));
-  registry.register(guarded(makeReplaceSelectionTool()));
-  registry.register(guarded(makeInsertCodeTool()));
   registry.register(makeGetEditorContextTool());
 
   // v0.5 read-only

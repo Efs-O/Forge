@@ -147,7 +147,7 @@ reviews and makes images, keeps them advertised with
 
 **Files and edits.** `read_file`, `write_file` — `mode: "append"` adds to the
 end of a file, which is how a write that was cut off is finished — `edit_file` with
-batched `edits[]`, `apply_line_edits`, `insert_code`, `move_file`,
+batched `edits[]`, `apply_line_edits`, `move_file`,
 `list_directory`. `delete_file` moves to the recycle bin rather
 than destroying. Every write is checkpointed and shown as a diff.
 
@@ -206,8 +206,8 @@ once before it occupies the GPU (`confirm_on_start`). Setup for both is in
 [AI_SETUP.md](AI_SETUP.md), step 10.
 
 **Editor context.** `get_editor_context` lets the agent read the file and
-selection you are actually looking at; `replace_selection` and `show_diff`
-write back into it.
+selection you are actually looking at; the edit tools then write that file by
+name, and `show_diff` shows two versions side by side.
 
 **Vision.** `view_image` for screenshots and diagrams, `view_video` for frames
 sampled out of a workspace clip (needs ffmpeg), and `image_search` for finding

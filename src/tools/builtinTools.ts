@@ -166,130 +166,24 @@ export function makeWriteFileTool(
   };
 }
 
-export function makeReplaceSelectionTool(): RegisteredTool {
-  return {
-    definition: {
-      type: 'function',
-      function: {
-        name: 'replace_selection',
-        description:
-          'Replace the current editor selection with new text, in the ACTIVE EDITOR — the file ' +
-          'the user currently has focused, which you cannot choose or see. Prefer edit_file, ' +
-          'which takes an explicit path. The result names the file that was written; check it.',
-        parameters: {
-          type: 'object',
-          properties: {
-            text: { type: 'string', description: 'Replacement text.' },
-          },
-          required: ['text'],
-          additionalProperties: false,
-        },
-      },
-    },
-    permission: 'write',
-    mutation: {
-      paths: () =>
-        vscode.window.activeTextEditor?.document.uri.fsPath
-          ? [vscode.window.activeTextEditor.document.uri.fsPath]
-          : [],
-      showDiff: true,
-    },
-    handler: async (args) => {
-      const editor = vscode.window.activeTextEditor;
-      if (!editor) throw new Error('replace_selection: no active editor');
-      if (editor.selection.isEmpty) {
-        // An empty selection has nothing to replace: `b.replace` on it inserts at
-        // the cursor, and the result then claimed a replacement the caller never
-        // asked for, in a file the caller cannot see. Refuse and name the file.
-        throw new Error(
-          `replace_selection: nothing is selected in ${vscode.workspace.asRelativePath(editor.document.uri)}, so there is nothing to replace. ` +
-            'Select the text to replace, or use insert_code to add text at the cursor, or edit_file with an explicit path.',
-        );
-      }
-      const saved = await editAndSave('replace_selection', editor, (b) =>
-        b.replace(editor.selection, args['text'] as string),
-      );
-      // Name the file, for the same reason insert_code does.
-      return `Selection replaced in ${vscode.workspace.asRelativePath(editor.document.uri)}.${saved}`;
-    },
-  };
-}
-
-export function makeInsertCodeTool(): RegisteredTool {
-  return {
-    definition: {
-      type: 'function',
-      function: {
-        name: 'insert_code',
-        description:
-          'Insert a line of code at a zero-based line number in the ACTIVE EDITOR — the file ' +
-          'the user currently has focused, which you cannot choose or see. Prefer edit_file, ' +
-          'which takes an explicit path. The result names the file that was written; check it.',
-        parameters: {
-          type: 'object',
-          properties: {
-            text: { type: 'string', description: 'Code to insert (a trailing newline is added).' },
-            line: { type: 'integer', description: 'Zero-based line number to insert at.' },
-          },
-          required: ['text', 'line'],
-          additionalProperties: false,
-        },
-      },
-    },
-    permission: 'write',
-    mutation: {
-      paths: () =>
-        vscode.window.activeTextEditor?.document.uri.fsPath
-          ? [vscode.window.activeTextEditor.document.uri.fsPath]
-          : [],
-      showDiff: true,
-    },
-    handler: async (args) => {
-      const editor = vscode.window.activeTextEditor;
-      if (!editor) throw new Error('insert_code: no active editor');
-      const line = args['line'] as number;
-      const saved = await editAndSave('insert_code', editor, (b) =>
-        b.insert(new vscode.Position(line, 0), (args['text'] as string) + '\n'),
-      );
-      // Name the file. The target is whatever the user has focused, which the
-      // model cannot choose or inspect — so a bare "Inserted at line 0." let a
-      // write land in an unrelated file with nothing in the transcript to show
-      // it. Reporting the path turns a silent mistake into a visible one.
-      return `Inserted at line ${line} of ${vscode.workspace.asRelativePath(editor.document.uri)}.${saved}`;
-    },
-  };
-}
+// The two active-editor writers (`replace_selection`, `insert_code`) and their
+// `editAndSave` helper were retired on 2026-11-13: across the whole session
+// archive they had been called 19 and 13 times, every call from a tool harness
+// probe, against 10,969 uses of `edit_file`. Both names now resolve through
+// `sidebar/retiredTools.ts`, so a saved conversation still replays and a model
+// that calls one is pointed at `edit_file`, which takes an explicit path.
+//
+// What is lost with them is the ability to write the file the USER has focused
+// without knowing its path — `get_editor_context` reads that picture, and
+// `edit_file` then writes it by name.
 
 /**
- * Edit the active editor and, when it held no unsaved user edits, save it, so
- * the change reaches disk where the per-turn checkpoint (and Undo) can see it
- * (U15-02). A buffer that was already dirty is left unsaved — saving would
- * persist the user's own edits — and the result says Undo will not cover it.
- * `editor.edit` resolves false when VS Code refuses the edit (U15-05).
- */
-async function editAndSave(
-  tool: string,
-  editor: vscode.TextEditor,
-  change: (builder: vscode.TextEditorEdit) => void,
-): Promise<string> {
-  const wasDirty = editor.document.isDirty;
-  if (!(await editor.edit(change))) throw new Error(`${tool}: VS Code did not apply the edit`);
-  if (wasDirty) {
-    return ' The file already had unsaved changes, so it was left unsaved; Undo does not cover this edit.';
-  }
-  if (!(await editor.document.save())) {
-    throw new Error(
-      `${tool}: edited, but the file could not be saved; the change is in the editor buffer only`,
-    );
-  }
-  return '';
-}
-
-/**
- * The read-side counterpart to replace_selection / insert_code.
+ * The read side of the active editor. The two tools that used to write it —
+ * `replace_selection` and `insert_code` — are retired above, so this is how a
+ * model finds out what the user is looking at before it names a path.
  *
- * Those two write into the active editor, but nothing could read it back: a
- * user saying "fix this" with a selection highlighted gave the model no way to
+ * Nothing else could read the editor back: a user saying "fix this" with a
+ * selection highlighted gave the model no way to
  * see what "this" was, so it re-read whole files and guessed. One call returns
  * the whole "what is the user looking at" picture — active file, selection,
  * cursor, and the other open tabs — because a separate tool per fact would
