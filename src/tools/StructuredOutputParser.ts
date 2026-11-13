@@ -28,6 +28,12 @@ export interface ParsedToolCall {
   error?: string;
 }
 
+/** A recognised call plus the span it was found in, kept only inside this file. */
+interface PositionedCall extends ParsedToolCall {
+  start: number;
+  end: number;
+}
+
 /**
  * Which shapes count as a tool call in one round's text. See
  * `TextToolCallMode.textToolCallForms` for who chooses them and why.
@@ -78,7 +84,10 @@ const OLLAMA_TOOL_WRAPPER_RE = new RegExp(
 
 /**
  * Scan `text` for ```json ... ``` blocks and attempt to parse each as a tool call.
- * Returns all valid tool calls found; silently skips malformed blocks.
+ * Returns every valid call found, IN THE ORDER THE MODEL WROTE THEM, and skips
+ * malformed blocks. Ordering is not cosmetic: calls run in the order they are
+ * dispatched, and collecting fence-by-fence then marker-by-marker ran a later
+ * Hermes call before an earlier fenced one.
  *
  * `toolNames`, when given, limits ```json blocks to calls of those tools. A
  * fence is also how a model shows ordinary JSON, and the single-key shorthand
@@ -90,13 +99,30 @@ export function parseStructuredOutput(
   toolNames?: ReadonlySet<string>,
   forms: StructuredOutputForms = ALL_FORMS,
 ): ParsedToolCall[] {
-  const results: ParsedToolCall[] = [];
-  if (forms.jsonFence) collectJsonFenceToolCalls(text, results, toolNames);
+  const found: PositionedCall[] = [];
+  if (forms.jsonFence) collectJsonFenceToolCalls(text, found, toolNames);
   if (forms.markers) {
-    collectOllamaMarkerToolCalls(text, results);
-    collectHermesToolCalls(text, results);
+    collectOllamaMarkerToolCalls(text, found);
+    collectHermesToolCalls(text, found);
   }
-  return results;
+  found.sort((a, b) => a.start - b.start);
+
+  // A span that starts inside one already accepted is the same call seen twice
+  // — a fenced block inside a `<tool_call>` body, say — and running it twice
+  // would write the file twice.
+  const accepted: ParsedToolCall[] = [];
+  let lastEnd = -1;
+  for (const call of found) {
+    if (call.start < lastEnd) continue;
+    // The span is bookkeeping for this function; the caller gets a call.
+    accepted.push({
+      name: call.name,
+      arguments: call.arguments,
+      ...(call.error !== undefined ? { error: call.error } : {}),
+    });
+    lastEnd = Math.max(lastEnd, call.end);
+  }
+  return accepted;
 }
 
 /**
@@ -226,7 +252,7 @@ function fenceCall(body: string, toolNames?: ReadonlySet<string>): ParsedToolCal
 
 function collectJsonFenceToolCalls(
   text: string,
-  results: ParsedToolCall[],
+  results: PositionedCall[],
   toolNames?: ReadonlySet<string>,
 ): void {
   let match: RegExpExecArray | null;
@@ -235,37 +261,42 @@ function collectJsonFenceToolCalls(
   while ((match = JSON_FENCE_RE.exec(text)) !== null) {
     const candidate = fenceCall(match[1], toolNames);
     if (candidate) {
-      results.push(candidate);
+      results.push({ ...candidate, start: match.index, end: match.index + match[0].length });
     }
   }
 }
 
-function collectOllamaMarkerToolCalls(text: string, results: ParsedToolCall[]): void {
+function collectOllamaMarkerToolCalls(text: string, results: PositionedCall[]): void {
   let match: RegExpExecArray | null;
   OLLAMA_TOOL_CALL_RE.lastIndex = 0;
 
   while ((match = OLLAMA_TOOL_CALL_RE.exec(text)) !== null) {
     const name = match[1]?.trim();
     if (!name) continue;
+    const span = { start: match.index, end: match.index + match[0].length };
     const raw = match[2]?.trim() ?? '';
     const parsedArgs = parseJsonArguments(raw);
     if (!parsedArgs.ok) {
       results.push({
+        ...span,
         name: PARSE_ERROR_TOOL,
         arguments: {},
         error: `malformed tool call: its arguments are not valid JSON (${parsedArgs.message}), so no tool ran. Resend it.`,
       });
       continue;
     }
-    results.push({ name, arguments: parsedArgs.value });
+    results.push({ ...span, name, arguments: parsedArgs.value });
   }
 }
 
-function collectHermesToolCalls(text: string, results: ParsedToolCall[]): void {
+function collectHermesToolCalls(text: string, results: PositionedCall[]): void {
   for (const match of text.matchAll(HERMES_TOOL_CALL_RE)) {
     const body = match[1] ?? '';
     const candidate = parseJsonToolObject(body, 'hermes') ?? parseXmlFunction(body);
-    if (candidate) results.push(candidate);
+    if (candidate) {
+      const start = match.index ?? 0;
+      results.push({ ...candidate, start, end: start + match[0].length });
+    }
   }
 }
 
