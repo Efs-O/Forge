@@ -1,7 +1,11 @@
 import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolDispatch } from '../../src/sidebar/ToolDispatch';
-import { dispatchWithParallelReads } from '../../src/sidebar/ToolDispatchParallel';
+import {
+  commitBufferedToolDispatchEffects,
+  createBufferedToolDispatchEffects,
+  dispatchWithParallelReads,
+} from '../../src/sidebar/ToolDispatchParallel';
 import type { ToolDispatchRoundContext } from '../../src/sidebar/toolDispatchTypes';
 import type { ChatMessage, ToolCall } from '../../src/llm/types';
 import type { CheckpointStack } from '../../src/checkpoint/CheckpointStack';
@@ -469,5 +473,28 @@ describe('ToolDispatch parallel read batches', () => {
     expect(trackerUpdates).toEqual(['reset:failure-order']);
     expect(messages.map((message) => message.tool_call_id)).toEqual(['success', 'failure']);
     expect(messages[1]?.content).toContain('read failed');
+  });
+});
+
+describe('buffered tracker updates commit in the order they happened', () => {
+  it('applies a protocol failure before the reset of a later call', () => {
+    const buffered = createBufferedToolDispatchEffects([{ role: 'user', content: 'go' }]);
+    buffered.failureTracker.recordNativeParseFailure('conv-a');
+    buffered.failureTracker.reset('conv-a');
+    const applied: string[] = [];
+
+    commitBufferedToolDispatchEffects(
+      buffered,
+      [],
+      {
+        reset: (id) => applied.push(`reset:${id}`),
+        recordNativeParseFailure: (id) => applied.push(`parse:${id}`),
+      },
+      () => undefined,
+    );
+
+    // The other order leaves the streak standing after a call ran, which is the
+    // opposite of what a successful call is for.
+    expect(applied).toEqual(['parse:conv-a', 'reset:conv-a']);
   });
 });

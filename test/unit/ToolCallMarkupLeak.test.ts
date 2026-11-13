@@ -119,7 +119,10 @@ describe('a tool call whose value swallowed a parameter block', () => {
         'the tool are not what was meant. Resend the call with one parameter block per argument ' +
         'and no markup inside any value.',
     );
-    expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
+    // Engine-folded markup is this model's tool-call protocol failing, not the
+    // tool's fault, so it counts toward the streak that switches the chat to
+    // text tool calls — which is the only recovery for ten of them.
+    expect(failureTracker.recordNativeParseFailure).toHaveBeenCalledTimes(1);
   });
 
   it('refuses a nested edit value that carries a block naming one of the tool parameters', async () => {
@@ -174,6 +177,7 @@ describe('a tool call whose value swallowed a parameter block', () => {
 
     expect(handler).toHaveBeenCalled();
     expect(messages[1]?.content).toBe('written');
+    expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
   });
 
   it('runs a value holding one closing tag with no opening tag anywhere', async () => {

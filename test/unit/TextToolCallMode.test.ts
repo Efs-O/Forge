@@ -4,7 +4,11 @@ import {
   stripStructuredOutputFromFullText,
   StructuredOutputStripper,
 } from '../../src/tools/StructuredOutputParser';
-import { textToolCallForms } from '../../src/tools/TextToolCallMode';
+import {
+  nativeOnlyToolCalls,
+  NATIVE_ONLY_PARSE_ERROR,
+  textToolCallForms,
+} from '../../src/tools/TextToolCallMode';
 
 const FENCE = '```json\n{"tool": "write_file", "arguments": {"path": "a"}}\n```';
 const HERMES = '<tool_call>{"name": "write_file", "arguments": {"path": "a"}}</tool_call>';
@@ -62,5 +66,20 @@ describe('the forms switch inside the parser', () => {
     expect(stripStructuredOutputFromFullText(HERMES, NAMES, forms)).toBe(HERMES);
     const stripper = new StructuredOutputStripper(forms);
     expect(stripper.push(HERMES) + stripper.flush()).toBe(HERMES);
+  });
+});
+
+describe('nativeOnlyToolCalls', () => {
+  it('is true only for the explicit native-only setting', () => {
+    expect(nativeOnlyToolCalls({ text_tool_calls: 'native' })).toBe(true);
+    expect(nativeOnlyToolCalls({ text_tool_calls: 'text' })).toBe(false);
+    expect(nativeOnlyToolCalls({ text_tool_calls: 'auto' })).toBe(false);
+    expect(nativeOnlyToolCalls({})).toBe(false);
+    expect(nativeOnlyToolCalls(undefined)).toBe(false);
+  });
+
+  it('the message the user sees names the setting that caused it', () => {
+    expect(NATIVE_ONLY_PARSE_ERROR).toContain('text_tool_calls: native');
+    expect(NATIVE_ONLY_PARSE_ERROR).toContain('did not retry');
   });
 });

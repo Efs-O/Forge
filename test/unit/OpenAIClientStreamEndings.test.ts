@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ToolCall } from '../../src/llm/types';
 import { streamChatCompletion } from '../../src/llm/OpenAIClient';
 import { ToolCallTruncatedError } from '../../src/llm/ToolCallTruncatedError';
+import { preflightToolCall } from '../../src/sidebar/toolCallPreflight';
+import { ToolRegistry } from '../../src/tools/ToolRegistry';
 
 const { logLines } = vi.hoisted(() => ({ logLines: [] as string[] }));
 
@@ -89,6 +92,36 @@ describe('every way a stream ends gets the same truncation check', () => {
     expect(h.onToolCalls.mock.calls[0]?.[0]).toEqual([
       { id: 'c1', type: 'function', function: { name: 'list_executions', arguments: '' } },
     ]);
+
+    // Delivered is not the same as runnable: the call has to get through
+    // preflight, which is what decides whether it executes.
+    const delivered = h.onToolCalls.mock.calls[0]?.[0] as ToolCall[];
+    const registry = new ToolRegistry();
+    registry.register({
+      definition: {
+        type: 'function',
+        function: {
+          name: 'list_executions',
+          description: 'List background runs',
+          parameters: { type: 'object' },
+        },
+      },
+      permission: 'read',
+      handler: async () => 'listed',
+    });
+    const pre = preflightToolCall(delivered[0] as ToolCall, {
+      toolRegistry: registry,
+      allowed: new Set(['read']),
+      convId: undefined,
+      signal: undefined,
+      budget: undefined,
+      unavailableTools: undefined,
+      clankerMode: false,
+    });
+    if (pre.kind !== 'ready') {
+      throw new Error(`preflight refused the call: ${JSON.stringify(pre.result)}`);
+    }
+    expect(pre.args).toEqual({});
   });
 
   it('a terminal frame followed by [DONE] settles once, with no second dispatch', async () => {

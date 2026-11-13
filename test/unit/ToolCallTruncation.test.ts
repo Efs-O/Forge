@@ -12,6 +12,7 @@ import {
 } from '../../src/agent/ToolCallingLoop';
 import { ToolCallTruncatedError } from '../../src/llm/ToolCallTruncatedError';
 import { ToolFailureTracker } from '../../src/tools/StripTools';
+import { NATIVE_ONLY_PARSE_ERROR } from '../../src/tools/TextToolCallMode';
 import { truncationGuidance } from '../../src/agent/truncationRecovery';
 import { makeWriteFileTool } from '../../src/tools/builtinTools';
 
@@ -59,6 +60,31 @@ function runOptions(messages: ChatMessage[], extra: Record<string, unknown> = {}
 describe('truncated tool calls', () => {
   beforeEach(() => {
     streamModelChatCompletion.mockReset();
+  });
+
+  it('a model set to native tool calls only is told the setting instead of getting an unusable retry', async () => {
+    let round = 0;
+    streamModelChatCompletion.mockImplementation(
+      async (_url: string, _req: unknown, _model: unknown, h: Handlers) => {
+        round += 1;
+        h.onError(new Error(SERVER_MALFORMED_500));
+      },
+    );
+    const nativeFallback = vi.fn();
+
+    await expect(
+      runToolCallingLoop(
+        runOptions([{ role: 'user', content: 'go' }], {
+          model: { name: 'test-model', text_tool_calls: 'native' } as never,
+          onNativeFallback: nativeFallback,
+        }) as never,
+      ),
+    ).rejects.toThrow(NATIVE_ONLY_PARSE_ERROR);
+
+    // The retry would have asked for fenced JSON that this mode refuses to read,
+    // so no second round is sent and no fallback is claimed to have happened.
+    expect(round).toBe(1);
+    expect(nativeFallback).not.toHaveBeenCalled();
   });
 
   it('maps llama-server input-context 400s to Forge recovery instead of a raw provider error', async () => {

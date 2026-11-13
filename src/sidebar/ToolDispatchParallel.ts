@@ -42,16 +42,24 @@ interface ParallelReadCall {
 export interface ToolDispatchEffects {
   messages: ChatMessage[];
   post: (msg: HostToWebview) => void;
-  /** Only the success reset travels here. A tool's own error no longer changes
-   *  the protocol (audit R1), so dispatch records no failures at all. */
-  failureTracker: Pick<ToolFailureTracker, 'reset'>;
+  /** The success reset, plus the one refusal that is the model's protocol
+   *  failing rather than the tool's (audit R1): engine-folded markup. A tool's
+   *  own error no longer changes the protocol, so nothing else records failures. */
+  failureTracker: Pick<ToolFailureTracker, 'reset' | 'recordNativeParseFailure'>;
 }
 
 export interface BufferedToolDispatchEffects extends ToolDispatchEffects {
   historyLength: number;
   posts: HostToWebview[];
-  failureTrackerResets: Array<string | undefined>;
+  /** Tracker updates in the order they happened: a failure recorded before a
+   *  call that ran must be applied before that call's reset, or the good call
+   *  would not clear the streak the broken one raised. */
+  failureTrackerUpdates: FailureTrackerUpdate[];
 }
+
+type FailureTrackerUpdate =
+  | { kind: 'reset'; conversationId: string | undefined }
+  | { kind: 'protocolFailure'; conversationId: string | undefined };
 
 export function isParallelReadOnlyTool(name: string): boolean {
   return PARALLEL_READ_ONLY_TOOLS.has(name);
@@ -119,17 +127,22 @@ export function createBufferedToolDispatchEffects(
   history: readonly ChatMessage[],
 ): BufferedToolDispatchEffects {
   const posts: HostToWebview[] = [];
-  const failureTrackerResets: BufferedToolDispatchEffects['failureTrackerResets'] = [];
+  const failureTrackerUpdates: BufferedToolDispatchEffects['failureTrackerUpdates'] = [];
   const messages = [...history];
   return {
     messages,
     post: (msg) => posts.push(msg),
     failureTracker: {
-      reset: (conversationId) => failureTrackerResets.push(conversationId),
+      reset: (conversationId) => {
+        failureTrackerUpdates.push({ kind: 'reset', conversationId });
+      },
+      recordNativeParseFailure: (conversationId) => {
+        failureTrackerUpdates.push({ kind: 'protocolFailure', conversationId });
+      },
     },
     historyLength: history.length,
     posts,
-    failureTrackerResets,
+    failureTrackerUpdates,
   };
 }
 
@@ -137,10 +150,13 @@ export function createBufferedToolDispatchEffects(
 export function commitBufferedToolDispatchEffects(
   buffered: BufferedToolDispatchEffects,
   messages: ChatMessage[],
-  failureTracker: Pick<ToolFailureTracker, 'reset'>,
+  failureTracker: Pick<ToolFailureTracker, 'reset' | 'recordNativeParseFailure'>,
   post: (msg: HostToWebview) => void,
 ): void {
-  for (const conversationId of buffered.failureTrackerResets) failureTracker.reset(conversationId);
+  for (const update of buffered.failureTrackerUpdates) {
+    if (update.kind === 'reset') failureTracker.reset(update.conversationId);
+    else failureTracker.recordNativeParseFailure(update.conversationId);
+  }
   for (const msg of buffered.posts) post(msg);
   messages.push(...buffered.messages.slice(buffered.historyLength));
 }
@@ -171,7 +187,7 @@ export async function dispatchWithParallelReads(
   context: ToolDispatchRoundContext,
   toolRegistry: ToolRegistry,
   messages: ChatMessage[],
-  failureTracker: Pick<ToolFailureTracker, 'reset'>,
+  failureTracker: Pick<ToolFailureTracker, 'reset' | 'recordNativeParseFailure'>,
   post: (msg: HostToWebview) => void,
   dispatchSerial: (call: ToolCall, approval?: CachedToolApproval) => Promise<void>,
   dispatchBuffered: (

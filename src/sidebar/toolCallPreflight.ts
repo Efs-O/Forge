@@ -121,7 +121,14 @@ function parameterNames(reg: RegisteredTool): readonly string[] {
 }
 
 export type ToolCallPreflight =
-  | { kind: 'refused'; result: ToolHandlerResult }
+  | {
+      kind: 'refused';
+      result: ToolHandlerResult;
+      /** The refusal is evidence that this model's tool-call protocol is failing,
+       *  not that a tool was misused, so the caller counts it toward the streak
+       *  that switches the chat to text tool calls. */
+      protocolFailure?: boolean;
+    }
   | { kind: 'ready'; args: Record<string, unknown>; reg: RegisteredTool };
 
 export function preflightToolCall(
@@ -143,7 +150,11 @@ export function preflightToolCall(
     return { kind: 'refused', result };
   }
   try {
-    const parsed: unknown = JSON.parse(tc.function.arguments);
+    // A call that takes no arguments arrives with an empty arguments string: a
+    // name-only delta has nothing to append, and some servers send `""` or omit
+    // the field. Empty means `{}` — parsing it as JSON would refuse a valid call.
+    const raw = typeof tc.function.arguments === 'string' ? tc.function.arguments.trim() : '';
+    const parsed: unknown = JSON.parse(raw || '{}');
     if (parsed === null || Array.isArray(parsed) || typeof parsed !== 'object') {
       const got = parsed === null ? 'null' : Array.isArray(parsed) ? 'array' : typeof parsed;
       result = `Error: ${tc.function.name}: arguments must be a JSON object, got ${got}.`;
@@ -197,9 +208,11 @@ export function preflightToolCall(
   // Valid JSON, but the engine's parser folded a second parameter block into one
   // of the values, so running this call would act on text the model never meant
   // as an argument — an edit would write the markup straight into the file.
+  // Every refusal of this shape is a protocol failure: the streak that switches
+  // the chat to text tool calls is exactly what ten of them should trigger.
   const leaked = markupLeakInArgs(tc.function.name, args, parameterNames(reg));
   if (leaked) {
-    return { kind: 'refused', result: leaked };
+    return { kind: 'refused', result: leaked, protocolFailure: true };
   }
   const budgetBlock = input.budget?.check(tc.function.name);
   if (budgetBlock) {

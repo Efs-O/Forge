@@ -163,6 +163,39 @@ describe('invalid tool-call JSON preflight', () => {
     expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
   });
 
+  it('runs a no-argument call instead of refusing an empty arguments string', async () => {
+    const handler = vi.fn().mockResolvedValue('listed');
+    registry.register({
+      definition: {
+        type: 'function',
+        function: {
+          name: 'list_executions',
+          description: 'List background runs',
+          parameters: { type: 'object' },
+        },
+      },
+      permission: 'read',
+      handler,
+    });
+
+    // A name-only delta has nothing to append, and some servers send `""` or
+    // omit the field. Every one of those shapes means "no arguments".
+    for (const args of ['', '   ', undefined]) {
+      const call: ToolCall = {
+        id: 'call-list',
+        type: 'function',
+        function: { name: 'list_executions', arguments: args as string },
+      };
+      const messages: ChatMessage[] = [
+        { role: 'assistant', content: null, tool_calls: [call] },
+      ];
+      await dispatch.dispatch([call], allowed, messages);
+      expect(messages[1]?.content).toBe('listed');
+    }
+    expect(handler).toHaveBeenCalledWith({}, expect.anything());
+    expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
+  });
+
   it('uses generic complete-object advice when no specific cause matches', () => {
     expect(invalidJsonAdvice('{broken', "Unexpected token 'b'")).toBe(
       'Resend the arguments as one complete JSON object.',

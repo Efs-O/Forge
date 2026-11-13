@@ -165,9 +165,8 @@ export class ToolDispatch {
 
     for (const tc of toolCalls) {
       // The span is stamped once here and read by `toolResultMessage` on whichever branch
-      // wins. The early refusals (declined, unknown tool, budget) are timed too:
-      // they are near-instant and fall under the display floor, so they simply
-      // render without a duration rather than needing a special case.
+      // wins. The early refusals (declined, unknown tool, budget) are timed too: they are
+      // near-instant and fall under the display floor, so they render without a duration.
       const startedAt = Date.now();
       let result: ToolHandlerResult;
       let args: Record<string, unknown> | undefined;
@@ -186,6 +185,8 @@ export class ToolDispatch {
           clankerMode,
         });
         if (pre.kind === 'refused') {
+          // A protocolFailure counts toward the streak that switches this chat to text tools.
+          if (pre.protocolFailure) effects.failureTracker.recordNativeParseFailure(convId);
           this.postResult(tc, toolResultText(pre.result), undefined, convId, effects.post);
           messages.push(toolResultMessage(tc, toolResultContent(pre.result), startedAt));
           continue;

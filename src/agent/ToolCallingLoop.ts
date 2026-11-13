@@ -3,7 +3,11 @@ import { ThinkingChannelStripper } from '../llm/ThinkingChannelStripper';
 import type { ChatCompletionRequest, ToolCall } from '../llm/types';
 import { StructuredOutputStripper } from '../tools/StructuredOutputParser';
 import { extractFallbackToolCalls } from '../tools/ToolCallFallback';
-import { textToolCallForms } from '../tools/TextToolCallMode';
+import {
+  nativeOnlyToolCalls,
+  NATIVE_ONLY_PARSE_ERROR,
+  textToolCallForms,
+} from '../tools/TextToolCallMode';
 import { MIN_ROUND_HEADROOM_TOKENS, reasoningReserve } from '../util/contextBudget';
 import { getLogger } from '../util/logger';
 import {
@@ -263,6 +267,12 @@ export async function runToolCallingLoop(
         continue;
       }
       if (!isNativeToolJsonParseError(err) || !built.usesNativeTools) throw err;
+      if (nativeOnlyToolCalls(options.model)) {
+        // No text channel exists to recover into, so the retry below would ask
+        // for fenced JSON and then decline to read any of it: the turn would end
+        // as ordinary text and run nothing. Name the setting instead.
+        throw new Error(NATIVE_ONLY_PARSE_ERROR);
+      }
       options.onNativeFallback?.();
       // The retry carries no native tools and does send the fenced-JSON
       // instructions, so text is now the only channel whatever the model says.
