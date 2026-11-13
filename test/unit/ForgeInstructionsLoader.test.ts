@@ -19,6 +19,7 @@ import {
   ensureForgeInstructionsFile,
   ForgeInstructionsLoader,
 } from '../../src/llm/ForgeInstructionsLoader';
+import { MAX_INSTRUCTION_BYTES } from '../../src/llm/forgeInstructionsChain';
 
 const roots: string[] = [];
 
@@ -154,7 +155,7 @@ describe('ForgeInstructionsLoader', () => {
   it('warns once when a rendered instruction file reaches 90% of the byte budget', () => {
     const root = makeRoot();
     const file = path.join(root, 'FORGE.md');
-    const content = 'a'.repeat(29_000);
+    const content = 'a'.repeat(MAX_INSTRUCTION_BYTES - 4_000);
     fs.writeFileSync(file, content, 'utf8');
     const loader = new ForgeInstructionsLoader(root);
 
@@ -166,17 +167,22 @@ describe('ForgeInstructionsLoader', () => {
       expect.stringContaining('FORGE.md'),
     );
     expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
-      expect.stringContaining('29,000 of 32,000 bytes'),
+      expect.stringContaining(
+        `${(MAX_INSTRUCTION_BYTES - 4_000).toLocaleString('en-US')} of ${MAX_INSTRUCTION_BYTES.toLocaleString(
+          'en-US',
+        )} bytes`,
+      ),
     );
     loader.dispose();
   });
 
   it('does not warn below 90% of the byte budget', () => {
     const root = makeRoot();
-    fs.writeFileSync(path.join(root, 'FORGE.md'), 'a'.repeat(28_000), 'utf8');
+    const below = Math.floor(MAX_INSTRUCTION_BYTES * 0.8);
+    fs.writeFileSync(path.join(root, 'FORGE.md'), 'a'.repeat(below), 'utf8');
     const loader = new ForgeInstructionsLoader(root);
 
-    expect(loader.instructions).toHaveLength(28_000);
+    expect(loader.instructions).toHaveLength(below);
     expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
     loader.dispose();
   });

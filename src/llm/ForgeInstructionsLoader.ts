@@ -15,7 +15,7 @@ const RELOAD_DEBOUNCE_MS = 150;
 // system prompt (execute.njk) stay out: every line here is paid on every turn.
 const STARTER_CONTENT = `# Project Instructions
 
-Keep this file concise (under 32,000 bytes). Forge includes it in every native local-agent prompt.
+Keep this file concise (under ${MAX_INSTRUCTION_BYTES.toLocaleString('en-US')} bytes). Forge includes it in every native local-agent prompt.
 Fill in the blanks below; delete any rule that does not fit this project.
 
 ## Project facts

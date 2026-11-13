@@ -106,12 +106,12 @@ describe('renderInstructionChain budget', () => {
   it('allocates root-first, truncating the leaf rather than dropping the root', () => {
     const rendered = renderInstructionChain(
       [
-        file('FORGE.md', '', 'R'.repeat(28_000)),
+        file('FORGE.md', '', 'R'.repeat(MAX_INSTRUCTION_BYTES - 6_000)),
         file('packages/api/FORGE.md', 'packages/api', 'L'.repeat(8_000)),
       ],
       MAX_INSTRUCTION_BYTES,
     );
-    expect(rendered?.text).toContain('R'.repeat(28_000));
+    expect(rendered?.text).toContain('R'.repeat(MAX_INSTRUCTION_BYTES - 6_000));
     expect(rendered?.truncated).toEqual(['packages/api/FORGE.md']);
     expect(Buffer.byteLength(rendered?.text ?? '', 'utf8')).toBeLessThanOrEqual(
       MAX_INSTRUCTION_BYTES,
@@ -121,7 +121,7 @@ describe('renderInstructionChain budget', () => {
   it('marks a leaf omitted, rather than silently dropping it, when nothing fits', () => {
     const rendered = renderInstructionChain(
       [
-        file('FORGE.md', '', 'R'.repeat(31_200)),
+        file('FORGE.md', '', 'R'.repeat(MAX_INSTRUCTION_BYTES - 800)),
         file('packages/api/FORGE.md', 'packages/api', 'L'.repeat(4000)),
       ],
       MAX_INSTRUCTION_BYTES,
@@ -266,14 +266,14 @@ describe('ForgeInstructionsLoader chain assembly', () => {
     fs.mkdirSync(path.join(root, '.git'));
     // Big root file: in the deep chain it is truncated to make room for a
     // header; on its own it must still arrive at its full length.
-    write(root, 'FORGE.md', 'R'.repeat(31_500));
+    write(root, 'FORGE.md', 'R'.repeat(MAX_INSTRUCTION_BYTES - 500));
     write(root, 'pkg/FORGE.md', 'P'.repeat(600));
     const loader = new ForgeInstructionsLoader(root);
 
     const deep = loader.instructionsFor('pkg/a.ts') ?? '';
     expect(deep).toContain('Omitted, project-instruction budget exhausted');
     const shallow = loader.instructionsFor('a.ts') ?? '';
-    expect(shallow).toBe('R'.repeat(31_500));
+    expect(shallow).toBe('R'.repeat(MAX_INSTRUCTION_BYTES - 500));
     loader.dispose();
   });
 });

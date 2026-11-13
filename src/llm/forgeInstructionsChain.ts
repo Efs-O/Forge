@@ -29,8 +29,14 @@ export const FORGE_MD = 'FORGE.md';
  * four times as much as the guard advertised. Counting the rendered form is
  * what makes the number mean something — at the cost of the delimiters
  * themselves consuming a little of it.
+ *
+ * Raised from 32,000 on 2026-11-13 (owner's call): a repo whose instruction
+ * file sits just under the cap cannot add a line without the chain dropping
+ * something else, which is a worse failure than a bigger prompt. This is a
+ * budget, not a safety limit; the strip that follows is what brings the
+ * per-turn cost back down.
  */
-export const MAX_INSTRUCTION_BYTES = 32_000;
+export const MAX_INSTRUCTION_BYTES = 48_000;
 
 /** Below this, a block is not worth a header; the file is marked omitted. */
 const MIN_CONTENT_BYTES = 200;
