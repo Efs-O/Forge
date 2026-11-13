@@ -37,6 +37,7 @@ Read this whole file before your first read, search, edit, write, command, commi
 14. expecting one approval to cover a tool or a turn → each gated call raises its own card and waits the full `approval_timeout_minutes`; budget one answer per gated call
 15. a heredoc terminator with a command after it (`MSG; echo ok`) → never seen as a terminator: the command text lands in the commit message and never runs. keep it alone on its line
 16. a result's field names are not its input names (`next_stdout_cursor` vs `stdout_cursor`) → refused: unknown arguments. the refusal lists the valid names; resend with those
+17. a field a tool does not declare → refused as unknown argument: `read_file` reads take `path`/`start_line`/`end_line`/`pages`; `edit_file` edits are `old_str`/`new_str`; `ask_user` has no `header`
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies only the tree it was written for. run the suite *after* the commit it is meant to certify, or the tip has no proof
@@ -84,5 +85,5 @@ Read this whole file before your first read, search, edit, write, command, commi
 2. `notify_user` with no remote chat bound → `Shown in the VS Code window only`: a local toast, never a phone ping. do not report that the user was notified remotely
 3. `manage_jobs` check `{kind: "none"}` → since 0.17.171 `get` says `runs every tick; on_change delivers nothing`: the job is inert. mute or restore with `on_change`, never a new check
 4. `manage_jobs run_now` → runs in whichever window holds the scheduler lease (here the real repo's), ~40 s later. verify in `jobs/runs/<name>.jsonl`; do not re-call `run_now`
-5. `ask_agent` → "started a new background thread", not the owner's open panel chat, despite the description saying "the session linked to this chat". `/link` binds one first
+5. `ask_agent` with a `target_id` → that session: `existing_session` is live, `new_task` is a new background one; without it → the linked session. `/link` binds the owner's panel chat
 6. `list_delegation_targets` → lists VRAM-loading local models beside cloud ones; picking a local one loads weights and fights the chat model for the GPU. prefer the cloud list

@@ -96,7 +96,8 @@ describe('ensureForgeInstructionsFile', () => {
     // (d) and (e): plan documents that disagree with the code, and durable state.
     expect(content).toContain('acceptance criteria disagree with the code');
     expect(content).toMatch(/outlives its turn/u);
-    expect(content).toContain('create, delete, crash and expiry');
+    expect(content).toMatch(/create, delete, pause or disable, crash mid-write, owner-process death, and expiry/u);
+    expect(content).toContain('a file, a registry entry, a config field, a lease, a queue item');
     // (f), (g), (h): one owner per concern, an audit's scope, and "reply only".
     expect(content).toContain('already owns a concern');
     expect(content).toContain('every reference to it');

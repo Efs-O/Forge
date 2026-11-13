@@ -55,7 +55,6 @@ Fill in the blanks below; delete any rule that does not fit this project.
 - For every message, verdict or request your code acts on, name what checks it came from the right session, chat or sender, and test that too.
 - If this project caps file length, check the count while you edit (\`wc -l\`) and split at a real seam before the cap, not after the lint fails at the end of your turn.
 - A plan is not implemented while its acceptance criteria disagree with the code; update the plan when behaviour changes during implementation.
-- A plan whose feature writes state that outlives its turn (a file, a registry entry, a config field, a lease, a queue item) lists each artifact with what happens on create, delete, crash and expiry.
 
 ## Other agents in the same repository
 - Before you start editing, run git status. Changes you did not make mean another agent or person may be working here: find out who (message_chat reaches another Forge chat) or ask the user, and agree who owns which files before you edit.
@@ -69,7 +68,7 @@ Fill in the blanks below; delete any rule that does not fit this project.
 
 ## Working rules
 - Add durable conventions, safety constraints, and facts you had to discover the hard way here, so the next session does not rediscover them.
-- A plan whose feature writes state that outlives its turn lists every artifact and covers create, delete, pause or disable, crash mid-write, owner-process death, and expiry. A plan with no durable state says so explicitly.
+- A plan whose feature writes state that outlives its turn lists every artifact — a file, a registry entry, a config field, a lease, a queue item — and covers create, delete, pause or disable, crash mid-write, owner-process death, and expiry. A plan with no durable state says so explicitly.
 `;
 
 export type ForgeInstructionsBootstrapResult =
