@@ -26,6 +26,8 @@ Read this whole file before your first read, search, edit, write, command, commi
 7. `json.loads` on every line of a session log → one bad line kills the scan halfway through the file. guard each line with `try/except` and keep going
 8. `cd ../other && { … ; } > rel/file.txt; tail rel/file.txt` → a `cd` inside the line moves the cwd for every command after it, so `tail` reads the wrong folder. give later commands absolute paths
 9. a bash double-quoted string holding backticks → bash runs them as command substitution, so the program gets text I did not write. wrap the body in single quotes or a quoted heredoc
+10. a scan run with `cwd` inside `~/.forge/sessions` → refused: any command there may write into Forge's files. run it from the workspace and pass absolute paths
+11. `probe && next && next` where the probe is meant to fail → the chain stops and the later commands never run. join probes with `;`
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies only the tree it was written for. run the suite *after* the commit it is meant to certify, or the tip has no proof
@@ -36,6 +38,7 @@ Read this whole file before your first read, search, edit, write, command, commi
 2. `apply_line_edits` against a range read earlier in the turn → refused: operation is stale, expected_lines do not match. re-read the range and edit in the same round
 3. an `old_str` rebuilt from two wrapped lines of a paragraph → refused: not found. the file holds a newline where the display wrapped; anchor one line, newlines and all
 4. a rename that lengthens an identifier → a line passes printWidth 100 and fails the formatter gate. after any rename: `git diff -U0 | grep '^+' | awk 'length > 101'`, re-wrap in the same pass
+5. `apply_line_edits` with `expected_lines` invented rather than copied → refused: has N lines but the range is M. the refusal prints the current lines verbatim; copy them from there
 
 ## TEST
 1. a harness that emits tool calls but never dispatches them → proves schema compatibility only. dispatch writes, deletes and commits before claiming behaviour is verified
@@ -55,3 +58,4 @@ Read this whole file before your first read, search, edit, write, command, commi
 5. attributing a log row or a file write to one chat → other chats share the workspace and the files. attribute by session id, read from the row, before counting
 6. reading a `tool_calls` row printed via `json.dumps` → `\n` there is a real newline in the argument, not text the tool got. read the raw value before calling a call malformed
 7. counting recorded lines by a pattern anchored on a backtick → only the template line ever matches; agents write `- tool:`. anchor on the word tool:, allow an optional dash, skip the template
+8. blaming a mistake on a filtered log window from memory → the rows I "remember" may be hours older. print each hit's wall-clock time before attributing it
