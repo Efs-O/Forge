@@ -223,6 +223,22 @@ describe('compaction attempt rows (A48)', () => {
     expect(h.rows[1]!.invalidSummary).toMatchObject({ invalid_check: 'tool-call' });
   });
 
+  // 2026-11-14: an unanchored shape check rejected three valid summaries of
+  // 40,387 / 42,954 / 13,446 characters because the conversation they
+  // summarized quoted a tool call. A quote further in is kept; only a call at
+  // the head of the candidate is unusable.
+  it('a summary that quotes a tool call further in is kept', async () => {
+    const quoted = async (): Promise<string> =>
+      (await good()).replace(
+        'Reference: none recorded.',
+        'Reference: the gate row verbatim: {"tool":"read_file","arguments":{"path":"x"}}.',
+      );
+    const h = setup(quoted);
+    await expect(runCompaction(h.deps, 'c1', { auto: true })).resolves.toBe('compacted');
+    expect(h.rows[1]!.category).toBeUndefined();
+    expect(h.rows[1]!.outcome).toBe('compacted');
+  });
+
   it('a summary missing sections logs their names, not the summary', async () => {
     const h = setup(
       async () => `Goal: complete the request.

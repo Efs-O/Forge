@@ -216,7 +216,9 @@ describe('unusableSummaryReason', () => {
 
   // Found stored as an 817-message conversation's working context on
   // 2026-08-22, from qwen3.8. Length alone caught that instance; the shape must
-  // catch it at any length.
+  // catch it at any length — at the head, which is where a call that answers
+  // the summarization request sits. Prose that quotes one is a different case,
+  // covered below.
   it('rejects a non-JSON tool call at any length', () => {
     const real =
       '<tool_call>\n<function=git_log>\n<parameter=max_entries>\n5\n</parameter>\n</function>\n</tool_call>';
@@ -226,6 +228,35 @@ describe('unusableSummaryReason', () => {
 
   it('accepts real prose that merely mentions a tool', () => {
     expect(unusableSummaryReason(long('Goal: finish the read_file fix'))).toBeUndefined();
+  });
+
+  // 2026-11-14: three valid summaries of 40,387, 42,954 and 13,446 characters
+  // were thrown away because the conversation they summarized quoted a tool
+  // call, and the shape check read the whole text rather than its head.
+  it('accepts a long summary that quotes a tool call in its body', () => {
+    const gateRow = '{"type":"gate","tool":"read_file","arguments":{"path":"~/.ssh/known_hosts"}}';
+    const quoted = long('fix the gate').replace(
+      'Reference: none recorded.',
+      `Reference: the gate row verbatim: ${gateRow}.`,
+    );
+    expect(quoted.indexOf('"tool":')).toBeGreaterThan(200);
+    expect(unusableSummaryReason(quoted)).toBeUndefined();
+  });
+
+  it('accepts a long summary whose tail carries a stray tool call', () => {
+    const call = `{ "tool": "read_file", "arguments": { "path": "${'a'.repeat(300)}" } }`;
+    expect(unusableSummaryReason(`${long('fix the gate')}\n${call}`)).toBeUndefined();
+  });
+
+  it('still rejects a tool call that begins the candidate after a short preamble', () => {
+    const call = `{ "tool": "read_file", "arguments": { "path": "${'a'.repeat(300)}" } }`;
+    expect(unusableSummaryReason(`Sure — here it is:\n\n${call}`)).toBe('tool-call');
+  });
+
+  it('accepts prose that quotes the XML tool-call syntax further in', () => {
+    const xml = 'the syntax the parser rejects is <tool_call><function=git_log>'.repeat(6);
+    const quoted = long('fix the gate').replace('Reference: none recorded.', `Reference: ${xml}.`);
+    expect(unusableSummaryReason(quoted)).toBeUndefined();
   });
 });
 
@@ -840,7 +871,11 @@ describe('runCompaction', () => {
       compactionMetrics: () => ({ max: 58_000, threshold: 0.8 }),
       logCompaction: (_target, entry) => rows.push(entry),
       persistSession: () => {
-        const saved = runtimeToPersisted({ conversations: [c], history: [], activeConversationId: c.id });
+        const saved = runtimeToPersisted({
+          conversations: [c],
+          history: [],
+          activeConversationId: c.id,
+        });
         restored = persistedToRuntime(saved.conversations[0]!);
       },
     };

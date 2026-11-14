@@ -372,12 +372,20 @@ export function capSummary(summary: string, maxChars = COMPACTION_SUMMARY_MAX_CH
  *  several thousand characters, the failures were 117 and 150. */
 const MIN_PLAUSIBLE_SUMMARY_CHARS = 200;
 
+/** How far into the candidate the tool-call shapes are matched. A model that
+ *  answers the summarization request with a tool call starts with it; a summary
+ *  that merely quotes one names it further in. Measured 2026-11-14: matching
+ *  against the whole text threw away three valid summaries of 40,387, 42,954
+ *  and 13,446 characters, because the conversation they summarized was about
+ *  tool calls and carried `{"tool":"read_file",…}` inside its prose. */
+const TOOL_CALL_HEAD_CHARS = 200;
+
 const TOOL_CALL_SHAPED = /"(tool|arguments|tool_calls|function)"\s*:/;
 /**
  * Non-JSON tool-call syntaxes. Qwen emits `<tool_call><function=name>` and a
  * 153-character instance of exactly this was found stored as an 817-message
  * conversation's entire working context. The length floor happened to catch
- * that one; two of them concatenated would have sailed through.
+ * that one; two of them concatenated would have sailed through — at the head.
  */
 const XML_TOOL_CALL_SHAPED = /<\/?tool_call>|<function=|<\|tool_call\|>/i;
 
@@ -400,12 +408,18 @@ export type UnusableSummaryReason =
  * 117 characters that `capSummary` accepted, and which would then have BEEN the
  * conversation's working context for every following turn. A bad summary is
  * recoverable; a summary that is a tool call is a silently poisoned window.
+ *
+ * Both tool-call checks read only the start of the candidate, for the same
+ * reason: what they guard against is a call standing IN PLACE of a summary.
+ * Prose that quotes a call is what a conversation about tools should produce,
+ * and rejecting it cost three real summaries on 2026-11-14.
  */
 export function unusableSummaryReason(candidate: string): UnusableSummaryReason | undefined {
   const text = candidate.trim();
   if (text.length < MIN_PLAUSIBLE_SUMMARY_CHARS) return 'too-short';
-  if (TOOL_CALL_SHAPED.test(text)) return 'tool-call';
-  if (XML_TOOL_CALL_SHAPED.test(text)) return 'xml-tool-call';
+  const head = text.slice(0, TOOL_CALL_HEAD_CHARS);
+  if (TOOL_CALL_SHAPED.test(head)) return 'tool-call';
+  if (XML_TOOL_CALL_SHAPED.test(head)) return 'xml-tool-call';
   if (FENCED_JSON_ONLY.test(text)) return 'fenced-json';
   try {
     JSON.parse(text);
