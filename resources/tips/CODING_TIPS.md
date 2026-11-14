@@ -32,11 +32,11 @@
 9. a scan run with `cwd` inside `~/.forge/sessions` → refused: any command there may write into Forge's files. run it from the workspace and pass absolute paths
 10. `probe && next && next` where the probe is meant to fail → the chain stops and the later commands never run. join probes with `;`
 11. a 2nd gated call after one card expired → `... needs the approval that went unanswered earlier in this turn, so no new card was shown` → only the first card burns time
-12. a gated call batched with later gated calls → those cards and results still wait for the first; an expired card silences only that approval key. since 0.17.171 ungated calls run on
-13. expecting one approval to cover a tool or a turn → each gated call raises its own card and waits the full `approval_timeout_minutes`; budget one answer per gated call
-14. a heredoc terminator with a command after it (`MSG; echo ok`) → never seen as a terminator: the command text lands in the commit message and never runs. keep it alone on its line
-15. a result's field names are not its input names (`next_stdout_cursor` vs `stdout_cursor`) → refused: unknown arguments. the refusal lists the valid names; resend with those
-16. a field a tool does not declare → refused: `edit_file` `edits[]` items take only `old_str`/`new_str`/`replace_all` (`path` once at top); `ask_user` `header` is per-question, not top-level
+12. a gated call batched with later gated calls → each raises its own card and waits the full `approval_timeout_minutes`; an expired card silences only that approval key
+13. a heredoc terminator with a command after it (`MSG; echo ok`) → never seen as a terminator: the command text lands in the commit message and never runs. keep it alone on its line
+14. a result's field names are not its input names (`next_stdout_cursor` vs `stdout_cursor`) → refused: unknown arguments. the refusal lists the valid names; resend with those
+15. a field a tool does not declare → refused: `edit_file` `edits[]` items take only `old_str`/`new_str`/`replace_all` (`path` once at top); `ask_user` `header` is per-question, not top-level
+16. `stop_execution` on a background `npm run ci` → the wrapper dies, the child tree lives and holds the ci-lock, so the next run waits forever: `MSYS_NO_PATHCONV=1 taskkill /PID <top> /T /F`
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green: never run `record-ci-pass.mjs` by hand — the `ci:steps` `&&` chain writes it. run the suite after the commit it certifies
