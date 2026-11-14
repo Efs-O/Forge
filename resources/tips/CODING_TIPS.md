@@ -40,7 +40,7 @@
 17. a field a tool does not declare → refused as unknown argument: `read_file` reads take `path`/`start_line`/`end_line`/`pages`; `edit_file` edits are `old_str`/`new_str`; `ask_user` has no `header`
 
 ## GIT
-1. `.forge/ci-pass/<tree>.json` → certifies only the tree it was written for. run the suite *after* the commit it is meant to certify, or the tip has no proof
+1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green: never run `record-ci-pass.mjs` by hand — the `ci:steps` `&&` chain writes it. run the suite after the commit it certifies
 2. `git commit -- <file> -m "msg"` → git reads `-m` and the message as pathspecs after `--`. put every flag before `--`, the files last; a new file needs `git add` first: untracked is not a pathspec
 
 ## EDIT
