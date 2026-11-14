@@ -1,5 +1,11 @@
 # Forge — Recent Changes
 
+## 0.17.178
+
+**The first command in a window is covered too.**
+
+- The job-object work in 0.17.177 left one case open, and a student run found it on the installed build: stopping a background command in a freshly opened window left its child running, while the second stop in the same window was clean. The helper that holds the job takes about a quarter of a second to start, and Git Bash forks a command's real child about 140 ms after the spawn — so the first command in a window had no job to join. A command that a stop has to reach now waits for the helper: about 270 ms, once per window, and never a hang (a helper that never answers gives up after three seconds and the stop falls back to the old kill).
+
 ## 0.17.177
 
 **A stopped command is now actually stopped on Windows.**
@@ -8,7 +14,6 @@
 - The close is ordered: the job is closed after `taskkill /T` has returned, not before it. Closed first, the kernel takes the recorded parent down instantly and the walk that follows has nothing left to walk — which is how the first version of this fix let a `sleep.exe` survive anyway.
 - The foreground `shell` command is in a job too. It has its own spawn rather than the shared one, so it was the one path the fix above did not cover, and it is the path every ordinary `sleep 60` goes through.
 - The helper's own compile files now land in `~/.forge/job-keeper/` instead of the system temp folder, and a day later they are gone.
-- The **first** command in a window is covered as well. The helper that holds the job takes about a quarter of a second to start, and Git Bash forks a command's real child 140 ms after the spawn, so the first background command in a freshly opened window had no job to join and its child survived the stop. Measured live the same day: the first `sleep 150 && echo late` left its sleep running for its full two and a half minutes, the second one in the same window stopped clean. A command that a stop has to reach now waits for the helper — about 270 ms, once per window.
 
 ## 0.17.176
 
