@@ -15,6 +15,7 @@ import {
   writeFileAtomic,
   type ExpectedFileState,
 } from '../util/atomicWrite';
+import { guardTipsWrite, tipsWriteNote } from './tipsWriteGuard';
 import { withFileLengthWarning, type FileLengthWarningGetter } from './fileLengthWarning';
 import { NO_PROBLEM_WATCHER, withProblemNote, type ProblemWatcher } from './editDiagnostics';
 
@@ -318,6 +319,9 @@ export function makeEditFileTool(
       // loads the document into the language service BEFORE the bytes change,
       // which is what turns "nothing reported on this file" into a real answer.
       const watch = await watchProblems(filepath);
+      // The tips table is injected into every prompt, so a second copy of a line
+      // costs the prompt twice: refused here, on the bytes about to land.
+      guardTipsWrite(filepath, updated, content);
       let contentionNote = '';
       await writeFileAtomic(
         filepath,
@@ -390,7 +394,10 @@ export function makeEditFileTool(
       // for it too: the agent needs to know before its next edit, not after.
       const note = watch ? await watch.settle(context?.abortSignal) : '';
       return withFileLengthWarning(
-        withProblemNote(text + (contentionNote ? `\n${contentionNote}` : ''), note),
+        withProblemNote(
+          text + tipsWriteNote(filepath) + (contentionNote ? `\n${contentionNote}` : ''),
+          note,
+        ),
         filepath,
         lengthWarning(),
       );

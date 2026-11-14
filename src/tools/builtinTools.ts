@@ -9,6 +9,7 @@ import {
   writeFileAtomic,
   type ExpectedFileState,
 } from '../util/atomicWrite';
+import { guardTipsWrite, tipsWriteNote } from './tipsWriteGuard';
 import { withFileLengthWarning, type FileLengthWarningGetter } from './fileLengthWarning';
 import { NO_PROBLEM_WATCHER, withProblemNote, type ProblemWatcher } from './editDiagnostics';
 import { applyWriteEol, chooseWriteEol, readExistingForWrite } from './writeEol';
@@ -125,6 +126,7 @@ export function makeWriteFileTool(
         // remain untouched, including when the file is not valid UTF-8.
         const snapshot = appendSnapshot!;
         const appended = Buffer.concat([snapshot.bytes, Buffer.from(converted.content, 'utf8')]);
+        guardTipsWrite(filePath, appended.toString('utf8'), snapshot.text ?? '');
         let contentionNote = '';
         await writeFileAtomic(
           filePath,
@@ -138,7 +140,8 @@ export function makeWriteFileTool(
         return withFileLengthWarning(
           withProblemNote(
             `Appended ${content.length} chars to ${filePath} (${total} bytes total)${converted.note}` +
-              (contentionNote ? `\n${contentionNote}` : ''),
+              (contentionNote ? `\n${contentionNote}` : '') +
+              tipsWriteNote(filePath),
             note,
           ),
           filePath,
@@ -146,6 +149,7 @@ export function makeWriteFileTool(
         );
       }
       let contentionNote = '';
+      guardTipsWrite(filePath, converted.content, existing ?? '');
       await writeFileAtomic(
         filePath,
         converted.content,
@@ -156,7 +160,8 @@ export function makeWriteFileTool(
       const note = watch ? await watch.settle(context?.abortSignal) : '';
       return withFileLengthWarning(
         withProblemNote(
-          `Written ${filePath}${converted.note}${contentionNote ? `\n${contentionNote}` : ''}`,
+          `Written ${filePath}${converted.note}${contentionNote ? `\n${contentionNote}` : ''}` +
+            tipsWriteNote(filePath),
           note,
         ),
         filePath,

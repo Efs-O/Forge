@@ -3,9 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  makeWriteFileTool,
-} from '../../src/tools/builtinTools';
+import { makeWriteFileTool } from '../../src/tools/builtinTools';
 import { makeReadFileTool } from '../../src/tools/readFileTool';
 import { makeListDirectoryTool } from '../../src/tools/listDirectoryTool';
 import { makeDeleteFileTool, makeMoveFileTool } from '../../src/tools/fileEditTools';
@@ -134,9 +132,9 @@ describe('isolated file and directory tool execution', () => {
     // A single read still behaves exactly as it did, except the past-the-end range is now the
     // length note instead of an error (prevention pass 2026-11-09); the batching must not change
     // what a lone read says.
-    await expect(
-      makeReadFileTool().handler({ path: 'a.txt', start_line: 5 }),
-    ).resolves.toContain('the file has 1 line(s)');
+    await expect(makeReadFileTool().handler({ path: 'a.txt', start_line: 5 })).resolves.toContain(
+      'the file has 1 line(s)',
+    );
   });
 
   it('a missing path in reads fails only its own section', async () => {
@@ -286,4 +284,44 @@ describe('isolated file and directory tool execution', () => {
     expect(fs.readFileSync(target, 'utf8')).toBe('current\n');
   });
 
+  it('refuses a duplicated tips line from every writer, and counts a new one', async () => {
+    const tips = path.join(root, 'docs', 'CODING_TIPS.md');
+    fs.mkdirSync(path.dirname(tips), { recursive: true });
+    fs.writeFileSync(tips, '## EDIT\n1. alpha → one\n', 'utf8');
+    const duplicate = '## EDIT\n1. alpha → one\n1. alpha → one\n';
+
+    await expect(
+      makeEditFileTool().handler({
+        path: 'docs/CODING_TIPS.md',
+        edits: [{ old_str: '1. alpha → one', new_str: '1. alpha → one\n1. alpha → one' }],
+      }),
+    ).rejects.toThrow(/already carries this tip/);
+    await expect(
+      makeWriteFileTool().handler({ path: 'docs/CODING_TIPS.md', content: duplicate }),
+    ).rejects.toThrow(/already carries this tip/);
+    await expect(
+      makeApplyLineEditsTool().handler({
+        path: 'docs/CODING_TIPS.md',
+        operations: [
+          {
+            start_line: 2,
+            end_line: 2,
+            expected_lines: ['1. alpha → one'],
+            replacement_lines: ['1. alpha → one', '1. alpha → one'],
+          },
+        ],
+      }),
+    ).rejects.toThrow(/already carries this tip/);
+    // Nothing was written by any of the three refusals.
+    expect(fs.readFileSync(tips, 'utf8')).toBe('## EDIT\n1. alpha → one\n');
+
+    const written = String(
+      await makeEditFileTool().handler({
+        path: 'docs/CODING_TIPS.md',
+        edits: [{ old_str: '1. alpha → one', new_str: '1. alpha → one\n1. beta → two' }],
+      }),
+    );
+    expect(fs.readFileSync(tips, 'utf8')).toContain('1. beta → two');
+    expect(written).toContain('Project tips:');
+  });
 });

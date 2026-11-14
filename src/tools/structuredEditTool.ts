@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import type { RegisteredTool } from './ToolRegistry';
 import { defaultWorkspaceRoot, resolveRealWorkspacePath } from '../util/WorkspacePaths';
 import { agentWriteOptions, delayedWriteNote, writeFileAtomic } from '../util/atomicWrite';
+import { guardTipsWrite, tipsWriteNote } from './tipsWriteGuard';
 import { withFileLengthWarning, type FileLengthWarningGetter } from './fileLengthWarning';
 import { NO_PROBLEM_WATCHER, withProblemNote, type ProblemWatcher } from './editDiagnostics';
 import { capAtLineBoundary, numberedBlock, throwStaleRefusal } from './structuredEditRefusals';
@@ -218,6 +219,8 @@ export function makeApplyLineEditsTool(
         throw new Error(`apply_line_edits: cannot read file — ${(error as Error).message}`);
       }
       const result = applyLineEditsToContent(content, operations);
+      // Same rule as `edit_file`: a duplicated tips line costs the prompt twice.
+      guardTipsWrite(filePath, result.content, content);
       // Snapshot before the write for the same reason `edit_file` does: this tool
       // replaces whole line ranges, so it can delete a line a diagnostic was
       // pointing at and move every problem below it. Awaiting the watcher is what
@@ -258,7 +261,8 @@ export function makeApplyLineEditsTool(
             ...(contentionNote ? { saveNote: contentionNote } : {}),
           }) +
             liftedNote +
-            alignedNote,
+            alignedNote +
+            tipsWriteNote(filePath),
           note,
         ),
         filePath,
