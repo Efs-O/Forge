@@ -1,5 +1,36 @@
 # Forge — Recent Changes
 
+## 0.17.172
+
+**Tool calls that used to be lost.**
+
+- A tool call shown as an example inside a text reply no longer runs a real tool. Only a call the model means as a call is parsed.
+- Text-mode tool calls run in the order the model wrote them, so a read of a file follows the write of it instead of racing ahead of it.
+- Every way a stream can end is now checked for a tool call cut off mid-JSON, and a retry keeps the sampling settings the first attempt used instead of starting the next round with defaults.
+- Only a call the provider actually REJECTED switches the tool protocol. A model that must keep its native tool schemas keeps them through the strip path; a call whose `arguments` arrived empty runs instead of throwing; markup that was folded into the text is counted where it actually landed.
+
+**MCP servers.**
+
+- A bridged MCP tool is advertised under a name the grammar compiler can accept, and a schema it cannot compile is named in the report instead of taking the whole bridge down. Checked live against the two servers on this machine: 6 of 6 and 10 of 10 tools bridged.
+
+**Tool names other agents' models already know.**
+
+- `search_code` is called `grep_search` now, after the program it wraps.
+- A call naming a tool this client does not have is answered by the one that does: `bash` → `shell`, `ls` → `list_directory`, `glob` and `file_search` → `find_files`, `create_file` → `write_file`, `codebase_search` → `search_codebase`, `BashOutput` → `monitor_execution`, `search_code` → `grep_search`. The rewrite is silent, applies to the name the model used, and never shadows a tool that is really registered under that name — so an MCP server that exposes `bash` still receives its own calls.
+- `replace_selection` and `insert_code` are retired. Both wrote to whichever file the editor had focused, a file the agent cannot see, so a call could land somewhere it never meant.
+
+**What a tool says about itself.**
+
+- Six tool descriptions were re-worded shorter with every operational rule kept: `read_file`, `shell`, `grep_search`, `ask_user`, `render_html_to_image`, `message_chat`. The maximally-advertised tool schema is 67,974 characters — 1,699 shorter than the 0.17.171 build, with 2,626 left under its ceiling.
+- `stop_execution` says whether it interrupted the job or the job had already ended.
+
+**Instructions and the tips table.**
+
+- The project instruction budget is 48 KB, up from 32 KB: a repo that documents itself in `FORGE.md` no longer has its rules cut off mid-sentence.
+- The coding-tips table is loaded by code with its own allowance and pinned per conversation, so a compaction no longer drops it. Where a repo's own table matches the shipped one it is injected once, which takes about 12 KB out of every turn here.
+- Writing a tips row the shipped table already has is refused at the write, and the request to review the table arrives when the count crosses each tenth tip.
+- A guard test now fails if the same operational rule shows up in two of the injected places, or if the inline copy of the tips table drifts from the file it copies.
+
 ## 0.17.171
 
 - A new install ships `permissions.approval_timeout_minutes: 10`, so a card nobody answers is declined in ten minutes instead of holding the turn open forever. Configs written before this release keep waiting forever, exactly as before; deleting the line from a new config restores that.
