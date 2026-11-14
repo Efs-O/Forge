@@ -153,6 +153,6 @@ export function tipsWriteNote(filePath: string, previous: string, shippedPath?: 
       : '';
   return (
     `\nProject tips: ${unreviewedNow.size} entr${unreviewedNow.size === 1 ? 'y' : 'ies'} in ` +
-    `docs/CODING_TIPS.md are not in the shipped table.${review}`
+    `docs/CODING_TIPS.md ${unreviewedNow.size === 1 ? 'is' : 'are'} not in the shipped table.${review}`
   );
 }

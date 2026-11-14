@@ -133,9 +133,13 @@ describe('the count and the every-tenth review ping', () => {
 
   it('says how many entries the shipped list does not have', () => {
     const one = writeEntries(1);
-    expect(tipsWriteNote(file(), one, shippedPath)).toContain('1 entry in docs/CODING_TIPS.md');
+    expect(tipsWriteNote(file(), one, shippedPath)).toContain(
+      '1 entry in docs/CODING_TIPS.md is not in the shipped table',
+    );
     const nine = writeEntries(9);
-    expect(tipsWriteNote(file(), nine, shippedPath)).toContain('9 entries in docs/CODING_TIPS.md');
+    expect(tipsWriteNote(file(), nine, shippedPath)).toContain(
+      '9 entries in docs/CODING_TIPS.md are not in the shipped table',
+    );
   });
 
   it('pings on the crossing of a tenth, once — not on every write that sits at one', () => {
@@ -145,7 +149,9 @@ describe('the count and the every-tenth review ping', () => {
     expect(tipsWriteNote(file(), nine, shippedPath)).toContain('tell the owner now');
     // A re-word while the count sits at 10 stays quiet: nothing crossed.
     expect(tipsWriteNote(file(), ten, shippedPath)).not.toContain('tell the owner now');
-    expect(tipsWriteNote(file(), writeEntries(11), shippedPath)).not.toContain('tell the owner now');
+    expect(tipsWriteNote(file(), writeEntries(11), shippedPath)).not.toContain(
+      'tell the owner now',
+    );
     // A write that adds two tips across the boundary still fires, exactly once.
     const nineAgain = writeEntries(9);
     writeEntries(11);
