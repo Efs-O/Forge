@@ -1,5 +1,12 @@
 # Forge — Recent Changes
 
+## 0.17.176
+
+**Two fixes the student runs found, neither of them visible from inside a test.**
+
+- A `grep_search` with a large `context` showed the lines around a match and none of the matches. The per-file budget counted context lines as if they were results, so thirty lines of context used the whole allowance before the first match was reached: the answer was eight context lines and a closing "(+3 more matches in this file)" that read like there were more hits waiting. The budget now counts matching lines, so context rides along with the match it belongs to.
+- A VS Code window with no folder open is now a window you can see and address. It answered the chat-list request and was dropped as "answered with a chat list this Forge could not read", which also meant a chat could not be opened in it from another window. It is listed as `no folder (window …)` and stays addressable by that id.
+
 ## 0.17.175
 
 **Two things an agent used to get wrong about waiting.**
