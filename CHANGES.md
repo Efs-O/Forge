@@ -1,5 +1,12 @@
 # Forge — Recent Changes
 
+## 0.17.179
+
+**A saved setting takes effect as written.**
+
+- Editing `config.yaml` or `policy.yaml` by hand could give Forge a value you never typed. A save flushes to disk in chunks and the watcher reloads on the first chunk, so Forge sometimes read a truncated file — and a truncated YAML file is not a parse error, because a mapping simply ends where the file does. Measured on 2026-11-13: an owner changing the approval-card timeout from 15 to 10 minutes was read as `1`, which is a valid value, and both open windows went on declining every unanswered card after one minute for eight hours while the file on disk said 10 the whole time. Any setting can be caught this way, not just that one — a dropped model entry or a flipped permission is the same accident.
+- The watcher now waits for the watched files to stay quiet before reading them, checks afterwards whether a write landed while it was reading, and gives up waiting after five windows so a file being edited in a fast loop cannot hold the config hostage. The read at startup is unchanged: a file saved at the moment the window opens can still be caught mid-flush.
+
 ## 0.17.178
 
 **The first command in a window is covered too.**
