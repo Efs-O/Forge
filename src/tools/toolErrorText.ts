@@ -70,6 +70,40 @@ export function missingArgumentError(
   );
 }
 
+/**
+ * The refusal for an argument the schema declares as a number or boolean that
+ * arrived holding the call's own markup: the parameter block was cut off
+ * mid-write, so the value swallowed the tags that followed it.
+ *
+ * The type sentence alone sends the model off guessing. `read_file` refused
+ * `end_line` this way on 2026-11-14 and suggested "as 1" — a number that was
+ * never sent, while the one that was (237) sat inside the value it was being
+ * refused for. So this quotes what actually arrived.
+ */
+export function cutOffArgumentMismatch(
+  name: string,
+  key: string,
+  expected: string,
+  range: string,
+  value: unknown,
+): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  // Markup evidence, not a guess. A numeric or boolean argument never holds a
+  // tag, so a `<` in one means the block ran past its end; a value that starts
+  // with `[` or `{` is the separate stringified-array mistake, which has its
+  // own better sentence and can legitimately contain a `<` inside a string.
+  if (!value.includes('<')) return undefined;
+  const trimmed = value.trimStart();
+  if (trimmed.startsWith('[') || trimmed.startsWith('{')) return undefined;
+  const shown = JSON.stringify(value.length > 120 ? `${value.slice(0, 117)}…` : value);
+  return (
+    `Error: ${name}: "${key}" must be a JSON ${expected}${range}, not a string. ` +
+    `It received ${shown} — that is the call's own markup, so the block was cut off ` +
+    `mid-write and the value swallowed the tags after it. Resend the call with every ` +
+    `argument written out in full; the number you meant is inside the text quoted above.`
+  );
+}
+
 /** One issue from a Zod refusal, narrowed to the fields the sentences read. */
 interface ZodIssueLike {
   code?: unknown;

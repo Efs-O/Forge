@@ -1,6 +1,6 @@
 import type { ToolDefinition } from '../llm/types';
 import { recordNativeLazyTool } from './lazyToolGroups';
-import { advertisedValues, missingArgumentError } from './toolErrorText';
+import { advertisedValues, cutOffArgumentMismatch, missingArgumentError } from './toolErrorText';
 import { repairParameterMarkup } from './toolArgumentMarkup';
 /** The declarations live in `toolContract.ts`; re-exported from here so every
  *  consumer that has always imported them from the registry keeps working. */
@@ -369,6 +369,8 @@ export class ToolRegistry {
             typeof schema.exclusiveMaximum === 'number')
             ? ` in range ${numericRangeText(schema)}`
             : '';
+        const cutOff = cutOffArgumentMismatch(name, key, expected, range, present[key]);
+        if (cutOff) return cutOff;
         return (
           `Error: ${name}: "${key}" must be a JSON ${expected}${range}, not ${jsonTypeName(present[key])}. ` +
           `Resend the call with ${key} as ${example}.`

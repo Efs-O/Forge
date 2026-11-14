@@ -259,7 +259,9 @@ describe('ToolRegistry.invalidArgs unknown-argument refusal', () => {
     expect(registry.invalidArgs(fullSearchCode, { wrap: { query: 'x', bogus: 1 } })).toBe(expected);
     expect(registry.invalidArgs(fullSearchCode, { wrap: {} })).toBe(expected);
     expect(registry.invalidArgs(fullSearchCode, { wrap: ['query'] })).toBe(expected);
-    expect(registry.invalidArgs(fullSearchCode, { query: 'a', wrap: { query: 'b' } })).toBe(expected);
+    expect(registry.invalidArgs(fullSearchCode, { query: 'a', wrap: { query: 'b' } })).toBe(
+      expected,
+    );
   });
 
   it('keeps the plural refusal when multiple unknown arguments include wrapped keys', () => {
@@ -578,6 +580,88 @@ describe('ToolRegistry.invalidArgs refuses quoted JSON types', () => {
       'Error: probe: "count" must be a JSON integer, not a string. ' +
         'Resend the call with count as 1.',
     );
+  });
+});
+
+/**
+ * A parameter block cut off mid-write leaves the argument holding the call's own
+ * markup. `read_file` was refused this way on 2026-11-14: `end_line` arrived as
+ * `"237\n</parameter>\nparameter=path>"` and the type sentence told the model to
+ * resend it "as 1" — a number nobody sent, while the one that was sent sat
+ * inside the value being refused. The refusal now quotes what arrived.
+ */
+describe('an argument that swallowed the markup after it', () => {
+  const registry = new ToolRegistry();
+  const readTool = makeBoolTool('read_file', {
+    path: { type: 'string' },
+    start_line: { type: 'integer' },
+    end_line: { type: 'integer' },
+    numbered: { type: 'boolean' },
+  });
+
+  it('quotes what arrived, names the cut-off, and stops inventing a number', () => {
+    const message = registry.invalidArgs(readTool, {
+      path: 'test/unit/mcpBridge.test.ts',
+      end_line: '237\n</parameter>\nparameter=path>',
+    });
+    expect(message).toContain('"end_line" must be a JSON integer, not a string.');
+    expect(message).toContain('It received "237\\n</parameter>\\nparameter=path>"');
+    expect(message).toContain("that is the call's own markup, so the block was cut off");
+    expect(message).toContain('the number you meant is inside the text quoted above');
+    expect(message).not.toContain('as 1.');
+  });
+
+  it('fires for a boolean whose value holds markup too', () => {
+    const message = registry.invalidArgs(readTool, {
+      path: 'a.ts',
+      numbered: 'true</parameter>',
+    });
+    expect(message).toContain('"numbered" must be a JSON boolean, not a string.');
+    expect(message).toContain('It received "true</parameter>"');
+  });
+
+  it('keeps the plain sentence for a quoted number with no markup in it', () => {
+    expect(registry.invalidArgs(readTool, { path: 'a.ts', end_line: '237' })).toBe(
+      'Error: read_file: "end_line" must be a JSON integer, not a string. ' +
+        'Resend the call with end_line as 1.',
+    );
+    // A stray newline is not markup evidence: no cut-off is claimed.
+    expect(registry.invalidArgs(readTool, { path: 'a.ts', end_line: '237\n' })).not.toContain(
+      'cut off',
+    );
+  });
+
+  it('does not diagnose a stringified array as a cut-off block', () => {
+    // The other mistake this could be confused with: a pretty-printed array sent
+    // as a string, which can hold a `<` inside its own text.
+    const tool = makeBoolTool('apply_line_edits', {
+      operations: { type: 'array', items: { type: 'object' } },
+    } as never);
+    expect(registry.invalidArgs(tool, { operations: '[\n  {"old_str": "a < b"}\n]' })).toBe(
+      'Error: apply_line_edits: "operations" must be a JSON array, not a string. ' +
+        'Resend the call with operations as [].',
+    );
+  });
+
+  it('quotes at most 120 characters of a runaway value', () => {
+    const message = registry.invalidArgs(readTool, {
+      end_line: `9\n</parameter>\n${'x'.repeat(400)}`,
+    }) as string;
+    const quoted = /It received "([^"]*)"/u.exec(message)?.[1] ?? '';
+    // The quote carries the first 120 characters of a 412-character value, then
+    // the ellipsis — enough to see the markup and the number, not the flood.
+    expect(quoted.endsWith('…')).toBe(true);
+    expect(quoted.length).toBeLessThanOrEqual(121);
+    // The explanation is fixed text; the quote is the only part that grows, so
+    // a runaway argument cannot turn the refusal into a wall of text.
+    expect(message.length).toBeLessThanOrEqual(500);
+  });
+
+  it('is still recorded as a failure by the row, the stats and the ledger', () => {
+    const refusal = registry.invalidArgs(readTool, { end_line: '237</parameter>' }) as string;
+    expect(refusal).toMatch(/^Error: /u);
+    expect(isFailureResult(refusal), refusal).toBe(true);
+    expect(classifyResult(refusal), refusal).toBe('failed');
   });
 });
 
