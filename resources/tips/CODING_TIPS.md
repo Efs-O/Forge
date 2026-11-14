@@ -36,7 +36,7 @@
 13. expecting one approval to cover a tool or a turn → each gated call raises its own card and waits the full `approval_timeout_minutes`; budget one answer per gated call
 14. a heredoc terminator with a command after it (`MSG; echo ok`) → never seen as a terminator: the command text lands in the commit message and never runs. keep it alone on its line
 15. a result's field names are not its input names (`next_stdout_cursor` vs `stdout_cursor`) → refused: unknown arguments. the refusal lists the valid names; resend with those
-16. a field a tool does not declare → refused as unknown argument: `read_file` reads take `path`/`start_line`/`end_line`/`pages`; `edit_file` edits are `old_str`/`new_str`; `ask_user` has no `header`
+16. a field a tool does not declare → refused: `edit_file` `edits[]` items take only `old_str`/`new_str`/`replace_all` (`path` once at top); `ask_user` `header` is per-question, not top-level
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green: never run `record-ci-pass.mjs` by hand — the `ci:steps` `&&` chain writes it. run the suite after the commit it certifies
