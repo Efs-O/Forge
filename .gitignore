@@ -134,6 +134,11 @@ scripts/_*.mjs
 scripts/forge-tools-bench/
 scripts/strata-bench/
 
+# Lab harness runtime state: the run lock and the last-run state stay local, the
+# scripts that produced the error reports are committed.
+scripts/session-scan/lab.lock
+scripts/session-scan/lab-state.json
+
 # Rebuildable browser bundle for the activity view screenshots.
 # Local design mockups and renders; not part of the repo.
 artifacts/
