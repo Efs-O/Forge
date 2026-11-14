@@ -96,21 +96,26 @@ function normalizeFolder(value: string): string {
  *  it; a peer whose report cannot be read is reported, not crashed on. */
 const ChatsReportSchema = z.object({
   windowId: z.string().default(''),
-  workspace: z.string().min(1),
+  // A window with no folder open reports an empty workspace. `.min(1)` used to
+  // reject that whole report, so such a window showed up as "answered with a chat
+  // list this Forge could not read" and could not be addressed at all (BUG-26).
+  workspace: z.string().default(''),
   models: z.array(z.string()).default([]),
-  chats: z
-    .array(
-      z.object({
-        id: z.string().min(1),
-        title: z.string().default(''),
-        running: z.boolean().default(false),
-        closed: z.boolean().default(false),
-        awaitingApproval: z.boolean().default(false),
-        userIntentEpoch: z.number().int().optional(),
-        model: z.string().optional(),
-      }),
-    )
-    .default([]),
+  // `chats` stays required, with no default: that is what tells a real window that
+  // merely has no folder open (it always sends a list, even an empty one) from one
+  // answering `{}`, which is reported as unreadable instead of listed as a peer
+  // with nothing in it.
+  chats: z.array(
+    z.object({
+      id: z.string().min(1),
+      title: z.string().default(''),
+      running: z.boolean().default(false),
+      closed: z.boolean().default(false),
+      awaitingApproval: z.boolean().default(false),
+      userIntentEpoch: z.number().int().optional(),
+      model: z.string().optional(),
+    }),
+  ),
 });
 
 /** One chat as this window read it off a peer's wire: the schema's own shape,
@@ -156,7 +161,14 @@ export async function discoverPeers(
         return;
       }
       const report = parsed.data;
-      if (normalizeFolder(report.workspace) === normalizeFolder(ctx.workspaceRoot)) return;
+      // Two windows on one folder share one chat store, so that one is dropped.
+      // A window with no folder shares no chat store with anything, so it is kept
+      // even though this window's own folder is a real one (BUG-26).
+      if (
+        report.workspace.trim() &&
+        normalizeFolder(report.workspace) === normalizeFolder(ctx.workspaceRoot)
+      )
+        return;
       peers.push({
         windowId: report.windowId || endpoint.windowId,
         url: endpoint.url,
@@ -259,12 +271,22 @@ export function peerPrompt(
 /** How a window is named in a refusal: the folder the caller can recognise, and
  *  the short id `list` prints for a window that would not answer. */
 export function windowLabel(peer: PeerWindow): string {
-  return `${folderName(peer.workspace)} (${peer.windowId.slice(0, 8)})`;
+  return `${windowName(peer.workspace)} (${peer.windowId.slice(0, 8)})`;
+}
+
+/** A window with no folder open has no folder name to print; an empty one used
+ *  to render as a blank label, leaving the id as the only way to tell them apart. */
+export const NO_FOLDER_LABEL = 'no folder';
+
+function windowName(workspace: string): string {
+  return workspace.trim() ? folderName(workspace) : NO_FOLDER_LABEL;
 }
 
 /** The label the reachable-window list prints and callers can pass back. */
 export function peerWindowListLabel(peer: PeerWindow): string {
-  return `${folderName(peer.workspace)} (${peer.workspace})`;
+  return peer.workspace.trim()
+    ? `${folderName(peer.workspace)} (${peer.workspace})`
+    : `${NO_FOLDER_LABEL} (window ${peer.windowId.slice(0, 8)})`;
 }
 
 /** The window a `new` is aimed at: any name this tool prints, or the full id.
@@ -288,7 +310,7 @@ export function matchPeerWindow(
   const matches = peers.filter((peer) => {
     const idPrefix = peer.windowId.slice(0, 8);
     return [
-      folderName(peer.workspace),
+      windowName(peer.workspace),
       peer.workspace,
       peer.windowId,
       idPrefix,
@@ -368,7 +390,9 @@ export async function postPeerMessage(
  *  failed read, not thrown at the caller as an unhandled error mid-turn. */
 const PeerViewReportSchema = z.object({
   windowId: z.string().default(''),
-  workspace: z.string().min(1),
+  // Same as the chat list above: a window with no folder open reports an empty
+  // workspace, and `view` must still read its transcript (BUG-26).
+  workspace: z.string().default(''),
   conversationId: z.string().min(1),
   title: z.string().default(''),
   closed: z.boolean().default(false),

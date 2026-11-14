@@ -19,6 +19,7 @@ import {
   folderName,
   matchPeerWindow,
   peerWindowListLabel,
+  NO_FOLDER_LABEL,
   peerContextFor,
   formatPeerSection,
   windowLabel,
@@ -120,19 +121,44 @@ describe('peer discovery', () => {
     expect(peers).toEqual([]);
   });
 
+  it('lists a window that has no folder open, and names it (BUG-26)', async () => {
+    report = { windowId: WINDOW_A, workspace: '', models: [], chats: [] };
+    const { peers, unreachable } = await discoverPeers({ ...ctx, busRoot });
+    // It used to land in `unreachable` as "answered with a chat list this Forge
+    // could not read", which left no way to tell it from a broken peer.
+    expect(unreachable.map((entry) => entry.windowId)).not.toContain(WINDOW_A);
+    const peer = peers.find((entry) => entry.windowId === WINDOW_A);
+    expect(peer).toBeDefined();
+    const shortId = WINDOW_A.slice(0, 8);
+    expect(peerWindowListLabel(peer!)).toBe(`${NO_FOLDER_LABEL} (window ${shortId})`);
+    expect(windowLabel(peer!)).toBe(`${NO_FOLDER_LABEL} (${shortId})`);
+    const byId = matchPeerWindow(peers, shortId);
+    expect('peer' in byId ? byId.peer.windowId : byId.refusal).toBe(WINDOW_A);
+    const byLabel = matchPeerWindow(peers, NO_FOLDER_LABEL);
+    expect('peer' in byLabel ? byLabel.peer.windowId : byLabel.refusal).toBe(WINDOW_A);
+  });
+
   it('matches a peer chat by its full id or an 8-character prefix', async () => {
     report = {
       windowId: WINDOW_A,
       workspace: 'N:/repo-a',
       models: [],
       chats: [
-        { id: 'aaaa1111-1111-4111-8111-111111111111', title: 'Worker', running: false, closed: false, awaitingApproval: false },
+        {
+          id: 'aaaa1111-1111-4111-8111-111111111111',
+          title: 'Worker',
+          running: false,
+          closed: false,
+          awaitingApproval: false,
+        },
       ],
     };
     const { peers } = await discoverPeers({ ...ctx, busRoot });
     const found = findPeerChat(peers, 'aaaa1111-1111-4111-8111-111111111111');
     expect(found?.chat.title).toBe('Worker');
-    expect(findPeerChat(peers, 'AAAA1111')).toMatchObject({ chat: { id: 'aaaa1111-1111-4111-8111-111111111111' } });
+    expect(findPeerChat(peers, 'AAAA1111')).toMatchObject({
+      chat: { id: 'aaaa1111-1111-4111-8111-111111111111' },
+    });
     expect(findPeerChat(peers, 'aaaa111')).toBeUndefined();
     expect(findPeerChat(peers, 'worker')).toBeUndefined();
     expect(findPeerChat(peers, '#1')).toBeUndefined();
@@ -148,15 +174,63 @@ describe('peer list formatting', () => {
       workspace: 'N:/repo-a',
       models: [],
       chats: [
-        { id: 'closed-1', title: 'Closed 1', running: false, closed: true, awaitingApproval: false },
+        {
+          id: 'closed-1',
+          title: 'Closed 1',
+          running: false,
+          closed: true,
+          awaitingApproval: false,
+        },
         { id: 'open-2', title: 'Open two', running: false, closed: false, awaitingApproval: false },
-        { id: 'closed-2', title: 'Closed 2', running: false, closed: true, awaitingApproval: false },
-        { id: 'closed-3', title: 'Closed 3', running: false, closed: true, awaitingApproval: false },
-        { id: 'closed-4', title: 'Closed 4', running: false, closed: true, awaitingApproval: false },
-        { id: 'closed-5', title: 'Closed 5', running: false, closed: true, awaitingApproval: false },
-        { id: 'closed-6', title: 'Closed 6', running: false, closed: true, awaitingApproval: false },
-        { id: 'closed-7', title: 'Closed 7', running: false, closed: true, awaitingApproval: false },
-        { id: 'closed-8', title: 'Closed 8', running: false, closed: true, awaitingApproval: false },
+        {
+          id: 'closed-2',
+          title: 'Closed 2',
+          running: false,
+          closed: true,
+          awaitingApproval: false,
+        },
+        {
+          id: 'closed-3',
+          title: 'Closed 3',
+          running: false,
+          closed: true,
+          awaitingApproval: false,
+        },
+        {
+          id: 'closed-4',
+          title: 'Closed 4',
+          running: false,
+          closed: true,
+          awaitingApproval: false,
+        },
+        {
+          id: 'closed-5',
+          title: 'Closed 5',
+          running: false,
+          closed: true,
+          awaitingApproval: false,
+        },
+        {
+          id: 'closed-6',
+          title: 'Closed 6',
+          running: false,
+          closed: true,
+          awaitingApproval: false,
+        },
+        {
+          id: 'closed-7',
+          title: 'Closed 7',
+          running: false,
+          closed: true,
+          awaitingApproval: false,
+        },
+        {
+          id: 'closed-8',
+          title: 'Closed 8',
+          running: false,
+          closed: true,
+          awaitingApproval: false,
+        },
         {
           id: 'open-1',
           title: 'Open one',
@@ -366,7 +440,9 @@ describe('the window a `new` is aimed at', () => {
     for (const [index, peer] of peers.entries()) {
       expect(matchPeerWindow(peers, listLabels[index] ?? '')).toEqual({ peer });
       const refusalLabel = windowLabel(peer);
-      expect(refusalLabel).toBe(`${peer.workspace.endsWith('c') ? 'repo-c' : 'repo-b'} (${peer.windowId.slice(0, 8)})`);
+      expect(refusalLabel).toBe(
+        `${peer.workspace.endsWith('c') ? 'repo-c' : 'repo-b'} (${peer.windowId.slice(0, 8)})`,
+      );
       expect(matchPeerWindow(peers, refusalLabel)).toEqual({ peer });
     }
   });
