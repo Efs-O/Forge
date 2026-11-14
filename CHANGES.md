@@ -1,5 +1,13 @@
 # Forge — Recent Changes
 
+## 0.17.173
+
+**Two refusals an agent no longer needs to hit.**
+
+- `grep_search` used to refuse the whole call when a model asked for more lines of context than the shared validator allowed. It now carries the most it can (up to 30 lines, from 0) and the result says what it was asked for and what it gave. The largest ask in 10 days of session logs was 30 lines, so the common case never trips.
+- Every prompt now carries one rule about Forge's own files: read what is under `~/.forge/` freely, never edit it, with memory files and skills excepted. Agents were spending a call and an approval card trying to change the owner's settings file, which no tool call can do; the rule states it before the attempt, in the same words the refusal uses.
+- The instruction-overlap guard now also checks that a project's `FORGE.md` does not carry a hand copy of the coding-tips table, which was arriving twice in every turn.
+
 ## 0.17.172
 
 **Tool calls that used to be lost.**
