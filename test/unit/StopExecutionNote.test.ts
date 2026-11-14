@@ -35,7 +35,7 @@ describe('stop_execution on a job that already ended', () => {
     expect(text).toContain('status "terminated" with exit_code null');
   });
 
-  it('adds nothing when the call really did interrupt the job', async () => {
+  it("names the pid it interrupted and the same kill in the agent's own words", async () => {
     const started = backgroundExecutionManager.start({
       command: process.execPath,
       args: ['-e', 'setInterval(() => {}, 1000)'],
@@ -53,5 +53,11 @@ describe('stop_execution on a job that already ended', () => {
 
     expect(text).not.toContain('had already ended on its own');
     expect(text).toContain('terminated');
+    // Tonight (2026-11-14) a stopped CI run answered `terminated` while its
+    // children ran on and held the CI lock. The note hands the agent the exact
+    // kill for the pid, so it can clear what the tree walk may have missed.
+    expect(text).toContain(`interrupted pid ${started.pid}`);
+    expect(text).toContain(`taskkill /PID ${started.pid} /T /F`);
+    expect(text).toContain(`kill -${started.pid}`);
   });
 });

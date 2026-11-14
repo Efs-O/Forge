@@ -162,7 +162,18 @@ export function makeStopExecutionTool(): RegisteredTool {
           'job reports status "terminated" with exit_code null.'
         );
       }
-      return text;
+      const pid = observation.pid;
+      if (pid === undefined) return text;
+      // The kill walks the OS process tree, and that walk has been observed to
+      // miss: a stopped CI run answered `terminated` while its npm, ci-lock and
+      // vitest children ran on for six more minutes and held the CI lock. The
+      // claim costs little to make checkable, so name the pid and the same kill
+      // in a form the agent can run itself.
+      return (
+        `${text}\nnote: interrupted pid ${pid}; its process tree was signalled as a tree. ` +
+        `If the command left anything running, the same kill is yours to repeat: ` +
+        `taskkill /PID ${pid} /T /F on Windows, or kill -${pid} to signal the process group.`
+      );
     },
   };
 }
