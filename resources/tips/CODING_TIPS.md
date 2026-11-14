@@ -65,7 +65,7 @@
 
 ## PATHS
 1. `~/.forge/sessions/<short-id>.jsonl` → no such file: logs carry the full 8-4-4-4-12 chat id. resolve a short id with a prefix glob
-2. `ls ~/.forge/logs/*` in `shell` → refused: a glob under `~/.forge/` counts as changing Forge's files. read them with `read_file`, `list_directory` or `find_files`
+2. `ls ~/.forge/jobs/*` in `shell` → it lists them: reads under `~/.forge/` are allowed. only a change is refused — `rm -f ~/.forge/x` → "refuses to change Forge's own files"
 3. `list_directory "~/.forge/jobs"` → resolves now (0.17.171), but `find_files "~/**"` still opens nothing outside the workspace. pass the absolute `C:/Users/<name>/.forge/jobs`
 
 ## FORENSICS
