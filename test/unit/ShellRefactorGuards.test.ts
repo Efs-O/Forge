@@ -123,10 +123,14 @@ describe('shell/core-group refactor guards', () => {
   // measured failures — copy edit text from the newest read (23 failed edits),
   // a search with no matches is an answer (11), and tool and field names are
   // fixed (3 bad names, 12 wrong fields). 666 bytes under the cap.
-  it('config/templates/builtin/execute.njk is at most 6,655 bytes', () => {
+  // 2026-11-14, +256 bytes (6,753): one rule for Forge's own files under
+  // `~/.forge/`. The lab reps showed agents reaching for `~/.forge/policy.yaml`
+  // to change an approval timeout they had no way to change; the guard refused
+  // them correctly, but only after the call. 6,800 leaves 47 bytes above the file.
+  it('config/templates/builtin/execute.njk is at most 6,800 bytes', () => {
     const file = path.join(root, 'config', 'templates', 'builtin', 'execute.njk');
     const size = fs.statSync(file).size;
-    expect(size, `execute.njk is ${size} bytes; the cap is 6655`).toBeLessThanOrEqual(6655);
+    expect(size, `execute.njk is ${size} bytes; the cap is 6800`).toBeLessThanOrEqual(6800);
   });
 
   it('the dead src/templates/builtin copy is deleted', () => {
