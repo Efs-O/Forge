@@ -21,6 +21,9 @@ function response(result: unknown): Response {
   return { ok: true, status: 200, json: async () => ({ ok: true, result }) } as Response;
 }
 
+/** Every Telegram bubble opens with the gap line; see `telegramBubbleGap.ts`. */
+const GAP = '\u2800\n';
+
 describe('TelegramChannel', () => {
   it('replaces a question keyboard in place and accepts a no-change edit', async () => {
     const calls: Array<{ method: string; body: Record<string, unknown> }> = [];
@@ -462,7 +465,7 @@ describe('TelegramChannel', () => {
 
     await channel.sendHtml('chat', '<b><u>Forge backend: model</u></b>');
     expect(bodies[0]).toMatchObject({
-      text: '<b><u>Forge backend: model</u></b>',
+      text: `${GAP}<b><u>Forge backend: model</u></b>`,
       parse_mode: 'HTML',
     });
   });
@@ -783,7 +786,7 @@ describe('TelegramChannel', () => {
       // The apostrophe arrives HTML-escaped: the notice is sent with
       // parse_mode HTML, so any quote in a reason must be escaped or it would
       // break the markup.
-      text: '<blockquote>ℹ️ This media type isn&#39;t supported yet: live_photo.</blockquote>',
+      text: `${GAP}<blockquote>ℹ️ This media type isn&#39;t supported yet: live_photo.</blockquote>`,
       parse_mode: 'HTML',
     });
     expect(armed).toEqual([{ chatId: '99', messageIds: ['12'], kind: 'transient' }]);
@@ -869,7 +872,7 @@ describe('TelegramChannel', () => {
     ]);
     expect(calls[0]!.body).toMatchObject({
       chat_id: 'chat',
-      text: 'page two',
+      text: `${GAP}page two`,
         reply_markup: {
           inline_keyboard: [
             [
@@ -881,7 +884,7 @@ describe('TelegramChannel', () => {
           ],
         },
     });
-    expect(calls[1]!.body).toMatchObject({ message_id: 42, text: 'page three' });
+    expect(calls[1]!.body).toMatchObject({ message_id: 42, text: `${GAP}page three` });
     expect(calls[2]!.body).toEqual({ chat_id: 'chat', message_id: 42 });
   });
 
@@ -962,6 +965,7 @@ describe('TelegramChannel', () => {
     );
 
     expect(calls[0]?.body).toMatchObject({
+      text: `${GAP}Choose profile`,
       reply_markup: {
         inline_keyboard: [
           [{ text: 'No profile', callback_data: 's:abcdefghijkl:m:p0' }],
@@ -1171,7 +1175,7 @@ describe('TelegramChannel', () => {
     await vi.waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]).toMatchObject({
       chat_id: '99',
-      text: '<blockquote>ℹ️ voice input is disabled (set voice.enabled in config)</blockquote>',
+      text: `${GAP}<blockquote>ℹ️ voice input is disabled (set voice.enabled in config)</blockquote>`,
       parse_mode: 'HTML',
     });
     expect(armed).toEqual([{ chatId: '99', messageIds: ['7'], kind: 'transient' }]);
@@ -1230,7 +1234,7 @@ describe('TelegramChannel', () => {
     await vi.waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]).toMatchObject({
       chat_id: '99',
-      text: '<blockquote>⚠️ conversation could not be restored.</blockquote>',
+      text: `${GAP}<blockquote>⚠️ conversation could not be restored.</blockquote>`,
       parse_mode: 'HTML',
     });
   });
@@ -1768,8 +1772,8 @@ describe('TelegramChannel — progress bubble', () => {
     expect(methods).not.toContain('sendRichMessageDraft');
     // Stop rides inline on the status, which is padded wide so the button is
     // too (0.17.69). The status stays the turn's one push notification.
-    const statusBody = bodies.find((body) => String(body.text).startsWith('Forge: working…'))!;
-    expect(statusBody.text).toBe(`Forge: working…${'\u2800'.repeat(38 - 15)}`);
+    const statusBody = bodies.find((body) => String(body.text).includes('Forge: working…'))!;
+    expect(statusBody.text).toBe(`${GAP}Forge: working…${'\u2800'.repeat(38 - 15)}`);
     expect(statusBody.reply_markup).toEqual({
       inline_keyboard: [[{ text: '⏹ Stop', callback_data: 'x' }]],
     });
@@ -1814,7 +1818,7 @@ describe('TelegramChannel — progress bubble', () => {
       expect(markup).not.toHaveProperty('keyboard');
       expect(markup).not.toHaveProperty('is_persistent');
     }
-    const prompt = bodies.find((body) => body.text === 'You (VS Code): inspect this');
+    const prompt = bodies.find((body) => body.text === `${GAP}You (VS Code): inspect this`);
     expect(prompt).toMatchObject({ disable_notification: true });
     expect(prompt).not.toHaveProperty('reply_markup');
     abort.abort();
@@ -1881,7 +1885,7 @@ describe('TelegramChannel — progress bubble', () => {
     expect(String(edits[0]!.text).endsWith('\u2800')).toBe(true);
     // The final edit drops Stop, and with it the padding.
     expect(edits[1]).not.toHaveProperty('reply_markup');
-    expect(edits[1]!.text).toBe('Forge: completed.');
+    expect(edits[1]!.text).toBe(`${GAP}Forge: completed.`);
     abort.abort();
   });
 });

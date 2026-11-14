@@ -1,15 +1,14 @@
 import { z } from 'zod';
-import { describeError } from '../util/describeError';
 import { downloadTelegramAttachment, downloadTelegramAttachmentToFile } from './TelegramDownloads';
 import { TelegramHelpMessages } from './TelegramHelpMessages';
 import { sendTelegramPhoto } from './TelegramPhoto';
 import { sendTelegramAudio, sendTelegramDocument, sendTelegramVideo } from './TelegramMedia';
 import { plainTelegramText, splitTelegramText } from './TelegramText';
+import { BUBBLE_GAP_CHARS, withTelegramBubbleGap } from './telegramBubbleGap';
 import { sendTelegramVoice } from './TelegramVoice';
 import { styleTelegramNotice } from './telegramNoticeStyle';
 import { inlineKeyboardMarkup } from './telegramInlineKeyboard';
-import { resolvedApprovalButton, telegramApprovalKeyboard } from './telegramApprovalKeyboard';
-import type { ApprovalDecision } from '../sidebar/approvalMessages';
+import { TelegramPromptKeyboard } from './TelegramPromptKeyboard';
 import type { TelegramChatQueue } from './telegramSendQueue';
 import {
   telegramRemoveStopReplyKeyboard,
@@ -19,7 +18,6 @@ import {
 import type { ProgressMessageOptions, RemoteContactButton, RemoteInboundAttachment } from './types';
 
 const TelegramSentMessageSchema = z.object({ message_id: z.number().int() });
-const PROMPT_MESSAGE_LIMIT = 256;
 
 type TelegramCall = (
   method: string,
@@ -37,8 +35,11 @@ function callOptions(options?: ProgressMessageOptions): { retryRateLimit?: boole
 }
 
 export class TelegramOutbound {
-  private readonly promptMessages = new Map<string, number>();
   private readonly helpMessages: TelegramHelpMessages;
+  /** The approval keyboard a prompt bubble carries, and what becomes of it. */
+  private readonly promptKeyboard = new TelegramPromptKeyboard(
+    (chatId, messageId, markup, signal) => this.editReplyMarkup(chatId, messageId, markup, signal),
+  );
 
   constructor(
     private readonly call: TelegramCall,
@@ -94,7 +95,9 @@ export class TelegramOutbound {
     parseMode?: 'HTML',
   ): Promise<string[]> {
     const messageIds: string[] = [];
-    const chunks = splitTelegramText(text);
+    // The split holds back room for the gap, and only the first part carries it:
+    // a follow-on part is a continuation of the same answer, not a new bubble.
+    const chunks = splitTelegramText(text, BUBBLE_GAP_CHARS);
     const line = options?.speedLine;
     if (line) {
       // One line, on the last part only, and never cut in half: re-splitting the
@@ -102,15 +105,16 @@ export class TelegramOutbound {
       // already filled its 4096 characters, the overflow and the line become one
       // further message, which is still the last part of the answer.
       const last = chunks.length - 1;
-      chunks.splice(last, 1, ...splitTelegramText(`${chunks[last]}\n\n${line}`));
+      chunks.splice(last, 1, ...splitTelegramText(`${chunks[last]}\n\n${line}`, BUBBLE_GAP_CHARS));
     }
+    chunks[0] = withTelegramBubbleGap(chunks[0]);
     for (let index = 0; index < chunks.length; index++) {
       const correlationId = index === 0 ? options?.correlationId : undefined;
       // Only the first chunk of a send carries buttons, and their layout is
       // `telegramApprovalKeyboard`'s: two rows once the card offers a rule, so
       // the longest label is not the one Telegram truncates.
       const keyboard = correlationId
-        ? telegramApprovalKeyboard(correlationId, {
+        ? this.promptKeyboard.keyboardFor(correlationId, {
             ...(options?.approvalAllowChat ? { allowChat: true } : {}),
             ...(options?.approvalAlwaysInProject ? { alwaysInProject: true } : {}),
           })
@@ -121,13 +125,16 @@ export class TelegramOutbound {
           chat_id: chatId,
           text: chunks[index],
           ...(parseMode ? { parse_mode: parseMode } : {}),
-          ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
+          ...(keyboard ? { reply_markup: keyboard } : {}),
         },
         options?.signal,
       );
-      if (correlationId) this.rememberPrompt(correlationId, sent);
       const parsed = TelegramSentMessageSchema.safeParse(sent);
-      if (parsed.success) messageIds.push(String(parsed.data.message_id));
+      if (parsed.success) {
+        messageIds.push(String(parsed.data.message_id));
+        // Only the first chunk carries a keyboard, so only that one is remembered.
+        if (correlationId) this.promptKeyboard.remember(correlationId, parsed.data.message_id);
+      }
     }
     return messageIds;
   }
@@ -139,7 +146,11 @@ export class TelegramOutbound {
   ): Promise<string | undefined> {
     const sent = await this.call(
       'sendMessage',
-      { chat_id: chatId, text: widenForStopButton(text, options), ...stopKeyboard(options) },
+      {
+        chat_id: chatId,
+        text: widenForStopButton(withTelegramBubbleGap(text), options),
+        ...stopKeyboard(options),
+      },
       options?.signal,
       callOptions(options),
     );
@@ -155,7 +166,7 @@ export class TelegramOutbound {
     const sent = await this.call(
       'sendMessage',
       // Silent: it echoes the owner's own words, so it must not buzz the phone.
-      { chat_id: chatId, text, disable_notification: true },
+      { chat_id: chatId, text: withTelegramBubbleGap(text), disable_notification: true },
       options?.signal,
     );
     const parsed = TelegramSentMessageSchema.safeParse(sent);
@@ -182,7 +193,8 @@ export class TelegramOutbound {
     options?: { signal?: AbortSignal; parseMode?: 'HTML' },
   ): Promise<string | undefined> {
     const notice = options?.parseMode ? undefined : styleTelegramNotice(text);
-    const chunks = splitTelegramText(notice ?? text);
+    const chunks = splitTelegramText(notice ?? text, BUBBLE_GAP_CHARS);
+    chunks[0] = withTelegramBubbleGap(chunks[0]);
     const replyMarkup = inlineKeyboardMarkup(buttons);
     let firstMessageId: string | undefined;
     for (let index = 0; index < chunks.length; index++) {
@@ -219,7 +231,7 @@ export class TelegramOutbound {
       {
         chat_id: chatId,
         message_id: Number(messageId),
-        text,
+        text: withTelegramBubbleGap(text),
         ...(options?.parseMode ? { parse_mode: options.parseMode } : {}),
         reply_markup: replyMarkup,
       },
@@ -237,7 +249,7 @@ export class TelegramOutbound {
       'sendMessage',
       {
         chat_id: chatId,
-        text,
+        text: withTelegramBubbleGap(text),
         reply_markup: {
           force_reply: true,
           input_field_placeholder: placeholder,
@@ -292,72 +304,14 @@ export class TelegramOutbound {
   }
 
   /**
-   * Replace a resolved prompt's Approve/Deny row with a single disabled button
-   * naming the outcome, so the row stays visible instead of vanishing.
-   *
-   * `keyboardMessageIds` is what the approval bridge recorded from every send
-   * that carried a keyboard for this correlation id — a republished gate leaves
-   * more than one, and a keyboard Telegram never takes back is a button that
-   * still looks pressable. The id remembered here for the correlation id is
-   * folded in as well, so a bridge that lost track of one chunk still gets it
-   * greyed out.
-   *
-   * The remembered correlation entry is dropped either way: this is the method
-   * that clears it for a resolved prompt, and it must not blank the button it
-   * just resolved.
-   *
-   * `decision` is the answer as the four choices every surface uses, carried
-   * down from the bridge that has it. Without it a card allowed for the chat
-   * reads `Approved ✓`, which says nothing was remembered when a rule was just
-   * written.
-   *
-   * Throws when an edit failed, naming both the resolved-button failure and the
-   * empty-keyboard fallback's failure when that failed too — a swallowed
-   * failure here means the user keeps staring at a live Approve button with no
-   * sign that anything went wrong.
+   * Retire the buttons of a gate that was answered, timed out or cancelled.
+   * The rules and the failure reporting live in `TelegramPromptKeyboard`, which
+   * is also what remembers which message carries them.
    */
-  async resolvePromptKeyboard(
-    chatId: string,
-    correlationId: string,
-    keyboardMessageIds: readonly string[],
-    approved: boolean,
-    options?: { signal?: AbortSignal },
-    reason?: 'resolved' | 'cancelled' | 'timeout',
-    decision?: ApprovalDecision,
-  ): Promise<void> {
-    const remembered = this.promptMessages.get(correlationId);
-    this.promptMessages.delete(correlationId);
-    const messageIds = [
-      ...new Set([
-        ...keyboardMessageIds,
-        ...(remembered === undefined ? [] : [String(remembered)]),
-      ]),
-    ];
-    const failures: string[] = [];
-    for (const messageId of messageIds) {
-      try {
-        await this.editReplyMarkup(
-          chatId,
-          messageId,
-          { inline_keyboard: [[resolvedApprovalButton(approved, reason, decision)]] },
-          options?.signal,
-        );
-      } catch (err) {
-        const disabledFailure = describeError(err);
-        // Better a row that is gone than a row that still looks pressable.
-        try {
-          await this.clearInlineKeyboard(chatId, messageId, options);
-          failures.push(
-            `resolved approval button could not be set on message ${messageId} (keyboard cleared instead): ${disabledFailure}`,
-          );
-        } catch (clearErr) {
-          failures.push(
-            `resolved approval button could not be set on message ${messageId} and its keyboard could not be cleared either: ${disabledFailure}; ${describeError(clearErr)}`,
-          );
-        }
-      }
-    }
-    if (failures.length > 0) throw new Error(failures.join('; '));
+  resolvePromptKeyboard(
+    ...args: Parameters<TelegramPromptKeyboard['resolve']>
+  ): ReturnType<TelegramPromptKeyboard['resolve']> {
+    return this.promptKeyboard.resolve(...args);
   }
 
   async editMessage(
@@ -371,7 +325,7 @@ export class TelegramOutbound {
       {
         chat_id: chatId,
         message_id: Number(messageId),
-        text: widenForStopButton(text, options),
+        text: widenForStopButton(withTelegramBubbleGap(text), options),
         ...(options?.stopButton === false
           ? { reply_markup: { inline_keyboard: [] } }
           : stopKeyboard(options)),
@@ -393,13 +347,8 @@ export class TelegramOutbound {
     );
   }
 
-  async retractPrompt(chatId: string, correlationId: string, signal?: AbortSignal): Promise<void> {
-    const messageId = this.promptMessages.get(correlationId);
-    this.promptMessages.delete(correlationId);
-    if (messageId === undefined) return;
-    await this.editReplyMarkup(chatId, String(messageId), { inline_keyboard: [] }, signal).catch(
-      () => undefined,
-    );
+  retractPrompt(chatId: string, correlationId: string, signal?: AbortSignal): Promise<void> {
+    return this.promptKeyboard.retract(chatId, correlationId, signal);
   }
 
   private async editReplyMarkup(
@@ -414,16 +363,6 @@ export class TelegramOutbound {
       { chat_id: chatId, message_id: Number(messageId), reply_markup: replyMarkup },
       signal,
     );
-  }
-
-  private rememberPrompt(correlationId: string, sent: unknown): void {
-    const parsed = TelegramSentMessageSchema.safeParse(sent);
-    if (!parsed.success) return;
-    if (this.promptMessages.size >= PROMPT_MESSAGE_LIMIT) {
-      const oldest = this.promptMessages.keys().next();
-      if (!oldest.done) this.promptMessages.delete(oldest.value);
-    }
-    this.promptMessages.set(correlationId, parsed.data.message_id);
   }
 
   async sendPhoto(

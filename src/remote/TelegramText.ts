@@ -1,13 +1,20 @@
 const TELEGRAM_TEXT_LIMIT = 4096;
 
-/** Splits text on Unicode code points so Telegram's message limit is respected. */
-export function splitTelegramText(text: string): string[] {
+/**
+ * Splits text on Unicode code points so Telegram's message limit is respected.
+ *
+ * `reserve` holds back room for text the caller will still add to the first
+ * part — the bubble gap — so a message that fills the limit does not grow a
+ * two-character tail message once that text is prefixed.
+ */
+export function splitTelegramText(text: string, reserve = 0): string[] {
   if (!text) return [''];
+  const limit = Math.max(1, TELEGRAM_TEXT_LIMIT - reserve);
   const chunks: string[] = [];
   let chunk = '';
   let characters = 0;
   for (const character of text) {
-    if (characters === TELEGRAM_TEXT_LIMIT) {
+    if (characters === limit) {
       chunks.push(chunk);
       chunk = '';
       characters = 0;

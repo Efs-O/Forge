@@ -1,4 +1,5 @@
 import type { RemoteSelectionChoice, RemoteSelectionControls, RemoteSelectionPages } from './types';
+import { withTelegramBubbleGap } from './telegramBubbleGap';
 
 export interface TelegramSelectionCallback {
   kind: RemoteSelectionControls['kind'];
@@ -151,7 +152,7 @@ async function sendTelegramSelectionPage(
     'sendMessage',
     {
       chat_id: chatId,
-      text,
+      text: withTelegramBubbleGap(text),
       ...(parseMode ? { parse_mode: parseMode } : {}),
       reply_markup: telegramSelectionKeyboard(controls),
     },
@@ -173,7 +174,7 @@ async function editTelegramSelectionPage(
     {
       chat_id: chatId,
       message_id: parseMessageId(messageId),
-      text,
+      text: withTelegramBubbleGap(text),
       ...(parseMode ? { parse_mode: parseMode } : {}),
       reply_markup: telegramSelectionKeyboard(controls),
     },
@@ -234,7 +235,7 @@ async function sendTelegramSelectionChoices(
     'sendMessage',
     {
       chat_id: chatId,
-      text,
+      text: withTelegramBubbleGap(text),
       ...(parseMode ? { parse_mode: parseMode } : {}),
       reply_markup: telegramChoiceKeyboard(controls, choices),
     },

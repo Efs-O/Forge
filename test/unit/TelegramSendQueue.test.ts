@@ -142,6 +142,9 @@ describe('postTelegram', () => {
 });
 
 describe('TelegramChannel ordering', () => {
+  /** The gap every Telegram bubble opens with; see `telegramBubbleGap.ts`. */
+  const GAP = '\u2800\n';
+
   it('sends to one chat in call order even when the first request is slow', async () => {
     const started: string[] = [];
     const finished: string[] = [];
@@ -152,9 +155,12 @@ describe('TelegramChannel ordering', () => {
       setCursor: async () => undefined,
       fetch: (async (_url: string, init?: RequestInit) => {
         const body = JSON.parse(String(init?.body)) as { text?: string };
-        started.push(body.text ?? '');
-        if (body.text === 'older') await first.promise;
-        finished.push(body.text ?? '');
+        // Order is what this test pins, so the gap is stripped here rather than
+        // written into every assertion below.
+        const text = String(body.text ?? '').replace(GAP, '');
+        started.push(text);
+        if (text === 'older') await first.promise;
+        finished.push(text);
         return jsonResponse({ ok: true, result: { message_id: 1 } });
       }) as typeof fetch,
     });

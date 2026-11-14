@@ -13,6 +13,9 @@ import type { RequestCapture } from '../../src/sessions/requestStats';
 
 const LINE = 'Speed: 535 tokens at 21.1 tok/s · read 19,160 at 725.4 tok/s';
 
+/** The gap every Telegram bubble opens with; see `telegramBubbleGap.ts`. */
+const GAP = '\u2800\n';
+
 const tempDirs: string[] = [];
 
 afterEach(async () => {
@@ -86,7 +89,7 @@ describe('the speed line on a Telegram reply', () => {
     expect(last.length).toBeLessThanOrEqual(4_096);
     // The answer survives the split intact and whole; only the line was added.
     const answerTail = last.replace(`\n\n${LINE}`, '');
-    expect(`${first}${answerTail}`).toBe('x'.repeat(4_100));
+    expect(`${first.replace(GAP, '')}${answerTail}`).toBe('x'.repeat(4_100));
   });
 
   it('puts the line on a short answer as one extra line of the same message', async () => {
@@ -94,7 +97,7 @@ describe('the speed line on a Telegram reply', () => {
     const channel = telegramCapturing(bodies);
     await channel.send('chat-1', 'done, the fix is committed', { speedLine: LINE });
     expect(bodies).toHaveLength(1);
-    expect(String(bodies[0]?.['text'])).toBe(`done, the fix is committed\n\n${LINE}`);
+    expect(String(bodies[0]?.['text'])).toBe(`${GAP}done, the fix is committed\n\n${LINE}`);
   });
 
   it('is display only: the stored item, the speech and the summary never carry it', async () => {
@@ -124,7 +127,7 @@ describe('the speed line on a Telegram reply', () => {
     );
     outbox.start();
     await vi.waitFor(() => expect(bodies).toHaveLength(1));
-    expect(String(bodies[0]?.['text'])).toBe(`the answer\n\n${LINE}`);
+    expect(String(bodies[0]?.['text'])).toBe(`${GAP}the answer\n\n${LINE}`);
     // Speech reads `item.text`, so the phone never hears a speed line. It runs
     // after the delivered mark is written to disk, so wait for it.
     await vi.waitFor(() => expect(spoken).toEqual(['the answer']));

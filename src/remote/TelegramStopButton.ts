@@ -9,7 +9,8 @@ const STOP_CALLBACK_DATA = 'x';
 const CONTROL_CALLBACK_DATA = 'y';
 export const STOP_KEY_LABEL = '⏹ Stop';
 
-const WIDE_BLANK = '\u2800';
+/** A blank Telegram will not trim; plain spaces and newlines are. */
+export const WIDE_BLANK = '\u2800';
 /** Code points the last line is padded to; about a full phone-width bubble. */
 const STOP_BUBBLE_MIN_WIDTH = 38;
 const TELEGRAM_TEXT_LIMIT = 4096;
