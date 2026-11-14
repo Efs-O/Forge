@@ -6,8 +6,9 @@ const fs = require('fs');
 const readline = require('readline');
 
 const log = process.env.FORGE_JOB_KEEPER_LOG;
-readline
-  .createInterface({ input: process.stdin })
-  .on('line', (line) => {
-    if (log) fs.appendFileSync(log, `${line}\n`);
-  });
+// The real keeper prints `ready` once it can create a job, and
+// warmWindowsJobKeeper waits for exactly that line, so the fake behaves the same.
+process.stdout.write('ready\n');
+readline.createInterface({ input: process.stdin }).on('line', (line) => {
+  if (log) fs.appendFileSync(log, `${line}\n`);
+});

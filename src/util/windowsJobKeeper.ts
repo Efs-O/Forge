@@ -2,6 +2,7 @@ import { ChildProcess, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { KEEPER_SCRIPT } from './windowsJobKeeperScript';
 
 /**
  * Windows job objects, so stopping a Forge-owned command takes its whole tree.
@@ -26,11 +27,11 @@ import * as path from 'path';
  *
  * Two limits worth knowing:
  *  - The keeper starts lazily and costs about 270 ms cold (measured: 126 ms for
- *    PowerShell plus the `Add-Type` compile). A grandchild created inside that
- *    window escapes the job — measured, Git Bash reaches its first fork 141 ms
- *    after the spawn, so the first protected command in a window is not
- *    covered. Every later one is, because the assignment then lands about a
- *    millisecond after the spawn.
+ *    PowerShell plus the `Add-Type` compile), and a grandchild created while it
+ *    is still compiling escapes the job — Git Bash reaches its first fork 141 ms
+ *    after a spawn. That is why a spawn path that can be stopped calls
+ *    `warmWindowsJobKeeper` before it spawns: with the keeper already answering,
+ *    the assignment lands about a millisecond after the spawn.
  *  - Nothing here dies hard. A missing PowerShell, a failed assignment or a
  *    keeper that exited mid-command leaves the old `taskkill` behaviour, which
  *    is what Windows users had before this module existed.
@@ -40,167 +41,6 @@ import * as path from 'path';
  *    and orphaned exactly the grandchildren this module exists for (the first
  *    version of it, caught by `StopExecutionTree.test.ts` on 2026-11-14).
  */
-
-/**
- * The keeper, in PowerShell for the same reason `windowsFileHolders.ts` uses it:
- * PowerShell is on every Windows install, and `Add-Type` compiles the P/Invoke
- * shim in-process, so Forge ships no native binary and no build step.
- *
- * Protocol, one line per command on stdin:
- *   `job <token> <pid>`  — create a job, put that pid in it, keep the handle.
- *   `kill <token>`       — close it with the kill flag still set.
- *   `release <token>`    — clear the flag, then close.
- *   `quit`               — release everything and exit.
- * A problem is one line on stdout carrying the Win32 code, because "the job was
- * not created" is otherwise invisible and the only symptom is an orphan that
- * outlived its stop. Reports go to stdout, not stderr: PowerShell serialises a
- * redirected stderr as a CLIXML stream whose `#< CLIXML` banner arrives first, so
- * a report read from stderr is half banner and half answer.
- */
-const KEEPER_SCRIPT = String.raw`
-$ErrorActionPreference = 'Continue'
-Add-Type -TypeDefinition @'
-using System;
-using System.Collections.Generic;
-using System.Runtime.InteropServices;
-public static class ForgeJobKeeper {
-  const int ExtendedLimitInformation = 9;
-  // KILL_ON_JOB_CLOSE is only valid through JobObjectExtendedLimitInformation:
-  // the same call with JobObjectBasicLimitInformation answers
-  // ERROR_INVALID_PARAMETER (87), measured here.
-  const int KillOnJobClose = 0x00002000;
-  const int ProcessSetQuota = 0x00000100;
-  const int ProcessTerminate = 0x00000010;
-  // Measured here: AssignProcessToJobObject rejects a handle opened with only
-  // the documented PROCESS_SET_QUOTA | PROCESS_TERMINATE (ERROR_ACCESS_DENIED,
-  // 5) and accepts a full-rights one, even for a process that already sits in
-  // another job. So the full-rights handle is what the assignment asks for, and
-  // the documented minimum stays as the fallback for a process this one cannot
-  // open fully (a protected or elevated process).
-  const int ProcessAllAccess = 0x1F0FFF;
-
-  [StructLayout(LayoutKind.Sequential)]
-  struct BasicLimits {
-    public long PerProcessUserTimeLimit;
-    public long PerJobUserTimeLimit;
-    public int LimitFlags;
-    public UIntPtr MinimumWorkingSetSize;
-    public UIntPtr MaximumWorkingSetSize;
-    public int ActiveProcessLimit;
-    public UIntPtr Affinity;
-    public int PriorityClass;
-    public int SchedulingClass;
-  }
-
-  // The second member is IO_COUNTERS (six 64-bit counters), not IO_STATUS_BLOCK:
-  // measured here, the kernel rejects a 112-byte struct for this class with
-  // ERROR_BAD_LENGTH (24) and accepts this 144-byte one.
-  [StructLayout(LayoutKind.Sequential)]
-  struct IoCounters {
-    public ulong ReadOperationCount;
-    public ulong WriteOperationCount;
-    public ulong OtherOperationCount;
-    public ulong ReadTransferCount;
-    public ulong WriteTransferCount;
-    public ulong OtherTransferCount;
-  }
-
-  [StructLayout(LayoutKind.Sequential)]
-  struct ExtendedLimits {
-    public BasicLimits BasicInformation;
-    public IoCounters IoInformation;
-    public UIntPtr ProcessMemoryLimit;
-    public UIntPtr JobMemoryLimit;
-    public UIntPtr PeakProcessMemoryUsed;
-    public UIntPtr PeakJobMemoryUsed;
-  }
-
-  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-  static extern IntPtr CreateJobObject(IntPtr attributes, string name);
-  [DllImport("kernel32.dll", SetLastError = true)]
-  static extern bool SetInformationJobObject(IntPtr job, int infoClass, ref ExtendedLimits info, int length);
-  [DllImport("kernel32.dll", SetLastError = true)]
-  static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
-  [DllImport("kernel32.dll", SetLastError = true)]
-  static extern bool CloseHandle(IntPtr handle);
-  [DllImport("kernel32.dll", SetLastError = true)]
-  static extern IntPtr OpenProcess(int access, bool inherit, int pid);
-
-  static readonly Dictionary<string, IntPtr> Jobs = new Dictionary<string, IntPtr>();
-
-  static bool SetFlags(IntPtr job, int flags) {
-    ExtendedLimits info = new ExtendedLimits();
-    info.BasicInformation.LimitFlags = flags;
-    return SetInformationJobObject(job, ExtendedLimitInformation, ref info,
-      Marshal.SizeOf(typeof(ExtendedLimits)));
-  }
-
-  static string Create(string token, int pid) {
-    IntPtr job = CreateJobObject(IntPtr.Zero, null);
-    if (job == IntPtr.Zero) return "err " + token + " create=" + Marshal.GetLastWin32Error();
-    if (!SetFlags(job, KillOnJobClose)) {
-      int code = Marshal.GetLastWin32Error();
-      CloseHandle(job);
-      return "err " + token + " limit=" + code;
-    }
-    IntPtr process = OpenProcess(ProcessAllAccess, false, pid);
-    int rights = ProcessAllAccess;
-    if (process == IntPtr.Zero) {
-      process = OpenProcess(ProcessSetQuota | ProcessTerminate, false, pid);
-      rights = ProcessSetQuota | ProcessTerminate;
-    }
-    if (process == IntPtr.Zero) {
-      int code = Marshal.GetLastWin32Error();
-      CloseHandle(job);
-      return "err " + token + " open=" + code;
-    }
-    bool assigned = AssignProcessToJobObject(job, process);
-    int assignCode = assigned ? 0 : Marshal.GetLastWin32Error();
-    CloseHandle(process);
-    if (!assigned) {
-      CloseHandle(job);
-      return "err " + token + " assign=" + assignCode + " rights=0x" + rights.ToString("X");
-    }
-    Jobs[token] = job;
-    return null;
-  }
-
-  static void Close(string token, bool withKill) {
-    IntPtr job;
-    if (!Jobs.TryGetValue(token, out job)) return;
-    Jobs.Remove(token);
-    if (!withKill) SetFlags(job, 0);
-    CloseHandle(job);
-  }
-
-  public static string Handle(string line) {
-    if (string.IsNullOrEmpty(line)) return null;
-    string[] parts = line.Trim().Split(' ');
-    try {
-      if (parts.Length == 3 && parts[0] == "job") return Create(parts[1], int.Parse(parts[2]));
-      if (parts.Length == 2 && parts[0] == "kill") { Close(parts[1], true); return null; }
-      if (parts.Length == 2 && parts[0] == "release") { Close(parts[1], false); return null; }
-    } catch (Exception e) {
-      return "err " + parts[0] + " " + e.GetType().Name;
-    }
-    return "err protocol " + parts[0];
-  }
-
-  public static void ReleaseAll() {
-    foreach (KeyValuePair<string, IntPtr> entry in
-      new List<KeyValuePair<string, IntPtr>>(Jobs)) Close(entry.Key, false);
-  }
-}
-'@
-while ($true) {
-  $line = [Console]::In.ReadLine()
-  if ($null -eq $line) { break }
-  if ($line.Trim() -eq 'quit') { break }
-  $reply = [ForgeJobKeeper]::Handle($line)
-  if (reply) { [Console]::Out.WriteLine($reply) }
-}
-[ForgeJobKeeper]::ReleaseAll()
-`;
 
 /**
  * Test and diagnostic seam: point it at a JS file and that file becomes the
@@ -283,6 +123,11 @@ const stopping = new Map<number, string>();
 let keeper: ChildProcess | undefined;
 let nextToken = 1;
 let reported = 0;
+/** Whether the current keeper has printed `ready`, which is the only way to
+ *  know a job can be created right now. Reset with every keeper. */
+let keeperReady = false;
+/** Callers waiting for the current keeper to become ready. */
+const warmWaiters = new Set<() => void>();
 
 /** How long the keeper stays up with nothing left to hold: long enough to cover
  *  two commands in a row, short enough that a window not running background
@@ -322,6 +167,16 @@ function scheduleIdleShutdown(): void {
   idleTimer.unref?.();
 }
 
+/** The keeper's first line out is `ready`; after that every line is a report. */
+function handleKeeperLine(line: string): void {
+  if (line.trim() !== 'ready') {
+    reportKeeperProblem(line);
+    return;
+  }
+  keeperReady = true;
+  for (const settle of [...warmWaiters]) settle();
+}
+
 function ensureKeeper(): ChildProcess | undefined {
   if (keeper && keeper.stdin && !keeper.stdin.destroyed) return keeper;
   const command = keeperCommand();
@@ -339,6 +194,7 @@ function ensureKeeper(): ChildProcess | undefined {
     return undefined;
   }
   keeper = child;
+  keeperReady = false;
   if (idleTimer) {
     clearTimeout(idleTimer);
     idleTimer = undefined;
@@ -352,11 +208,14 @@ function ensureKeeper(): ChildProcess | undefined {
     pending += chunk;
     const lines = pending.split('\n');
     pending = lines.pop() ?? '';
-    for (const line of lines) reportKeeperProblem(line);
+    for (const line of lines) handleKeeperLine(line);
   });
   const forget = (): void => {
     if (keeper !== child) return;
     keeper = undefined;
+    keeperReady = false;
+    // Nobody is waiting on a keeper that is gone; the next protect() starts one.
+    for (const settle of [...warmWaiters]) settle();
     // The handles died with the keeper, so these pids have no job to close.
     jobs.clear();
     stopping.clear();
@@ -374,6 +233,41 @@ function send(keeperProcess: ChildProcess, line: string): void {
   } catch {
     /* The keeper is gone; forget() has already cleared the map. */
   }
+}
+
+/** How long a caller will wait for a cold keeper before spawning anyway. The
+ *  cold start measured here is 274 ms (PowerShell 126 ms plus the C# compile),
+ *  so this ceiling is a broken-keeper guard, not a normal path. */
+const KEEPER_WARM_CEILING_MS = 3_000;
+
+/**
+ * Ask for the job-keeping helper and resolve once it can actually create a job.
+ *
+ * A caller that spawns a command it may later have to stop awaits this BEFORE
+ * the spawn, because of a measured race: the helper costs about 274 ms the first
+ * time, and Git Bash reaches its first fork 141 ms after a spawn. A command
+ * started while the helper is still compiling has no job to join, so its
+ * children outlive the stop — measured on 2026-11-14 in a freshly opened window,
+ * where the first background `sleep 150 && echo late` leaked its sleep and the
+ * second one in the same window did not.
+ *
+ * It never blocks a command indefinitely: past `KEEPER_WARM_CEILING_MS` it
+ * resolves anyway, and the stop keeps its `taskkill` fallback.
+ */
+export async function warmWindowsJobKeeper(): Promise<void> {
+  if (!keeperCommand()) return;
+  const target = ensureKeeper();
+  if (!target || keeperReady) return;
+  await new Promise<void>((resolve) => {
+    const settle = (): void => {
+      clearTimeout(ceiling);
+      warmWaiters.delete(settle);
+      resolve();
+    };
+    const ceiling = setTimeout(settle, KEEPER_WARM_CEILING_MS);
+    ceiling.unref?.();
+    warmWaiters.add(settle);
+  });
 }
 
 /**
@@ -472,6 +366,11 @@ export function shutdownJobKeeper(): void {
   } catch {
     /* Already closed. */
   }
+}
+
+/** Whether the current keeper can create a job right now. Test seam. */
+export function keeperIsReady(): boolean {
+  return keeperReady;
 }
 
 /** Every pid this module still has a job handle for, stopping included, so a

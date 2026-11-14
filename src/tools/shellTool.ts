@@ -8,6 +8,7 @@ import {
   backgroundExecutionManager,
 } from './BackgroundExecutionManager';
 import { execCwdPreview, resolveExecCwd, runShellInForeground } from './execHelpers';
+import { warmWindowsJobKeeper } from '../util/windowsJobKeeper';
 import { NOTIFY_ON_EXIT_DESCRIPTION } from './backgroundExecutionTools';
 import { resolveGitBash, systemProbe } from './execProgramResolver';
 import { type ShellClassification, type ShellSecretCheck } from './shellPolicy';
@@ -437,6 +438,8 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
         GIT_TERMINAL_PROMPT: '0',
       };
       if (background) {
+        // The job helper must hold the job before the command's first fork.
+        await warmWindowsJobKeeper();
         const start = manager.start({
           command: resolved.command,
           args: resolved.args,

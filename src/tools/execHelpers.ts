@@ -2,7 +2,7 @@ import { spawn } from 'child_process';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { terminateCliProcessTree } from '../agents/cliProcess';
-import { protectProcessTree } from '../util/windowsJobKeeper';
+import { protectProcessTree, warmWindowsJobKeeper } from '../util/windowsJobKeeper';
 import { ShellOutputCollector } from './shellOutput';
 
 export const MAX_OUTPUT_CHARS = 16_000;
@@ -287,6 +287,10 @@ export async function runShellInForeground(
   output: ShellOutputCollector,
 ): Promise<{ code: number | null; timedOut: boolean; seconds: number }> {
   const started = Date.now();
+  // The job helper has to hold the job before this command's first fork, so it
+  // is started before the spawn, not after it (`warmWindowsJobKeeper`). The
+  // command already pays about 270 ms once per window for that.
+  await warmWindowsJobKeeper();
   return new Promise((resolve, reject) => {
     const proc = spawn(executable, args, {
       shell: false,

@@ -18,6 +18,7 @@ import {
   type BackgroundExecutionCompletion,
 } from '../BackgroundExecutionManager';
 import { freeGpusForEngine, type MediaModelLifecycle } from './mediaGpuFreeing';
+import { warmWindowsJobKeeper } from '../../util/windowsJobKeeper';
 import { archiveAnalysisManifest, mediaOutcomeNotice } from './mediaManifest';
 
 export interface MediaRenderRequest {
@@ -142,6 +143,9 @@ async function spawnStage(
   // was rendered. `req.next` is what says another stage follows, so the wake
   // and its manifest summary ride on the final stage alone.
   const final = req.next === undefined;
+  // A render is long and stopable, so the job helper that makes a stop take the
+  // whole command tree has to be up before the adapter exists.
+  await warmWindowsJobKeeper();
   const started = background.start({
     command: req.command,
     args: [...req.args],

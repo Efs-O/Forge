@@ -9,11 +9,13 @@ import { BackgroundRegistry } from '../../src/tools/backgroundRegistry';
 import {
   beginTreeStop,
   finishStoppedTree,
+  keeperIsReady,
   protectProcessTree,
   protectedPids,
   releaseProtectedTree,
   shutdownJobKeeper,
   sweepProtectedTree,
+  warmWindowsJobKeeper,
 } from '../../src/util/windowsJobKeeper';
 import { removeTreeWhenFree } from '../support/removeTempTree';
 
@@ -213,6 +215,76 @@ function fakeTaskkill(exitCode: number): ChildProcess {
     },
   } as unknown as ChildProcess;
 }
+
+describe('the warm-up a stoppable command waits for', () => {
+  it('comes back once the keeper can create a job, without waiting its ceiling', async () => {
+    const started = Date.now();
+    await warmWindowsJobKeeper();
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(keeperIsReady()).toBe(true);
+    // And a command protected after the warm-up is in a job the keeper holds,
+    // which is the whole point: the assignment lands before the first fork.
+    const child = liveChild();
+    try {
+      protectProcessTree(child);
+      expect(await tokenFor(child.pid!)).toMatch(/^\d+$/u);
+    } finally {
+      await stopChild(child);
+    }
+  });
+
+  it('gives up rather than blocking a command when the keeper never answers', async () => {
+    const saved = process.env.FORGE_JOB_KEEPER_CMD;
+    const silent = path.join(process.cwd(), '.test-tmp', 'silent-keeper.cjs');
+    fs.mkdirSync(path.dirname(silent), { recursive: true });
+    // Silent: it never prints `ready`. It still quits when its stdin closes, so
+    // `shutdownJobKeeper` can get rid of it and the next test gets a real fake.
+    fs.writeFileSync(
+      silent,
+      'setInterval(() => {}, 500);\n' +
+        'process.stdin.resume();\n' +
+        "process.stdin.on('end', () => process.exit(0));\n" +
+        "process.stdin.on('error', () => process.exit(0));\n",
+    );
+    shutdownJobKeeper();
+    await vi.waitFor(() => expect(keeperIsReady()).toBe(false), { timeout: 5_000 });
+    process.env.FORGE_JOB_KEEPER_CMD = silent;
+    try {
+      const started = Date.now();
+      await warmWindowsJobKeeper();
+      const waited = Date.now() - started;
+      // The ceiling is 3 s: a broken keeper delays one command, it never hangs
+      // one, and the stop keeps its taskkill fallback either way.
+      expect(waited).toBeGreaterThanOrEqual(2_500);
+      expect(waited).toBeLessThan(8_000);
+    } finally {
+      process.env.FORGE_JOB_KEEPER_CMD = saved;
+      shutdownJobKeeper();
+      fs.rmSync(silent, { force: true });
+      // Put the logging keeper back before the next test in this file needs it:
+      // the silent one is dying, and a keeper that answers is what the later
+      // assertions read from the log.
+      await vi.waitFor(
+        async () => {
+          await warmWindowsJobKeeper();
+          expect(keeperIsReady()).toBe(true);
+        },
+        { timeout: 15_000 },
+      );
+    }
+  }, 30_000);
+
+  it('returns at once where there is no keeper to start', async () => {
+    if (process.platform === 'win32') return; // Windows always has PowerShell.
+    const saved = process.env.FORGE_JOB_KEEPER_CMD;
+    delete process.env.FORGE_JOB_KEEPER_CMD;
+    try {
+      await expect(warmWindowsJobKeeper()).resolves.toBeUndefined();
+    } finally {
+      if (saved !== undefined) process.env.FORGE_JOB_KEEPER_CMD = saved;
+    }
+  });
+});
 
 describe('the Windows stop path', () => {
   it('spends the job before taskkill and closes it only after taskkill returns', () => {
