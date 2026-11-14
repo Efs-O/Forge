@@ -1,5 +1,11 @@
 # Forge — Recent Changes
 
+## 0.17.177
+
+**A stopped command is now actually stopped on Windows.**
+
+- `stop_execution` said "its process tree was signalled as a tree" while the command's own child kept running: a stopped `sleep 90` went on sleeping for its remaining ninety seconds, and a stopped build could keep a lock for the length of the thing you just stopped. Git Bash's `fork()` runs a short-lived forker that creates the real child and exits, so the child's recorded parent is a dead pid — and `taskkill /T` walks parent links, so it cannot find what is left. Forge now keeps one helper per window that puts every command it starts into a Windows job object and closes that job when the command is stopped: the kernel then terminates everything still inside, whatever its parent says. A command that finishes by itself keeps whatever it left running, as before, so a detached launch still survives its launcher.
+
 ## 0.17.176
 
 **Two fixes the student runs found, neither of them visible from inside a test.**
