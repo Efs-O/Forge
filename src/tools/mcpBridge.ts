@@ -113,9 +113,9 @@ async function connectOne(
 
   try {
     const { tools } = await client.listTools();
-    // Set only for a server whose schemas are demand-loaded; every other
-    // server bridges in exactly as before.
-    const lazyGroup = lazyGroupForServer(server.name);
+    // Set for every server that did not ask to stay advertised: the tools bridge
+    // in exactly as before, they just wait behind `load_tool_group`.
+    const lazyGroup = lazyGroupForServer(server.name, server.eager === true);
     let bridged = 0;
     for (const tool of tools) {
       // The server's own name may be one no backend accepts, or one another

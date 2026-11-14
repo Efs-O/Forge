@@ -29,7 +29,7 @@ const HALLUSCRIBE_TOOLS = [
   'get_digest',
 ];
 
-/** Two bridged tools from a server that is NOT lazy, as a control group. */
+/** Two bridged tools, used both as an eager control and as a demand-loaded server. */
 const OTHER_MCP_TOOLS = ['fetch_page', 'list_repos'];
 
 /**
@@ -46,8 +46,13 @@ function modelFacingTools(registry: ToolRegistry, conversationId: string | undef
 }
 
 /** Bridges a server's tools in the same order and shape mcpBridge does. */
-function bridge(registry: ToolRegistry, serverName: string, toolNames: string[]): void {
-  const group = lazyGroupForServer(serverName);
+function bridge(
+  registry: ToolRegistry,
+  serverName: string,
+  toolNames: string[],
+  eager = false,
+): void {
+  const group = lazyGroupForServer(serverName, eager);
   for (const name of toolNames) {
     registry.register(
       mcpToolToRegisteredTool(
@@ -65,7 +70,7 @@ function registryWithHalluscribe(): ToolRegistry {
   const registry = new ToolRegistry();
   registry.register(makeLoadToolGroupTool());
   bridge(registry, 'halluscribe', HALLUSCRIBE_TOOLS);
-  bridge(registry, 'other-server', OTHER_MCP_TOOLS);
+  bridge(registry, 'other-server', OTHER_MCP_TOOLS, true);
   return registry;
 }
 
@@ -257,15 +262,30 @@ describe('lazy tool groups', () => {
     expect(modelFacingTools(registry, 'conv-a')).toEqual([]);
   });
 
-  it('leaves other MCP servers advertised in both states', () => {
-    const registry = registryWithHalluscribe();
-    expect(lazyGroupForServer('other-server')).toBeUndefined();
+  it('holds an ordinary MCP server behind its own group, and advertises one that asks to stay eager', () => {
+    // The default flipped on 2026-11-14: a bridged server now waits behind
+    // `load_tool_group` under a group named after it, so a conversation that
+    // never touches it stops paying its schemas every turn. `eager: true` on the
+    // server entry keeps the old behaviour for a server used every turn.
+    expect(lazyGroupForServer('other-server')).toBe('other-server');
+    expect(lazyGroupForServer('other-server', true)).toBeUndefined();
+
+    const lazy = new ToolRegistry();
+    lazy.register(makeLoadToolGroupTool());
+    bridge(lazy, 'quiet-server', OTHER_MCP_TOOLS);
+    expect(modelFacingTools(lazy, 'conv-a')).not.toContain('fetch_page');
+    expect(lazyGroupNames()).toContain('quiet-server');
+    activateLazyGroup('conv-a', 'quiet-server');
+    expect(modelFacingTools(lazy, 'conv-a')).toContain('fetch_page');
+    expect(modelFacingTools(lazy, 'conv-b')).not.toContain('fetch_page');
+
+    const eager = registryWithHalluscribe();
     for (const name of OTHER_MCP_TOOLS) {
-      expect(modelFacingTools(registry, 'conv-a')).toContain(name);
+      expect(modelFacingTools(eager, 'conv-a')).toContain(name);
     }
     activateLazyGroup('conv-a', 'halluscribe');
     for (const name of OTHER_MCP_TOOLS) {
-      expect(modelFacingTools(registry, 'conv-a')).toContain(name);
+      expect(modelFacingTools(eager, 'conv-a')).toContain(name);
     }
   });
 

@@ -924,6 +924,10 @@ mcp_servers:
   - name: halluscribe
     command: xxxx/halluscribe-mcp.exe
     max_result_chars: 6000
+    # Its tools wait behind load_tool_group, in a group named after the server.
+    # Set eager: true for a server you use every turn, so its schemas are
+    # advertised on every request instead.
+    # eager: true
 
 # ===========================================================================
 # C. LOCAL RUNTIME & RESOURCES

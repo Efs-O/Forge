@@ -232,6 +232,25 @@ describe('MCP tool permission config validation', () => {
       expect(result.error.issues[0]?.message).toContain('MCP tool permission must be one of');
     }
   });
+
+  it('accepts `eager: true` on a server and refuses a non-boolean for it', () => {
+    const base = {
+      active_model: 'local-model',
+      llama_server: { binary: 'llama-server' },
+      models: [{ name: 'local-model', gguf_path: 'C:/models/local.gguf' }],
+    };
+    const accepted = ForgeConfigSchema.safeParse({
+      ...base,
+      mcp_servers: [{ name: 'blender', command: 'uvx', args: ['mcp-for-blender'], eager: true }],
+    });
+    expect(accepted.success).toBe(true);
+
+    const refused = ForgeConfigSchema.safeParse({
+      ...base,
+      mcp_servers: [{ name: 'blender', command: 'uvx', eager: 'yes' }],
+    });
+    expect(refused.success).toBe(false);
+  });
 });
 
 describe('the provider-facing boundary of a real stdio server', () => {

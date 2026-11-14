@@ -382,4 +382,12 @@ export interface McpServerConfig {
   max_result_chars?: number;
   /** Per-tool capability classification; unlisted MCP tools default to read. */
   tool_permissions?: Record<string, ToolPermission>;
+  /**
+   * Advertise this server's tools on every request instead of holding them
+   * behind `load_tool_group` (a group named after the server). Default false:
+   * the 2026-11-14 lab logs put 9 of the 11 tools of the one always-eager
+   * server here at zero calls in 10 days, while every conversation paid its
+   * 11,913 characters of schemas.
+   */
+  eager?: boolean;
 }

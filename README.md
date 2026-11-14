@@ -878,11 +878,12 @@ mcp_servers:
     command: C:/path/to/my-mcp-server.exe
     # args: [--flag]              # optional
     # max_result_chars: 24000     # optional; default 24000
+    # eager: true                 # optional; advertise its tools on every request instead of holding them behind load_tool_group
     # tool_permissions:           # optional; unlisted tools are read-only
     #   dispatch_subagent: delegate
 ```
 
-On activation Forge spawns each server, auto-discovers its tools via the MCP handshake, and registers unclassified tools under the read-only permission tier — no per-server code needed. Classify a sensitive tool with `tool_permissions`; for example, `delegate` requires `permissions.agents.delegate: true` before the tool is advertised or dispatched. Connection happens in the background: a slow or missing server binary never delays startup; its tools simply appear on the next chat turn once connected. A server that fails to connect logs an error and shows a warning toast, and duplicate tool names are skipped. Spawned server processes are stdio children of Forge (no network) and are terminated on extension deactivation.
+On activation Forge spawns each server, auto-discovers its tools via the MCP handshake, and registers unclassified tools under the read-only permission tier — no per-server code needed. Classify a sensitive tool with `tool_permissions`; for example, `delegate` requires `permissions.agents.delegate: true` before the tool is advertised or dispatched. A server's tools are held behind `load_tool_group` (under a group named after the server) so a chat that never uses one does not pay its schemas every turn; set `eager: true` on a server you reach for constantly to advertise it on every request. Connection happens in the background: a slow or missing server binary never delays startup; its tools simply appear on the next chat turn once connected. A server that fails to connect logs an error and shows a warning toast, and duplicate tool names are skipped. Spawned server processes are stdio children of Forge (no network) and are terminated on extension deactivation.
 
 Tool results are capped at `max_result_chars` (default 24000) before entering the conversation — oversized payloads are truncated with a visible marker so a verbose MCP server cannot overflow a local model's per-slot context window (`num_ctx / n_parallel` in direct llama.cpp mode).
 

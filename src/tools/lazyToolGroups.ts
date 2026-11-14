@@ -3,8 +3,16 @@
  * controls only which schemas are advertised in each conversation.
  */
 
-/** MCP server name -> lazy group name. Unlisted servers remain eager. */
-const LAZY_GROUP_BY_SERVER: ReadonlyMap<string, string> = new Map([['halluscribe', 'halluscribe']]);
+/**
+ * Which MCP server tools are advertised, and when. Every server's tools arrive
+ * in a demand-loaded group named after the server — the same mechanism the
+ * native groups use — unless its `mcp_servers` entry sets `eager: true`.
+ *
+ * The default flipped from eager to demand-loaded on 2026-11-14: the one server
+ * that used to stay eager here was the Blender bridge, 11 tools and 11,913
+ * characters of schemas paid by every conversation, with 9 of those 11 tools at
+ * zero calls across 10 days of session logs.
+ */
 
 /**
  * Membership follows the 2026-09-30 audit of 15,676 Qwen calls across 86+
@@ -136,8 +144,13 @@ const NATIVE_GROUP_BY_TOOL: ReadonlyMap<string, string> = new Map([
 const membersByGroup = new Map<string, Set<string>>();
 const activeByConversation = new Map<string, Set<string>>();
 
-export function lazyGroupForServer(serverName: string): string | undefined {
-  return LAZY_GROUP_BY_SERVER.get(serverName);
+/**
+ * The lazy group an MCP server's tools belong to: its own name, so
+ * `load_tool_group` can fetch them by the name the user configured. Returns
+ * undefined only for a server that asks to stay advertised on every request.
+ */
+export function lazyGroupForServer(serverName: string, eager = false): string | undefined {
+  return eager ? undefined : serverName;
 }
 
 export function lazyGroupForTool(toolName: string): string | undefined {

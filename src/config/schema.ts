@@ -275,6 +275,8 @@ export const ForgeConfigShape = {
         args: z.array(z.string()).optional(),
         max_result_chars: z.number().int().positive().optional(),
         tool_permissions: z.record(z.string(), ToolPermissionSchema).optional(),
+        // Advertise on every request instead of behind `load_tool_group`; see McpServerConfig.eager.
+        eager: z.boolean().optional(),
       }),
     )
     .optional(),
