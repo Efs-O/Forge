@@ -5,6 +5,9 @@
 **A stopped command is now actually stopped on Windows.**
 
 - `stop_execution` said "its process tree was signalled as a tree" while the command's own child kept running: a stopped `sleep 90` went on sleeping for its remaining ninety seconds, and a stopped build could keep a lock for the length of the thing you just stopped. Git Bash's `fork()` runs a short-lived forker that creates the real child and exits, so the child's recorded parent is a dead pid — and `taskkill /T` walks parent links, so it cannot find what is left. Forge now keeps one helper per window that puts every command it starts into a Windows job object and closes that job when the command is stopped: the kernel then terminates everything still inside, whatever its parent says. A command that finishes by itself keeps whatever it left running, as before, so a detached launch still survives its launcher.
+- The close is ordered: the job is closed after `taskkill /T` has returned, not before it. Closed first, the kernel takes the recorded parent down instantly and the walk that follows has nothing left to walk — which is how the first version of this fix let a `sleep.exe` survive anyway.
+- The foreground `shell` command is in a job too. It has its own spawn rather than the shared one, so it was the one path the fix above did not cover, and it is the path every ordinary `sleep 60` goes through.
+- The helper's own compile files now land in `~/.forge/job-keeper/` instead of the system temp folder, and a day later they are gone.
 
 ## 0.17.176
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -9,13 +9,52 @@ import {
   MAX_OUTPUT_CHARS,
   MAX_OUTPUT_CHARS_CEILING,
   parseExecOutputOptions,
+  runShellInForeground,
   spawnAndWait,
   stripAnsi,
   resolveExecCwd,
 } from '../../src/tools/execHelpers';
+import { ShellOutputCollector } from '../../src/tools/shellOutput';
+import { shutdownJobKeeper } from '../../src/util/windowsJobKeeper';
 import * as vscode from 'vscode';
 
 const ESC = String.fromCharCode(27);
+
+// Every spawn in this file goes through the job keeper now, and the real keeper
+// is PowerShell. Point the seam at the fake keeper for the whole file, from
+// before the first test: the keeper is a per-process singleton, so a real one
+// started by an earlier test in the file would answer the later ones too. The
+// log path is fixed here as well, because the fake reads it once at startup.
+let keeperRoot = '';
+let keeperLog = '';
+
+beforeAll(() => {
+  keeperRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-job-keeper-'));
+  keeperLog = path.join(keeperRoot, 'commands.log');
+  fs.writeFileSync(keeperLog, '');
+  process.env.FORGE_JOB_KEEPER_CMD = path.join(
+    process.cwd(),
+    'test',
+    'support',
+    'fakeJobKeeper.cjs',
+  );
+  process.env.FORGE_JOB_KEEPER_LOG = keeperLog;
+});
+
+afterAll(() => {
+  shutdownJobKeeper();
+  delete process.env.FORGE_JOB_KEEPER_CMD;
+  delete process.env.FORGE_JOB_KEEPER_LOG;
+  fs.rmSync(keeperRoot, { recursive: true, force: true });
+});
+
+/** The `job <token> <pid>` lines the keeper has been asked for so far. */
+function jobLines(): string[] {
+  return fs
+    .readFileSync(keeperLog, 'utf8')
+    .split('\n')
+    .filter((line) => /^job \d+ \d+$/u.test(line));
+}
 
 describe('stripAnsi', () => {
   it('strips SGR color codes', () => {
@@ -35,9 +74,9 @@ describe('stripAnsi', () => {
 
 describe('background output helpers', () => {
   it('keeps oversized text output limits as a refusal with a file alternative', () => {
-    expect(() => parseExecOutputOptions({ max_output_chars: MAX_OUTPUT_CHARS_CEILING + 1 })).toThrow(
-      /redirect.*file/iu,
-    );
+    expect(() =>
+      parseExecOutputOptions({ max_output_chars: MAX_OUTPUT_CHARS_CEILING + 1 }),
+    ).toThrow(/redirect.*file/iu);
   });
 
   it('distinguishes success from non-zero exit', () => {
@@ -57,9 +96,9 @@ describe('background output helpers', () => {
 
   it('classifies a missing working directory separately from a missing executable', async () => {
     const cwd = path.join(os.tmpdir(), `forge-missing-cwd-${Date.now()}`);
-    await expect(
-      spawnAndWait(process.execPath, [], cwd, 1_000),
-    ).rejects.toMatchObject<Partial<ExecCommandError>>({ kind: 'missing_cwd' });
+    await expect(spawnAndWait(process.execPath, [], cwd, 1_000)).rejects.toMatchObject<
+      Partial<ExecCommandError>
+    >({ kind: 'missing_cwd' });
   });
 
   it('resolves shell cwd only to an existing directory', () => {
@@ -106,6 +145,41 @@ describe('background output helpers', () => {
     await expect(pending).rejects.toMatchObject<Partial<ExecCommandError>>({ kind: 'cancelled' });
   });
 
+  // The foreground path has its own spawn, not spawnAndWait, so it needs the
+  // job object itself: without it, an aborted `sleep 600` under Git Bash
+  // outlived the call because the forker that created it was already gone.
+  it('protects a foreground command so a cancel takes its children too', async () => {
+    const root = fs.mkdtempSync(path.join(keeperRoot, 'foreground-'));
+    const askedFor = jobLines().length;
+    const controller = new AbortController();
+    const collector = new ShellOutputCollector(
+      'foreground-protect',
+      'call-1',
+      1000,
+      path.join(root, 'spill'),
+    );
+    const pending = runShellInForeground(
+      process.execPath,
+      ['-e', 'setInterval(() => {}, 1000)'],
+      process.cwd(),
+      10_000,
+      {},
+      controller.signal,
+      collector,
+    );
+    try {
+      // A keeper is a cold process: the protocol tests give its first line five
+      // seconds, and this is a keeper that earlier tests already started.
+      await vi.waitFor(() => expect(jobLines().length).toBeGreaterThan(askedFor), {
+        timeout: 5_000,
+      });
+      controller.abort();
+      await expect(pending).resolves.toMatchObject({ code: null, timedOut: false });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it('returns a bounded final output window without a shell pipe', () => {
     const output = JSON.parse(
       formatExecCommandOutput(
@@ -124,9 +198,13 @@ describe('background output helpers', () => {
     // 10k/16k slice and the middle was gone forever. Now the full stream is
     // stored, so read_tool_result can page the part the head cut off.
     it('stores the full stream when it is under the retention bound', () => {
-      const help = `usage: llama-server\n` + Array.from({ length: 800 }, (_, i) => `  --flag${i}  does something\n`).join('');
+      const help =
+        `usage: llama-server\n` +
+        Array.from({ length: 800 }, (_, i) => `  --flag${i}  does something\n`).join('');
       expect(help.length).toBeGreaterThan(MAX_OUTPUT_CHARS);
-      const output = JSON.parse(formatExecCommandOutput('llama-server', { stdout: help, stderr: '', exitCode: 0 }));
+      const output = JSON.parse(
+        formatExecCommandOutput('llama-server', { stdout: help, stderr: '', exitCode: 0 }),
+      );
       // The whole dump is in the transcript, not just the head.
       expect(output.stdout).toBe(help);
       expect(output).not.toHaveProperty('stdout_truncated');
@@ -138,7 +216,9 @@ describe('background output helpers', () => {
       const middle = 'SPLIT_MODE_SECTION';
       const tail = 'B'.repeat(MAX_OUTPUT_CHARS);
       const stdout = `${head}\n${middle}\n${tail}\n`;
-      const output = JSON.parse(formatExecCommandOutput('tool', { stdout, stderr: '', exitCode: 0 }));
+      const output = JSON.parse(
+        formatExecCommandOutput('tool', { stdout, stderr: '', exitCode: 0 }),
+      );
       // The middle sits past the old 10k head; it must be in the stored text.
       expect(output.stdout).toContain(middle);
       expect(output.stdout).toBe(stdout);
@@ -146,7 +226,9 @@ describe('background output helpers', () => {
 
     it('caps stored output at the retention bound and says how much was dropped', () => {
       const stdout = 'x'.repeat(MAX_EXEC_STORED_CHARS + 5_000);
-      const output = JSON.parse(formatExecCommandOutput('tool', { stdout, stderr: '', exitCode: 0 }));
+      const output = JSON.parse(
+        formatExecCommandOutput('tool', { stdout, stderr: '', exitCode: 0 }),
+      );
       expect(output.stdout).toHaveLength(MAX_EXEC_STORED_CHARS);
       expect(output.stdout_truncated).toBe(true);
       expect(output.stdout_note).toContain('5000 characters');
@@ -155,7 +237,9 @@ describe('background output helpers', () => {
     // A build puts its error and summary last; a head-only cut dropped them.
     it('keeps the end of an over-long stream, where the failure is', () => {
       const stdout = `START\n${'progress\n'.repeat(MAX_EXEC_STORED_CHARS / 4)}error TS2322: boom\n`;
-      const output = JSON.parse(formatExecCommandOutput('tsc', { stdout, stderr: '', exitCode: 2 }));
+      const output = JSON.parse(
+        formatExecCommandOutput('tsc', { stdout, stderr: '', exitCode: 2 }),
+      );
       expect(output.stdout).toHaveLength(MAX_EXEC_STORED_CHARS);
       expect(output.stdout.startsWith('START')).toBe(true);
       expect(output.stdout.endsWith('error TS2322: boom\n')).toBe(true);
@@ -186,7 +270,11 @@ describe('background output helpers', () => {
 
     it('leaves a stream shorter than max_output_chars whole and unmarked', () => {
       const output = JSON.parse(
-        formatExecCommandOutput('tool', { stdout: 'short', stderr: '', exitCode: 0 }, { maxChars: 2_000 }),
+        formatExecCommandOutput(
+          'tool',
+          { stdout: 'short', stderr: '', exitCode: 0 },
+          { maxChars: 2_000 },
+        ),
       );
       expect(output.stdout).toBe('short');
       expect(output).not.toHaveProperty('stdout_truncated');

@@ -7,6 +7,8 @@ import { signalWindowsTree } from '../../src/agents/cliProcess';
 import { BackgroundExecutionManager } from '../../src/tools/BackgroundExecutionManager';
 import { BackgroundRegistry } from '../../src/tools/backgroundRegistry';
 import {
+  beginTreeStop,
+  finishStoppedTree,
   protectProcessTree,
   protectedPids,
   releaseProtectedTree,
@@ -118,6 +120,30 @@ describe('the job keeper protocol', () => {
     }
   });
 
+  it('holds the job open between the begin and the finish, so the walk has a parent', async () => {
+    const child = liveChild();
+    try {
+      protectProcessTree(child);
+      const token = await tokenFor(child.pid!);
+      expect(beginTreeStop(child.pid)).toBe(true);
+      // Nothing is closed yet, so the keeper must not have been told to kill:
+      // a kill here would take down the parent `taskkill /T` is about to walk.
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(keeperLines().some((line) => line === `kill ${token}`)).toBe(false);
+      expect(protectedPids()).toContain(child.pid as number);
+      expect(finishStoppedTree(child.pid)).toBe(true);
+      expect(await waitForLine(new RegExp(`^kill ${token}$`, 'u'))).toBe(`kill ${token}`);
+      expect(finishStoppedTree(child.pid)).toBe(false);
+      // The child's own exit event still reaches the release path; the token is
+      // spent, so it must not arrive and undo the kill.
+      await stopChild(child);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(keeperLines().some((line) => line === `release ${token}`)).toBe(false);
+    } finally {
+      if (!child.killed) child.kill();
+    }
+  });
+
   it('releases nothing twice for the same pid', async () => {
     const child = liveChild();
     try {
@@ -186,7 +212,7 @@ function fakeTaskkill(exitCode: number): ChildProcess {
 }
 
 describe('the Windows stop path', () => {
-  it('writes the job kill before taskkill starts, and waits for taskkill', () => {
+  it('spends the job before taskkill and closes it only after taskkill returns', () => {
     const order: string[] = [];
     const killer = fakeTaskkill(0);
     const proc = {
@@ -198,8 +224,12 @@ describe('the Windows stop path', () => {
     } as unknown as ChildProcess;
 
     signalWindowsTree(proc, () => order.push('done'), {
-      sweepJob: (pid) => {
-        order.push(`sweep ${String(pid)}`);
+      beginStop: (pid) => {
+        order.push(`begin ${String(pid)}`);
+        return true;
+      },
+      finishStop: (pid) => {
+        order.push(`kill ${String(pid)}`);
         return true;
       },
       spawnTaskkill: (pid) => {
@@ -213,16 +243,19 @@ describe('the Windows stop path', () => {
         }, 0),
     });
 
-    expect(order).toEqual(['sweep 4242', 'taskkill 4242']);
+    // Closing the job before the walk is the bug: the kernel takes the recorded
+    // parent with it, and the MSYS2 grandchild whose forker had already exited
+    // is unreachable by parent link (lab BUG-27, caught by StopExecutionTree).
+    expect(order).toEqual(['begin 4242', 'taskkill 4242']);
     return new Promise<void>((resolve) =>
       setTimeout(() => {
-        expect(order).toEqual(['sweep 4242', 'taskkill 4242', 'settle', 'done']);
+        expect(order).toEqual(['begin 4242', 'taskkill 4242', 'kill 4242', 'settle', 'done']);
         resolve();
       }, 50),
     );
   });
 
-  it('still signals the direct child when taskkill reports failure', async () => {
+  it('still closes the job when taskkill reports failure', async () => {
     const killed: string[] = [];
     const killer = fakeTaskkill(1);
     const proc = {
@@ -235,12 +268,37 @@ describe('the Windows stop path', () => {
 
     await new Promise<void>((resolve) =>
       signalWindowsTree(proc, resolve, {
-        sweepJob: vi.fn(),
+        beginStop: vi.fn(),
+        finishStop: vi.fn(),
         spawnTaskkill: () => killer,
         settle: (done) => setTimeout(done, 0),
       }),
     );
     expect(killed).toEqual(['proc.kill']);
+  });
+
+  it('closes the job when taskkill cannot start at all', async () => {
+    const closed: Array<number | undefined> = [];
+    const killer = {
+      once: (event: string, fn: (arg?: unknown) => void) => {
+        if (event === 'error') setTimeout(() => fn(new Error('ENOENT')), 0);
+        return killer as unknown as ChildProcess;
+      },
+    } as unknown as ChildProcess;
+    const proc = { pid: 9, kill: () => true } as unknown as ChildProcess;
+
+    await new Promise<void>((resolve) =>
+      signalWindowsTree(proc, resolve, {
+        beginStop: vi.fn(),
+        finishStop: (pid) => {
+          closed.push(pid);
+          return true;
+        },
+        spawnTaskkill: () => killer,
+        settle: (done) => setTimeout(done, 0),
+      }),
+    );
+    expect(closed).toEqual([9]);
   });
 });
 

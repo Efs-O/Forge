@@ -1,4 +1,7 @@
 import { ChildProcess, spawn } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 /**
  * Windows job objects, so stopping a Forge-owned command takes its whole tree.
@@ -31,6 +34,11 @@ import { ChildProcess, spawn } from 'child_process';
  *  - Nothing here dies hard. A missing PowerShell, a failed assignment or a
  *    keeper that exited mid-command leaves the old `taskkill` behaviour, which
  *    is what Windows users had before this module existed.
+ *  - A stop is two calls, not one. `beginTreeStop` spends the token and leaves
+ *    the job open so `taskkill /T` can still walk from a live parent; only
+ *    `finishStoppedTree` closes it. Closing it first killed the parent instantly
+ *    and orphaned exactly the grandchildren this module exists for (the first
+ *    version of it, caught by `StopExecutionTree.test.ts` on 2026-11-14).
  */
 
 /**
@@ -218,7 +226,60 @@ function keeperCommand(): { file: string; args: string[] } | undefined {
   return undefined;
 }
 
+/** PowerShell's `Add-Type` compiles the shim and leaves its sources, its
+ *  command-line file and the compiled assembly in the process temp folder: five
+ *  files per keeper, named like `cug3etsd.0.cs`. Left in the system temp they
+ *  pile up there for the life of the machine, and they trip the test suite's
+ *  temp guard — `StopExecutionNote.test.ts` failed on exactly those names.
+ *  So the keeper gets a folder of its own under `~/.forge/job-keeper/`, in the
+ *  spirit of `~/.forge/tool-usage/`, and every keeper start prunes folders this
+ *  module left more than a day ago: what we put there is ours to remove. */
+const KEEPER_TMP_STALE_MS = 24 * 60 * 60 * 1000;
+
+function pruneStaleKeeperTemps(root: string): void {
+  const now = Date.now();
+  let names: string[];
+  try {
+    names = fs.readdirSync(root);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!name.startsWith('ps-')) continue;
+    const full = path.join(root, name);
+    try {
+      // A live keeper writes here as it compiles, so its mtime keeps it alive.
+      if (now - fs.statSync(full).mtimeMs > KEEPER_TMP_STALE_MS) {
+        fs.rmSync(full, { recursive: true, force: true });
+      }
+    } catch {
+      // Another window may have removed it between the stat and the unlink.
+    }
+  }
+}
+
+function keeperTempEnv(): Record<string, string> | undefined {
+  try {
+    const root = path.join(os.homedir(), '.forge', 'job-keeper');
+    fs.mkdirSync(root, { recursive: true });
+    pruneStaleKeeperTemps(root);
+    const dir = path.join(root, `ps-${String(process.pid)}-${Date.now().toString(36)}`);
+    fs.mkdirSync(dir, { recursive: true });
+    // TMP and TEMP are what .NET's Path.GetTempPath reads on Windows; TMPDIR is
+    // the POSIX spelling, harmless to set and correct if a test keeper runs here.
+    return { TMP: dir, TEMP: dir, TMPDIR: dir };
+  } catch {
+    // No folder of our own: PowerShell writes where it always wrote, and the
+    // keeper still works.
+    return undefined;
+  }
+}
+
 const jobs = new Map<number, string>();
+/** A stop has begun for this pid: the token is spent, so the child's own exit
+ *  event can no longer release the job, and the keeper still holds it, because
+ *  closing it now would kill the parent `taskkill /T` is about to walk. */
+const stopping = new Map<number, string>();
 let keeper: ChildProcess | undefined;
 let nextToken = 1;
 let reported = 0;
@@ -266,11 +327,13 @@ function ensureKeeper(): ChildProcess | undefined {
   const command = keeperCommand();
   if (!command) return undefined;
   let child: ChildProcess;
+  const keeperTemp = keeperTempEnv();
   try {
     child = spawn(command.file, command.args, {
       stdio: ['pipe', 'pipe', 'ignore'],
       windowsHide: true,
       shell: false,
+      ...(keeperTemp ? { env: { ...process.env, ...keeperTemp } } : {}),
     });
   } catch {
     return undefined;
@@ -296,6 +359,7 @@ function ensureKeeper(): ChildProcess | undefined {
     keeper = undefined;
     // The handles died with the keeper, so these pids have no job to close.
     jobs.clear();
+    stopping.clear();
   };
   child.once('error', forget);
   child.once('exit', forget);
@@ -336,22 +400,47 @@ export function protectProcessTree(proc: ChildProcess): void {
   jobs.set(pid, token);
   send(target, `job ${token} ${pid}`);
   // The command finished by itself: whatever it left behind is its own business
-  // again, exactly as before this module. A stop goes through sweepProtectedTree
-  // instead, which is written first and removes the token, so this never runs.
+  // again, exactly as before this module. A stop spends the token first, in
+  // `beginTreeStop`, so this release never runs for a stopped command.
   const release = (): void => releaseProtectedTree(pid);
   proc.once('exit', release);
   proc.once('error', release);
 }
 
-/** Stop semantics: close the job with the kill flag set, so survivors die. */
-export function sweepProtectedTree(pid: number | undefined): boolean {
+/** First half of a stop: spend the token, so the child's own `exit` event can
+ *  no longer release the job, and leave the job OPEN. The caller runs
+ *  `taskkill /T /F` next and that walk starts from the recorded parent; closing
+ *  the job here terminates that parent instantly, and the grandchildren whose
+ *  forker already exited are unreachable by parent link — the exact bug this
+ *  module was written for. */
+export function beginTreeStop(pid: number | undefined): boolean {
   if (pid === undefined) return false;
   const token = jobs.get(pid);
   if (token === undefined) return false;
   jobs.delete(pid);
+  stopping.set(pid, token);
+  return true;
+}
+
+/** Second half: close the job with the kill flag set, so whatever the tree walk
+ *  could not reach dies with it. False when there is nothing to close — no job,
+ *  or a keeper that died and took the handles with it. */
+export function finishStoppedTree(pid: number | undefined): boolean {
+  if (pid === undefined) return false;
+  const token = stopping.get(pid);
+  if (token === undefined) return false;
+  stopping.delete(pid);
   const target = keeper;
   if (target) send(target, `kill ${token}`);
   scheduleIdleShutdown();
+  return true;
+}
+
+/** Both halves in one call, for a caller that kills with no tree walk of its
+ *  own and so has no live parent to lose. */
+export function sweepProtectedTree(pid: number | undefined): boolean {
+  if (!beginTreeStop(pid)) return false;
+  finishStoppedTree(pid);
   return true;
 }
 
@@ -371,6 +460,7 @@ export function releaseProtectedTree(pid: number | undefined): void {
 export function shutdownJobKeeper(): void {
   const target = keeper;
   jobs.clear();
+  stopping.clear();
   if (idleTimer) {
     clearTimeout(idleTimer);
     idleTimer = undefined;
@@ -384,7 +474,8 @@ export function shutdownJobKeeper(): void {
   }
 }
 
-/** What this module currently has a job for. Test seam. */
+/** Every pid this module still has a job handle for, stopping included, so a
+ *  test that leaves a half-stop behind can still close it out. Test seam. */
 export function protectedPids(): number[] {
-  return [...jobs.keys()];
+  return [...new Set([...jobs.keys(), ...stopping.keys()])];
 }

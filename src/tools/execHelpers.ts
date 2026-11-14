@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { terminateCliProcessTree } from '../agents/cliProcess';
+import { protectProcessTree } from '../util/windowsJobKeeper';
 import { ShellOutputCollector } from './shellOutput';
 
 export const MAX_OUTPUT_CHARS = 16_000;
@@ -301,6 +302,11 @@ export async function runShellInForeground(
       },
       ...(process.platform !== 'win32' ? { detached: true } : {}),
     });
+    // The job object is the half of the tree kill that survives an MSYS2 forker:
+    // `terminateCliProcessTree` below walks parent links, and a grandchild whose
+    // creator already exited has none (lab BUG-27). This path has its own spawn
+    // rather than `spawnAndWait`, so it needs the protection itself.
+    protectProcessTree(proc);
     let timedOut = false;
     let settled = false;
     const finish = (code: number | null): void => {

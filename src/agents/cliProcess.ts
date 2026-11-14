@@ -12,7 +12,7 @@ import {
   needsWindowsCmdShellWrap,
   unwrapNpmCmdShim,
 } from './windowsCmdShim';
-import { protectProcessTree, sweepProtectedTree } from '../util/windowsJobKeeper';
+import { protectProcessTree, beginTreeStop, finishStoppedTree } from '../util/windowsJobKeeper';
 
 export interface SpawnCliProcessOptions {
   executable: string;
@@ -258,31 +258,36 @@ export function waitForCliProcessExit(proc: ChildProcess): Promise<CliProcessExi
 /** What `signalWindowsTree` asks for, so a test can watch the order on any OS. */
 export interface WindowsTreeDeps {
   spawnTaskkill?: (pid: number) => ChildProcess;
-  sweepJob?: (pid: number | undefined) => boolean;
+  beginStop?: (pid: number | undefined) => boolean;
+  finishStop?: (pid: number | undefined) => boolean;
   settle?: (done: () => void, ms: number) => void;
 }
 
 /**
- * Kill one Windows process tree: the job sweep, then `taskkill /T /F`.
+ * Kill one Windows process tree: mark the job stopping, `taskkill /T /F`, then
+ * close the job with the kill flag set.
  *
- * The sweep goes out first on purpose. The keeper reads a single pipe in order,
- * and the child's own `exit` event asks for a `release` — the "it finished on
- * its own" path. `kill` ahead of that means the keeper sees kill-then-release
- * and the survivors die; a release that lands first would leave them running.
+ * The token is spent before the walk on purpose. The child's own `exit` event
+ * asks the keeper for a `release` — the "it finished on its own" path — and a
+ * release that lands before the kill would leave the survivors running. Nothing
+ * is CLOSED before the walk either: closing the job terminates the recorded
+ * parent instantly, and `taskkill /T` starts from that parent. Measured twice
+ * on 2026-11-14: with the job closed first, a background bash command's
+ * `sleep.exe` survived the stop, because the forker that had created it was
+ * long dead and the parent taskkill could have walked was not.
  *
  * `taskkill /T` still runs, for the trees this module never protected: a
  * command started before the keeper was up, or a job whose assignment failed.
- * It walks the tree from the live parent, so the parent must not die first —
- * killing it with `proc.kill()` beforehand left every grandchild running (a
- * timed-out `sleep 20` under bash, a CLI agent's own subprocesses). The parent's
- * exit is not the signal either: the tree is gone only when taskkill returns.
+ * The parent's exit is not the signal either: the tree is gone only when
+ * taskkill returns and the job close has followed it.
  */
 export function signalWindowsTree(
   proc: ChildProcess,
   onDone: () => void,
   deps: WindowsTreeDeps = {},
 ): void {
-  const sweep = deps.sweepJob ?? sweepProtectedTree;
+  const begin = deps.beginStop ?? beginTreeStop;
+  const finishStop = deps.finishStop ?? finishStoppedTree;
   const spawnTaskkill =
     deps.spawnTaskkill ??
     ((pid: number): ChildProcess =>
@@ -292,22 +297,28 @@ export function signalWindowsTree(
         windowsHide: true,
       }));
   const settle = deps.settle ?? ((done: () => void, ms: number): void => void setTimeout(done, ms));
-  sweep(proc.pid);
+  begin(proc.pid);
   const pid = proc.pid;
   if (pid === undefined) {
     settle(onDone, 0);
     return;
   }
   const killer = spawnTaskkill(pid);
+  // The walk is over, so the parent is of no further use: close the job and the
+  // kernel takes everything that joined it, parent links or not.
+  const afterWalk = (): void => {
+    finishStop(pid);
+    settle(onDone, 250);
+  };
   const fallback = (): void => {
     try {
       proc.kill();
     } catch {
       // Already gone; taskkill's failure was "process not found".
     }
-    settle(onDone, 250);
+    afterWalk();
   };
-  killer.once('exit', (code) => (code === 0 ? settle(onDone, 250) : fallback()));
+  killer.once('exit', (code) => (code === 0 ? afterWalk() : fallback()));
   killer.once('error', fallback);
 }
 
