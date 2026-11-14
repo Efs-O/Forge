@@ -1,5 +1,12 @@
 # Forge — Recent Changes
 
+## 0.17.175
+
+**Two things an agent used to get wrong about waiting.**
+
+- The standing rules now state the whole waiting decision in one place: long work goes in the background and the turn ends or carries on with other work (the job notifies you when it finishes), `monitor_execution` is only for output this turn must see, `wait` is for a pause with nothing running, and sleeping inside a foreground shell command is the one shape that wastes the turn. Agents were holding a turn open with `sleep` while watching a job that had already promised to wake them.
+- An interrupted background job now reports the process id it killed, and the same kill in a form you can run yourself (`taskkill /PID … /T /F`, or `kill -…` for the process group). A stopped CI run used to answer "terminated" while its child processes ran on for six more minutes holding a lock; the tree kill itself is now pinned by tests on both a node-rooted and a shell-rooted tree.
+
 ## 0.17.174
 
 **Schemas a conversation stops paying for, and a refusal that says what happened.**
