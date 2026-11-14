@@ -150,30 +150,31 @@ export function makeStopExecutionTool(): RegisteredTool {
     handler: async (args) => {
       const id = args['execution_id'] as string;
       const observation = await backgroundExecutionManager.stop(id);
-      const text = formatBackgroundObservation(observation, 0, {});
       // A job that had already ended answers with its own outcome, and that
       // outcome reads like a stop went wrong: `status: failed, exit_code: 1` is
       // how the job finished, not what this call did. Only an interruption
       // reports `terminated` with a null exit code, so say which one this is.
-      if (observation.status !== 'terminated') {
-        return (
-          `${text}\nnote: this job had already ended on its own (exit_code: ` +
-          `${observation.exitCode}); stop_execution did not interrupt it. Only an interrupted ` +
-          'job reports status "terminated" with exit_code null.'
-        );
-      }
-      const pid = observation.pid;
-      if (pid === undefined) return text;
+      const alreadyEnded =
+        observation.status !== 'terminated'
+          ? 'this job had already ended on its own (exit_code: ' +
+            `${String(observation.exitCode)}); stop_execution did not interrupt it. Only an ` +
+            'interrupted job reports status "terminated" with exit_code null.'
+          : undefined;
       // The kill walks the OS process tree, and that walk has been observed to
       // miss: a stopped CI run answered `terminated` while its npm, ci-lock and
       // vitest children ran on for six more minutes and held the CI lock. The
       // claim costs little to make checkable, so name the pid and the same kill
       // in a form the agent can run itself.
-      return (
-        `${text}\nnote: interrupted pid ${pid}; its process tree was signalled as a tree. ` +
-        `If the command left anything running, the same kill is yours to repeat: ` +
-        `taskkill /PID ${pid} /T /F on Windows, or kill -${pid} to signal the process group.`
-      );
+      const pid = observation.pid;
+      const interrupted =
+        observation.status === 'terminated' && pid !== undefined
+          ? `interrupted pid ${String(pid)}; its process tree was signalled as a tree. ` +
+            `If the command left anything running, the same kill is yours to repeat: ` +
+            `taskkill /PID ${String(pid)} /T /F on Windows, or kill -${String(pid)} to signal ` +
+            'the process group.'
+          : undefined;
+      const note = [alreadyEnded, interrupted].find((part) => part !== undefined);
+      return formatBackgroundObservation(observation, 0, {}, undefined, note);
     },
   };
 }
@@ -247,6 +248,7 @@ function formatBackgroundObservation(
   waitedMs: number,
   outputOptions: ReturnType<typeof parseExecOutputOptions>,
   requestedWaitMs?: number,
+  extraNote?: string,
 ): string {
   const stream = outputOptions.stream ?? 'both';
   const stdout = shapeBackgroundOutput(
@@ -287,6 +289,13 @@ function formatBackgroundObservation(
   if (outputOptions.maxCharsClamped) {
     result['note'] =
       `max_output_chars clamped to ${String(outputOptions.maxChars)} for this model's context.`;
+  }
+  // The whole result is JSON, so anything the caller wants the agent to read goes
+  // in as a field: text concatenated after the closing brace breaks the next
+  // `JSON.parse` (a test that parsed the stop result started failing on it).
+  if (extraNote !== undefined) {
+    const existing = typeof result['note'] === 'string' ? `${result['note']} ` : '';
+    result['note'] = `${existing}${extraNote}`;
   }
   if (requestedWaitMs !== undefined && observation.status === 'running') {
     const sawNewOutput =
