@@ -24,16 +24,19 @@ describe('skills-lab/offload', () => {
   it.skipIf(!canRun)(
     'self-tests copy, verification refusal, and same-call purge without bytecode caches',
     () => {
+      // Same budget as the media-inspect selftest: 120 s is enough on a quiet box
+      // and has been exceeded under the full suite's process load. The test timeout
+      // must stay above the spawn timeout so the spawn's own error is what fails.
       const result = spawnSync('python', ['-B', SELFTEST], {
         cwd: REPO_ROOT,
         encoding: 'utf8',
-        timeout: 120_000,
+        timeout: 300_000,
         env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' },
       });
       expect(result.error?.message).toBeUndefined();
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
       expect(findBytecodeCaches(SKILLS_ROOT)).toEqual([]);
     },
-    120_000,
+    330_000,
   );
 });

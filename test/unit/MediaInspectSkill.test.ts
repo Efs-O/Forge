@@ -23,13 +23,20 @@ function containsPycache(directory: string): boolean {
 
 describe('media-inspect lab skill', () => {
   it.skipIf(!canRun)('self-tests its shared media library without Python cache files', () => {
+    // Budget sized for a loaded machine, not an idle one: this selftest costs 28 s
+    // on a quiet box, but under the full suite's process load it ran past 120 s and
+    // failed with `spawnSync python ETIMEDOUT` (three full runs in a row on
+    // 2026-11-14). The test timeout stays above the spawn timeout on purpose: then
+    // the spawn's own error is what fails the test, whereas a vitest kill mid-run
+    // also strands the selftest's own temp folders, which the temp guard then
+    // blames on this file as a second, misleading failure.
     const result = spawnSync(
       python,
       ['-B', join(skillRoot, 'media-inspect', 'scripts', 'selftest.py')],
       {
         cwd: root,
         encoding: 'utf8',
-        timeout: 120_000,
+        timeout: 300_000,
         env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' },
       },
     );
@@ -38,5 +45,5 @@ describe('media-inspect lab skill', () => {
     expect(result.stdout).toContain('ok test_core.py');
     expect(containsPycache(skillRoot)).toBe(false);
     expect(containsPycache(shippedSkillsRoot)).toBe(false);
-  }, 180_000);
+  }, 330_000);
 });
