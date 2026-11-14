@@ -1,5 +1,12 @@
 # Forge — Recent Changes
 
+## 0.17.174
+
+**Schemas a conversation stops paying for, and a refusal that says what happened.**
+
+- A bridged MCP server's tools now wait behind `load_tool_group`, in a group named after the server, instead of riding on every request. The one server that was always advertised here cost 11,913 characters of schemas a turn, and 9 of its 11 tools had no calls at all in 10 days of session logs. A server you reach for every turn opts back in with `eager: true` on its `mcp_servers` entry; the group's tool names are still listed in `load_tool_group`, so nothing is hidden without being findable.
+- A tool call cut off mid-write used to be refused as `"end_line" must be a JSON integer … resend it as 1` — a number nobody sent, while the number that was sent sat inside the value being refused. The refusal now quotes what actually arrived and says the block was cut off mid-write.
+
 ## 0.17.173
 
 **Two refusals an agent no longer needs to hit.**
