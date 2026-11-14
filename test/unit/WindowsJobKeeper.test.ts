@@ -15,6 +15,7 @@ import {
   shutdownJobKeeper,
   sweepProtectedTree,
 } from '../../src/util/windowsJobKeeper';
+import { removeTreeWhenFree } from '../support/removeTempTree';
 
 /**
  * The protocol that makes `stop_execution` take a command's whole tree on
@@ -69,11 +70,13 @@ beforeAll(() => {
   process.env.FORGE_JOB_KEEPER_LOG = keeperLog;
 });
 
-afterAll(() => {
+afterAll(async () => {
   shutdownJobKeeper();
   delete process.env.FORGE_JOB_KEEPER_CMD;
   delete process.env.FORGE_JOB_KEEPER_LOG;
-  fs.rmSync(keeperDir, { recursive: true, force: true });
+  // The keeper is a child process that had a file in this folder: Windows will
+  // not remove the folder until it is gone, so poll rather than lose the race.
+  await removeTreeWhenFree(keeperDir);
 });
 
 afterEach(async () => {

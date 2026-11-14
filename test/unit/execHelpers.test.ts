@@ -16,6 +16,7 @@ import {
 } from '../../src/tools/execHelpers';
 import { ShellOutputCollector } from '../../src/tools/shellOutput';
 import { shutdownJobKeeper } from '../../src/util/windowsJobKeeper';
+import { removeTreeWhenFree } from '../support/removeTempTree';
 import * as vscode from 'vscode';
 
 const ESC = String.fromCharCode(27);
@@ -41,11 +42,13 @@ beforeAll(() => {
   process.env.FORGE_JOB_KEEPER_LOG = keeperLog;
 });
 
-afterAll(() => {
+afterAll(async () => {
   shutdownJobKeeper();
   delete process.env.FORGE_JOB_KEEPER_CMD;
   delete process.env.FORGE_JOB_KEEPER_LOG;
-  fs.rmSync(keeperRoot, { recursive: true, force: true });
+  // The keeper is a child process that had this folder's file open, and Windows
+  // will not remove a folder while something still holds it: poll until free.
+  await removeTreeWhenFree(keeperRoot);
 });
 
 /** The `job <token> <pid>` lines the keeper has been asked for so far. */
@@ -176,7 +179,7 @@ describe('background output helpers', () => {
       controller.abort();
       await expect(pending).resolves.toMatchObject({ code: null, timedOut: false });
     } finally {
-      fs.rmSync(root, { recursive: true, force: true });
+      await removeTreeWhenFree(root);
     }
   }, 30_000);
 
