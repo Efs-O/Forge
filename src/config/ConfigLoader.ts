@@ -23,6 +23,7 @@ import { effectiveGroupField } from './modelSchema';
 import { endpointHostOf, isLoopbackHost } from './policyYamlNodes';
 import { leftoverWarningText, modelRefKey, type ModelReference } from './modelReferences';
 import { permissionsSuppressedByBlock } from '../tools/PermissionResolver';
+import { MAX_FILE_SETTLE_ROUNDS, runWhenFilesSettled, snapshotWatchedFiles } from './fileSettle';
 import { getLogger } from '../util/logger';
 
 const CONFIG_FILENAME = 'config.yaml';
@@ -359,6 +360,10 @@ export function findConfigPath(
 /**
  * Watch workspace `config.yaml` and optional extra absolute paths.
  * Debounces so saves that touch multiple files produce one reload.
+ *
+ * A save is not one atomic write, so the debounce alone is not enough: the reload
+ * would read the first flushed chunk. The wait for the files to go quiet lives in
+ * `fileSettle.ts`, and the reason it exists is documented there.
  */
 export function watchForgeConfigPaths(
   primaryConfigYamlPath: string,
@@ -367,13 +372,30 @@ export function watchForgeConfigPaths(
 ): vscode.Disposable {
   const forgeDir = path.dirname(primaryConfigYamlPath);
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Reloads this function asked for itself, after finding the file had moved
+   *  under the load. Bounded, so a file edited in a tight loop cannot reload the
+   *  extension forever; a real save resets the count. */
+  let driftRounds = 0;
 
   const reload = (): void => {
+    const before = snapshotWatchedFiles([...normalizedSeen]);
     try {
       const loaded = loadConfig(forgeDir);
       onReload(loaded);
     } catch (err) {
       onReload(null, err instanceof Error ? err : new Error(String(err)));
+    }
+    // A flush that landed while the file was being read may never raise its own
+    // event, and a half-read file that still parses is exactly the accident this
+    // block exists to prevent. Compare the bytes on disk with the ones just read.
+    if (
+      snapshotWatchedFiles([...normalizedSeen]) !== before &&
+      driftRounds < MAX_FILE_SETTLE_ROUNDS
+    ) {
+      driftRounds += 1;
+      schedule();
+    } else {
+      driftRounds = 0;
     }
   };
 
@@ -381,7 +403,7 @@ export function watchForgeConfigPaths(
     if (debounceTimer !== undefined) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       debounceTimer = undefined;
-      reload();
+      runWhenFilesSettled({ paths: [...normalizedSeen], onLoad: reload });
     }, 150);
   };
 
@@ -402,7 +424,10 @@ export function watchForgeConfigPaths(
         process.platform === 'win32'
           ? eventPath.toLowerCase() === normalized.toLowerCase()
           : eventPath === normalized;
-      if (matches) schedule();
+      if (matches) {
+        driftRounds = 0;
+        schedule();
+      }
     };
     watcher.onDidChange(onEvent);
     watcher.onDidCreate(onEvent);
