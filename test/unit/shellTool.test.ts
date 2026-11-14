@@ -307,7 +307,7 @@ describe('default shell', () => {
   it('explains that relative command paths use cwd in both schemas', () => {
     const tool = makeShellTool({ platform: 'win32', bashPath: String.raw`C:\Git\bin\bash.exe` });
     const expected =
-      'Workspace-relative or absolute working directory. Omit it: every call starts in the workspace root, so a command needs no leading cd there. Set it when the project is in a subfolder. Relative paths inside the command resolve from cwd.';
+      'Workspace-relative or absolute working directory. When omitted, every call starts in the workspace root, so a command needs no leading cd there. Set it when the project is in a subfolder. Relative paths inside the command resolve from cwd.';
     const parameters = tool.definition.function.parameters as {
       properties: Record<string, { description?: string }>;
     };

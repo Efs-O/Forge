@@ -136,13 +136,13 @@ export function makeReadFileTool(deps: ReadFileDeps = {}): RegisteredTool {
             start_line: {
               type: 'integer',
               minimum: 1,
-              description: '1-based first line to read (inclusive). With path only.',
+              description: 'Optional 1-based first line to read (inclusive). With path only.',
             },
             end_line: {
               type: 'integer',
               minimum: 1,
               description:
-                '1-based last line (inclusive); defaults to end of file. With path only — inside reads each item carries its own end_line.',
+                'Optional 1-based last line (inclusive); defaults to end of file. With path only — inside reads each item carries its own end_line.',
             },
             numbered: {
               type: 'boolean',

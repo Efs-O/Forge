@@ -158,7 +158,7 @@ function definition(windows: boolean, shell: ShellKind): ToolDefinition {
     cwd: {
       type: 'string',
       description:
-        'Workspace-relative or absolute working directory. Omit it: every call starts in the workspace root, so a command needs no leading cd there. Set it when the project is in a subfolder. Relative paths inside the command resolve from cwd.',
+        'Workspace-relative or absolute working directory. When omitted, every call starts in the workspace root, so a command needs no leading cd there. Set it when the project is in a subfolder. Relative paths inside the command resolve from cwd.',
     },
     timeout_ms: {
       type: 'integer',
@@ -306,7 +306,7 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
             cwd: {
               type: 'string',
               description:
-                'Workspace-relative or absolute working directory. Omit it: every call starts in the workspace root, so a command needs no leading cd there. Set it when the project is in a subfolder. Relative paths inside the command resolve from cwd.',
+                'Workspace-relative or absolute working directory. When omitted, every call starts in the workspace root, so a command needs no leading cd there. Set it when the project is in a subfolder. Relative paths inside the command resolve from cwd.',
             },
             timeout_ms: {
               type: 'integer',

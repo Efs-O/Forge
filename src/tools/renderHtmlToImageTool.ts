@@ -77,7 +77,7 @@ export function makeRenderHtmlToImageTool(deps: RenderHtmlDeps): RegisteredTool 
           'image mode runs no JavaScript and loads nothing external, so inline everything ' +
           '(system fonts, base64 images); use generate_image for photographs and painterly ' +
           'scenes. mode "shader_check": compile WGSL or GLSL shader text from a workspace file ' +
-          'and return the compiler errors.',
+          'and return the compiler errors; it opens no page and uses no network or GPU.',
         parameters: {
           type: 'object',
           properties: {

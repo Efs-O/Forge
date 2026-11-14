@@ -151,8 +151,14 @@ export function preflightToolCall(
   // tool the call actually reaches, and the model is never told a name it typed
   // is unknown. The rewrite is in place on the call, and the hit is counted in a
   // file the next session can read (`toolNameAliases.ts`).
-  const aliased = applyToolNameAlias(tc);
-  if (aliased) recordToolNameAliasHit(aliased, input.convId);
+  //
+  // Only when NOTHING is registered under that name: an MCP server may expose its
+  // own `bash`, `ls` or `glob` (`mcpBridge.ts` renames only a name already taken),
+  // and then the model's call means that server's tool, not Forge's shell.
+  if (!input.toolRegistry.get(tc.function.name)) {
+    const aliased = applyToolNameAlias(tc);
+    if (aliased) recordToolNameAliasHit(aliased);
+  }
   if (input.signal?.aborted) {
     result = 'Error: tool execution cancelled';
     return { kind: 'refused', result };

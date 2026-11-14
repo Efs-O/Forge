@@ -20,7 +20,6 @@ import {
   aliasUsageFile,
   applyToolNameAlias,
   canonicalToolName,
-  readAliasUsage,
   recordToolNameAliasHit,
 } from '../../src/tools/toolNameAliases';
 // @ts-expect-error -- the standalone catalog is a plain ESM script
@@ -80,6 +79,11 @@ function createDispatch(registry: ToolRegistry): ToolDispatch {
 let usageFile: string;
 let temp: string;
 
+/** The counter as the next session reads it: `{ <alias>: <count>, last_hit }`. */
+function counts(): Record<string, unknown> {
+  return JSON.parse(fs.readFileSync(usageFile, 'utf8')) as Record<string, unknown>;
+}
+
 beforeEach(() => {
   temp = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-tool-alias-'));
   usageFile = path.join(temp, 'tool-aliases.jsonl');
@@ -134,40 +138,27 @@ describe('the alias table', () => {
 });
 
 describe('the usage counter', () => {
-  it('counts every alias per name, in a file the next session can read', () => {
-    recordToolNameAliasHit(
-      { alias: 'ls', tool: 'list_directory' },
-      'conv-12345678-abcd',
-      usageFile,
-    );
-    recordToolNameAliasHit({ alias: 'ls', tool: 'list_directory' }, undefined, usageFile);
-    recordToolNameAliasHit({ alias: 'bash', tool: 'shell' }, undefined, usageFile);
-    expect(readAliasUsage(usageFile)).toEqual({ ls: 2, bash: 1 });
-    const rows = fs
-      .readFileSync(usageFile, 'utf8')
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line) as Record<string, unknown>);
-    expect(rows[0]).toMatchObject({ alias: 'ls', tool: 'list_directory', conv: 'conv-123' });
-    expect(typeof rows[0]?.['ts']).toBe('string');
+  it('counts every alias per name, in a file of fixed size the next session can read', () => {
+    recordToolNameAliasHit({ alias: 'ls', tool: 'list_directory' }, usageFile);
+    recordToolNameAliasHit({ alias: 'ls', tool: 'list_directory' }, usageFile);
+    recordToolNameAliasHit({ alias: 'bash', tool: 'shell' }, usageFile);
+    expect(counts()).toMatchObject({ ls: 2, bash: 1 });
+    expect(typeof counts()['last_hit']).toBe('string');
+    // Rewritten whole, so a year of aliased calls costs the same bytes as one.
+    expect(fs.readFileSync(usageFile, 'utf8').split('\n').length).toBeLessThan(15);
   });
 
   it("survives an unwritable counter: the model's call is not refused for a lost count", () => {
     const blocker = path.join(temp, 'blocker');
     fs.writeFileSync(blocker, 'not a directory');
     expect(() =>
-      recordToolNameAliasHit(
-        { alias: 'bash', tool: 'shell' },
-        undefined,
-        path.join(blocker, 'deeper', 'a.jsonl'),
-      ),
+      recordToolNameAliasHit({ alias: 'bash', tool: 'shell' }, path.join(blocker, 'deeper', 'a')),
     ).not.toThrow();
-    expect(readAliasUsage(path.join(temp, 'absent.jsonl'))).toEqual({});
   });
 
-  it('defaults to ~/.forge/telemetry when nothing overrides it', () => {
+  it('defaults to ~/.forge/tool-usage when nothing overrides it', () => {
     delete process.env.FORGE_TOOL_ALIAS_FILE;
-    expect(aliasUsageFile()).toContain(path.join('.forge', 'telemetry', 'tool-aliases.jsonl'));
+    expect(aliasUsageFile()).toContain(path.join('.forge', 'tool-usage', 'tool-name-aliases.json'));
   });
 });
 
@@ -192,7 +183,17 @@ describe('a call that names another dialect', () => {
     registry.register(tool('shell', handler));
     expect(await dispatchNamed('bash', registry)).toContain('ran shell');
     expect(handler).toHaveBeenCalledTimes(1);
-    expect(readAliasUsage(usageFile)).toEqual({ bash: 1 });
+    expect(counts()).toMatchObject({ bash: 1 });
+  });
+
+  it('leaves a tool that is really named `ls` alone — an MCP server may own that name', async () => {
+    const registry = new ToolRegistry();
+    const mcpHandler = vi.fn(async () => 'ran the server tool');
+    registry.register(tool('ls', mcpHandler));
+    expect(await dispatchNamed('ls', registry)).toContain('ran the server tool');
+    expect(mcpHandler).toHaveBeenCalledTimes(1);
+    // Nothing was aliased, so nothing was counted.
+    expect(fs.existsSync(usageFile)).toBe(false);
   });
 
   it('runs grep_search for the old name `search_code`, and counts it', async () => {
@@ -201,14 +202,14 @@ describe('a call that names another dialect', () => {
     registry.register(tool('grep_search', handler));
     expect(await dispatchNamed('search_code', registry)).toContain('ran grep_search');
     expect(handler).toHaveBeenCalledTimes(1);
-    expect(readAliasUsage(usageFile)).toEqual({ search_code: 1 });
+    expect(counts()).toMatchObject({ search_code: 1 });
   });
 
   it('refuses a name that is not a tool and not an alias, without guessing', async () => {
     const registry = new ToolRegistry();
     registry.register(tool('grep_search'));
     expect(await dispatchNamed('grep_the_files', registry)).toContain('unknown tool');
-    expect(readAliasUsage(usageFile)).toEqual({});
+    expect(fs.existsSync(usageFile)).toBe(false);
   });
 
   it('asks approval for the tool it resolved, not for the name typed', () => {
@@ -227,6 +228,6 @@ describe('a call that names another dialect', () => {
     if (pre.kind !== 'refused') {
       expect(pre.reg.definition.function.name).toBe('write_file');
     }
-    expect(readAliasUsage(usageFile)).toEqual({ create_file: 1 });
+    expect(counts()).toMatchObject({ create_file: 1 });
   });
 });

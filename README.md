@@ -159,7 +159,7 @@ definitions, references, implementations and code actions. `apply_code_action`,
 Its operation values are `diagnostics`, `document_symbols`, `workspace_symbols`,
 `hover`, `definition`, `references`, `implementations` and `code_actions`.
 
-**Search.** `search_code` and `find_files` (both ripgrep — one index, so they
+**Search.** `grep_search` and `find_files` (both ripgrep — one index, so they
 cannot disagree), plus `search_codebase` for local semantic search over your
 own embeddings.
 
@@ -360,7 +360,7 @@ rule, and that is one line in the Tailscale admin page:
    stays asleep. An entry that already exists is left exactly as it was, so
    running it again adds nothing and says "already there".
 3. **On the second computer, when something does not work:** `Forge: Check
-   connection`. It walks the path — Tailscale here, the desktop online in
+connection`. It walks the path — Tailscale here, the desktop online in
    Tailscale, the model starter, the cloud relay, the models the desktop will
    serve — and names the first link that is broken, in words you can act on. It
    starts nothing to make that answer, and writes nothing.
@@ -376,15 +376,15 @@ both loopback-only:
 # partial: the model_starter and cloud_relay blocks only, not a whole config
 # the main machine's .forge/config.yaml
 model_starter:
-  enabled: true                     # absent block or false = nothing listens
-  port: 8798                        # must equal `tailscale serve --tcp 8798`
-  shared_ports: [8080, 8081, 8090]  # must equal the ACL's dst ports
-  lease_ttl_s: 600                  # how long a started model stays held
+  enabled: true # absent block or false = nothing listens
+  port: 8798 # must equal `tailscale serve --tcp 8798`
+  shared_ports: [8080, 8081, 8090] # must equal the ACL's dst ports
+  lease_ttl_s: 600 # how long a started model stays held
 
 cloud_relay:
   enabled: true
-  port: 8797                        # chat only; no key leaves this machine
-  models: [grok-code-fast, llama3:cloud]  # names THIS config knows
+  port: 8797 # chat only; no key leaves this machine
+  models: [grok-code-fast, llama3:cloud] # names THIS config knows
 ```
 
 - `model_starter` lets the other computer **start** a model it cannot start
@@ -406,15 +406,15 @@ The second computer's entries:
 models:
   - name: strata-iq3s
     provider: openai-compatible
-    endpoint: http://100.64.0.10:8090   # host only; /ensure reports the port
+    endpoint: http://100.64.0.10:8090 # host only; /ensure reports the port
     remote_start:
-      starter: [http://192.0.2.10:8798, http://100.64.0.10:8798]  # LAN first
-      model: strata-iq3s                # the name the MAIN config knows it by
-    num_ctx: 32768                      # = the `context` /models reports
+      starter: [http://192.0.2.10:8798, http://100.64.0.10:8798] # LAN first
+      model: strata-iq3s # the name the MAIN config knows it by
+    num_ctx: 32768 # = the `context` /models reports
 
-  - name: grok-code-fast                # must be spelled the same on both machines
+  - name: grok-code-fast # must be spelled the same on both machines
     provider: openai-compatible
-    endpoint: http://100.64.0.10:8797   # the cloud relay, not the provider
+    endpoint: http://100.64.0.10:8797 # the cloud relay, not the provider
 ```
 
 `starter` is one address or 1-4 of them, tried in the order written, each an
@@ -434,12 +434,12 @@ spell it the same; a `model:` field on the entry does not change that.
 **Waking the main machine.** Nothing on a sleeping machine can wake it, and a
 magic packet does not cross a router, so pick how it gets woken:
 
-| Option | Needs | Who asks for it |
-|---|---|---|
-| Wake-on-LAN magic packet | the adapter armed for WoL, and an always-on device on the same LAN | a phone WoL app, another machine, a small board |
-| Forge's wake relay (`remote.wake_relay`) | an always-on device on the same LAN holding the Telegram side and the magic packet; Forge binds `host`:`port` on the machine to be slept and accepts a signed `/v1/sleep` only from `relay_ip` | Telegram `/sleep` and `/wake` from your phone |
-| An RTC wake timer | wake timers allowed in the power scheme, armed **before** it sleeps | `schedule_wake` in a turn, or `/sleep 8h` on Telegram |
-| A recurring wake task | the same permission; the jobs scheduler owns `ForgeScheduledWake` and deletes it when no job asks for a wake | a scheduled job with a wake time |
+| Option                                   | Needs                                                                                                                                                                                          | Who asks for it                                       |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Wake-on-LAN magic packet                 | the adapter armed for WoL, and an always-on device on the same LAN                                                                                                                             | a phone WoL app, another machine, a small board       |
+| Forge's wake relay (`remote.wake_relay`) | an always-on device on the same LAN holding the Telegram side and the magic packet; Forge binds `host`:`port` on the machine to be slept and accepts a signed `/v1/sleep` only from `relay_ip` | Telegram `/sleep` and `/wake` from your phone         |
+| An RTC wake timer                        | wake timers allowed in the power scheme, armed **before** it sleeps                                                                                                                            | `schedule_wake` in a turn, or `/sleep 8h` on Telegram |
+| A recurring wake task                    | the same permission; the jobs scheduler owns `ForgeScheduledWake` and deletes it when no job asks for a wake                                                                                   | a scheduled job with a wake time                      |
 
 ## Requirements
 
@@ -477,10 +477,10 @@ extensions, so:
    models:
      - name: claude-code
        provider: cli
-       cli: claude   # bare name, or a full path to the executable. A .cmd shim is run through its launcher, which needs Node on PATH
+       cli: claude # bare name, or a full path to the executable. A .cmd shim is run through its launcher, which needs Node on PATH
      - name: codex
        provider: cli
-       cli: codex    # bare name, or a full path to the executable. A .cmd shim is run through its launcher, which needs Node on PATH
+       cli: codex # bare name, or a full path to the executable. A .cmd shim is run through its launcher, which needs Node on PATH
    ```
    For `ask_local_agent` delegation, also set `permissions.agents.delegate: true`.
 3. **If you run Claude Code in bypass-permissions mode**, add
@@ -735,7 +735,7 @@ Ollama example:
 
 ```yaml
 models:
-  - name: "gemma4:26b"
+  - name: 'gemma4:26b'
     provider: ollama
     endpoint: http://127.0.0.1:11434
     num_ctx: 262144
@@ -1023,31 +1023,31 @@ steer, the interrupt may already have happened. Nothing retries it; `list` and
 
 Type `/` in chat to open the built-in command list. Forge also contributes commands to the VS Code palette — the full list is in [docs/COMMANDS.md](docs/COMMANDS.md).
 
-| Slash command | What it does                                     |
-| ------------- | ------------------------------------------------ |
-| `/unload`     | Release only this chat's model from memory       |
-| `/unloadall`  | Stop all backends and release every loaded model |
-| `/restart`    | Restart or reconnect the backend                 |
-| `/reindex`    | Rebuild the local semantic search index          |
-| `/new`        | Open a new conversation                          |
-| `/rename`     | Rename the active conversation                   |
-| `/checkin`    | Set or turn off the long-task check-in reminder  |
-| `/context`    | Add a file, selection, tabs, or files as context |
-| `/config`     | Open the active Forge config                     |
-| `/logs`       | Show the Forge backend output                    |
-| `/memories`   | Open the editable workspace memory index         |
-| `/clear`      | Clear the current conversation                   |
-| `/approvals`  | List approvals for this chat; `/approvals reset` clears them |
-| `/review`     | Run an immediate review prompt                   |
-| `/compact`    | Summarize and compress the current chat          |
-| `/undo`       | Restore files from the last checkpoint           |
-| `/keep`       | Keep current checkpoint changes                  |
-| `/reload`     | Reload the VS Code window                        |
-| `/init`       | Have the agent read the repo and fill in its `FORGE.md` (alias `/initForge`) |
+| Slash command | What it does                                                                           |
+| ------------- | -------------------------------------------------------------------------------------- |
+| `/unload`     | Release only this chat's model from memory                                             |
+| `/unloadall`  | Stop all backends and release every loaded model                                       |
+| `/restart`    | Restart or reconnect the backend                                                       |
+| `/reindex`    | Rebuild the local semantic search index                                                |
+| `/new`        | Open a new conversation                                                                |
+| `/rename`     | Rename the active conversation                                                         |
+| `/checkin`    | Set or turn off the long-task check-in reminder                                        |
+| `/context`    | Add a file, selection, tabs, or files as context                                       |
+| `/config`     | Open the active Forge config                                                           |
+| `/logs`       | Show the Forge backend output                                                          |
+| `/memories`   | Open the editable workspace memory index                                               |
+| `/clear`      | Clear the current conversation                                                         |
+| `/approvals`  | List approvals for this chat; `/approvals reset` clears them                           |
+| `/review`     | Run an immediate review prompt                                                         |
+| `/compact`    | Summarize and compress the current chat                                                |
+| `/undo`       | Restore files from the last checkpoint                                                 |
+| `/keep`       | Keep current checkpoint changes                                                        |
+| `/reload`     | Reload the VS Code window                                                              |
+| `/init`       | Have the agent read the repo and fill in its `FORGE.md` (alias `/initForge`)           |
 | `/clanker`    | Turn Clanker on or off for THIS chat: no confirmations in it; the deny list still asks |
-| `/link`       | Link an existing agent session to this chat      |
-| `/chatMode`   | Set solo or multi-chat mode for Strata or llama.cpp |
-| `/system`     | Report GPU, VRAM by process, RAM and drive space |
+| `/link`       | Link an existing agent session to this chat                                            |
+| `/chatMode`   | Set solo or multi-chat mode for Strata or llama.cpp                                    |
+| `/system`     | Report GPU, VRAM by process, RAM and drive space                                       |
 
 `/checkin` and the agent's own `set_checkin` tool set the same reminder; the
 `elapsed_time_note` config block is what lets the agent use it.

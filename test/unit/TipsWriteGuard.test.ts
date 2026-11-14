@@ -92,6 +92,18 @@ describe('an exact duplicate is refused before anything is written', () => {
     ).toBeUndefined();
   });
 
+  it('catches the same tip added under a different number — the usual duplicate', () => {
+    // Entries are numbered per section, so the key must ignore the number: an
+    // agent appends the shipped tip as `4.` and nothing else about it changes.
+    expect(
+      tipsWriteRefusal({
+        proposed: `## EDIT\n1. an existing tip → already reviewed\n4. an existing tip → already reviewed\n`,
+        previous: `## EDIT\n1. an existing tip → already reviewed\n`,
+        shippedPath,
+      }),
+    ).toContain('already carries this tip');
+  });
+
   it('throws, so the tool reports a refusal and writes nothing', () => {
     expect(() =>
       guardTipsWrite(
@@ -105,37 +117,49 @@ describe('an exact duplicate is refused before anything is written', () => {
 });
 
 describe('the count and the every-tenth review ping', () => {
-  const fileIn = (entries: number): string => {
-    const file = path.join(dir, 'docs', 'CODING_TIPS.md');
-    fs.mkdirSync(path.dirname(file), { recursive: true });
+  const file = path.join(dir, 'docs', 'CODING_TIPS.md');
+  const writeEntries = (entries: number): string => {
     const body = Array.from(
       { length: entries },
       (_, i) => `${i + 1}. tip ${i + 1} → mistake ${i + 1}`,
-    );
-    fs.writeFileSync(file, `## EDIT\n${body.join('\n')}\n`, 'utf8');
-    return file;
+    ).join('\n');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, `## EDIT\n${body}\n`, 'utf8');
+    return `## EDIT\n${body}\n`;
   };
 
   it('says how many entries the shipped list does not have', () => {
-    expect(tipsWriteNote(fileIn(1), shippedPath)).toContain('1 entry in docs/CODING_TIPS.md');
-    expect(tipsWriteNote(fileIn(9), shippedPath)).toContain('9 entries in docs/CODING_TIPS.md');
+    const one = writeEntries(1);
+    expect(tipsWriteNote(file, one, shippedPath)).toContain('1 entry in docs/CODING_TIPS.md');
+    const nine = writeEntries(9);
+    expect(tipsWriteNote(file, nine, shippedPath)).toContain('9 entries in docs/CODING_TIPS.md');
   });
 
-  it('asks for a review at ten, and not again at eleven', () => {
-    expect(tipsWriteNote(fileIn(9), shippedPath)).not.toContain('tell the owner now');
-    expect(tipsWriteNote(fileIn(10), shippedPath)).toContain('tell the owner now');
-    expect(tipsWriteNote(fileIn(11), shippedPath)).not.toContain('tell the owner now');
-    expect(tipsWriteNote(fileIn(20), shippedPath)).toContain('tell the owner now');
+  it('pings on the crossing of a tenth, once — not on every write that sits at one', () => {
+    const nine = writeEntries(9);
+    expect(tipsWriteNote(file, nine, shippedPath)).not.toContain('tell the owner now');
+    const ten = writeEntries(10);
+    expect(tipsWriteNote(file, nine, shippedPath)).toContain('tell the owner now');
+    // A re-word while the count sits at 10 stays quiet: nothing crossed.
+    expect(tipsWriteNote(file, ten, shippedPath)).not.toContain('tell the owner now');
+    expect(tipsWriteNote(file, writeEntries(11), shippedPath)).not.toContain('tell the owner now');
+    // A write that adds two tips across the boundary still fires, exactly once.
+    const nineAgain = writeEntries(9);
+    writeEntries(11);
+    expect(tipsWriteNote(file, nineAgain, shippedPath)).toContain('tell the owner now');
+    const nineteen = writeEntries(19);
+    writeEntries(20);
+    expect(tipsWriteNote(file, nineteen, shippedPath)).toContain('tell the owner now');
+    expect(ten.length).toBeGreaterThan(0);
   });
 
   it('says nothing when the project table holds nothing the shipped one does not', () => {
-    const file = path.join(dir, 'docs', 'CODING_TIPS.md');
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, SHIPPED, 'utf8');
-    expect(tipsWriteNote(file, shippedPath)).toBe('');
+    expect(tipsWriteNote(file, SHIPPED, shippedPath)).toBe('');
   });
 
   it('says nothing for any other file', () => {
-    expect(tipsWriteNote(path.join(dir, 'notes.md'), shippedPath)).toBe('');
+    expect(tipsWriteNote(path.join(dir, 'notes.md'), '', shippedPath)).toBe('');
   });
 });

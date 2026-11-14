@@ -141,7 +141,7 @@ export function makeWriteFileTool(
           withProblemNote(
             `Appended ${content.length} chars to ${filePath} (${total} bytes total)${converted.note}` +
               (contentionNote ? `\n${contentionNote}` : '') +
-              tipsWriteNote(filePath),
+              tipsWriteNote(filePath, snapshot.text ?? ''),
             note,
           ),
           filePath,
@@ -161,7 +161,7 @@ export function makeWriteFileTool(
       return withFileLengthWarning(
         withProblemNote(
           `Written ${filePath}${converted.note}${contentionNote ? `\n${contentionNote}` : ''}` +
-            tipsWriteNote(filePath),
+            tipsWriteNote(filePath, existing ?? ''),
           note,
         ),
         filePath,

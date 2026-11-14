@@ -1,3 +1,5 @@
+import { canonicalToolName } from './toolNameAliases';
+
 /**
  * StructuredOutputParser - fallback parser for models that emit JSON-fenced
  * tool-call blocks or provider-specific tool markers instead of native
@@ -247,7 +249,10 @@ function fenceCall(body: string, toolNames?: ReadonlySet<string>): ParsedToolCal
   // A refused envelope still counts as a call only when it names a real tool,
   // so an ordinary JSON snippet in the answer is left alone.
   const named = candidate.error === undefined ? candidate.name : candidate.arguments['__tool'];
-  return typeof named === 'string' && toolNames.has(named) ? candidate : null;
+  return typeof named === 'string' &&
+    (toolNames.has(named) || canonicalToolName(named) !== undefined)
+    ? candidate
+    : null;
 }
 
 function collectJsonFenceToolCalls(

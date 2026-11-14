@@ -61,54 +61,45 @@ export function applyToolNameAlias(call: ToolCall): ToolNameAliasHit | undefined
 }
 
 /**
- * Where hits accumulate. One JSON line per call, so a partial write costs one
- * row. `FORGE_TOOL_ALIAS_FILE` redirects it — the tests use that so a suite run
- * does not inflate the counts the report reads.
+ * Where the counts live: one small JSON file, rewritten whole, so the record has
+ * a fixed size no long chat can grow — unlike an append log, which would be a
+ * second transcript. `~/.forge/tool-usage/`, and not a "telemetry" directory:
+ * nothing here is sent anywhere, and this repo's instruction file says no
+ * telemetry, so the path says what it is — a ledger the owner can open.
  */
 export function aliasUsageFile(): string {
+  // The one override, so a suite run does not inflate the counts the report reads.
   const override = process.env.FORGE_TOOL_ALIAS_FILE;
   if (override) return override;
-  return path.join(os.homedir(), '.forge', 'telemetry', 'tool-aliases.jsonl');
+  return path.join(os.homedir(), '.forge', 'tool-usage', 'tool-name-aliases.json');
 }
 
 /**
- * Append one hit. Never throws: a model's call must not fail because the
- * counter could not be written, and the counter is not worth retrying.
+ * Add one hit to the counts. Never throws: a model's call must not fail because
+ * the counter could not be written, and a lost count is not worth a retry.
  */
-export function recordToolNameAliasHit(
-  hit: ToolNameAliasHit,
-  convId?: string,
-  file = aliasUsageFile(),
-): void {
+export function recordToolNameAliasHit(hit: ToolNameAliasHit, file = aliasUsageFile()): void {
   try {
+    let counts: Record<string, number> = {};
+    try {
+      const parsed: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        counts = Object.fromEntries(
+          Object.entries(parsed as Record<string, unknown>).filter(
+            (entry): entry is [string, number] => typeof entry[1] === 'number',
+          ),
+        );
+      }
+    } catch {
+      // No file yet, or an unreadable one: start fresh rather than skip the count.
+    }
+    counts[hit.alias] = (counts[hit.alias] ?? 0) + 1;
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.appendFileSync(
-      file,
-      `${JSON.stringify({ ts: new Date().toISOString(), alias: hit.alias, tool: hit.tool, ...(convId ? { conv: convId.slice(0, 8) } : {}) })}\n`,
-      'utf8',
-    );
+    const body = `${JSON.stringify({ ...counts, last_hit: new Date().toISOString() }, null, 2)}\n`;
+    const tmp = `${file}.tmp`;
+    fs.writeFileSync(tmp, body, 'utf8');
+    fs.renameSync(tmp, file);
   } catch {
     // The call already ran; a lost count is not worth a refusal or a retry.
   }
-}
-
-/** Per-alias counts from the usage file, for the report the plan asks for. */
-export function readAliasUsage(file = aliasUsageFile()): Readonly<Record<string, number>> {
-  const out: Record<string, number> = {};
-  let raw: string;
-  try {
-    raw = fs.readFileSync(file, 'utf8');
-  } catch {
-    return out;
-  }
-  for (const line of raw.split('\n')) {
-    if (!line.trim()) continue;
-    try {
-      const row = JSON.parse(line) as { alias?: unknown };
-      if (typeof row.alias === 'string') out[row.alias] = (out[row.alias] ?? 0) + 1;
-    } catch {
-      // A half-written last line is expected after a crash; skip it and keep counting.
-    }
-  }
-  return out;
 }

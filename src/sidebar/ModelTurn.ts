@@ -20,6 +20,7 @@ import type { MidTurnDrainResult } from '../agent/MidTurnInbox';
 import type { CheckinStage } from '../agent/elapsedTimeNote';
 import { createContextTrimState } from '../agent/toolResultContext';
 import type { ToolDispatch } from './ToolDispatch';
+import { canonicalToolName } from '../tools/toolNameAliases';
 import { stripDecision, type ToolFailureTracker } from '../tools/StripTools';
 import type { TurnLifecycle } from './TurnLifecycle';
 import { createOutputBudgetTracker } from '../util/contextBudget';
@@ -319,15 +320,14 @@ export async function runModelTurn(
       dispatchToolCalls: async (toolCalls, messages) => {
         applyToolCalls(conv, toolCalls.length);
         for (const call of toolCalls) {
-          ctx.emitAgentProgress({
-            conversationId: conv.id,
-            kind: 'tool',
-            toolName: call.function.name,
-          });
+          // The activity row names the tool the call will reach, not the name the
+          // model typed: a renderer keyed on toolName must not miss an alias.
+          const shown = canonicalToolName(call.function.name) ?? call.function.name;
+          ctx.emitAgentProgress({ conversationId: conv.id, kind: 'tool', toolName: shown });
           const detail = extractToolDetail(call.function.arguments);
           postC({
             type: 'toolActivity',
-            toolName: call.function.name,
+            toolName: shown,
             toolCallId: call.id,
             ...(detail ? { detail } : {}),
           });

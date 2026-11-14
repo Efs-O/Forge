@@ -27,6 +27,20 @@ import { resolveShippedTipsPath } from '../llm/codingTips';
 /** Numbered tips entries only — prose and headings are not tips. */
 const ENTRY = /^\s*\d+\.\s+\S/;
 
+/**
+ * The key that identifies an entry. The number is STRIPPED: entries are numbered
+ * per section, so the duplicate an agent actually writes — the same tip appended
+ * as `4.` under a section whose copy is `1.` — would otherwise key differently
+ * and pass. What survives is the tip text itself, normalised.
+ */
+function entryKey(line: string): string {
+  return line
+    .replace(/^\s*\d+\.\s+/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
 /** The tips file an agent may write, matched on the tail so no workspace root is needed. */
 export function isProjectTipsPath(filePath: string): boolean {
   return filePath.replace(/\\/g, '/').toLowerCase().endsWith('docs/coding_tips.md');
@@ -36,7 +50,7 @@ function entryKeys(text: string): string[] {
   return text
     .split(/\r?\n/)
     .filter((line) => ENTRY.test(line))
-    .map((line) => line.replace(/\s+/g, ' ').trim().toLowerCase());
+    .map(entryKey);
 }
 
 function countBy(entries: string[]): Map<string, number> {
@@ -66,10 +80,7 @@ function readShipped(shippedPath: string | undefined): string {
 function originalLineOf(text: string, key: string): string {
   const line = text
     .split(/\r?\n/)
-    .find(
-      (candidate) =>
-        ENTRY.test(candidate) && candidate.replace(/\s+/g, ' ').trim().toLowerCase() === key,
-    );
+    .find((candidate) => ENTRY.test(candidate) && entryKey(candidate) === key);
   return (line ?? key).trim().slice(0, 140);
 }
 
@@ -116,23 +127,32 @@ export function guardTipsWrite(
 
 /**
  * What to tell the agent about the table it just changed: how many entries the
- * shipped list does not have, and at every tenth one, that the owner wants to be
- * told. Empty for every other file, and for a project table that holds nothing
- * the shipped one does not.
+ * shipped list does not have, and — ONCE, when the count crosses a tenth — that
+ * the owner wants to be told. `previous` is the file as it was before this write,
+ * so the ping is a crossing of a tenth, not a hit on one: a re-word while the
+ * count sits at 10 stays quiet, and a write that jumps 9 to 11 still fires once.
+ * Empty for every other file, and for a project table that holds nothing the
+ * shipped one does not.
+ *
+ * Guarded writers are the three file tools. `move_file` onto this path, a shell
+ * `>>` or `sed -i`, and `git checkout`/`restore` all change the file unguarded —
+ * accepted: the shell cannot be intercepted here, and the Phase 3 overlap test
+ * catches a duplicate that slips in, one turn later.
  */
-export function tipsWriteNote(filePath: string, shippedPath?: string): string {
+export function tipsWriteNote(filePath: string, previous: string, shippedPath?: string): string {
   if (!isProjectTipsPath(filePath) || !fs.existsSync(filePath)) return '';
   const shippedKeys = new Set(entryKeys(readShipped(shippedPath)));
-  const unreviewed = new Set(
+  const unreviewedNow = new Set(
     entryKeys(fs.readFileSync(filePath, 'utf8')).filter((k) => !shippedKeys.has(k)),
   );
-  if (unreviewed.size === 0) return '';
+  if (unreviewedNow.size === 0) return '';
+  const unreviewedBefore = new Set(entryKeys(previous).filter((k) => !shippedKeys.has(k)));
   const review =
-    unreviewed.size % 10 === 0
-      ? ` ${unreviewed.size} recorded since the shipped table: tell the owner now and offer to promote the keepers.`
+    Math.floor(unreviewedNow.size / 10) > Math.floor(unreviewedBefore.size / 10)
+      ? ` ${unreviewedNow.size} recorded since the shipped table: tell the owner now and offer to promote the keepers.`
       : '';
   return (
-    `\nProject tips: ${unreviewed.size} entr${unreviewed.size === 1 ? 'y' : 'ies'} in ` +
+    `\nProject tips: ${unreviewedNow.size} entr${unreviewedNow.size === 1 ? 'y' : 'ies'} in ` +
     `docs/CODING_TIPS.md are not in the shipped table.${review}`
   );
 }

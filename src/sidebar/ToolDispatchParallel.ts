@@ -1,4 +1,5 @@
 import type { HostToWebview } from './messageBridge';
+import { applyToolNameAlias, recordToolNameAliasHit } from '../tools/toolNameAliases';
 import type { ChatMessage, ToolCall } from '../llm/types';
 import type { ToolRegistry } from '../tools/ToolRegistry';
 import type { ToolFailureTracker } from '../tools/StripTools';
@@ -75,6 +76,14 @@ export async function checkParallelReadCall(
   context: ToolDispatchRoundContext,
   toolRegistry: ToolRegistry,
 ): Promise<ParallelReadCheck> {
+  // Resolve a foreign name first, or an aliased read (`glob`, `ls`, `search_code`)
+  // is not parallel-eligible and runs serially through dispatchOne. Same rule as
+  // `toolCallPreflight.ts`: only when nothing is registered under that name, and
+  // the hit is counted here when this path is the one that resolved it.
+  if (!toolRegistry.get(tc.function.name)) {
+    const aliased = applyToolNameAlias(tc);
+    if (aliased) recordToolNameAliasHit(aliased);
+  }
   if (!isParallelReadOnlyTool(tc.function.name) || context.signal?.aborted) {
     return { eligible: false };
   }

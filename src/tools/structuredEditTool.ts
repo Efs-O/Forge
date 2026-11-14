@@ -262,7 +262,7 @@ export function makeApplyLineEditsTool(
           }) +
             liftedNote +
             alignedNote +
-            tipsWriteNote(filePath),
+            tipsWriteNote(filePath, content),
           note,
         ),
         filePath,

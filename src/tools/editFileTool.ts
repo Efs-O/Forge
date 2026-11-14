@@ -395,7 +395,7 @@ export function makeEditFileTool(
       const note = watch ? await watch.settle(context?.abortSignal) : '';
       return withFileLengthWarning(
         withProblemNote(
-          text + tipsWriteNote(filepath) + (contentionNote ? `\n${contentionNote}` : ''),
+          text + tipsWriteNote(filepath, content) + (contentionNote ? `\n${contentionNote}` : ''),
           note,
         ),
         filepath,
