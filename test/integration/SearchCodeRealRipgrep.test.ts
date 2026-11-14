@@ -149,6 +149,23 @@ describe.skipIf(realRg === undefined || !gitAvailable)(
       expect(wide).toContain('  3: after');
     });
 
+    it('shows every matching line when context is large, not just context (lab BUG-25)', async () => {
+      // Matches on lines 6, 21 and 36 of a 40-line file. With `context: 20` the
+      // context used to fill the per-file snippet budget first, so the answer was
+      // eight context lines, zero matches, and "(+3 more matches in this file)".
+      const lines = Array.from({ length: 40 }, (_, i) =>
+        i === 5 || i === 20 || i === 35 ? `needle here ${i}` : `filler ${i}`,
+      );
+      fs.writeFileSync(path.join(root, 'wide.ts'), `${lines.join('\n')}\n`);
+      const result = await tool().handler({
+        query: 'needle here',
+        include: '**/wide.ts',
+        context: 20,
+      });
+      for (const n of [6, 21, 36]) expect(result).toContain(`> ${n}: needle here ${n - 1}`);
+      expect(result.split('\n').filter((line) => line.startsWith('>'))).toHaveLength(3);
+    });
+
     it('matches case-insensitively when ignore_case is set', async () => {
       fs.writeFileSync(path.join(root, 'case.ts'), 'NEEDLE HERE once\n');
       const folded = await tool().handler({

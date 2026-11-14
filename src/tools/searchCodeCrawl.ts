@@ -245,7 +245,12 @@ export async function searchWorkspaceText(
 
       const isMatchingLine = isMatchEvent(event);
       if (isMatchingLine) entry.matchCount += 1;
-      if (entry.snippets.length >= SNIPPETS_PER_FILE_LIMIT) {
+      // The per-file budget is matching lines, not stored lines. A context line
+      // rides along with the match it belongs to, and `context: 20` used to spend
+      // the whole allowance on context before the first match was reached: the
+      // answer was eight context lines, no match at all, and "(+3 more matches in
+      // this file)" that read as three extra hits (lab BUG-25).
+      if (entry.snippetMatches.filter(Boolean).length >= SNIPPETS_PER_FILE_LIMIT) {
         if (isMatchingLine) entry.omittedSnippets += 1;
         return;
       }
