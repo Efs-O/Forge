@@ -448,7 +448,7 @@ describe('a read of Forge own files is not refused for being a read', () => {
       // The refusal still names the tools that CAN read it, which is the half the
       // 11-02 agent was missing when it reached for a shell one-liner.
       expect(result.rule?.alternative).toContain('read_file');
-      expect(result.rule?.alternative).toContain('search_code');
+      expect(result.rule?.alternative).toContain('grep_search');
     }
   });
 
@@ -493,7 +493,7 @@ describe('a read of Forge own files is not refused for being a read', () => {
     );
     expect(result.classification).toBe('refused');
     expect(result.rule?.alternative).toContain('read_file');
-    expect(result.rule?.alternative).toContain('search_code');
+    expect(result.rule?.alternative).toContain('grep_search');
   });
 });
 

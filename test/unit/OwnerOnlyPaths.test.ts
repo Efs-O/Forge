@@ -577,7 +577,7 @@ describe('what a refusal says', () => {
       // with a `python -` one-liner, and nothing in the refusal told it that
       // `read_file` was open to it all along.
       expect(text).toContain('read_file');
-      expect(text).toContain('search_code');
+      expect(text).toContain('grep_search');
       // Not a write tool, though: naming one would invite the agent to try its
       // own hand at the file the owner forbade it from touching.
       expect(text).not.toMatch(/use `?(edit_file|write_file|restore_file|delete_file|move_file)/);
@@ -627,7 +627,7 @@ describe('what a refusal says', () => {
     expect(
       ownerOnlyToolRefusal('edit_file', hitFor('~/.forge/policy.yaml')),
     ).toBe(
-      "edit_file: ~/.forge/policy.yaml is part of Forge's own files (everything under `~/.forge/` except memory files (`~/.forge/memories/<project>/<name>.md`) and skills (`~/.forge/skills/`); it holds session logs and jobs, and `policy.yaml` there is the owner's settings file, the one that says what an agent may do), which only the owner changes. Reading them with `read_file` or `search_code` is allowed. Tell the user what change you want and why, and let them make it.",
+      "edit_file: ~/.forge/policy.yaml is part of Forge's own files (everything under `~/.forge/` except memory files (`~/.forge/memories/<project>/<name>.md`) and skills (`~/.forge/skills/`); it holds session logs and jobs, and `policy.yaml` there is the owner's settings file, the one that says what an agent may do), which only the owner changes. Reading them with `read_file` or `grep_search` is allowed. Tell the user what change you want and why, and let them make it.",
     );
   });
 });

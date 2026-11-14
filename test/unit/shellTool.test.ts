@@ -328,7 +328,7 @@ describe('default shell', () => {
 
   it('names the shell parameter in Windows bash guidance', () => {
     expect(described({ platform: 'win32', bashPath: String.raw`C:\Git\bin\bash.exe` })).toBe(
-      'Run one command line in bash on Windows; rg on PATH is the binary search_code and find_files use. ' +
+      'Run one command line in bash on Windows; rg on PATH is the binary grep_search and find_files use. ' +
         'Search or filter many files in ONE command (rg, globs, pipes), not one call per file. Destructive commands require approval; unsafe commands are refused.' +
         ' bash\'s /tmp is not where Windows programs such as node look for /tmp: put scratch files in a workspace-relative directory. bash turns a lone /switch into a path (schtasks /query reaches schtasks as C:/Program Files/Git/query): for a Windows program taking /switches set "shell": "pwsh" on the call, or write //query. Run PowerShell by setting "shell": "pwsh", never powershell -Command inside bash: bash expands $variables first, and Git\'s usr/bin shadows System32 there (Start-Process notepad finds Git\'s notepad script, not notepad.exe).' +
         ' Admin (UAC) prompts need the owner at the PC: elevate only for drivers, services, HKLM or Program Files; put every admin step in one script logging to the workspace or C:\\Users\\Public, never C:\\Windows\\Temp.',

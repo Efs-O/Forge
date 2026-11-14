@@ -77,8 +77,8 @@ describe('compact activity rows', () => {
     const edit2 = tool('e2', 'edit_file', 'a.ts', { toolCallId: 'b' });
     const diff2 = msg('d2', 'diff', 'a.ts', { toolCallId: 'b' });
     const different = tool('e3', 'edit_file', 'b.ts');
-    const noTarget1 = tool('n1', 'search_code', '');
-    const noTarget2 = tool('n2', 'search_code', '');
+    const noTarget1 = tool('n1', 'grep_search', '');
+    const noTarget2 = tool('n2', 'grep_search', '');
     delete noTarget1.toolTarget;
     delete noTarget2.toolTarget;
     expect(steps(toCompactRows([edit1, diff1, edit2, diff2]))).toHaveLength(2);
@@ -88,10 +88,10 @@ describe('compact activity rows', () => {
 
   it('never merges parallel rounds', () => {
     const parallel = [
-      tool('a', 'search_code', 'same'),
-      tool('b', 'search_code', 'same'),
+      tool('a', 'grep_search', 'same'),
+      tool('b', 'grep_search', 'same'),
     ];
-    const next = tool('c', 'search_code', 'same');
+    const next = tool('c', 'grep_search', 'same');
     expect(steps(toCompactRows([...parallel, pause('next-round'), next]))).toHaveLength(2);
   });
 
@@ -124,13 +124,13 @@ describe('compact activity rows', () => {
       pause('r4'),
       tool('5', 'render_html_to_image', 'page.html'),
       pause('r5'),
-      tool('6', 'search_code', 'one'),
+      tool('6', 'grep_search', 'one'),
       pause('r6'),
-      tool('7', 'search_code', 'two'),
+      tool('7', 'grep_search', 'two'),
       pause('r7'),
-      tool('8', 'search_code', 'three'),
+      tool('8', 'grep_search', 'three'),
       pause('r8'),
-      tool('9', 'search_code', 'four'),
+      tool('9', 'grep_search', 'four'),
       msg('tail', 'assistant', '', { reasoning: 'final thought' }),
     ];
     const rows = toCompactRows(sequence);

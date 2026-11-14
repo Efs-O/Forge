@@ -23,7 +23,7 @@ describe('activity row folding', () => {
       row('t5', 'tool', 'lint_file'),
       row('d3', 'diff', 'b.ts'),
       row('t6', 'tool', 'test_file'),
-      row('t7', 'tool', 'search_code'),
+      row('t7', 'tool', 'grep_search'),
       row('t8', 'tool', 'open_file'),
       row('t9', 'tool', 'git_status'),
       row('r4', 'assistant', '', { reasoning: 'wrap up one' }),

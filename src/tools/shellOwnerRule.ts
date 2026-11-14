@@ -161,7 +161,7 @@ export function ownerOnlyShellRule(input: OwnerOnlyShellRuleInput): ShellTokenRu
       'Nothing in this command was classed as a change, so this is not a refusal to write ' +
       'that folder: the guard cannot follow a `cd` whose folder it cannot resolve, and a `cd` ' +
       'it cannot see would move every later relative path in this same line. Spell the folder ' +
-      'in full, or read it with `read_file` / `search_code`. ' +
+      'in full, or read it with `read_file` / `grep_search`. ' +
       `${ownerOnlyInstruction()}`,
     class: 'refused',
     gateKind: 'ownerGate',

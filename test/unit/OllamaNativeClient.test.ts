@@ -272,12 +272,12 @@ describe('streamOllamaChatCompletion', () => {
     // "search_codesearch_code" — an unknown tool, and a wasted round.
     const lines = [
       JSON.stringify({
-        message: { tool_calls: [{ function: { name: 'search_code', arguments: {} } }] },
+        message: { tool_calls: [{ function: { name: 'grep_search', arguments: {} } }] },
         done: false,
       }),
       JSON.stringify({
         message: {
-          tool_calls: [{ function: { name: 'search_code', arguments: { query: 'x' } } }],
+          tool_calls: [{ function: { name: 'grep_search', arguments: { query: 'x' } } }],
         },
         done: false,
       }),
@@ -299,7 +299,7 @@ describe('streamOllamaChatCompletion', () => {
 
     const calls = toolCalls.mock.calls[0]![0];
     expect(calls).toHaveLength(1);
-    expect(calls[0].function.name).toBe('search_code');
+    expect(calls[0].function.name).toBe('grep_search');
     expect(calls[0].function.arguments).toBe('{"query":"x"}');
     vi.unstubAllGlobals();
   });

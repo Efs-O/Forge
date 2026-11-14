@@ -16,7 +16,7 @@ const EXCLUDED = new Set(['.git', 'node_modules', '.venv', '__pycache__', 'dist'
 export const BENCHMARK_TOOL_NAMES = [
   'read_file',
   'find_files',
-  'search_code',
+  'grep_search',
   'write_file',
   'edit_file',
   'shell',
@@ -182,7 +182,7 @@ export function createBenchmarkToolHost(root: string): BenchmarkToolHost {
     definition: {
       type: 'function',
       function: {
-        name: 'search_code',
+        name: 'grep_search',
         description: 'Search using ripgrep regex by default, or plain text when literal is true.',
         parameters: {
           type: 'object',

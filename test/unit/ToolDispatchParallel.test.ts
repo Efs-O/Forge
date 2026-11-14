@@ -128,7 +128,7 @@ describe('ToolDispatch parallel read batches', () => {
     let maxActive = 0;
     const completed: string[] = [];
     toolRegistry.register(
-      readTool('search_code', async (args) => {
+      readTool('grep_search', async (args) => {
         active += 1;
         maxActive = Math.max(maxActive, active);
         const query = args['query'] as string;
@@ -140,8 +140,8 @@ describe('ToolDispatch parallel read batches', () => {
     );
 
     const calls = [
-      makeToolCall('search_code', { query: 'first' }, 'read-1'),
-      makeToolCall('search_code', { query: 'second' }, 'read-2'),
+      makeToolCall('grep_search', { query: 'first' }, 'read-1'),
+      makeToolCall('grep_search', { query: 'second' }, 'read-2'),
     ];
     await dispatch.dispatch(calls, allowed, messages, 'parallel-order');
 
@@ -155,7 +155,7 @@ describe('ToolDispatch parallel read batches', () => {
   it('keeps a write between two reads in its original position', async () => {
     const steps: string[] = [];
     toolRegistry.register(
-      readTool('search_code', async (args) => {
+      readTool('grep_search', async (args) => {
         const label = args['query'] as string;
         steps.push(`${label}:start`);
         await pause(5);
@@ -183,9 +183,9 @@ describe('ToolDispatch parallel read batches', () => {
 
     await dispatch.dispatch(
       [
-        makeToolCall('search_code', { query: 'before' }, 'before'),
+        makeToolCall('grep_search', { query: 'before' }, 'before'),
         makeToolCall('write_file', {}, 'write'),
-        makeToolCall('search_code', { query: 'after' }, 'after'),
+        makeToolCall('grep_search', { query: 'after' }, 'after'),
       ],
       allowed,
       messages,
@@ -211,10 +211,10 @@ describe('ToolDispatch parallel read batches', () => {
       steps.push(`${label}:end`);
       return label;
     };
-    toolRegistry.register(readTool('search_code', async () => read('read-a')));
+    toolRegistry.register(readTool('grep_search', async () => read('read-a')));
     toolRegistry.register(readTool('list_directory', async () => read('read-b')));
     const calls = [
-      makeToolCall('search_code', { query: 'a' }, 'read-a'),
+      makeToolCall('grep_search', { query: 'a' }, 'read-a'),
       makeToolCall('list_directory', { query: 'b' }, 'read-b'),
       makeToolCall('ask_user', {}, 'question'),
     ];
@@ -246,7 +246,7 @@ describe('ToolDispatch parallel read batches', () => {
         });
       },
       async (call, _approval, effects) => {
-        await read(call.function.name === 'search_code' ? 'read-a' : 'read-b');
+        await read(call.function.name === 'grep_search' ? 'read-a' : 'read-b');
         return effects;
       },
     );
@@ -427,10 +427,10 @@ describe('ToolDispatch parallel read batches', () => {
           if (started === 10) controller.abort();
         }),
     );
-    toolRegistry.register(readTool('search_code', handler));
+    toolRegistry.register(readTool('grep_search', handler));
 
     const calls = Array.from({ length: 12 }, (_, index) =>
-      makeToolCall('search_code', { query: `q${index}` }, `cancel-${index}`),
+      makeToolCall('grep_search', { query: `q${index}` }, `cancel-${index}`),
     );
     await dispatch.dispatch(calls, allowed, messages, 'abort-batch', controller.signal);
 
@@ -450,7 +450,7 @@ describe('ToolDispatch parallel read batches', () => {
   it('applies failure tracker updates in call order after the batch settles', async () => {
     const completed: string[] = [];
     toolRegistry.register(
-      readTool('search_code', async (args) => {
+      readTool('grep_search', async (args) => {
         const query = args['query'] as string;
         await pause(query === 'success' ? 40 : 5);
         completed.push(query);
@@ -461,8 +461,8 @@ describe('ToolDispatch parallel read batches', () => {
 
     await dispatch.dispatch(
       [
-        makeToolCall('search_code', { query: 'success' }, 'success'),
-        makeToolCall('search_code', { query: 'failure' }, 'failure'),
+        makeToolCall('grep_search', { query: 'success' }, 'success'),
+        makeToolCall('grep_search', { query: 'failure' }, 'failure'),
       ],
       allowed,
       messages,

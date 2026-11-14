@@ -1,5 +1,5 @@
 /**
- * What ripgrep is allowed to look at, for both `find_files` and `search_code`.
+ * What ripgrep is allowed to look at, for both `find_files` and `grep_search`.
  *
  * Owner of the exclusion list and of the one rule that overrides it. Split out
  * of `dirTools.ts` so the two tools' plumbing and the policy about scope are
@@ -26,7 +26,7 @@ export function isGlobInclude(include: string): boolean {
  * which doubled every match — the reason the blanket exclusion was added), the
  * session logs, and the remote inbox. Excluding the whole directory also hid
  * `.forge/config.yaml`, the most-edited file in this repo, from both tools: on
- * 2026-09-05 `search_code "num_ctx" include=".forge/config.yaml"` answered "no
+ * 2026-09-05 `grep_search "num_ctx" include=".forge/config.yaml"` answered "no
  * matches found" about a file holding dozens, and the agent fell back to
  * reading 100-line windows blind. A tool that reports absence for something
  * present is worse than one that refuses.
@@ -46,7 +46,7 @@ export const SEARCH_EXCLUDES = [
  *
  * It matters because ripgrep applies `.gitignore` to anything it *discovers*
  * but not to a path handed to it as a search root. `.forge/` is gitignored in
- * this repo, so `search_code include=".forge/config.yaml"` and
+ * this repo, so `grep_search include=".forge/config.yaml"` and
  * `find_files ".forge/config.yaml"` both answered "no matches found" about the
  * most-edited file in the workspace, and the agent fell back to reading blind
  * 100-line windows of it. Naming a file is an explicit request for that file:
@@ -197,7 +197,7 @@ export function namedPathScope(named: string, workspaceRoot: string): SearchCode
 }
 
 /**
- * Resolve the ripgrep root and optional glob for search_code. Relative patterns
+ * Resolve the ripgrep root and optional glob for grep_search. Relative patterns
  * remain workspace-scoped; absolute paths explicitly name an external target.
  */
 export function resolveSearchCodeScope(include: string, workspaceRoot: string): SearchCodeScope {
@@ -221,7 +221,7 @@ export function resolveSearchCodeScope(include: string, workspaceRoot: string): 
     try {
       stat = fs.statSync(absolute);
     } catch {
-      throw new Error(`search_code: absolute include path does not exist: ${absolute}`);
+      throw new Error(`grep_search: absolute include path does not exist: ${absolute}`);
     }
     return {
       target: absolute,
@@ -241,7 +241,7 @@ export function resolveSearchCodeScope(include: string, workspaceRoot: string): 
   // below the root is the smallest scope that can still be a real request.
   if (target === parsed.root) {
     throw new Error(
-      `search_code: absolute include globs must name a directory below the drive root, ` +
+      `grep_search: absolute include globs must name a directory below the drive root, ` +
         `not the root itself: ${include} (use e.g. ${path.join(parsed.root, 'someDir', '**', '*.ts')})`,
     );
   }
@@ -250,10 +250,10 @@ export function resolveSearchCodeScope(include: string, workspaceRoot: string): 
   try {
     targetStat = fs.statSync(target);
   } catch {
-    throw new Error(`search_code: absolute include root does not exist: ${target}`);
+    throw new Error(`grep_search: absolute include root does not exist: ${target}`);
   }
   if (!targetStat.isDirectory()) {
-    throw new Error(`search_code: absolute include root is not a directory: ${target}`);
+    throw new Error(`grep_search: absolute include root is not a directory: ${target}`);
   }
   return {
     target,

@@ -4,6 +4,7 @@ import type { ToolBudget } from '../tools/ToolBudget';
 import type { RegisteredTool, ToolHandlerResult, ToolPermission } from '../tools/ToolRegistry';
 import type { ToolRegistry } from '../tools/ToolRegistry';
 import { unknownToolResult } from './retiredTools';
+import { applyToolNameAlias, recordToolNameAliasHit } from '../tools/toolNameAliases';
 
 /** Suggests a correction that matches the JSON parser's reported failure. */
 export function invalidJsonAdvice(raw: string, parserMessage: string): string {
@@ -145,6 +146,13 @@ export function preflightToolCall(
 ): ToolCallPreflight {
   let result: ToolHandlerResult;
   let args: Record<string, unknown>;
+  // A name from another agent's dialect is answered here, before every gate: the
+  // refusal text, the approval card, the budget and the handler all judge the
+  // tool the call actually reaches, and the model is never told a name it typed
+  // is unknown. The rewrite is in place on the call, and the hit is counted in a
+  // file the next session can read (`toolNameAliases.ts`).
+  const aliased = applyToolNameAlias(tc);
+  if (aliased) recordToolNameAliasHit(aliased, input.convId);
   if (input.signal?.aborted) {
     result = 'Error: tool execution cancelled';
     return { kind: 'refused', result };

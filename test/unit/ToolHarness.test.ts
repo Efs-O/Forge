@@ -172,7 +172,7 @@ describe('local tool harness canonical inventory', () => {
   it('generates a canonical coverage matrix with no missing native handler tests', () => {
     expect(coverage.match(/^\| [a-z_]+ \| native \|/gmu)).toHaveLength(snapshot.names.length);
     expect(coverage).not.toContain('| missing |');
-    expect(coverage).toContain('| search_code | native | read | harness | automated |');
+    expect(coverage).toContain('| grep_search | native | read | harness | automated |');
     expect(coverage).not.toContain('Coordinator');
     expect(coverage).toContain('| browser_click | native | browser | harness |');
     expect(coverage).toContain('| desktop_click | native | desktop | harness |');

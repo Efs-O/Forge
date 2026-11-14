@@ -206,7 +206,7 @@ export function scenarios() {
   return [
     scenario('tool-read-file', 'read_file', strict('read_file', { path: 'seed.txt' })),
     scenario('tool-find-files', 'find_files', strict('find_files', { pattern: '**/*.ts', max_results: 5 })),
-    scenario('tool-search-code', 'search_code', strict('search_code', { query: 'needle', include: '**/*.ts' })),
+    scenario('tool-search-code', 'grep_search', strict('grep_search', { query: 'needle', include: '**/*.ts' })),
     scenario('tool-write-file', 'write_file', strict('write_file', { path: 'out.txt', content: 'written\n' })),
     // `append_file` is retired: `write_file` carries mode "append" (tool-trim
     // lane B, item B2/B3), and the benchmark host offers only write_file, so

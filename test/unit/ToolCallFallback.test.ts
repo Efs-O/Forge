@@ -102,7 +102,7 @@ describe('extractFallbackToolCalls', () => {
       {
         type: 'function' as const,
         function: {
-          name: 'search_code',
+          name: 'grep_search',
           description: '',
           parameters: {
             type: 'object',
@@ -112,7 +112,7 @@ describe('extractFallbackToolCalls', () => {
       },
     ];
     const calls = extractFallbackToolCalls(
-      '<tool_call>\n<function=search_code>\n<parameter=query>\n20\n</parameter>\n<parameter=max_results>\n20\n</parameter>\n</function>\n</tool_call>',
+      '<tool_call>\n<function=grep_search>\n<parameter=query>\n20\n</parameter>\n<parameter=max_results>\n20\n</parameter>\n</function>\n</tool_call>',
       definitions,
     );
     expect(JSON.parse(calls?.[0]?.function.arguments ?? '{}')).toEqual({

@@ -126,12 +126,12 @@ describe('language-server readiness reporting', () => {
     ]);
     const oneMissing = await makeFindReferencesTool().handler(baseArgs);
     expect(oneMissing).toBe(
-      'scratch/a.ts:1:2\n\nPositions are zero-based line:character, the same as the line and character inputs.\n\nNote: a text search also finds `sumPricesR1` in 1 file(s) the language server did not report: scratch/z.ts. The language server may still be loading this project; ask again in a few seconds, or check those files with search_code.',
+      'scratch/a.ts:1:2\n\nPositions are zero-based line:character, the same as the line and character inputs.\n\nNote: a text search also finds `sumPricesR1` in 1 file(s) the language server did not report: scratch/z.ts. The language server may still be loading this project; ask again in a few seconds, or check those files with grep_search.',
     );
 
     mocks.executeCommand.mockResolvedValue(undefined);
     await expect(makeFindReferencesTool().handler(baseArgs)).resolves.toBe(
-      'No references found for `sumPricesR1` at src/math.ts line 0 character 12 (zero-based). That line reads: `export function sumPricesR1(items: number[]): number {`. If `sumPricesR1` is not the symbol you meant (for example a word in a comment or a string), point line and character at the symbol\'s name.\n\nNote: a text search also finds `sumPricesR1` in 2 file(s) the language server did not report: scratch/a.ts, scratch/z.ts. The language server may still be loading this project; ask again in a few seconds, or check those files with search_code.',
+      'No references found for `sumPricesR1` at src/math.ts line 0 character 12 (zero-based). That line reads: `export function sumPricesR1(items: number[]): number {`. If `sumPricesR1` is not the symbol you meant (for example a word in a comment or a string), point line and character at the symbol\'s name.\n\nNote: a text search also finds `sumPricesR1` in 2 file(s) the language server did not report: scratch/a.ts, scratch/z.ts. The language server may still be loading this project; ask again in a few seconds, or check those files with grep_search.',
     );
   });
 
@@ -184,7 +184,7 @@ describe('language-server readiness reporting', () => {
         { beforeMutate: vi.fn() },
       ),
     ).resolves.toBe(
-      'Renamed to sumPricesNew\n\nNote: a text search still finds `sumPricesR1` in 2 file(s) after the rename: scratch/a.ts, scratch/z.ts. Check them with search_code; they may be comments or strings, or files the language server had not loaded.',
+      'Renamed to sumPricesNew\n\nNote: a text search still finds `sumPricesR1` in 2 file(s) after the rename: scratch/a.ts, scratch/z.ts. Check them with grep_search; they may be comments or strings, or files the language server had not loaded.',
     );
   });
 });

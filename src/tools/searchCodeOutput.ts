@@ -1,4 +1,4 @@
-/** The three shapes a `search_code` call can ask for; `content` is what this tool printed before 2026-10-29. */
+/** The three shapes a `grep_search` call can ask for; `content` is what this tool printed before 2026-10-29. */
 export type SearchCodeOutputMode = 'content' | 'files' | 'count';
 
 export interface SearchCodeMatch {

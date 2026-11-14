@@ -169,7 +169,7 @@ export async function runLiveToolLoop(options: {
 /**
  * Resolve the real VS Code app root so the bundled ripgrep can be found.
  *
- * The vscode mock's env.appRoot is undefined, so find_files/search_code would
+ * The vscode mock's env.appRoot is undefined, so find_files/grep_search would
  * fall back to a bare `rg` that is not on PATH (and fail with `spawn rg
  * ENOENT`). The `code` shim is on PATH at <install>/bin/code(.cmd); the app
  * root is <install>/<commitHash>/resources/app — the commit-hash dir whose

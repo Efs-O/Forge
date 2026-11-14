@@ -123,14 +123,14 @@ describe.skipIf(!LIVE)(
         endpoint: ENDPOINT,
         model: MODEL,
         prompt:
-          'Read status.txt. Use search_code to find STATUS=old in the workspace. Replace the exact text STATUS=old with STATUS=done using edit_file. Then run the project tests with shell (npm test). Do not skip any step.',
+          'Read status.txt. Use grep_search to find STATUS=old in the workspace. Replace the exact text STATUS=old with STATUS=done using edit_file. Then run the project tests with shell (npm test). Do not skip any step.',
         registry,
         allowed: new Set<ToolPermission>(['read', 'write', 'headless']),
         context: contextFor(session),
       });
       checkpoints.commitTurn(session);
       expect(result.calls).toEqual(
-        expect.arrayContaining(['read_file', 'search_code', 'edit_file', 'shell']),
+        expect.arrayContaining(['read_file', 'grep_search', 'edit_file', 'shell']),
       );
       expect(fs.readFileSync(target, 'utf8')).toBe('STATUS=done\n');
       await expect(checkpoints.undo()).resolves.toEqual([target]);

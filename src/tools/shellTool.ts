@@ -183,7 +183,7 @@ function definition(windows: boolean, shell: ShellKind): ToolDefinition {
     function: {
       name: 'shell',
       description:
-        `Run one command line in ${name}${windows ? ' on Windows' : ''}; rg on PATH is the binary search_code and find_files use.` +
+        `Run one command line in ${name}${windows ? ' on Windows' : ''}; rg on PATH is the binary grep_search and find_files use.` +
         ' Search or filter many files in ONE command (rg, globs, pipes), not one call per file. Destructive commands require approval; unsafe commands are refused.' +
         (windows && shell === 'bash'
           ? ' bash\'s /tmp is not where Windows programs such as node look for /tmp: put scratch files in a workspace-relative directory. bash turns a lone /switch into a path (schtasks /query reaches schtasks as C:/Program Files/Git/query): for a Windows program taking /switches set "shell": "pwsh" on the call, or write //query. Run PowerShell by setting "shell": "pwsh", never powershell -Command inside bash: bash expands $variables first, and Git\'s usr/bin shadows System32 there (Start-Process notepad finds Git\'s notepad script, not notepad.exe).'
@@ -292,7 +292,7 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
       function: {
         name: 'shell',
         description:
-          'Run one command line in bash (PowerShell on Windows without Git for Windows); rg on PATH is the binary search_code and find_files use. Search or filter many files in ONE command (rg, globs, pipes), not one call per file. Destructive commands require approval; unsafe commands are refused.',
+          'Run one command line in bash (PowerShell on Windows without Git for Windows); rg on PATH is the binary grep_search and find_files use. Search or filter many files in ONE command (rg, globs, pipes), not one call per file. Destructive commands require approval; unsafe commands are refused.',
         parameters: {
           type: 'object',
           additionalProperties: false,

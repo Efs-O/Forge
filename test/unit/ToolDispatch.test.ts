@@ -435,13 +435,13 @@ describe('ToolDispatch', () => {
     expect(messages[0].tool_call_id).toBe('call-read_file');
   });
 
-  it('dispatches a Python-spelled search_code boolean to the handler as a boolean', async () => {
+  it('dispatches a Python-spelled grep_search boolean to the handler as a boolean', async () => {
     const handler = vi.fn().mockResolvedValue('matches');
     toolRegistry.register({
       definition: {
         type: 'function',
         function: {
-          name: 'search_code',
+          name: 'grep_search',
           description: 'Search code',
           parameters: {
             type: 'object',
@@ -458,7 +458,7 @@ describe('ToolDispatch', () => {
       handler,
     });
 
-    const call = makeToolCall('search_code', {
+    const call = makeToolCall('grep_search', {
       output: 'count',
       query: 'harborLanternF1',
       ignore_case: 'True',

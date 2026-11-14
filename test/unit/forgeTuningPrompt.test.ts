@@ -73,8 +73,8 @@ describe('builtin execute template', () => {
       'Stop and ask after 3 failed attempts',
       'considered a hypothesis twice',
       'Never suggest cloud services or external APIs',
-      'Prefer search_code/find_files/read_file for reading code',
-      'use search_code/find_files/read_file for reading code',
+      'Prefer grep_search/find_files/read_file for reading code',
+      'use grep_search/find_files/read_file for reading code',
       'Be brief. Think only as long as the next action needs',
       'Before you call a change done, run the narrowest check',
       // Injected-text fixes: the destructive-command outcome is the turn
@@ -89,7 +89,7 @@ describe('builtin execute template', () => {
     expect(prompt).toContain(
       'Read a file before editing it, unless its current content is already in a recent tool result',
     );
-    expect(prompt).toContain('To locate code, use search_code');
+    expect(prompt).toContain('To locate code, use grep_search');
     expect(prompt).toContain('ripgrep regex; `literal: true` for plain text');
     expect(new TemplateEngine(builtinDir).render('execute', { workspaceRoot: 'N:/ws' })).toContain(
       'find_files` `pattern` resolves from this root',

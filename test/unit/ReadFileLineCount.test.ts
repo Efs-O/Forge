@@ -81,7 +81,7 @@ describe('read_file line count', () => {
         { path: target, start_line: 1, end_line: 1 },
         { signal: new AbortController().signal } as never,
       ),
-    ).rejects.toThrow(/Use search_code or the shell with a byte range/);
+    ).rejects.toThrow(/Use grep_search or the shell with a byte range/);
   });
 
   it('skips remaining batch paths after the result cap and reports each one', async () => {
@@ -122,7 +122,7 @@ describe('read_file line count', () => {
     expect(result).toContain('other');
   });
 
-  // The 50 MiB limit stays. What was wrong was the advice: `search_code` and a
+  // The 50 MiB limit stays. What was wrong was the advice: `grep_search` and a
   // byte range read text, and an Office document is a ZIP of deflated XML
   // parts while a PDF is compressed streams, so neither route gave anything
   // readable for those files — and view_image has its own 10 MiB PDF limit.
@@ -130,7 +130,7 @@ describe('read_file line count', () => {
   // Git Bash and not in the pwsh the shell tool defaults to on Windows, so an
   // advice that names only the command sends the agent to find that out.
   it.each([
-    ['text file', 'large.txt', /Use search_code or the shell with a byte range/],
+    ['text file', 'large.txt', /Use grep_search or the shell with a byte range/],
     ['DOCX', 'large.docx', /unzip -p .* word\/document\.xml.*shell: "bash"/],
     ['XLSX', 'large.xlsx', /unzip -p .* xl\/workbook\.xml.*shell: "bash"/],
     ['PPTX', 'large.pptx', /unzip -p .* ppt\/slides\/slide1\.xml.*shell: "bash"/],
@@ -146,7 +146,7 @@ describe('read_file line count', () => {
     );
   });
 
-  it('does not send a large Office document to search_code', async () => {
+  it('does not send a large Office document to grep_search', async () => {
     const target = path.join(dir, 'bigdeck.pptx');
     fs.writeFileSync(target, Buffer.alloc(5));
     const message = String(
@@ -156,7 +156,7 @@ describe('read_file line count', () => {
     );
     expect(message).toMatch(/unzip -p/);
     expect(message).toMatch(/shell: "bash"/);
-    expect(message).not.toMatch(/search_code/);
+    expect(message).not.toMatch(/grep_search/);
   });
 
   it('uses the same supported formats in the single and batch pages refusals', async () => {

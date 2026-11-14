@@ -42,7 +42,7 @@ import {
 // line once. +404 chars over lane F1 item 1.1's 60,344, so the gate number is
 // 60,748.
 // Reference measurement updated 2026-10-29 (tools-expansion lane F1, item 1.1):
-// `search_code` now takes `output` ("content" | "files" | "count"), `context`
+// `grep_search` now takes `output` ("content" | "files" | "count"), `context`
 // (0-10), `ignore_case` and `offset`, because the audit's 1,164 shell greps
 // mostly carried `-l`, `-c`, `-i` and `-A`/`-B` and this tool could answer none
 // of them. +925 chars on the 89-tool catalog over the 59,419 that lane B's
@@ -157,7 +157,7 @@ import {
 // and the non-computer-use set is 65 — 68,575 chars, 1,098 less than the 69,673
 // of 0.17.171. The retired names answer with a pointer to `edit_file`.
 // 2026-11-14: 67,906 (−669) from the streamline pass (Phase 6): read_file, shell,
-// search_code, ask_user, render_html_to_image and message_chat re-worded to drop
+// grep_search, ask_user, render_html_to_image and message_chat re-worded to drop
 // restatement and ceremony — every rule kept, including the /switch trap and the
 // numbered-read prefix warning. Headroom is now 2,694.
 const MEASURED_CHARS = 67_906;

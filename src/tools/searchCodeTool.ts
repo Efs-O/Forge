@@ -1,5 +1,5 @@
 /**
- * `search_code`: what the caller asked for, what the secret gate allows, and
+ * `grep_search`: what the caller asked for, what the secret gate allows, and
  * what the result says. The ripgrep crawl itself is `searchCodeCrawl.ts`.
  *
  * Split out of `dirTools.ts` because search reads file *contents*. A hit in
@@ -63,7 +63,7 @@ function outputModeOf(value: unknown): SearchCodeOutputMode {
   if (value === undefined || value === 'content') return 'content';
   if (value === 'files' || value === 'count') return value;
   throw new Error(
-    `search_code: output must be "content", "files" or "count", not ${JSON.stringify(value)}.`,
+    `grep_search: output must be "content", "files" or "count", not ${JSON.stringify(value)}.`,
   );
 }
 
@@ -89,7 +89,7 @@ export function makeSearchCodeTool(
     definition: {
       type: 'function',
       function: {
-        name: 'search_code',
+        name: 'grep_search',
         description:
           'Search for a ripgrep regex by default, or plain text when literal is true, across ' +
           'workspace files or a named absolute path, folder or glob outside the workspace. ' +
@@ -337,7 +337,7 @@ export function makeSearchCodeTool(
           ...(hiddenNote ? [`[Note: ${hiddenNote}]`] : []),
         ].join('\n'),
         MAX_SEARCH_RESULT_CHARS,
-        'search_code',
+        'grep_search',
         'Narrow the search with a more specific query or an `include` glob.',
       );
     },

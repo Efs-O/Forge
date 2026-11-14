@@ -1,7 +1,7 @@
 /**
  * `find_files`, plus the two things it needs: the note that explains a
  * gitignored miss, and the ripgrep crawl that lists names without reading
- * contents. `search_code` lives in `searchCodeTool.ts` — it reads contents,
+ * contents. `grep_search` lives in `searchCodeTool.ts` — it reads contents,
  * which is why the secret-path gate belongs there and not here.
  */
 import { spawn } from 'child_process';
@@ -64,13 +64,13 @@ export function missingIncludeNote(include: string, workspaceRoot: string): stri
 }
 
 /**
- * Lists workspace files matching a glob, via the same ripgrep `search_code` uses.
+ * Lists workspace files matching a glob, via the same ripgrep `grep_search` uses.
  *
  * Previously `vscode.workspace.findFiles`, which routes through VS Code's
  * indexed search service. On this workspace that reported "no files match" for
  * paths that plainly exist and are not ignored — `threejs-game-prompt/
  * package*.json` and `threejs-game-prompt/REFACTOR_PLAN.md` among them, 16
- * failures in 42 calls — while `search_code` was returning those very paths
+ * failures in 42 calls — while `grep_search` was returning those very paths
  * from the same root. The workspace sits on a mapped network drive, where that
  * index is unreliable. Two file-matching tools backed by two different engines
  * could disagree about what the workspace contains; now there is one engine,
@@ -175,7 +175,7 @@ export function makeFindFilesTool(
       function: {
         name: 'find_files',
         description:
-          'Find files by name or path using a glob pattern (e.g. "**/*.test.ts" or "src/**/index.*"). Returns matching workspace-relative paths. Matches file paths, not content — use search_code to search file contents.',
+          'Find files by name or path using a glob pattern (e.g. "**/*.test.ts" or "src/**/index.*"). Returns matching workspace-relative paths. Matches file paths, not content — use grep_search to search file contents.',
         parameters: {
           type: 'object',
           properties: {

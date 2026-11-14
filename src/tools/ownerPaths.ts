@@ -414,8 +414,8 @@ function ownerOnlyRootClause(root: string): string {
   );
 }
 
-/** The half of the rule the agent can still act on: reading these files is allowed, and `read_file` / `search_code` are the tools that do it. A refusal that named no way to read them would send the agent back to a shell one-liner for the same file, which is what happened in the re-run. */
-const OWNER_ONLY_READS = ' Reading them with `read_file` or `search_code` is allowed.';
+/** The half of the rule the agent can still act on: reading these files is allowed, and `read_file` / `grep_search` are the tools that do it. A refusal that named no way to read them would send the agent back to a shell one-liner for the same file, which is what happened in the re-run. */
+const OWNER_ONLY_READS = ' Reading them with `read_file` or `grep_search` is allowed.';
 
 /** The tail every owner-only refusal carries: who may change it, and what to do instead of hunting for another way. It names no way to CHANGE them, because for the agent there is none — a guard that refused legitimate work would send it looking for one. */
 const OWNER_ONLY_TAIL = ' Tell the user what change you want and why, and let them make it.';

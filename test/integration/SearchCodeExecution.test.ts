@@ -12,7 +12,7 @@ import {
 import { removeTreeWhenFree } from '../support/removeTempTree';
 import type { ForgeConfig } from '../../src/config/types';
 
-describe('isolated search_code process execution', () => {
+describe('isolated grep_search process execution', () => {
   let root: string;
   const fixture = path.resolve(__dirname, '../fixtures/fake-rg.mjs');
 
@@ -92,7 +92,7 @@ describe('isolated search_code process execution', () => {
     };
     expect(registry.invalidArgs(registered, args)).toBeUndefined();
     expect(args['include_ignored']).toBe(true);
-    const result = await registry.dispatch('search_code', args, new Set(['read']));
+    const result = await registry.dispatch('grep_search', args, new Set(['read']));
     expect(result).toContain('--no-ignore-vcs');
   });
 
@@ -404,7 +404,7 @@ describe('isolated search_code process execution', () => {
       { beforeMutate: () => undefined, abortSignal: controller.signal },
     );
     controller.abort();
-    await expect(pending).rejects.toThrow('search_code: cancelled');
+    await expect(pending).rejects.toThrow('grep_search: cancelled');
   });
 
   it('includes resolved command diagnostics when process startup fails', async () => {

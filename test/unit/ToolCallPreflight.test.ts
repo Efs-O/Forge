@@ -79,12 +79,12 @@ describe('invalid tool-call JSON preflight', () => {
     return messages;
   }
 
-  it('names leaked search_code markup and its unclosed output value', async () => {
+  it('names leaked grep_search markup and its unclosed output value', async () => {
     const handler = vi.fn().mockResolvedValue('matches');
     registry.register({
       definition: {
         type: 'function',
-        function: { name: 'search_code', description: 'Search', parameters: { type: 'object' } },
+        function: { name: 'grep_search', description: 'Search', parameters: { type: 'object' } },
       },
       permission: 'read',
       handler,
@@ -94,12 +94,12 @@ describe('invalid tool-call JSON preflight', () => {
     const advice =
       'Tool-call markup (</parameter) ended up inside the string value of "output", which was never closed. ' +
       'Close the value with " and the object with }, and keep tool-call markup out of the arguments, then resend.';
-    const messages = await refuse(raw, 'search_code');
+    const messages = await refuse(raw, 'grep_search');
 
     expect(invalidJsonAdvice(raw, message)).toBe(advice);
     expect(handler).not.toHaveBeenCalled();
     expect(messages[1]?.content).toBe(
-      `Error: search_code: the arguments are not valid JSON (${message}). ${advice}`,
+      `Error: grep_search: the arguments are not valid JSON (${message}). ${advice}`,
     );
     expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
   });

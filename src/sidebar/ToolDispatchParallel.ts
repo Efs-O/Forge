@@ -15,7 +15,7 @@ import type { ToolDispatchRoundContext } from './toolDispatchTypes';
 /** Only these built-in local reads may join a parallel run; this is deliberately not a name pattern. */
 const PARALLEL_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   'read_file',
-  'search_code',
+  'grep_search',
   'list_directory',
   'find_files',
   '__code_intel_get_diagnostics',

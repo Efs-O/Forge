@@ -241,7 +241,7 @@ export class ToolRegistry {
     // never ambiguous: its lowercase form is "true" or "false", and the property is declared
     // boolean. Coerce it here — `present` is the live `args` object, so the handler receives the
     // real boolean and the call simply works. Case is ignored because the 0.17.147 lab refused
-    // `search_code` `ignore_case: "True"` (Python's spelling) twice. No trimming: anything else
+    // `grep_search` `ignore_case: "True"` (Python's spelling) twice. No trimming: anything else
     // (" true", "yes", "1") stays a refusal.
     if (typeof parameters.properties === 'object' && parameters.properties !== null) {
       for (const [key, schema] of Object.entries(

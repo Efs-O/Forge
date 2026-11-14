@@ -26,7 +26,7 @@ try {
 }
 
 describe.skipIf(realRg === undefined || !gitAvailable)(
-  'search_code against the bundled ripgrep',
+  'grep_search against the bundled ripgrep',
   () => {
     let root: string;
 

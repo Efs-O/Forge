@@ -43,11 +43,11 @@ describe('benchmark file write limits', () => {
   });
 });
 
-describe('benchmark search_code contract', () => {
+describe('benchmark grep_search contract', () => {
   it('supports regex by default, literal searches and invalid-pattern guidance', async () => {
     fs.writeFileSync(path.join(root, 'search.ts'), 'target.heal(value); call foo(value);');
     const host = createBenchmarkToolHost(root);
-    const definition = host.definitions().find((item) => item.function.name === 'search_code');
+    const definition = host.definitions().find((item) => item.function.name === 'grep_search');
     expect(definition?.function.parameters.properties?.literal).toMatchObject({
       type: 'boolean',
     });
@@ -57,7 +57,7 @@ describe('benchmark search_code contract', () => {
         {
           id: 'search',
           type: 'function',
-          function: { name: 'search_code', arguments: JSON.stringify(args) },
+          function: { name: 'grep_search', arguments: JSON.stringify(args) },
         },
         new AbortController().signal,
       );

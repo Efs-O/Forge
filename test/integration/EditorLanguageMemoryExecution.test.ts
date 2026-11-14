@@ -43,7 +43,7 @@ describe('isolated editor, language, search, and memory tool execution', () => {
 
   it('executes discovery and semantic-search handlers with controlled results', async () => {
     // find_files runs ripgrep now, not vscode.workspace.findFiles — one engine
-    // shared with search_code, so the two cannot disagree about the workspace.
+    // shared with grep_search, so the two cannot disagree about the workspace.
     const stub = path.join(root, 'rg-stub.js');
     fs.writeFileSync(stub, "process.stdout.write('sample.ts');", 'utf8');
     const resolveStub = () => ({
@@ -286,7 +286,7 @@ describe('isolated editor, language, search, and memory tool execution', () => {
         { beforeMutate },
       ),
     ).resolves.toBe(
-      'Renamed to renamed\n\nNote: a text search still finds `sample` in 1 file(s) after the rename: sample.ts. Check them with search_code; they may be comments or strings, or files the language server had not loaded.',
+      'Renamed to renamed\n\nNote: a text search still finds `sample` in 1 file(s) after the rename: sample.ts. Check them with grep_search; they may be comments or strings, or files the language server had not loaded.',
     );
     expect(beforeMutate).toHaveBeenCalledWith([path.join(root, 'sample.ts')]);
     expect(apply).toHaveBeenCalledWith(workspaceEdit);

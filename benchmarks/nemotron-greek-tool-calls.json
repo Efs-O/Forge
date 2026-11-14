@@ -1,7 +1,7 @@
 [
   {"id":"greek-read-file","prompt":"Διάβασε μόνο το αρχείο seed.txt.","expected_tool":"read_file","expected_args":{"path":"seed.txt"}},
   {"id":"greek-find-files","prompt":"Βρες έως 5 αρχεία TypeScript με το μοτίβο **/*.ts.","expected_tool":"find_files","expected_args":{"pattern":"**/*.ts","max_results":5}},
-  {"id":"greek-search-code","prompt":"Αναζήτησε τη λέξη needle μόνο σε αρχεία TypeScript.","expected_tool":"search_code","expected_args":{"query":"needle","include":"**/*.ts"}},
+  {"id":"greek-search-code","prompt":"Αναζήτησε τη λέξη needle μόνο σε αρχεία TypeScript.","expected_tool":"grep_search","expected_args":{"query":"needle","include":"**/*.ts"}},
   {"id":"greek-write-file","prompt":"Γράψε ακριβώς το κείμενο γραμμή στο αρχείο out.txt.","expected_tool":"write_file","expected_args":{"path":"out.txt","content":"γραμμή\n"}},
   {"id":"greek-append-file","prompt":"Πρόσθεσε ακριβώς τη γραμμή τέλος στο seed.txt.","expected_tool":"write_file","expected_args":{"path":"seed.txt","content":"τέλος\n","mode":"append"}},
   {"id":"greek-edit-file","prompt":"Στο seed.txt αντικατάστησε το seed με έτοιμο.","expected_tool":"edit_file","expected_args":{"path":"seed.txt","old_text":"seed","new_text":"έτοιμο"}},

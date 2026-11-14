@@ -116,7 +116,7 @@ function pathKey(value: string): string {
 
 function referencesTextNote(name: string, missing: readonly string[]): string {
   return missing.length
-    ? `\n\nNote: a text search also finds \`${name}\` in ${missing.length} file(s) the language server did not report: ${missing.join(', ')}. The language server may still be loading this project; ask again in a few seconds, or check those files with search_code.`
+    ? `\n\nNote: a text search also finds \`${name}\` in ${missing.length} file(s) the language server did not report: ${missing.join(', ')}. The language server may still be loading this project; ask again in a few seconds, or check those files with grep_search.`
     : '';
 }
 
@@ -267,7 +267,7 @@ export function makeGetDocumentSymbolsTool(): RegisteredTool {
         return (
           `No symbol provider answered for ${String(args['path'] ?? 'this file')}. ` +
           'The language server may still be starting — ask again in a few seconds, or use ' +
-          'search_code. A file type with no symbol provider answers the same way.'
+          'grep_search. A file type with no symbol provider answers the same way.'
         );
       }
       if (result.length === 0) {
@@ -277,7 +277,7 @@ export function makeGetDocumentSymbolsTool(): RegisteredTool {
         return (
           'No symbols found. That is not proof the file has none: a language server that has not ' +
           'finished starting answers the same way. If you expected symbols here, ask again in a ' +
-          'few seconds, or use search_code.'
+          'few seconds, or use grep_search.'
         );
       }
       return `${formatSymbolTree(result).join('\n')}\n\n${POSITION_NOTE}`;
@@ -314,13 +314,13 @@ export function makeGetWorkspaceSymbolsTool(): RegisteredTool {
       if (result === undefined) {
         return (
           `No workspace symbol provider answered for "${query}". ` +
-          'The language server may still be starting — ask again in a few seconds, or use search_code.'
+          'The language server may still be starting — ask again in a few seconds, or use grep_search.'
         );
       }
       if (result.length === 0) {
         return (
           `No symbols match "${query}". That is not proof none exist: a language server that has ` +
-          'not finished starting answers the same way. Ask again in a few seconds, or use search_code.'
+          'not finished starting answers the same way. Ask again in a few seconds, or use grep_search.'
         );
       }
       return formatWorkspaceSymbols(result);

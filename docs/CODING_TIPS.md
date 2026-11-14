@@ -23,21 +23,20 @@
 ## RUN
 1. `cd "C:/Users/…/sessions" && python -c "…"` → refused: the write is judged from the folder the command started in. pass `cwd: "C:/Users/…/sessions"` and the command alone
 2. `node -e '… /regex/ …'` under bash → quoting dies through bash → node → regex. use plain string comparisons, or a script file
-3. `monitor_execution wait_ms: 90000` → refused: 60000 is the ceiling. reuse the returned `stdout_cursor` instead of waiting longer
-4. `… | tail -3; echo "exit: $?"` → `$?` is tail's code, not the command's; same for a background job ending `echo "ci exit: $?"`, whose notice says 0 whatever npm did. read the line the command wrote
-5. an f-string containing `\|` or `\n` inside `{…}` on Python 3.10 → SyntaxError: f-string expression part cannot include a backslash. build the escaped text into a variable first
-6. a Python scan printing `→` or `×` → UnicodeEncodeError: 'charmap' codec can't encode, stdout is cp1253. first line of the scan: `sys.stdout.reconfigure(encoding="utf-8")`
-7. `json.loads` on every line of a session log → one bad line kills the scan halfway through the file. guard each line with `try/except` and keep going
-8. `cd ../other && { … ; } > rel/file.txt; tail rel/file.txt` → a `cd` inside the line moves the cwd for every command after it, so `tail` reads the wrong folder. give later commands absolute paths
-9. a bash double-quoted string holding backticks → bash runs them as command substitution, so the program gets text I did not write. wrap the body in single quotes or a quoted heredoc
-10. a scan run with `cwd` inside `~/.forge/sessions` → refused: any command there may write into Forge's files. run it from the workspace and pass absolute paths
-11. `probe && next && next` where the probe is meant to fail → the chain stops and the later commands never run. join probes with `;`
-12. a 2nd gated call after one card expired → `... needs the approval that went unanswered earlier in this turn, so no new card was shown` → only the first card burns time
-13. a gated call batched with later gated calls → those cards and results still wait for the first; an expired card silences only that approval key. since 0.17.171 ungated calls run on
-14. expecting one approval to cover a tool or a turn → each gated call raises its own card and waits the full `approval_timeout_minutes`; budget one answer per gated call
-15. a heredoc terminator with a command after it (`MSG; echo ok`) → never seen as a terminator: the command text lands in the commit message and never runs. keep it alone on its line
-16. a result's field names are not its input names (`next_stdout_cursor` vs `stdout_cursor`) → refused: unknown arguments. the refusal lists the valid names; resend with those
-17. a field a tool does not declare → refused as unknown argument: `read_file` reads take `path`/`start_line`/`end_line`/`pages`; `edit_file` edits are `old_str`/`new_str`; `ask_user` has no `header`
+3. `… | tail -3; echo "exit: $?"` → `$?` is tail's code, not the command's; same for a background job ending `echo "ci exit: $?"`, whose notice says 0 whatever npm did. read the line the command wrote
+4. an f-string containing `\|` or `\n` inside `{…}` on Python 3.10 → SyntaxError: f-string expression part cannot include a backslash. build the escaped text into a variable first
+5. a Python scan printing `→` or `×` → UnicodeEncodeError: 'charmap' codec can't encode, stdout is cp1253. first line of the scan: `sys.stdout.reconfigure(encoding="utf-8")`
+6. `json.loads` on every line of a session log → one bad line kills the scan halfway through the file. guard each line with `try/except` and keep going
+7. `cd ../other && { … ; } > rel/file.txt; tail rel/file.txt` → a `cd` inside the line moves the cwd for every command after it, so `tail` reads the wrong folder. give later commands absolute paths
+8. a bash double-quoted string holding backticks → bash runs them as command substitution, so the program gets text I did not write. wrap the body in single quotes or a quoted heredoc
+9. a scan run with `cwd` inside `~/.forge/sessions` → refused: any command there may write into Forge's files. run it from the workspace and pass absolute paths
+10. `probe && next && next` where the probe is meant to fail → the chain stops and the later commands never run. join probes with `;`
+11. a 2nd gated call after one card expired → `... needs the approval that went unanswered earlier in this turn, so no new card was shown` → only the first card burns time
+12. a gated call batched with later gated calls → those cards and results still wait for the first; an expired card silences only that approval key. since 0.17.171 ungated calls run on
+13. expecting one approval to cover a tool or a turn → each gated call raises its own card and waits the full `approval_timeout_minutes`; budget one answer per gated call
+14. a heredoc terminator with a command after it (`MSG; echo ok`) → never seen as a terminator: the command text lands in the commit message and never runs. keep it alone on its line
+15. a result's field names are not its input names (`next_stdout_cursor` vs `stdout_cursor`) → refused: unknown arguments. the refusal lists the valid names; resend with those
+16. a field a tool does not declare → refused as unknown argument: `read_file` reads take `path`/`start_line`/`end_line`/`pages`; `edit_file` edits are `old_str`/`new_str`; `ask_user` has no `header`
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green: never run `record-ci-pass.mjs` by hand — the `ci:steps` `&&` chain writes it. run the suite after the commit it certifies
@@ -61,6 +60,7 @@
 3. comparing objects by serialized source order → false failures on property order. compare by value; array order is meaningful
 4. `expect(x).toHaveLengthLessThanOrEqual(n)` → no such matcher, so the assertion itself throws. `expect(x.length).toBeLessThanOrEqual(n)`
 5. `fs.rmSync` on a killed child's cwd → EPERM is not in `maxRetries`' retried set, so the retries do nothing. use `removeTreeWhenFree` (test/support/removeTempTree.ts): polls until removable
+6. a tool rename swept only src+test → a bench script and its JSON fixture still named the old tool, and only the full suite found it. sweep scripts/ and benchmarks/ in the same pass
 
 ## PATHS
 1. `~/.forge/sessions/<short-id>.jsonl` → no such file: logs carry the full 8-4-4-4-12 chat id. resolve a short id with a prefix glob

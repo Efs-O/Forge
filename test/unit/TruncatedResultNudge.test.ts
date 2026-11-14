@@ -7,9 +7,9 @@ function result(id: string, name: string, content: string): ChatMessage {
 }
 
 describe('nudgeTruncatedResults', () => {
-  it('nudges a truncated search_code result to narrow, not re-run', () => {
+  it('nudges a truncated grep_search result to narrow, not re-run', () => {
     const messages: ChatMessage[] = [
-      result('a', 'search_code', '=== src/a.ts ===\n> 1: match\n\n[truncated by search_code — showing 60000 of 140000 chars]'),
+      result('a', 'grep_search', '=== src/a.ts ===\n> 1: match\n\n[truncated by grep_search — showing 60000 of 140000 chars]'),
     ];
 
     const out = nudgeTruncatedResults(messages);
@@ -18,7 +18,7 @@ describe('nudgeTruncatedResults', () => {
     expect(out[0]?.content).toContain('Do not re-run the same search');
     expect(out[0]?.content).toContain('include');
     // The original marker and content are preserved, the nudge is appended.
-    expect(out[0]?.content).toContain('[truncated by search_code');
+    expect(out[0]?.content).toContain('[truncated by grep_search');
     expect(out[0]?.content).toContain('=== src/a.ts ===');
   });
 
@@ -39,7 +39,7 @@ describe('nudgeTruncatedResults', () => {
   });
 
   it('leaves a non-truncated result untouched and returns the same array', () => {
-    const messages: ChatMessage[] = [result('a', 'search_code', '=== src/a.ts ===\n> 1: match')];
+    const messages: ChatMessage[] = [result('a', 'grep_search', '=== src/a.ts ===\n> 1: match')];
     expect(nudgeTruncatedResults(messages)).toBe(messages);
   });
 
@@ -53,13 +53,13 @@ describe('nudgeTruncatedResults', () => {
   });
 
   it('does not mutate the input message object', () => {
-    const original = result('a', 'search_code', 'x\n\n[truncated by search_code — showing 1 of 9 chars]');
+    const original = result('a', 'grep_search', 'x\n\n[truncated by grep_search — showing 1 of 9 chars]');
     const messages: ChatMessage[] = [original];
 
     const out = nudgeTruncatedResults(messages);
 
     expect(out).not.toBe(messages);
-    expect(original.content).toBe('x\n\n[truncated by search_code — showing 1 of 9 chars]');
+    expect(original.content).toBe('x\n\n[truncated by grep_search — showing 1 of 9 chars]');
     expect(out[0]).not.toBe(original);
   });
 });

@@ -22,7 +22,7 @@ describe('resultLabel', () => {
   });
 
   it('falls back to the first line when a read-only call has no path', () => {
-    expect(resultLabel('search_code', 'hit one\nhit two', null)).toBe('hit one');
+    expect(resultLabel('grep_search', 'hit one\nhit two', null)).toBe('hit one');
   });
 
   it('uses only the first line of a multi-line result', () => {

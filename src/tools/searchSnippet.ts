@@ -1,12 +1,12 @@
 /**
- * Bounds on what one `search_code` match may contribute to the prompt.
+ * Bounds on what one `grep_search` match may contribute to the prompt.
  *
- * `search_code` already limits files (`max_results`), snippets per file
+ * `grep_search` already limits files (`max_results`), snippets per file
  * (`SNIPPETS_PER_FILE_LIMIT`) and emitted lines (`OUTPUT_LINE_LIMIT`) — but a
  * "line" is whatever the file says it is, and nothing bounded its length.
  * Single-line JSON defeats all three limits at once: measured across 197
  * session logs, ELEVEN calls out of 1,170 produced 96% of every byte
- * `search_code` ever returned, the worst being a 1.7 MB `object_info.json`
+ * `grep_search` ever returned, the worst being a 1.7 MB `object_info.json`
  * line — 542,853 tokens in a single tool result, several times any local
  * model's per-slot window.
  *

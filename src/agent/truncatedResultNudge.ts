@@ -19,7 +19,13 @@ import { isCapTruncated } from '../tools/resultCap';
  */
 
 /** Tools whose cap is a search breadth the model can narrow with a query/glob. */
-const SEARCH_TOOLS = new Set(['search_code', 'find_files', 'search_codebase']);
+const SEARCH_TOOLS = new Set([
+  'grep_search',
+  'find_files',
+  'search_codebase',
+  // History rows: a session saved before the rename still names `search_code`.
+  'search_code',
+]);
 
 function nudgeFor(toolName: string | undefined): string {
   if (toolName && SEARCH_TOOLS.has(toolName)) {

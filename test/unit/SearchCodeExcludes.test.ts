@@ -12,7 +12,7 @@ import {
 import { SNIPPETS_PER_FILE_LIMIT } from '../../src/tools/searchCodeTool';
 import { searchCodeRgArgs, type SearchCodeOptions } from '../../src/tools/searchCodeCrawl';
 
-describe('search_code excludes', () => {
+describe('grep_search excludes', () => {
   // Bare `.git/**` is anchored to the search root, so a monorepo's
   // `subproject/.git/` and `subproject/node_modules/` were searched anyway.
   // `find_files` always excluded these recursively, so the two tools disagreed
@@ -31,7 +31,7 @@ describe('search_code excludes', () => {
   });
 
   // But NOT the whole directory. Excluding `.forge/**` also hid config.yaml,
-  // the most-edited file in this workspace: search_code reported "no matches"
+  // the most-edited file in this workspace: grep_search reported "no matches"
   // for `num_ctx` in a file holding dozens of them.
   it('does not exclude .forge wholesale, which would hide config.yaml', () => {
     expect(SEARCH_EXCLUDES).not.toContain('!**/.forge/**');
@@ -254,7 +254,7 @@ describe('resolveSearchCodeScope', () => {
   it('does not fall back to the workspace for a missing absolute target', () => {
     expect(() =>
       resolveSearchCodeScope(path.join(os.tmpdir(), `missing-${process.pid}.py`), root),
-    ).toThrow('search_code: absolute include path does not exist');
+    ).toThrow('grep_search: absolute include path does not exist');
   });
 
   // `N:\*` and `C:\*` derived the rg root from the empty static prefix, i.e. the

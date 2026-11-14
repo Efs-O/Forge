@@ -47,7 +47,7 @@ export function ToolsTab({ model, onEdit, errorField }: Props): React.ReactEleme
           kind="list"
           onCommit={onEdit}
           errored={errorField === 'tools'}
-          placeholder="read_file, list_directory, search_code, write_file"
+          placeholder="read_file, list_directory, grep_search, write_file"
         />
       </div>
       <div className={`mm-field mm-field--wide${limitsInherited ? ' mm-field--inherited' : ''}`}>

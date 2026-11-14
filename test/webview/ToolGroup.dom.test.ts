@@ -16,7 +16,7 @@ const { resetDisclosures } = await import('../../webview-ui/src/disclosureState'
 
 const tools: AppMessage[] = [
   { id: 'one', role: 'tool', content: 'read_file → src/a.ts', toolName: 'read_file' },
-  { id: 'two', role: 'tool', content: 'search_code → TODO', toolName: 'search_code' },
+  { id: 'two', role: 'tool', content: 'grep_search → TODO', toolName: 'grep_search' },
   { id: 'three', role: 'tool', content: 'read_file → src/b.ts', toolName: 'read_file' },
 ];
 
@@ -53,7 +53,7 @@ describe('ToolGroup', () => {
 
     expect(
       [...container.querySelectorAll('.tool-row-name')].map((node) => node.textContent),
-    ).toEqual(['read_file', 'search_code', 'read_file']);
+    ).toEqual(['read_file', 'grep_search', 'read_file']);
   });
 
   it('keeps a manually opened tool group visible across a remount', () => {

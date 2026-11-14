@@ -8,10 +8,12 @@
 const READ_ONLY_TOOLS = new Set([
   'read_file',
   'list_directory',
-  'search_code',
+  'grep_search',
   'code_intel',
-  // Keep historical transcripts readable after the LSP family was merged.
+  // Keep historical transcripts readable after the LSP family was merged, and
+  // after `search_code` was renamed to `grep_search`.
   'get_diagnostics',
+  'search_code',
 ]);
 
 export function readPathArg(args?: Record<string, unknown>): string | null {

@@ -49,9 +49,9 @@ describe('streamed tool-call names', () => {
       'fetch',
       vi.fn(async () =>
         sseResponse([
-          chunk({ tool_calls: [{ index: 0, id: 'c1', function: { name: 'search_code' } }] }),
-          chunk({ tool_calls: [{ index: 0, function: { name: 'search_code', arguments: '{"query"' } }] }),
-          chunk({ tool_calls: [{ index: 0, function: { name: 'search_code', arguments: ':"x"}' } }] }),
+          chunk({ tool_calls: [{ index: 0, id: 'c1', function: { name: 'grep_search' } }] }),
+          chunk({ tool_calls: [{ index: 0, function: { name: 'grep_search', arguments: '{"query"' } }] }),
+          chunk({ tool_calls: [{ index: 0, function: { name: 'grep_search', arguments: ':"x"}' } }] }),
           chunk({}, 'tool_calls'),
           'data: [DONE]',
         ]),
@@ -61,7 +61,7 @@ describe('streamed tool-call names', () => {
     await streamChatCompletion('http://localhost:0', request as never, h);
     expect(h.onToolCalls).toHaveBeenCalledTimes(1);
     const calls = h.onToolCalls.mock.calls[0]?.[0] as { function: { name: string; arguments: string } }[];
-    expect(calls[0]?.function.name).toBe('search_code');
+    expect(calls[0]?.function.name).toBe('grep_search');
     expect(calls[0]?.function.arguments).toBe('{"query":"x"}');
   });
 
@@ -89,7 +89,7 @@ describe('streamed tool-call names', () => {
       vi.fn(async () =>
         sseResponse([
           chunk({ tool_calls: [{ index: 0, id: 'a', function: { name: 'read_file', arguments: '{}' } }] }),
-          chunk({ tool_calls: [{ index: 1, id: 'b', function: { name: 'search_code', arguments: '{}' } }] }),
+          chunk({ tool_calls: [{ index: 1, id: 'b', function: { name: 'grep_search', arguments: '{}' } }] }),
           chunk({}, 'tool_calls'),
           'data: [DONE]',
         ]),
@@ -98,6 +98,6 @@ describe('streamed tool-call names', () => {
     const h = handlers();
     await streamChatCompletion('http://localhost:0', request as never, h);
     const calls = h.onToolCalls.mock.calls[0]?.[0] as { function: { name: string } }[];
-    expect(calls.map((c) => c.function.name)).toEqual(['read_file', 'search_code']);
+    expect(calls.map((c) => c.function.name)).toEqual(['read_file', 'grep_search']);
   });
 });

@@ -61,7 +61,7 @@ export async function describePosition(
   return { ...(word ? { word } : {}), lineText, label, lineCount: document.lineCount };
 }
 
-/** Search with search_code's ripgrep executable and ignore policy. */
+/** Search with grep_search's ripgrep executable and ignore policy. */
 export async function searchSymbolFiles(name: string): Promise<string[]> {
   const folder = vscode.workspace.workspaceFolders?.[0];
   if (!folder) return [];

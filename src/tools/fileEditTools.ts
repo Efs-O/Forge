@@ -331,7 +331,7 @@ export function makeRenameSymbolTool(
         .map((file) => vscode.workspace.asRelativePath(vscode.Uri.file(file)).replace(/\\/gu, '/'))
         .sort();
       const note = files.length
-        ? `\n\nNote: a text search still finds \`${primed.name}\` in ${files.length} file(s) after the rename: ${files.join(', ')}. Check them with search_code; they may be comments or strings, or files the language server had not loaded.`
+        ? `\n\nNote: a text search still finds \`${primed.name}\` in ${files.length} file(s) after the rename: ${files.join(', ')}. Check them with grep_search; they may be comments or strings, or files the language server had not loaded.`
         : '';
       return `Renamed to ${newName}${note}`;
     },

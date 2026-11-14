@@ -227,13 +227,13 @@ describe('ActivityRow', () => {
   it('renders one named compact line per parallel call', () => {
     const parallel = [
       tool('one', { toolName: 'read_file', toolTarget: 'src/a.ts', toolResult: 'a', toolResultTotal: 1 }),
-      tool('two', { toolName: 'search_code', toolTarget: 'TODO', toolResult: 'b', toolResultTotal: 1 }),
+      tool('two', { toolName: 'grep_search', toolTarget: 'TODO', toolResult: 'b', toolResultTotal: 1 }),
     ];
     render(step({ attempts: rounds(parallel) }));
     expect(container.querySelector('.activity-row-parallel')?.textContent).toBe('+1 parallel');
     toggle();
     expect([...container.querySelectorAll('.activity-row-attempt-name')].map((node) => node.textContent))
-      .toEqual(['read_file', 'search_code']);
+      .toEqual(['read_file', 'grep_search']);
     expect([...container.querySelectorAll('.activity-row-attempt-target')].map((node) => node.textContent))
       .toEqual(['src/a.ts', 'TODO']);
     expect(container.querySelectorAll('.tool-row-name')).toHaveLength(0);

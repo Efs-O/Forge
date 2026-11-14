@@ -145,7 +145,7 @@ describe.runIf(LIVE)('lazy tool groups against a live Qwen3.8', () => {
     }
     // Real Forge always has the repo open; without it every path tool throws.
     vscode.workspace.workspaceFolders.splice(0, Infinity, { uri: vscode.Uri.file(ROOT) });
-    // The mock's appRoot is undefined, so find_files/search_code would fall back
+    // The mock's appRoot is undefined, so find_files/grep_search would fall back
     // to a bare `rg` that is not on PATH. Point it at the real VS Code app root.
     const appRoot = resolveLiveAppRoot();
     if (!appRoot) {

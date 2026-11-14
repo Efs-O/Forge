@@ -7,7 +7,7 @@ export const MAX_READ_FILE_BYTES = 50 * 1024 * 1024;
 /**
  * Refuse a file over the read limit, with the route that works on it.
  *
- * The route used to be `search_code`, or a byte range with the shell, for every
+ * The route used to be `grep_search`, or a byte range with the shell, for every
  * oversized file. That is right for text and wrong for these: an Office
  * document is a ZIP of deflated XML parts and a PDF is compressed streams, so
  * a text search finds nothing in either and a byte slice returns bytes no
@@ -40,13 +40,13 @@ export function refuseOversize(
     );
   if (extension === '.pdf')
     throw new Error(
-      `${head}search_code and a byte range read nothing useful in a PDF, and ` +
+      `${head}grep_search and a byte range read nothing useful in a PDF, and ` +
         'view_image stops at its own 10 MiB limit: split it with the shell first ' +
         '(qpdf or gs, if one is installed), then read_file or view_image with ' +
         'pages on a part.',
     );
   throw new Error(
-    `${head}Use search_code or the shell with a byte range to inspect it; line ranges and document parsing read the whole file.`,
+    `${head}Use grep_search or the shell with a byte range to inspect it; line ranges and document parsing read the whole file.`,
   );
 }
 

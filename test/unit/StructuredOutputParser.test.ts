@@ -138,7 +138,7 @@ describe('XML <function=...> tool calls in content', () => {
   const call = (query: string) =>
     [
       '<tool_call>',
-      '<function=search_code>',
+      '<function=grep_search>',
       '<parameter=query>',
       query,
       '</parameter>',
@@ -152,8 +152,8 @@ describe('XML <function=...> tool calls in content', () => {
 
   it('parses each block, values as raw strings', () => {
     expect(parseStructuredOutput(text)).toEqual([
-      { name: 'search_code', arguments: { query: '(no profile)', max_results: '20' } },
-      { name: 'search_code', arguments: { query: 'no profile', max_results: '20' } },
+      { name: 'grep_search', arguments: { query: '(no profile)', max_results: '20' } },
+      { name: 'grep_search', arguments: { query: 'no profile', max_results: '20' } },
     ]);
   });
 

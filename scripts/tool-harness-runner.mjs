@@ -15,7 +15,7 @@ const EXAMPLE_ARGS = {
   write_file: { path: '.forge/tool-test-write.txt', content: 'Forge tool-call smoke test\n' },
   list_directory: { path: 'src' },
   find_files: { pattern: 'src/**/*.ts', max_results: 5 },
-  search_code: { query: 'ToolRegistry', include: 'src/**/*.ts', max_results: 5 },
+  grep_search: { query: 'ToolRegistry', include: 'src/**/*.ts', max_results: 5 },
   search_codebase: { query: 'tool registry dispatch', top_k: 3, scope_glob: 'src/**/*.ts' },
   get_diagnostics: { path: 'src/extension.ts' },
   get_document_symbols: { path: 'src/tools/ToolRegistry.ts' },

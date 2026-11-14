@@ -267,7 +267,7 @@ describe('groups ("boards") — F7', () => {
         },
         workers: {
           think: false,
-          tools: ['read_file', 'search_code'],
+          tools: ['read_file', 'grep_search'],
           tool_call_limits: { shell: 0 },
           max_output_tokens: 8192,
         },
@@ -287,7 +287,7 @@ describe('groups ("boards") — F7', () => {
           sampling: { top_k: 64, temperature: 0.55, min_p: 0.0 },
           num_ctx: 32768,
           think: false,
-          tools: ['read_file', 'search_code'],
+          tools: ['read_file', 'grep_search'],
           tool_call_limits: { shell: 0 },
           max_output_tokens: 8192,
         },
@@ -320,7 +320,7 @@ describe('groups ("boards") — F7', () => {
     expect(merged.spawn).toMatchObject({ n_batch: 512, flash_attn: true, type_k: 'q8_0' });
     expect(merged.num_ctx).toBe(32768);
     expect(merged.think).toBe(false); // from 'workers' group
-    expect(merged.tools).toEqual(['read_file', 'search_code']);
+    expect(merged.tools).toEqual(['read_file', 'grep_search']);
     expect(merged.tool_call_limits).toEqual({ shell: 0 });
     expect(merged.max_output_tokens).toBe(8192);
   });

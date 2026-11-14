@@ -1,5 +1,5 @@
 /**
- * The ripgrep crawl behind `search_code`: spawn it, parse its JSON events, and
+ * The ripgrep crawl behind `grep_search`: spawn it, parse its JSON events, and
  * stop it once the caller's page is full.
  *
  * Split out of `searchCodeTool.ts` on 2026-10-29 (tools-expansion lane F1, item
@@ -186,7 +186,7 @@ export async function searchWorkspaceText(
 
     const onAbort = (): void => {
       child.kill();
-      finish(new Error('search_code: cancelled'));
+      finish(new Error('grep_search: cancelled'));
     };
 
     const finish = (result: SearchCodeFound | Error): void => {
@@ -290,7 +290,7 @@ export async function searchWorkspaceText(
         : '(VS Code app root unavailable)';
       finish(
         new Error(
-          `search_code: failed to start ripgrep command "${resolution.command}": ${err.message}. ` +
+          `grep_search: failed to start ripgrep command "${resolution.command}": ${err.message}. ` +
             `Bundled candidates checked: ${attempted}`,
         ),
       );
@@ -318,7 +318,7 @@ export async function searchWorkspaceText(
       }
 
       const detail = stderr.trim() || `ripgrep exited with code ${code}`;
-      finish(new Error(`search_code: ${detail}`));
+      finish(new Error(`grep_search: ${detail}`));
     });
   });
 }

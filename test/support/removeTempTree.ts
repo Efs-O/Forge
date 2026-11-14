@@ -1,4 +1,4 @@
-// Why this exists: a search_code call that the caller cancels rejects as soon as
+// Why this exists: a grep_search call that the caller cancels rejects as soon as
 // the abort fires, but the child it spawned is only signalled at that moment. On
 // Windows a directory cannot be removed while a process still lists it as its
 // working directory, so the teardown that runs right after the assertion loses a
