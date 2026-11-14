@@ -61,6 +61,7 @@
 4. `expect(x).toHaveLengthLessThanOrEqual(n)` → no such matcher, so the assertion itself throws. `expect(x.length).toBeLessThanOrEqual(n)`
 5. `fs.rmSync` on a killed child's cwd → EPERM is not in `maxRetries`' retried set, so the retries do nothing. use `removeTreeWhenFree` (test/support/removeTempTree.ts): polls until removable
 6. a tool rename swept only src+test → a bench script and its JSON fixture still named the old tool, and only the full suite found it. sweep scripts/ and benchmarks/ in the same pass
+7. a describe-level `path.join(dir, 'x')`, dir set in beforeEach → runs at collection while dir is '': a RELATIVE path, and the test overwrote a real repo file. build temp paths in the test
 
 ## PATHS
 1. `~/.forge/sessions/<short-id>.jsonl` → no such file: logs carry the full 8-4-4-4-12 chat id. resolve a short id with a prefix glob
@@ -81,9 +82,8 @@
 11. a tool-result string quoted from a rep's staging file → it is the build that rep ran, not the current one. read the source before filing it as a live defect
 
 ## DELEGATE
-1. `notify_user` with a `user_prompt` field → refused: `unknown argument "user_prompt"; this tool takes: message`. only the Blender tools echo it; resend with `message` alone
-2. `notify_user` with no remote chat bound → `Shown in the VS Code window only`: a local toast, never a phone ping. do not report that the user was notified remotely
-3. `manage_jobs` check `{kind: "none"}` → since 0.17.171 `get` says `runs every tick; on_change delivers nothing`: the job is inert. mute or restore with `on_change`, never a new check
-4. `manage_jobs run_now` → runs in whichever window holds the scheduler lease (here the real repo's), ~40 s later. verify in `jobs/runs/<name>.jsonl`; do not re-call `run_now`
-5. `ask_agent` with a `target_id` → that session: `existing_session` is live, `new_task` is a new background one; without it → the linked session. `/link` binds the owner's panel chat
-6. `list_delegation_targets` → lists VRAM-loading local models beside cloud ones; picking a local one loads weights and fights the chat model for the GPU. prefer the cloud list
+1. `notify_user` with no remote chat bound → `Shown in the VS Code window only`: a local toast, never a phone ping. do not report that the user was notified remotely
+2. `manage_jobs` check `{kind: "none"}` → since 0.17.171 `get` says `runs every tick; on_change delivers nothing`: the job is inert. mute or restore with `on_change`, never a new check
+3. `manage_jobs run_now` → runs in whichever window holds the scheduler lease (here the real repo's), ~40 s later. verify in `jobs/runs/<name>.jsonl`; do not re-call `run_now`
+4. `ask_agent` with a `target_id` → that session: `existing_session` is live, `new_task` is a new background one; without it → the linked session. `/link` binds the owner's panel chat
+5. `list_delegation_targets` → lists VRAM-loading local models beside cloud ones; picking a local one loads weights and fights the chat model for the GPU. prefer the cloud list

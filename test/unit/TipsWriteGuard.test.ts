@@ -117,46 +117,49 @@ describe('an exact duplicate is refused before anything is written', () => {
 });
 
 describe('the count and the every-tenth review ping', () => {
-  const file = path.join(dir, 'docs', 'CODING_TIPS.md');
+  // Resolved per call, never at collection time: a describe-level const runs
+  // while `dir` is still '', and path.join('', 'docs', 'CODING_TIPS.md') is a
+  // RELATIVE path — that wrote the fixture over the repo's own tips table.
+  const file = (): string => path.join(dir, 'docs', 'CODING_TIPS.md');
   const writeEntries = (entries: number): string => {
     const body = Array.from(
       { length: entries },
       (_, i) => `${i + 1}. tip ${i + 1} → mistake ${i + 1}`,
     ).join('\n');
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, `## EDIT\n${body}\n`, 'utf8');
+    fs.mkdirSync(path.dirname(file()), { recursive: true });
+    fs.writeFileSync(file(), `## EDIT\n${body}\n`, 'utf8');
     return `## EDIT\n${body}\n`;
   };
 
   it('says how many entries the shipped list does not have', () => {
     const one = writeEntries(1);
-    expect(tipsWriteNote(file, one, shippedPath)).toContain('1 entry in docs/CODING_TIPS.md');
+    expect(tipsWriteNote(file(), one, shippedPath)).toContain('1 entry in docs/CODING_TIPS.md');
     const nine = writeEntries(9);
-    expect(tipsWriteNote(file, nine, shippedPath)).toContain('9 entries in docs/CODING_TIPS.md');
+    expect(tipsWriteNote(file(), nine, shippedPath)).toContain('9 entries in docs/CODING_TIPS.md');
   });
 
   it('pings on the crossing of a tenth, once — not on every write that sits at one', () => {
     const nine = writeEntries(9);
-    expect(tipsWriteNote(file, nine, shippedPath)).not.toContain('tell the owner now');
+    expect(tipsWriteNote(file(), nine, shippedPath)).not.toContain('tell the owner now');
     const ten = writeEntries(10);
-    expect(tipsWriteNote(file, nine, shippedPath)).toContain('tell the owner now');
+    expect(tipsWriteNote(file(), nine, shippedPath)).toContain('tell the owner now');
     // A re-word while the count sits at 10 stays quiet: nothing crossed.
-    expect(tipsWriteNote(file, ten, shippedPath)).not.toContain('tell the owner now');
-    expect(tipsWriteNote(file, writeEntries(11), shippedPath)).not.toContain('tell the owner now');
+    expect(tipsWriteNote(file(), ten, shippedPath)).not.toContain('tell the owner now');
+    expect(tipsWriteNote(file(), writeEntries(11), shippedPath)).not.toContain('tell the owner now');
     // A write that adds two tips across the boundary still fires, exactly once.
     const nineAgain = writeEntries(9);
     writeEntries(11);
-    expect(tipsWriteNote(file, nineAgain, shippedPath)).toContain('tell the owner now');
+    expect(tipsWriteNote(file(), nineAgain, shippedPath)).toContain('tell the owner now');
     const nineteen = writeEntries(19);
     writeEntries(20);
-    expect(tipsWriteNote(file, nineteen, shippedPath)).toContain('tell the owner now');
+    expect(tipsWriteNote(file(), nineteen, shippedPath)).toContain('tell the owner now');
     expect(ten.length).toBeGreaterThan(0);
   });
 
   it('says nothing when the project table holds nothing the shipped one does not', () => {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, SHIPPED, 'utf8');
-    expect(tipsWriteNote(file, SHIPPED, shippedPath)).toBe('');
+    fs.mkdirSync(path.dirname(file()), { recursive: true });
+    fs.writeFileSync(file(), SHIPPED, 'utf8');
+    expect(tipsWriteNote(file(), SHIPPED, shippedPath)).toBe('');
   });
 
   it('says nothing for any other file', () => {
