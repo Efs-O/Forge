@@ -94,7 +94,7 @@ function starterContent(): string {
   return source.slice(from, close);
 }
 
-/** FORGE.md minus its inline tips copy: that copy is the tips table, not a second home. */
+/** FORGE.md as the prompt sees it; the split on MARK is harmless now that the copy is gone. */
 function projectProse(): string | undefined {
   const forge = path.join(root, PROJECT);
   if (!fs.existsSync(forge)) return undefined; // gitignored: absent on a fresh clone.
@@ -185,24 +185,23 @@ describe('injected instruction sources do not say the same rule twice', () => {
   });
 });
 
-describe('the inline tips copy in FORGE.md stays the tips file', () => {
-  it('holds the tips table byte for byte, or is absent', () => {
+describe('FORGE.md carries no second copy of the tips table', () => {
+  // The table used to be hand-copied into FORGE.md so an agent that forgot to read the
+  // file still saw the rules. `codingTips.ts` now injects it — own allowance, pinned per
+  // conversation — so the copy became a second home for the same text: a student chat
+  // counted two identical RUN-3 lines in one prompt, about 12 KB a turn. This guard now
+  // keeps it out rather than keeping the copy honest.
+  it('holds neither the markers nor the table itself', () => {
     const forge = path.join(root, PROJECT);
     if (!fs.existsSync(forge)) return; // gitignored, skipped on a fresh clone.
     const forgeText = read(PROJECT);
-    const start = forgeText.indexOf(MARK);
-    expect(start, 'FORGE.md must carry the marked tips copy').toBeGreaterThan(-1);
-    const end = forgeText.indexOf('\nTIPS-INJECT-END', start);
-    expect(end, 'the marked tips copy is not closed').toBeGreaterThan(start);
-    const copied = forgeText.slice(forgeText.indexOf('\n\n', start) + 2, end);
-    const tableOf = (text: string): string => {
-      const at = text.indexOf('\n## ');
-      expect(at, 'no section heading to compare').toBeGreaterThan(-1);
-      return text.slice(at).trim();
-    };
-    expect(
-      tableOf(copied),
-      'the inline copy drifted from docs/CODING_TIPS.md: run scripts/lab-sync/sync_tips.py',
-    ).toEqual(tableOf(read(TIPS)));
+    expect(forgeText, 'the marked copy is back; the code already injects the table').not.toContain(
+      MARK,
+    );
+    expect(forgeText, 'an orphan TIPS-INJECT-END was left behind').not.toContain(
+      'TIPS-INJECT-END',
+    );
+    const header = read(TIPS).split(/\r?\n/)[0];
+    expect(forgeText, 'the tips table was pasted in without markers').not.toContain(header);
   });
 });
