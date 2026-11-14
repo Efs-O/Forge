@@ -165,7 +165,7 @@ import {
 // end_line — the first shipped tip), "When omitted," on shell's cwd (which read as an
 // instruction to omit it), and that shader_check opens no page and uses no network or
 // GPU (an operational fact, not filler). Headroom is now 2,626.
-const MEASURED_CHARS = 67_974;
+const MEASURED_CHARS = 68_014;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.

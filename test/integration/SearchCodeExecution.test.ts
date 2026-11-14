@@ -70,7 +70,12 @@ describe('isolated grep_search process execution', () => {
       type: 'string',
       enum: ['content', 'files', 'count'],
     });
-    expect(properties['context']).toMatchObject({ type: 'integer', minimum: 0, maximum: 10 });
+    // No declared bounds on `context`, on purpose: an out-of-range value is clamped by
+    // the tool and named in the result, not refused by the shared validator.
+    expect(properties['context']).toMatchObject({ type: 'integer' });
+    expect(properties['context']).not.toHaveProperty('minimum');
+    expect(properties['context']).not.toHaveProperty('maximum');
+    expect(String(properties['context']?.['description'])).toContain('More is clamped to 30');
     expect(properties['ignore_case']).toMatchObject({ type: 'boolean' });
     expect(properties['include_ignored']).toEqual({
       type: 'boolean',
@@ -248,6 +253,41 @@ describe('isolated grep_search process execution', () => {
     const defaulted = await tool().handler({ query: 'flag fixture', include: '**/*.ts' });
     expect(defaulted).toContain('--context 2');
     expect(defaulted).toContain('--case-sensitive');
+  });
+
+  // A caller that wants more context than this tool carries is not wrong about what it
+  // wants, only about how much is available. Refusing it spent 20 rounds across 10 days
+  // of session logs to re-send a search that was about to run anyway, so the ask is
+  // clamped and the result names the number it actually got.
+  it('clamps a context ask above the ceiling and says so instead of refusing it', async () => {
+    const asked = await tool().handler({
+      query: 'flag fixture',
+      include: '**/*.ts',
+      context: 400,
+    });
+    expect(asked).toContain('--context 30');
+    expect(asked).toContain('asked for 400 lines');
+    expect(asked).toContain('this tool carries 0-30');
+  });
+
+  it('carries a context ask inside the ceiling with no note about it', async () => {
+    const asked = await tool().handler({
+      query: 'flag fixture',
+      include: '**/*.ts',
+      context: 25,
+    });
+    expect(asked).toContain('--context 25');
+    expect(asked).not.toContain('asked for');
+  });
+
+  it('clamps a context ask below zero to the match lines and says so', async () => {
+    const asked = await tool().handler({
+      query: 'flag fixture',
+      include: '**/*.ts',
+      context: -3,
+    });
+    expect(asked).toContain('--context 0');
+    expect(asked).toContain('asked for -3 lines');
   });
 
   // Real ripgrep matches `NEEDLE` for `needle` only with --ignore-case, so the

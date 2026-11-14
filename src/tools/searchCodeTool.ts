@@ -40,22 +40,48 @@ export { SNIPPETS_PER_FILE_LIMIT } from './searchCodeCrawl';
 
 /** What `context` is when the caller does not name one: two lines, as it always was. */
 const DEFAULT_CONTEXT_LINES = 2;
-/** The most context this tool will carry, so one call cannot ask for a whole file. */
-const MAX_CONTEXT_LINES = 10;
+/**
+ * The most context this tool will carry, so one call cannot ask for a whole file.
+ *
+ * Outside this range the value is CLAMPED here, not refused: the schema declares no
+ * `minimum`/`maximum` for `context` on purpose. A model that wants forty lines of
+ * context is not wrong about what it wants, only about how much this tool carries,
+ * and refusing made it spend a round re-sending the same search. 20 refused calls in
+ * 10 days of session logs; the largest ask was 30 lines.
+ */
+const MAX_CONTEXT_LINES = 30;
 
 /**
  * The call's numbers, inside the range the schema declares.
  *
- * `ToolRegistry.invalidArgs` refuses a missing required field and a wrong-type
- * boolean or array, but not an out-of-range integer, so a model that sends
- * `context: 400` reaches this handler and has to be answered with something
- * sane rather than a crawl that prints the file forty times over.
+ * The shared validator (`ToolRegistry.invalidArgs`) refuses an out-of-range integer
+ * only where the schema declares `minimum`/`maximum`. `context` declares neither, so
+ * `context: 400` reaches here and is clamped; `max_results` keeps its declared bounds
+ * and its refusal, which is the right answer there — asking for five hundred results
+ * is a mistake the caller should see, not one quietly rewritten.
  */
 function boundedInt(value: unknown, fallback: number, minimum: number, maximum: number): number {
   if (value === undefined) return fallback;
   const parsed = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(maximum, Math.max(minimum, Math.trunc(parsed)));
+}
+
+/**
+ * When the caller asked for more context than this tool carries, or less than none,
+ * the result names the number it actually got, instead of quietly answering a
+ * different question than the one that was asked.
+ */
+function contextClampNote(requested: unknown, used: number): string | undefined {
+  if (requested === undefined) return undefined;
+  const parsed = typeof requested === 'number' ? requested : Number(requested);
+  if (!Number.isFinite(parsed)) return undefined;
+  const asked = Math.trunc(parsed);
+  if (asked >= 0 && asked <= MAX_CONTEXT_LINES) return undefined;
+  return (
+    `context: asked for ${asked} lines; this tool carries 0-${MAX_CONTEXT_LINES}, ` +
+    `so each match shows ${used}.`
+  );
 }
 
 /** A wrong `output` is refused here, not by `invalidArgs`: that checks types, not enums. */
@@ -122,11 +148,10 @@ export function makeSearchCodeTool(
             },
             context: {
               type: 'integer',
-              minimum: 0,
-              maximum: MAX_CONTEXT_LINES,
               description:
                 `Lines of context around each match (0-${MAX_CONTEXT_LINES}, default ` +
-                `${DEFAULT_CONTEXT_LINES}). Ignored by output "files" and "count".`,
+                `${DEFAULT_CONTEXT_LINES}). More is clamped to ${MAX_CONTEXT_LINES} and said ` +
+                'in the result; below 0 becomes 0. Ignored by output "files" and "count".',
             },
             ignore_case: {
               type: 'boolean',
@@ -165,6 +190,7 @@ export function makeSearchCodeTool(
       const offset = boundedInt(args['offset'], 0, 0, 1_000_000);
       const output = outputModeOf(args['output']);
       const contextLines = boundedInt(args['context'], DEFAULT_CONTEXT_LINES, 0, MAX_CONTEXT_LINES);
+      const contextNote = contextClampNote(args['context'], contextLines);
       const ignoreCase = args['ignore_case'] === true;
       const includeIgnored = args['include_ignored'] === true;
 
@@ -333,6 +359,7 @@ export function makeSearchCodeTool(
       return capResultText(
         [
           body,
+          ...(contextNote ? [`[${contextNote}]`] : []),
           ...(pagingNote ? [`[${pagingNote}]`] : []),
           ...(hiddenNote ? [`[Note: ${hiddenNote}]`] : []),
         ].join('\n'),
