@@ -69,16 +69,15 @@ export function makeRenderHtmlToImageTool(deps: RenderHtmlDeps): RegisteredTool 
           'Render an HTML page. mode "preview": shows you how a page you wrote (canvas, WebGL, ' +
           'three.js, animation, any UI) renders — runs its ' +
           'scripts headless, uses the real GPU (which may briefly slow a local model on the same GPU), ' +
-          'and can load libraries from public hosts. It opens nothing for the ' +
-          'user: it renders off-screen inside Forge, and only you see the result. ' +
-          'console.log from the page is how to read a value out. Returns page errors, console ' +
-          'output and screenshots to you only; nothing is saved or sent. ' +
+          'and can load libraries from public hosts. It opens nothing for the user; only you ' +
+          'see the result. console.log from the page is how to read a value out; page errors, ' +
+          'console output and screenshots come back to you only, nothing is saved or sent. ' +
           'mode "image" (default): render an HTML/CSS/SVG page to a PNG and send it to the ' +
-          'remote chat watching this turn — for posters, cards, invites, diagrams, infographics; ' +
+          'remote chat watching this turn — posters, cards, invites, diagrams, infographics. ' +
           'image mode runs no JavaScript and loads nothing external, so inline everything ' +
-          '(system fonts, base64 images). Use generate_image for photographs and painterly scenes. ' +
-          'mode "shader_check": compile WGSL or GLSL shader text from a workspace file and return ' +
-          'the compiler errors; it opens no page and uses no network or GPU.',
+          '(system fonts, base64 images); use generate_image for photographs and painterly ' +
+          'scenes. mode "shader_check": compile WGSL or GLSL shader text from a workspace file ' +
+          'and return the compiler errors.',
         parameters: {
           type: 'object',
           properties: {

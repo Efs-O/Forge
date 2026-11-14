@@ -158,7 +158,7 @@ function definition(windows: boolean, shell: ShellKind): ToolDefinition {
     cwd: {
       type: 'string',
       description:
-        'Workspace-relative or absolute working directory. Omitted, every call starts in the workspace root, so a command needs no leading cd there. Set it when the project is in a subfolder. Relative paths inside the command resolve from cwd, not from the workspace root.',
+        'Workspace-relative or absolute working directory. Omit it: every call starts in the workspace root, so a command needs no leading cd there. Set it when the project is in a subfolder. Relative paths inside the command resolve from cwd.',
     },
     timeout_ms: {
       type: 'integer',
@@ -186,10 +186,10 @@ function definition(windows: boolean, shell: ShellKind): ToolDefinition {
         `Run one command line in ${name}${windows ? ' on Windows' : ''}; rg on PATH is the binary search_code and find_files use.` +
         ' Search or filter many files in ONE command (rg, globs, pipes), not one call per file. Destructive commands require approval; unsafe commands are refused.' +
         (windows && shell === 'bash'
-          ? ' bash\'s /tmp is not where node or other Windows programs look for /tmp: put scratch files in a workspace-relative directory. bash turns a lone /switch into a path (schtasks /query reaches schtasks as C:/Program Files/Git/query): run Windows programs that take /switches by setting "shell": "pwsh" on the call (a separate argument, not part of command), or write //query. Run PowerShell code by setting "shell": "pwsh", never powershell -Command inside bash: bash expands its $variables first, and Git\'s usr/bin comes before System32 there (Start-Process notepad finds Git\'s notepad script, not notepad.exe).'
+          ? ' bash\'s /tmp is not where Windows programs such as node look for /tmp: put scratch files in a workspace-relative directory. bash turns a lone /switch into a path (schtasks /query reaches schtasks as C:/Program Files/Git/query): for a Windows program taking /switches set "shell": "pwsh" on the call, or write //query. Run PowerShell by setting "shell": "pwsh", never powershell -Command inside bash: bash expands $variables first, and Git\'s usr/bin shadows System32 there (Start-Process notepad finds Git\'s notepad script, not notepad.exe).'
           : '') +
         (windows
-          ? ' Admin (UAC) prompts need the owner at the PC: elevate only for drivers, services, HKLM or Program Files, put every admin step in one script, and have it log to the workspace or C:\\Users\\Public, never C:\\Windows\\Temp.'
+          ? ' Admin (UAC) prompts need the owner at the PC: elevate only for drivers, services, HKLM or Program Files; put every admin step in one script logging to the workspace or C:\\Users\\Public, never C:\\Windows\\Temp.'
           : ''),
       parameters: {
         type: 'object',
@@ -306,7 +306,7 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
             cwd: {
               type: 'string',
               description:
-                'Workspace-relative or absolute working directory. Omitted, every call starts in the workspace root, so a command needs no leading cd there. Set it when the project is in a subfolder. Relative paths inside the command resolve from cwd, not from the workspace root.',
+                'Workspace-relative or absolute working directory. Omit it: every call starts in the workspace root, so a command needs no leading cd there. Set it when the project is in a subfolder. Relative paths inside the command resolve from cwd.',
             },
             timeout_ms: {
               type: 'integer',

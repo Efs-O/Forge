@@ -175,19 +175,17 @@ export function makeAskUserTool(
       function: {
         name: 'ask_user',
         description:
-          'Ask the user a question and BLOCK until they answer, with no timeout -- ' +
-          'do not use it to check in during unattended work; when work can continue ' +
-          'under a stated assumption, state it, notify_user, and keep going. Keep ' +
-          'options short. For related decisions in one round, pass `questions` rather ' +
-          'than one combined options list: each entry carries its own prompt and ' +
-          'options, and the top-level prompt only heads them. Use multiSelect only ' +
-          'when the choices can be combined; choices that contradict each other ' +
-          'belong in a single-select question. Mark an option such as "None of these" ' +
-          'as exclusive. Mark the option you recommend with recommended: true, list it ' +
-          'first; say what it leads to; the badge marks it recommended. Keep that word out of ' +
-          'labels. ' +
-          'The user can always add a note or write their own answer; ' +
-          'do not add an “Other” option.',
+          'Ask the user a question and BLOCK until they answer, with no timeout -- do not use ' +
+          'it to check in during unattended work; when work can continue under a stated ' +
+          'assumption, state it, notify_user, and keep going. Keep options short. For related ' +
+          'decisions in one round pass `questions` (each entry carries its own prompt and ' +
+          'options; the top-level prompt only heads them) rather than one combined options ' +
+          'list. Use multiSelect only when the choices can be combined; choices that contradict ' +
+          'each other belong in a single-select question. Mark an option such as "None of ' +
+          'these" as exclusive. Mark the option you recommend with recommended: true and list ' +
+          'it first; say what it leads to; the badge marks it recommended. Keep that word out ' +
+          'of labels. The user can always add a note or write their own answer; do not add an ' +
+          '“Other” option.',
         parameters: {
           type: 'object',
           properties: {

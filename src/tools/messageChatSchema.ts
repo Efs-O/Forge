@@ -133,7 +133,7 @@ export function messageChatDefinition(flags: MessageChatActionFlags): Registered
     function: {
       name: 'message_chat',
       description:
-        "Message another Forge chat. `to` is a chat id, `#N` from `list`, or words from the chat's title — `#N` and title words mean this window's chats; a chat in another Forge window on this machine takes its id, or its first 8 or more characters when no other chat's id starts the same way. Omit `to` to reach the other chat when exactly one other chat is running (or open); otherwise an omitted `to` answers the chat in another window that last wrote to this one. No `list` needed first. A running chat reads it at its next tool round; an idle chat starts a turn. Replies arrive the same way. `list`: show every chat in every window, open ones first." +
+        "Message another Forge chat. `to` is a chat id, `#N` from `list`, or words from its title — `#N` and title words mean this window's chats; a chat in another Forge window takes its id, or a unique prefix of 8 or more characters. Omit `to` when exactly one other chat is running (or open); otherwise an omitted `to` answers the chat in another window that last wrote to this one. No `list` needed first. A running chat reads it at its next tool round; an idle chat starts a turn; replies arrive the same way. `list`: show every chat in every window, open ones first." +
         ' `action` defaults to `send` when a `message` is given, so a message alone is enough.' +
         ' A chat that has ingested untrusted content (a web page, a web search) is asked to ' +
         'approve an outgoing send, so a card may sit between the read and the send.' +
@@ -146,7 +146,7 @@ export function messageChatDefinition(flags: MessageChatActionFlags): Registered
             type: 'string',
             maxLength: 200,
             description:
-              "Another chat only: use its chat id, its #N tab number from list, or words from its title. #N and title words reach only this window's chats; a chat in another window takes its id or a unique prefix of 8 or more characters. Never target this chat. A closed chat must be read with action: view.",
+              'Another chat only: its chat id, its #N tab number from list, or words from its title — never this chat. A chat in another window takes its id or a unique prefix of 8 or more characters. A closed chat must be read with action: view.',
           },
           message: {
             type: 'string',

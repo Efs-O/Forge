@@ -75,7 +75,7 @@ describe('isolated search_code process execution', () => {
     expect(properties['include_ignored']).toEqual({
       type: 'boolean',
       description:
-        "Also search files the workspace .gitignore excludes (default false). A broad glob such as **/* can already reach gitignored files; set this to be sure. The tool's own exclusions (.git, node_modules, dist, out, and Forge's embeddings index, session logs and remote inbox) still apply.",
+        "Also search files the workspace .gitignore excludes (default false). A broad glob such as **/* can already reach them; set this to be sure. The tool's own exclusions (.git, node_modules, dist, out, Forge's embeddings index, session logs, remote inbox) still apply.",
     });
     expect(properties['offset']).toMatchObject({ type: 'integer', minimum: 0 });
     expect(tool().definition.function.parameters).toMatchObject({ additionalProperties: false });

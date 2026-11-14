@@ -140,7 +140,7 @@ describe('message_chat tool contract and handler', () => {
           type: 'string',
           maxLength: 200,
           description:
-            'Another chat only: use its chat id, its #N tab number from list, or words from its title. #N and title words reach only this window\'s chats; a chat in another window takes its id or a unique prefix of 8 or more characters. Never target this chat. A closed chat must be read with action: view.',
+            'Another chat only: its chat id, its #N tab number from list, or words from its title — never this chat. A chat in another window takes its id or a unique prefix of 8 or more characters. A closed chat must be read with action: view.',
         },
         message: {
           type: 'string',
@@ -157,7 +157,7 @@ describe('message_chat tool contract and handler', () => {
     expect(toDescription).toContain('chat id');
     expect(toDescription).toContain('#N tab number from list');
     expect(toDescription).toContain('words from its title');
-    expect(toDescription).toContain('Never target this chat');
+    expect(toDescription).toContain('never this chat');
     expect(toDescription).toContain('closed chat must be read with action: view');
     expect((tool.definition.function as { description: string }).description).toContain(
       "`list`: show every chat in every window, open ones first.",

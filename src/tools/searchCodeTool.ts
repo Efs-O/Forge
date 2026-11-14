@@ -92,13 +92,12 @@ export function makeSearchCodeTool(
         name: 'search_code',
         description:
           'Search for a ripgrep regex by default, or plain text when literal is true, across ' +
-          'workspace files or an explicitly named absolute path, folder, or glob outside the ' +
-          'workspace. Relative includes are rooted at the workspace; absolute globs are rooted ' +
-          'at the path before the first wildcard. output:"files" lists matching paths only, ' +
-          '"count" gives per-file match counts, "content" (the default) shows match lines with ' +
-          'context. Set include_ignored to search files excluded by workspace gitignore rules. ' +
-          'A result that could not show every matching file names the offset to call next. ' +
-          'Ripgrep regex does not support lookaround or backreferences.',
+          'workspace files or a named absolute path, folder or glob outside the workspace. ' +
+          'Relative includes are rooted at the workspace; absolute globs at the path before the ' +
+          'first wildcard. output:"files" lists paths only, "count" gives per-file counts, ' +
+          '"content" (default) shows match lines with context. Set include_ignored to search ' +
+          'gitignored files. A result that could not show every matching file names the offset ' +
+          'to call next. Ripgrep regex does not support lookaround or backreferences.',
         parameters: {
           type: 'object',
           properties: {
@@ -110,17 +109,16 @@ export function makeSearchCodeTool(
             include: {
               type: 'string',
               description:
-                'Glob pattern of files to include, e.g. "**/*.ts". Defaults to "**/*". ' +
-                'Relative patterns are anchored at the workspace root. An absolute path, ' +
-                'folder, or glob can target outside the workspace.',
+                'Glob of files to include, e.g. "**/*.ts" (default "**/*"), anchored at the ' +
+                'workspace root. An absolute path, folder or glob can target outside it.',
             },
             output: {
               type: 'string',
               enum: ['content', 'files', 'count'],
               description:
-                '"content" (default) prints match lines; "files" prints matching paths only ' +
-                '(cheaper, and where to look next is usually the whole question); "count" ' +
-                'prints path:matches per file.',
+                '"content" (default) prints match lines; "files" prints paths only (cheaper — ' +
+                'where to look next is usually the whole question); "count" prints ' +
+                'path:matches per file.',
             },
             context: {
               type: 'integer',
@@ -137,13 +135,13 @@ export function makeSearchCodeTool(
             include_ignored: {
               type: 'boolean',
               description:
-                "Also search files the workspace .gitignore excludes (default false). A broad glob such as **/* can already reach gitignored files; set this to be sure. The tool's own exclusions (.git, node_modules, dist, out, and Forge's embeddings index, session logs and remote inbox) still apply.",
+                "Also search files the workspace .gitignore excludes (default false). A broad glob such as **/* can already reach them; set this to be sure. The tool's own exclusions (.git, node_modules, dist, out, Forge's embeddings index, session logs, remote inbox) still apply.",
             },
             max_results: {
               type: 'integer',
               description:
-                'Maximum number of matching FILES to return (default 20), in every output ' +
-                'mode. The result says when more files matched than it could show.',
+                'Max matching FILES to return (default 20) in every output mode. The result ' +
+                'says when more files matched than it showed.',
             },
             offset: {
               type: 'integer',

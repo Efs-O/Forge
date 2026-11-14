@@ -29,8 +29,8 @@ const read = async (args: Record<string, unknown>) =>
 describe('read_file line count', () => {
   it('states numbered is a top-level option applied to every reads section', () => {
     const numbered = makeReadFileTool().definition.function.parameters?.properties['numbered'];
-    expect(numbered?.description).toContain('Top-level option only');
-    expect(numbered?.description).toContain('do not put it inside a reads item');
+    expect(numbered?.description).toContain('Top-level only');
+    expect(numbered?.description).toContain('never inside a reads item');
     expect(numbered?.description).toContain('every section of a reads call');
   });
 

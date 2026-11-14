@@ -156,7 +156,11 @@ import {
 // probe, against 10,969 uses of `edit_file`), so the maximal catalog is 89 tools
 // and the non-computer-use set is 65 — 68,575 chars, 1,098 less than the 69,673
 // of 0.17.171. The retired names answer with a pointer to `edit_file`.
-const MEASURED_CHARS = 68_575;
+// 2026-11-14: 67,906 (−669) from the streamline pass (Phase 6): read_file, shell,
+// search_code, ask_user, render_html_to_image and message_chat re-worded to drop
+// restatement and ceremony — every rule kept, including the /switch trap and the
+// numbered-read prefix warning. Headroom is now 2,694.
+const MEASURED_CHARS = 67_906;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.
