@@ -31,10 +31,12 @@ import * as path from 'path';
 
 import { clampUtf8 } from './forgeInstructionsChain';
 
-/** The shipped table is the vendor's: it gets room for the whole list. */
-export const SHIPPED_TIPS_ALLOWANCE = 16_000;
+/** The shipped table is the vendor's: it gets room for the whole list. Sized to hold
+ *  a full 180-entry table (`CodingTipsDoc.test.ts`'s cap): 90 entries measured 12.7 KB
+ *  on 2026-11-14, so an allowance under 25 KB would truncate a table the cap allows. */
+export const SHIPPED_TIPS_ALLOWANCE = 32_000;
 /** The project table grows one line per recorded mistake, so it is capped on its own. */
-export const PROJECT_TIPS_ALLOWANCE = 8_000;
+export const PROJECT_TIPS_ALLOWANCE = 16_000;
 export const PROJECT_TIPS_RELATIVE_PATH = 'docs/CODING_TIPS.md';
 
 /**
