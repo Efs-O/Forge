@@ -1,5 +1,12 @@
 # Forge — Recent Changes
 
+## 0.17.180
+
+**A summary that quotes a tool call is no longer thrown away.**
+
+- Automatic compaction failed three times in a row on 2026-11-14 while the conversation kept growing, until the window was closed, reopened, and the compaction run by hand. The guard that rejects a model answering the summarization request with a tool call instead of a summary was reading the whole summary, so a summary that merely quoted a tool call — `"tool": "read_file"` — was thrown out as unusable. The three rejected attempts were 40,387, 42,954 and 13,446 characters: real summaries, killed by a substring. A conversation about tools produces summaries that quote tools, so in that chat every compaction was a coin flip, and after each failure the automatic attempts were held off while the window grew from 232k to 237k of its 262k.
+- The guard now reads only the first 200 characters, where a call standing in place of a summary begins. A call is still rejected, including when the model writes a short preamble first, and an answer that is nothing but JSON is still rejected by the checks that read the whole text.
+
 ## 0.17.179
 
 **A saved setting takes effect as written.**
