@@ -35,6 +35,7 @@ const ALLOW_LIST = [
   'resources/media/music_sa3.py',
   'resources/media/music_analyze.py',
   'resources/skills/**',
+  'resources/tips/CODING_TIPS.md',
 ];
 
 const REQUIRED_VSIX_FILES = [
@@ -49,6 +50,7 @@ const REQUIRED_VSIX_FILES = [
   'resources/media/music_analyze.py',
   'resources/skills/video-clip/SKILL.md',
   'resources/skills/music-track/SKILL.md',
+  'resources/tips/CODING_TIPS.md',
 ];
 
 /** Return VSIX entries that are not explicitly approved for shipping. */

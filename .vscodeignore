@@ -59,6 +59,10 @@ skills-lab/**
 !resources/skills/**/SKILL.md
 !resources/skills/**/*.md
 !resources/skills/**/*.py
+# The shipped coding-tips table (`resources/tips/`): `**/*.md` below the root strips
+# it, and an agent that cannot see the table re-makes the mistakes it lists. The VSIX
+# contents are checked by `test/unit/CodingTipsInjection.test.ts`.
+!resources/tips/CODING_TIPS.md
 # Runtime Python adapters and the LTX graph skeleton are loaded from the
 # extension folder; exclude only their tests from the shipped package.
 !resources/media/media_job.py

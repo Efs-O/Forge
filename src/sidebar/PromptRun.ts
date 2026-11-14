@@ -15,6 +15,7 @@ import type { ChatCompletionRequest, ChatMessage, ToolCall, ToolDefinition } fro
 import type { IBackendPool } from '../backend/BackendPool';
 import type { TemplateEngine } from '../llm/TemplateEngine';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
+import { loadCodingTips } from '../llm/codingTips';
 import type { SidebarProviderEvents } from './AgentLoop';
 import type { HostToWebview } from './messageBridge';
 import { streamModelChatCompletion } from '../llm/ChatClient';
@@ -232,6 +233,9 @@ export async function runPromptToMarkdown(
           // as the engine (several prompt-shape tests do), and a missing catalog
           // is the same as no catalog: no block, no skills.
           ctx.templateEngine?.skillsCatalogFor?.(undefined),
+          // A one-shot has no rounds before its own system prompt is captured, so a
+          // live read here is already frozen for every round it spends.
+          loadCodingTips(ctx.forgeLoader?.root)?.text,
         ),
         selectedModel.system_prompt,
         selectedModel.system_prompt_mode,

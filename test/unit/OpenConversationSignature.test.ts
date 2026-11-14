@@ -113,6 +113,10 @@ describe('open conversation signature', () => {
       (value: ConversationRuntime) =>
         (value.plan = { items: [{ text: 'step', status: 'pending' }], updatedAt: 3 }),
     ],
+    [
+      'coding_tips_pin',
+      (value: ConversationRuntime) => (value.codingTipsPin = { text: 'tips', windowStart: 0 }),
+    ],
     ['display_diffs', (value: ConversationRuntime) => (value.displayDiffs = [])],
     ['active_time_ms', (value: ConversationRuntime) => (value.active_time_ms = 10)],
     ['active_started_at', (value: ConversationRuntime) => (value.active_started_at = 10)],
@@ -122,10 +126,7 @@ describe('open conversation signature', () => {
     ['last_output_tokens', (value: ConversationRuntime) => (value.last_output_tokens = 10)],
     ['model_request_count', (value: ConversationRuntime) => (value.model_request_count = 1)],
     ['tool_call_count', (value: ConversationRuntime) => (value.tool_call_count = 1)],
-    [
-      'approval_rules',
-      (value: ConversationRuntime) => (value.approval_rules = ['cross_chat']),
-    ],
+    ['approval_rules', (value: ConversationRuntime) => (value.approval_rules = ['cross_chat'])],
     ['clanker', (value: ConversationRuntime) => (value.clanker = true)],
   ] as const)('changes the signature when %s changes', (_field, mutate) => {
     const value = conversation();

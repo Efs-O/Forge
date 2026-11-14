@@ -38,6 +38,7 @@ import {
   type TurnContextState,
 } from './turnContext';
 import { pinForgeInstructions } from './forgeInstructionsPin';
+import { pinCodingTips } from './codingTipsPin';
 import { formatCompactionResumeNote } from './compactionTypes';
 import { terminalCommandTracker } from '../tools/TerminalCommandTracker';
 import { toolOutputLimits } from '../tools/toolOutputLimits';
@@ -309,6 +310,8 @@ export async function runModelTurn(
           forgeInstructions: instructions.system,
           workspaceIsProjectRoot,
           ...(skillsCatalog !== undefined ? { skillsCatalog } : {}),
+          // Re-evaluated every round: compaction can move the window mid-turn (codingTipsPin.ts).
+          codingTips: pinCodingTips(conv, ctx.forgeLoader?.root),
           turnContext,
           getToolDefinitions: buildToolDefinitions,
         });

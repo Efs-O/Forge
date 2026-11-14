@@ -362,6 +362,19 @@ export class ArchivedSessions {
     writeFileAtomicSync(this.indexPath, JSON.stringify(rows));
   }
 
+  /**
+   * Rebuild a conversation from its append-only log.
+   *
+   * Only the transcript is recoverable: `SessionLogger` skips the system prompt,
+   * so nothing built from it comes back — not compaction, not the plan, not
+   * either prompt-head pin. That is the right outcome for the pins, not an
+   * oversight: a chat this route rebuilds is cold, so its first request pays the
+   * whole prefill anyway, and both pin modules renew to the CURRENT text on that
+   * turn. Restoring a pin here would be inert or worse: a saved `windowStart` of
+   * any other value cannot match the restored 0, so the pin is replaced on the
+   * first turn anyway, and a saved 0 would freeze a weeks-old block into a chat
+   * that has no compaction at all.
+   */
   private readLog(id: string, meta: ArchivedSessionMeta): ConversationPersisted | undefined {
     const file = path.join(this.logsDirectory, `${id}.jsonl`);
     if (!fs.existsSync(file)) {

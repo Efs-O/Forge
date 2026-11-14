@@ -45,6 +45,10 @@ Workspace root: {{ workspaceRoot }}
 {{ forgeInstructions }}
 </project_instructions>
 {% endif %}
+{% if codingTips %}<coding_tips>
+{{ codingTips }}
+</coding_tips>
+{% endif %}
 {% if selection %}<selected_code>
 ```
 {{ selection }}

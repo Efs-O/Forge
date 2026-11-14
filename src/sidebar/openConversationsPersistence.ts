@@ -64,6 +64,7 @@ const OPEN_SIGNATURE_FIELDS = [
   'model_request_count',
   'tool_call_count',
   'forge_instructions_pin',
+  'coding_tips_pin',
   'title_source',
   'origin_agent',
   'untrusted_since_ms',
@@ -103,6 +104,7 @@ function signatureFor(
   displayQuestionRecords: unknown,
   displayNotices: unknown,
   forgeInstructionsPin: unknown,
+  codingTipsPin: unknown,
 ): string {
   const historySignature = `${conversation.updatedAt}:${conversation.title}:${conversation.messages.length}:${JSON.stringify(conversation.agentLinks ?? {})}`;
   const compaction = conversation.compaction;
@@ -135,6 +137,7 @@ function signatureFor(
     conversation.model_request_count ?? null,
     conversation.tool_call_count ?? null,
     forgeInstructionsPin ?? null,
+    codingTipsPin ?? null,
     conversation.title_source ?? null,
     conversation.origin_agent ?? null,
     // The untrusted-content flag is part of the signature because it is a fact
@@ -164,6 +167,7 @@ export function openConversationSignature(conversation: ConversationRuntime): st
     conversation.displayQuestionRecords,
     conversation.displayNotices,
     conversation.forgeInstructionsPin,
+    conversation.codingTipsPin,
   );
 }
 
@@ -174,6 +178,7 @@ function persistedOpenConversationSignature(conversation: ConversationPersisted)
     conversation.display_question_records,
     conversation.display_notices,
     conversation.forge_instructions_pin,
+    conversation.coding_tips_pin,
   );
 }
 

@@ -104,6 +104,12 @@ export function buildTemplateContext(
   projectRoot?: boolean,
   /** The conversation's frozen skills catalog; absent means no block at all. */
   skillsCatalog?: string,
+  /**
+   * The conversation's frozen tips block (`codingTipsPin.ts`), never a live read:
+   * the table is the one instruction file an agent edits mid-turn, and a live read
+   * would rewrite the prompt head on the next tool round.
+   */
+  codingTips?: string,
 ): Record<string, string> {
   const ctx: Record<string, string> = {};
   // `activeFile` is deliberately NOT a template variable any more. Rendering it
@@ -120,6 +126,9 @@ export function buildTemplateContext(
   }
   const projectInstructions = forgeLoader?.instructionsFor(activeFile);
   if (projectInstructions) ctx['forgeInstructions'] = projectInstructions;
+  // Its own budget, not the instruction chain's: a repository that fills FORGE.md
+  // to the chain cap must not be able to evict the tips table (see codingTips.ts).
+  if (codingTips) ctx['codingTips'] = codingTips;
   // The caller passes the string it froze for this conversation, never a live
   // re-read: re-rendering per round would move the prompt head on a skill install.
   if (skillsCatalog) ctx['skillsCatalog'] = skillsCatalog;

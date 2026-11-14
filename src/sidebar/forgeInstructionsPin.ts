@@ -17,17 +17,14 @@
  * windowed out.
  */
 
+import { z } from 'zod';
+
 import type { ChatMessage } from '../llm/types';
 import type { ConversationRuntime } from './sessionTypes';
 import { compactionWindowStart } from './compactionWindow';
+import { forgeInstructionsPinSchema } from './pinSchemas';
 
-/** `text` is '' when no FORGE.md applies. */
-export interface ForgeInstructionsPin {
-  text: string;
-  windowStart: number;
-  /** The newest text delivered by a note, and the message that carries it. */
-  announced?: { text: string; messageIndex: number };
-}
+export type ForgeInstructionsPin = z.infer<typeof forgeInstructionsPinSchema>;
 
 const NOTE_HEAD = '[FORGE.md changed during this chat]';
 

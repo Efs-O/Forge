@@ -36,6 +36,7 @@ const todaysFiles = [
   'resources/media/music_analyze.py',
   'resources/skills/video-clip/SKILL.md',
   'resources/skills/music-track/SKILL.md',
+  'resources/tips/CODING_TIPS.md',
 ];
 
 describe('VSIX contents allow-list', () => {

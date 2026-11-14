@@ -151,6 +151,7 @@ export function persistedToRuntime(p: ConversationPersisted): ConversationRuntim
     ...(p.forge_instructions_pin !== undefined
       ? { forgeInstructionsPin: copyPin(p.forge_instructions_pin) }
       : {}),
+    ...(p.coding_tips_pin !== undefined ? { codingTipsPin: { ...p.coding_tips_pin } } : {}),
     ...(p.display_diffs !== undefined
       ? { displayDiffs: p.display_diffs.map((diff) => ({ ...diff })) }
       : {}),
@@ -210,6 +211,7 @@ function conversationToPersisted(c: ConversationRuntime): ConversationPersisted 
     ...(c.forgeInstructionsPin !== undefined
       ? { forge_instructions_pin: copyPin(c.forgeInstructionsPin) }
       : {}),
+    ...(c.codingTipsPin !== undefined ? { coding_tips_pin: { ...c.codingTipsPin } } : {}),
     ...(c.displayDiffs !== undefined
       ? { display_diffs: c.displayDiffs.map((diff) => ({ ...diff })) }
       : {}),

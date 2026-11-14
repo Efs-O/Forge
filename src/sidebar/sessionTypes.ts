@@ -4,6 +4,8 @@
 
 import { z } from 'zod';
 import type { CompactionState } from './compactionTypes';
+import { codingTipsPinSchema, forgeInstructionsPinSchema } from './pinSchemas';
+import type { CodingTipsPin } from './codingTipsPin';
 import type { ForgeInstructionsPin } from './forgeInstructionsPin';
 import type { ContextTrimState } from '../agent/toolResultContext';
 import type { PromptAnchor } from '../util/contextBudget';
@@ -249,14 +251,9 @@ export const conversationPersistedBaseSchema = z.object({
       updatedAt: z.number().int(),
     })
     .optional(),
-  forge_instructions_pin: z
-    .object({
-      text: z.string(),
-      windowStart: z.number().int().min(0),
-      announced: z.object({ text: z.string(), messageIndex: z.number().int() }).strict().optional(),
-    })
-    .strict()
-    .optional(),
+  forge_instructions_pin: forgeInstructionsPinSchema.optional(),
+  // The tips block this chat froze (`codingTipsPin.ts`); optional so old records parse.
+  coding_tips_pin: codingTipsPinSchema.optional(),
   // Optional migration field: previews written by older Forge versions were
   // only live webview state and therefore were not recoverable after a sync.
   display_diffs: z.array(displayDiffSchema).optional(),
@@ -384,6 +381,7 @@ export interface ConversationRuntime {
   plan?: ConversationPlan;
   /** FORGE.md text this chat's system prompt renders; see forgeInstructionsPin.ts. */
   forgeInstructionsPin?: ForgeInstructionsPin;
+  codingTipsPin?: CodingTipsPin;
   /**
    * The skills catalog this conversation's system prompt renders, frozen when it
    * was first built (`src/skills/skillsService.ts`).

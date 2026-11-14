@@ -45,14 +45,14 @@ Read this whole file once per turn, before your first read, search, edit, write,
 
 ## EDIT
 1. an `edit_file` whose `old_str` is a heading → the heading disappears when `new_str` omits it, orphaning the text under it. re-include the heading in `new_str`
-2. `apply_line_edits` against a range read earlier in the turn → refused: operation is stale, expected_lines do not match. re-read the range and edit in the same round
+2. `apply_line_edits` or `edit_file` anchored on text from before a formatter pass or earlier in the turn → refused: stale. re-read after `prettier --write`, edit in the same round
 3. an `old_str` rebuilt from wrapped prose → refused: not found. the wrap is a real newline, and a sentence that starts mid-line cannot be anchored mid-sentence: copy the whole physical line
 4. a rename that lengthens an identifier → a line passes printWidth 100 and fails the formatter gate. after any rename: `git diff -U0 | grep '^+' | awk 'length > 101'`, re-wrap in the same pass
 5. `apply_line_edits` with `expected_lines` invented rather than copied → refused: has N lines but the range is M. the refusal prints the current lines verbatim; copy them from there
 6. `apply_line_edits` on `docs/TOOL_COVERAGE.md` → `ToolHarness.test.ts` diffs it against a fresh generation and normalises only `Generated:`. restore_file it after a demo
 7. a multi-line string edit that drops the `+` between two literals → the parse error names a later line, not the missing one. after editing a joined description, re-read the block
 8. an `edit_file` whose `new_str` turns out to be the text already there → reports Applied, nothing changes, and the fix I meant never lands. diff the file, not the reply
-9. an `edit_file` whose `old_str` is a header plus its first body line, `new_str` only the header → the body line is deleted. same when appending a numbered tip: re-include the anchored item
+9. an `edit_file` where `old_str` spans more than `new_str` replaces → the extra line is deleted or the next line glues on. end both anchors at the same point; re-include an anchored body line
 10. deleting entries from a numbered list by replacing a block → the renumbering duplicated one entry and silently dropped another. rewrite the section's whole tail, then read it back
 
 ## TEST

@@ -43,6 +43,12 @@ export interface PrepareModelTurnMessagesInput {
    * disabled or none were discovered, and the prompt gains no block.
    */
   skillsCatalog?: string;
+  /**
+   * The chat's frozen tips block (`codingTipsPin.ts`), not a live read: the tips
+   * table is the instruction file an agent edits during a turn, and a live read
+   * would rewrite the prompt head on the next tool round.
+   */
+  codingTips?: string | undefined;
   turnContext: TurnContextState;
   getToolDefinitions: () => ToolDefinition[];
 }
@@ -77,6 +83,7 @@ export function prepareModelTurnMessages(
     input.activeFile,
     input.workspaceIsProjectRoot,
     input.skillsCatalog,
+    input.codingTips,
   );
   // The live file would rewrite the prompt head on every FORGE.md edit.
   delete templateContext['forgeInstructions'];

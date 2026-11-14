@@ -302,6 +302,26 @@ describe('ArchivedSessions', () => {
     }
   });
 
+  it('restores a logged chat without either prompt-head pin, so its first turn pins the current text', () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-archived-'));
+    const logs = path.join(root, 'logs');
+    fs.mkdirSync(logs);
+    fs.writeFileSync(
+      path.join(logs, 'pinned.jsonl'),
+      [
+        { type: 'session_start', timestamp_ms: 1, workspace_path: 'C:/repo' },
+        { role: 'user', content: 'start' },
+      ]
+        .map((row) => JSON.stringify(row))
+        .join('\n'),
+    );
+    const stored = new ArchivedSessions(path.join(root, 'storage'), 'C:/repo', logs).read('pinned');
+    expect(stored).toBeDefined();
+    const runtime = persistedToRuntime(stored!);
+    expect(runtime.codingTipsPin).toBeUndefined();
+    expect(runtime.forgeInstructionsPin).toBeUndefined();
+  });
+
   it('keeps repeated user messages but collapses a full replayed legacy block', () => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-archived-'));
     const logs = path.join(root, 'logs');
@@ -391,14 +411,18 @@ describe('ArchivedSessions', () => {
       updatedAt: 2,
       messages: [{ role: 'user', content: 'hello' }],
     };
-    fs.writeFileSync(
-      path.join(archive.directory, 'chat-1.json'),
-      JSON.stringify(conversation),
-    );
+    fs.writeFileSync(path.join(archive.directory, 'chat-1.json'), JSON.stringify(conversation));
     fs.writeFileSync(
       path.join(archive.directory, 'index.json'),
       JSON.stringify([
-        { id: 'chat-1', title: 'hello man', createdAt: 1, updatedAt: 2, messageCount: 1, source: 'body' },
+        {
+          id: 'chat-1',
+          title: 'hello man',
+          createdAt: 1,
+          updatedAt: 2,
+          messageCount: 1,
+          source: 'body',
+        },
       ]),
     );
 
