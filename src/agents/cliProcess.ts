@@ -12,6 +12,7 @@ import {
   needsWindowsCmdShellWrap,
   unwrapNpmCmdShim,
 } from './windowsCmdShim';
+import { protectProcessTree, sweepProtectedTree } from '../util/windowsJobKeeper';
 
 export interface SpawnCliProcessOptions {
   executable: string;
@@ -227,7 +228,7 @@ export function spawnCliProcess(
       ` cwd=${options.cwd}` +
       ` pathSource=${invocation.pathSource}`,
   );
-  return spawn(invocation.file, invocation.args, {
+  const proc = spawn(invocation.file, invocation.args, {
     cwd: options.cwd,
     env: environment,
     stdio: [options.stdin ?? 'ignore', 'pipe', 'pipe'],
@@ -240,6 +241,10 @@ export function spawnCliProcess(
     ...(process.platform !== 'win32' ? { detached: true } : {}),
     ...(invocation.windowsCmdWrapped ? { windowsVerbatimArguments: true } : {}),
   });
+  // A CLI agent forks its own subprocesses, and on Windows those escape a
+  // `taskkill /T` when their creator exits (see windowsJobKeeper.ts).
+  protectProcessTree(proc);
+  return proc;
 }
 
 /** Resolves on the first process exit or spawn error. */
@@ -250,10 +255,67 @@ export function waitForCliProcessExit(proc: ChildProcess): Promise<CliProcessExi
   });
 }
 
+/** What `signalWindowsTree` asks for, so a test can watch the order on any OS. */
+export interface WindowsTreeDeps {
+  spawnTaskkill?: (pid: number) => ChildProcess;
+  sweepJob?: (pid: number | undefined) => boolean;
+  settle?: (done: () => void, ms: number) => void;
+}
+
 /**
- * Terminates a Forge-owned CLI process tree. Windows runs `taskkill /T /F`
- * and resolves when it returns; POSIX sends SIGTERM then SIGKILL after a grace
- * period. Cleanup never waits longer than six seconds.
+ * Kill one Windows process tree: the job sweep, then `taskkill /T /F`.
+ *
+ * The sweep goes out first on purpose. The keeper reads a single pipe in order,
+ * and the child's own `exit` event asks for a `release` — the "it finished on
+ * its own" path. `kill` ahead of that means the keeper sees kill-then-release
+ * and the survivors die; a release that lands first would leave them running.
+ *
+ * `taskkill /T` still runs, for the trees this module never protected: a
+ * command started before the keeper was up, or a job whose assignment failed.
+ * It walks the tree from the live parent, so the parent must not die first —
+ * killing it with `proc.kill()` beforehand left every grandchild running (a
+ * timed-out `sleep 20` under bash, a CLI agent's own subprocesses). The parent's
+ * exit is not the signal either: the tree is gone only when taskkill returns.
+ */
+export function signalWindowsTree(
+  proc: ChildProcess,
+  onDone: () => void,
+  deps: WindowsTreeDeps = {},
+): void {
+  const sweep = deps.sweepJob ?? sweepProtectedTree;
+  const spawnTaskkill =
+    deps.spawnTaskkill ??
+    ((pid: number): ChildProcess =>
+      spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+        shell: false,
+        stdio: 'ignore',
+        windowsHide: true,
+      }));
+  const settle = deps.settle ?? ((done: () => void, ms: number): void => void setTimeout(done, ms));
+  sweep(proc.pid);
+  const pid = proc.pid;
+  if (pid === undefined) {
+    settle(onDone, 0);
+    return;
+  }
+  const killer = spawnTaskkill(pid);
+  const fallback = (): void => {
+    try {
+      proc.kill();
+    } catch {
+      // Already gone; taskkill's failure was "process not found".
+    }
+    settle(onDone, 250);
+  };
+  killer.once('exit', (code) => (code === 0 ? settle(onDone, 250) : fallback()));
+  killer.once('error', fallback);
+}
+
+/**
+ * Terminates a Forge-owned CLI process tree. Windows sweeps the job object (see
+ * `windowsJobKeeper.ts`) and runs `taskkill /T /F`, resolving when it returns;
+ * POSIX sends SIGTERM then SIGKILL after a grace period. Cleanup never waits
+ * longer than six seconds.
  */
 export function terminateProcessTree(proc: ChildProcess): Promise<void> {
   return new Promise<void>((resolve) => {
@@ -265,26 +327,7 @@ export function terminateProcessTree(proc: ChildProcess): Promise<void> {
     };
 
     if (process.platform === 'win32' && proc.pid) {
-      // taskkill /T walks the tree from the live parent, so the parent must
-      // not die first. Killing it with proc.kill() beforehand left every
-      // grandchild running (a timed-out `sleep 20` under bash, a CLI agent's
-      // own subprocesses). The parent's exit is not the signal either: the
-      // tree is gone only when taskkill returns.
-      const killer = spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F'], {
-        shell: false,
-        stdio: 'ignore',
-        windowsHide: true,
-      });
-      const fallback = (): void => {
-        try {
-          proc.kill();
-        } catch {
-          // Already gone; taskkill's failure was "process not found".
-        }
-        setTimeout(finish, 250);
-      };
-      killer.once('exit', (code) => (code === 0 ? setTimeout(finish, 250) : fallback()));
-      killer.once('error', fallback);
+      signalWindowsTree(proc, finish);
     } else {
       proc.once('exit', finish);
       proc.once('error', finish);

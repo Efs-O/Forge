@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { spawn } from 'child_process';
 import { terminateCliProcessTree } from '../agents/cliProcess';
+import { protectProcessTree } from '../util/windowsJobKeeper';
 import { assertSpawnCwd, normalizeSpawnCwd } from '../util/processSpawn';
 import { getLogger } from '../util/logger';
 import { backgroundRegistry, type BackgroundRegistry } from './backgroundRegistry';
@@ -69,6 +70,10 @@ export class BackgroundExecutionManager {
       // over a caller-supplied value, matching the foreground path.
       env: { ...globalThis.process.env, ...options.env, NO_COLOR: '1', FORCE_COLOR: '0' },
     });
+    // The reported defect this answers: `stop_execution` on a background bash
+    // command killed the recorded pid and reported success, while the command's
+    // own child kept running. The job object is what makes "stopped" mean gone.
+    protectProcessTree(process);
     const execution: BackgroundExecution = {
       id: `exec-${randomUUID()}`,
       command: options.command,

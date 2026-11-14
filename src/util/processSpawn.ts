@@ -1,6 +1,7 @@
 import * as child_process from 'child_process';
 import * as fs from 'fs';
 import { terminateCliProcessTree } from '../agents/cliProcess';
+import { protectProcessTree } from './windowsJobKeeper';
 import { RollingOutputCap } from './outputCap';
 
 /**
@@ -126,6 +127,10 @@ export function spawnAndWait(
       // emit no ANSI. NOT CI=true — that changes some runners' semantics.
       env: { ...process.env, ...extraEnv, NO_COLOR: '1', FORCE_COLOR: '0' },
     });
+    // A timeout or an abort must take the command's whole tree, and on Windows
+    // `taskkill /T` misses a child whose creator already exited: a timed-out
+    // `sleep 20` under bash outlived the call (lab BUG-27).
+    protectProcessTree(proc);
 
     const finish = (result: SpawnResult | Error): void => {
       if (settled) return;
