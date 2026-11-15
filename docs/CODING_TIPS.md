@@ -37,6 +37,9 @@
 14. a result's field names are not its input names (`next_stdout_cursor` vs `stdout_cursor`) → refused: unknown arguments. the refusal lists the valid names; resend with those
 15. a field a tool does not declare → refused: `edit_file` `edits[]` items take only `old_str`/`new_str`/`replace_all` (`path` once at top); `ask_user` `header` is per-question, not top-level
 16. `stop_execution` on a background `npm run ci` → the wrapper dies, the child tree lives and holds the ci-lock, so the next run waits forever: `MSYS_NO_PATHCONV=1 taskkill /PID <top> /T /F`
+17. `npm test 2>&1 > run.log` → vitest writes failures to stderr, so they print to the terminal and the file holds only the summary: grep finds no FAIL. write `> run.log 2>&1`
+18. `npx eslint test/unit/x.test.ts` → "none of those TSConfigs include this file": the lint script is `eslint src webview-ui`, so tests have no typed-lint config. lint `src` only
+19. an approval-gated command inside `A && B && C` → the card can expire with the owner away and B/C never run. restore a tracked file with `git show HEAD:path > path`: no card
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green: never run `record-ci-pass.mjs` by hand — the `ci:steps` `&&` chain writes it. run the suite after the commit it certifies
@@ -56,7 +59,7 @@
 
 ## TEST
 1. a harness that only emits calls, or a threshold measured by a script whose pair list differs from the gate's → the number certifies neither. dispatch the calls; measure with the gate's own list
-2. a flaky test → do not raise the timeout. await the promise that ends the work, then assert: fix it at the lifecycle boundary
+2. a flaky test → do not raise the timeout: `child.once('exit')` attached after an `await` misses the event, so that await never settles. await the promise that ends the work
 3. comparing objects by serialized source order → false failures on property order. compare by value; array order is meaningful
 4. `expect(x).toHaveLengthLessThanOrEqual(n)` → no such matcher, so the assertion itself throws. `expect(x.length).toBeLessThanOrEqual(n)`
 5. `fs.rmSync` on a killed child's cwd → EPERM is not in `maxRetries`' retried set, so the retries do nothing. use `removeTreeWhenFree` (test/support/removeTempTree.ts): polls until removable
