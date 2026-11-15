@@ -1,5 +1,15 @@
 # Forge — Recent Changes
 
+## 0.17.181
+
+**A stopped command now takes every leftover with it, and a deleted job stays deleted.**
+
+- Stopping a command in a freshly opened window could still leave its child running, which is what 0.17.178 was supposed to have fixed. The helper that holds the job said it was ready, but its very first job was slower than the ones after it, and Git Bash creates the real child about 140 ms after a spawn — measured 1 leak in 10 tries, the child born 49 ms too late to join. The helper now creates and closes a throwaway job for itself before it says ready: 0 leaks in 40 tries after.
+- A helper that retired between the two halves of a stop used to clear the kill flag before closing the job, so exactly the survivors this helper exists to catch were let go. A stop now holds the helper open until the tree has been taken down, and a helper warmed but never given a job retires on schedule instead of holding about 75 MB for the whole window.
+- The helper's own error reports never reached the log. Its script tested a bare word instead of the variable, so PowerShell ran it as a command and threw the report away — a job that was never created stayed invisible, with an orphan outliving its stop as the only symptom. It now reports, and the log says which Win32 code it hit.
+- A background job you delete in one window could come back in another: the summary that was already running wrote its state file after the delete, and nothing ever removed a state file whose job was gone. Writers now check the job still exists, so a deleted job's state file and run log are not recreated.
+- The coding-tips block that is pinned into every conversation was being cut off: the size ceiling still assumed the older, smaller allowance, so a table within its budget was truncated. The ceiling is now derived from the allowances themselves, so the two ends cannot drift apart.
+
 ## 0.17.180
 
 **A summary that quotes a tool call is no longer thrown away.**
