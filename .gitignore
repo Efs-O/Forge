@@ -46,6 +46,7 @@ docs/*
 !docs/OWNERS.md
 !docs/WORKSPACE_FORENSICS.md
 !docs/CODING_TIPS.md
+!docs/FORGE_TOOL_BUGS.md
 # The agent-task llama job reads this at run time (AGENT_TASK_JOBS_PLAN phase 5).
 !docs/LLAMACPP_UPDATE.md
 # Reference lifted out of README.md in 0.15.4 so the store page stops being

@@ -78,7 +78,7 @@
 4. scripting over `tool_calls` rows → the keys are `name`, `input`, `raw_arguments`. guessing `args` returns null — print one row's keys first
 5. attributing a log row or a file write to one chat → other chats share the workspace and the files. attribute by session id, read from the row, before counting
 6. reading a `tool_calls` row printed via `json.dumps` → `\n` there is a real newline in the argument, not text the tool got. read the raw value before calling a call malformed
-7. a session-log pattern matching nothing: backtick-anchored → only the template line matches (agents write `- tool:`); `"tool": "x"` → 0 hits, the lines are compact JSON, no space after the colon
+7. a session-log pattern that matches nothing → a backtick-anchored one hits only the template (agents write `- tool:`); `"tool": "x"` misses: rows are compact JSON. anchor on `tool:`
 8. blaming a mistake on a filtered log window from memory → the rows I "remember" may be hours older. print each hit's wall-clock time before attributing it
 9. a Fisher p quoted without its variant → the same 2×2 gives 0.21 strict vs 1.0 standard two-sided. name the variant; re-run the same function, never a library default
 10. a tool call with no result row for minutes → not a hang: an unanswered approval card writes its `gate` row only when answered or expired (one timeout period). read the `gate` rows first
