@@ -175,6 +175,37 @@ describe('the owner switches the job to none while the summary is being written'
   });
 });
 
+describe('a job deleted while its summary is being written', () => {
+  it('clears nothing on the success path: a deleted job owns no state file', async () => {
+    const job = jobOf(watchingCheck, summarizeOn);
+    const store = storeFor(job, { ...pending });
+    // The owner deleted the job from another window while the model wrote. A
+    // `patchState` here would write `defaultState()` and revive the state file
+    // `delete()` removed — nothing enumerates `stateDir` to clean it again.
+    const d = delivery({ ...store, load: async () => undefined }, async () => 'a finished summary');
+
+    await d.processPendingSummaries();
+
+    expect(toasts).toEqual([]);
+    expect(outboxFiles()).toEqual([]);
+    expect(store.patches).toEqual([]);
+  });
+
+  it('clears nothing and sends no failure notice when the attempt failed too', async () => {
+    const job = jobOf(watchingCheck, summarizeOn);
+    const store = storeFor(job, { ...pending });
+    const d = delivery({ ...store, load: async () => undefined }, async () => {
+      throw new Error('model busy');
+    });
+
+    await d.processPendingSummaries();
+
+    expect(toasts).toEqual([]);
+    expect(outboxFiles()).toEqual([]);
+    expect(store.patches).toEqual([]);
+  });
+});
+
 describe('a check that does observe something', () => {
   it('still delivers its summary when it changed', async () => {
     const job = jobOf(watchingCheck, notifyOn);

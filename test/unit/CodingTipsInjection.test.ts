@@ -28,7 +28,7 @@ import {
 import { pinCodingTips } from '../../src/sidebar/codingTipsPin';
 import { persistedToRuntime, runtimeToPersisted } from '../../src/sidebar/sessionPersistence';
 import { openConversationSignature } from '../../src/sidebar/openConversationsPersistence';
-import { TIPS_PIN_TEXT_MAX_CHARS } from '../../src/sidebar/pinSchemas';
+import { TIPS_PIN_TEXT_MAX_CHARS } from '../../src/llm/codingTipsBudget';
 import {
   conversationPersistedBaseSchema,
   sidebarSessionPersistedSchema,
@@ -336,6 +336,31 @@ describe('the pin survives a save and a reload', () => {
         coding_tips_pin: { text: 'x', windowStart: 0, extra: 1 },
       }).success,
     ).toBe(false);
+  });
+
+  it('admits the largest block a loader can actually write', () => {
+    // The ceiling and the allowances are the two ends of one contract: a block
+    // `loadCodingTips` produces must survive the pin schema, or every chat body
+    // carrying it is quarantined at load. Both tables are written past their
+    // allowances so each arrives at exactly its allowance, which is the biggest
+    // block the loader can emit.
+    workspace = makeWorkspace('b'.repeat(PROJECT_TIPS_ALLOWANCE + 500));
+    const base = { id: 'c1', title: 't', createdAt: 1, updatedAt: 2, messages: [] };
+    const shippedFile = path.join(workspace, 'shipped-at-allowance.md');
+    fs.writeFileSync(shippedFile, 'a'.repeat(SHIPPED_TIPS_ALLOWANCE + 500), 'utf8');
+    const block = loadCodingTips(workspace, shippedFile);
+    expect(block?.sources.map((s) => s.kind)).toEqual(['shipped', 'project']);
+    const text = block?.text ?? '';
+    expect(text.length, 'a block at both allowances must fit the pin ceiling').toBeLessThanOrEqual(
+      TIPS_PIN_TEXT_MAX_CHARS,
+    );
+    expect(
+      conversationPersistedBaseSchema.safeParse({
+        ...base,
+        coding_tips_pin: { text, windowStart: 0 },
+      }).success,
+      'the schema must accept what the loader can produce',
+    ).toBe(true);
   });
 });
 

@@ -102,9 +102,12 @@ export class JobDelivery {
    */
   private async liveIntent(
     jobId: string,
-  ): Promise<{ kind: 'deliver'; job: Job } | { kind: 'keep' } | { kind: 'clear' }> {
+  ): Promise<
+    { kind: 'deliver'; job: Job } | { kind: 'keep' } | { kind: 'clear'; definitionGone: boolean }
+  > {
     const current = await this.deps.store.load(jobId);
-    if (!current || current.job.check.kind === 'none') return { kind: 'clear' };
+    if (!current) return { kind: 'clear', definitionGone: true };
+    if (current.job.check.kind === 'none') return { kind: 'clear', definitionGone: false };
     if (!current.job.enabled) return { kind: 'keep' };
     return { kind: 'deliver', job: current.job };
   }
@@ -194,12 +197,16 @@ export class JobDelivery {
         const after = await this.liveIntent(job.id);
         if (after.kind === 'clear') {
           // Switched to `none`, or deleted, while the summary was attempted:
-          // nothing is left to retry, and no failure notice is owed.
-          this.deps.store.patchState(job.id, {
-            summary_pending: false,
-            summary_failures: 0,
-            summary_retry_at: null,
-          });
+          // nothing is left to retry, and no failure notice is owed. A deleted
+          // job owns no state file, so there is nothing to clear — patching one
+          // would revive the file `delete()` removed.
+          if (!after.definitionGone) {
+            this.deps.store.patchState(job.id, {
+              summary_pending: false,
+              summary_failures: 0,
+              summary_retry_at: null,
+            });
+          }
           continue;
         }
         if (after.kind === 'keep') {
@@ -225,12 +232,15 @@ export class JobDelivery {
       const afterSuccess = await this.liveIntent(job.id);
       if (afterSuccess.kind === 'clear') {
         // The owner stopped the notifications while the model wrote this
-        // summary. The answer exists; it is simply not sent.
-        this.deps.store.patchState(job.id, {
-          summary_pending: false,
-          summary_failures: 0,
-          summary_retry_at: null,
-        });
+        // summary. The answer exists; it is simply not sent. A deleted job owns
+        // no state file, so there is nothing here to clear.
+        if (!afterSuccess.definitionGone) {
+          this.deps.store.patchState(job.id, {
+            summary_pending: false,
+            summary_failures: 0,
+            summary_retry_at: null,
+          });
+        }
         continue;
       }
       if (afterSuccess.kind === 'keep') {

@@ -10,11 +10,12 @@
  * `sessionTypes`, and by then `sessionTypes` needs a schema the pin module has
  * not finished defining — so the field reads
  * `TypeError: Cannot read properties of undefined (reading 'optional')` on the
- * first import of the day. A module that imports only `zod` cannot be in that
- * cycle, so both shapes live here.
+ * first import of the day. A module that imports only `zod`, plus a module that
+ * imports nothing at all, cannot be in that cycle, so both shapes live here.
  */
 
 import { z } from 'zod';
+import { TIPS_PIN_TEXT_MAX_CHARS } from '../llm/codingTipsBudget';
 
 /** FORGE.md's pin: `text` is '' when no FORGE.md applies. */
 export const forgeInstructionsPinSchema = z
@@ -27,15 +28,15 @@ export const forgeInstructionsPinSchema = z
   .strict();
 
 /**
- * The ceiling on a pinned tips block. `loadCodingTips` can only ever produce the
- * shipped table (16,000 bytes) plus the project table (8,000) plus its two
- * headings, so anything larger in session.json is corruption — and an unbounded
- * string is the one field a corrupted save could grow without end. The FORGE.md
- * pin above is deliberately NOT bounded: its producer clamps the instruction
- * chain to `MAX_INSTRUCTION_BYTES`, and a ceiling this build cannot reproduce
- * would drop a whole chat at load rather than shrink one field.
+ * The ceiling on a pinned tips block, imported from `codingTipsBudget.ts`, the
+ * module that owns the budget: `loadCodingTips` can only ever produce the
+ * shipped allowance plus the project allowance plus its headings, so anything
+ * larger in session.json is corruption — and an unbounded string is the one
+ * field a corrupted save could grow without end. The FORGE.md pin above is
+ * deliberately NOT bounded: its producer clamps the instruction chain to
+ * `MAX_INSTRUCTION_BYTES`, and a ceiling this build cannot reproduce would drop
+ * a whole chat at load rather than shrink one field.
  */
-export const TIPS_PIN_TEXT_MAX_CHARS = 32_000;
 
 /**
  * The tips pin: the same shape minus `announced`, because a changed tips table

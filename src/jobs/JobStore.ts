@@ -234,9 +234,20 @@ export class JobStore {
     }
   }
 
+  /**
+   * Whether the job's definition is on disk. A job owns its state file, its run
+   * log and its markers, so writing one for a definition that is gone revives
+   * an artifact `delete()` removed — and a delete made in ANOTHER window never
+   * reached this instance's `deletedJobs` set. Nothing enumerates those
+   * directories, so nothing would ever remove the revived artifact.
+   */
+  private hasDefinition(id: string): boolean {
+    return fs.existsSync(path.join(this.jobsDir, `${id}.json`));
+  }
+
   /** Save a job's state atomically. */
   async saveState(id: string, state: JobState): Promise<void> {
-    if (this.deletedJobs.has(id)) return;
+    if (this.deletedJobs.has(id) || !this.hasDefinition(id)) return;
     await this.ensureDirs();
     JobStateSchema.parse(state);
     writeFileAtomicSync(path.join(this.stateDir, `${id}.json`), JSON.stringify(state, null, 2));
@@ -259,8 +270,11 @@ export class JobStore {
     try {
       raw = fs.readFileSync(full, 'utf8');
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') raw = JSON.stringify(defaultState());
-      else throw err;
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      // No state file: creating one for a job with no definition would revive
+      // `state/<id>.json` for good (`delete()` is the only thing that removes it).
+      if (!this.hasDefinition(id)) return;
+      raw = JSON.stringify(defaultState());
     }
     let current: JobState;
     try {
@@ -347,7 +361,7 @@ export class JobStore {
    * never rewritten, so a crash mid-run cannot lose the previous row.
    */
   async appendRun(id: string, row: RunRow): Promise<void> {
-    if (this.deletedJobs.has(id)) return;
+    if (this.deletedJobs.has(id) || !this.hasDefinition(id)) return;
     await this.ensureDirs();
     RunRowSchema.parse(row);
     const full = path.join(this.runsDir, `${id}.jsonl`);

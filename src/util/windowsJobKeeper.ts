@@ -156,13 +156,25 @@ function reportKeeperProblem(line: string): void {
 }
 
 /** Retire the keeper once nothing is protected any more, so an idle window
- *  pays nothing for this. A later command starts a fresh one. */
+ *  pays nothing for this. A later command starts a fresh one.
+ *
+ *  A pid in `stopping` counts as protected: `beginTreeStop` spends the token and
+ *  deliberately leaves the job open, so retiring here could send `quit` while
+ *  `taskkill /T` is still walking the tree. The keeper's `ReleaseAll` clears the
+ *  kill flag before it closes each job, so the survivors this module exists to
+ *  catch are let go — measured shape: an idle timer armed by an earlier release
+ *  firing inside a later stop.
+ *
+ *  And when something is still held, the check is re-armed rather than dropped:
+ *  this is the only timer, so a keeper whose one timer fired while a job was
+ *  live would never retire and would hold its ~75 MB for the whole window. */
 function scheduleIdleShutdown(): void {
   if (idleTimer) clearTimeout(idleTimer);
   if (!keeper) return;
   idleTimer = setTimeout(() => {
     idleTimer = undefined;
-    if (jobs.size === 0) shutdownJobKeeper();
+    if (jobs.size === 0 && stopping.size === 0) shutdownJobKeeper();
+    else scheduleIdleShutdown();
   }, keeperIdleMs());
   idleTimer.unref?.();
 }
@@ -178,7 +190,13 @@ function handleKeeperLine(line: string): void {
 }
 
 function ensureKeeper(): ChildProcess | undefined {
-  if (keeper && keeper.stdin && !keeper.stdin.destroyed) return keeper;
+  // A keeper whose stdin has ended was told to quit: it is still the recorded
+  // child until its `exit` event lands, and writing to it now loses that command
+  // — the job is registered, but the keeper never hears about it. Spawn afresh
+  // instead of waiting for the event to arrive.
+  if (keeper && keeper.stdin && !keeper.stdin.destroyed && !keeper.stdin.writableEnded) {
+    return keeper;
+  }
   const command = keeperCommand();
   if (!command) return undefined;
   let child: ChildProcess;
@@ -224,6 +242,11 @@ function ensureKeeper(): ChildProcess | undefined {
   child.once('exit', forget);
   // Never hold the extension host open for a helper that only holds handles.
   child.unref();
+  // Arm the idle check now, not at the first release: a keeper that is warmed
+  // and then never given a job would otherwise hold its ~75 MB for the whole
+  // window, because only a finish or a release used to arm the check. A job that
+  // arrives later keeps it alive — the check re-arms while anything is held.
+  scheduleIdleShutdown();
   return child;
 }
 
@@ -313,6 +336,13 @@ export function beginTreeStop(pid: number | undefined): boolean {
   if (token === undefined) return false;
   jobs.delete(pid);
   stopping.set(pid, token);
+  // Nothing may retire the keeper mid-stop: `jobs` is empty for the whole span
+  // between the two halves, and an idle timer armed by an earlier release can
+  // fire inside it. `finishStoppedTree` re-arms the check.
+  if (idleTimer) {
+    clearTimeout(idleTimer);
+    idleTimer = undefined;
+  }
   return true;
 }
 

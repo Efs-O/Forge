@@ -183,6 +183,83 @@ describe('the job keeper protocol', () => {
     }
   });
 
+  it('does not retire the keeper while a stop is in flight', async () => {
+    // The race the idle check used to lose: a release arms the timer, a later
+    // command is protected without clearing it, a stop begins while it is still
+    // counting down, and the timer fires mid-`taskkill`. `quit` there makes the
+    // keeper release every job it holds with the kill flag cleared first, which
+    // is how a stopped command's grandchildren escaped.
+    const savedIdle = process.env.FORGE_JOB_KEEPER_IDLE_MS;
+    process.env.FORGE_JOB_KEEPER_IDLE_MS = '60';
+    const finished = liveChild();
+    const stopping = liveChild();
+    try {
+      protectProcessTree(finished);
+      await tokenFor(finished.pid!);
+      // A command that ended on its own: this release arms the idle check.
+      releaseProtectedTree(finished.pid);
+      finished.kill();
+      // The next command is protected, and its stop begins with no await in
+      // between, so the idle window is still open when the stop starts.
+      protectProcessTree(stopping);
+      expect(beginTreeStop(stopping.pid)).toBe(true);
+      const token = await tokenFor(stopping.pid!);
+      // Well past the idle window, with the stop still half-finished.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(keeperLines().some((line) => line === 'quit')).toBe(false);
+      expect(keeperLines().some((line) => line === `kill ${token}`)).toBe(false);
+      expect(finishStoppedTree(stopping.pid)).toBe(true);
+      expect(await waitForLine(new RegExp(`^kill ${token}$`, 'u'))).toBe(`kill ${token}`);
+      expect(await waitForLine(/^quit$/u, 5_000)).toBe('quit');
+    } finally {
+      if (savedIdle === undefined) delete process.env.FORGE_JOB_KEEPER_IDLE_MS;
+      else process.env.FORGE_JOB_KEEPER_IDLE_MS = savedIdle;
+      if (!finished.killed) finished.kill();
+      if (!stopping.killed) stopping.kill();
+    }
+  }, 20_000);
+
+  it('still retires a keeper whose idle check fired while a job was protected', async () => {
+    // The idle check is the only timer, so firing it with a job still live used
+    // to leave the keeper with no check at all: it held its ~75 MB for the whole
+    // window however many commands came and went afterwards.
+    const savedIdle = process.env.FORGE_JOB_KEEPER_IDLE_MS;
+    process.env.FORGE_JOB_KEEPER_IDLE_MS = '40';
+    const child = liveChild();
+    try {
+      protectProcessTree(child);
+      const token = await tokenFor(child.pid!);
+      // Well past the idle window, with the command still running.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(keeperLines().some((line) => line === 'quit')).toBe(false);
+      expect(protectedPids()).toContain(child.pid as number);
+      await stopChild(child);
+      expect(await waitForLine(new RegExp(`^release ${token}$`, 'u'))).toBe(`release ${token}`);
+      expect(await waitForLine(/^quit$/u, 5_000)).toBe('quit');
+    } finally {
+      if (savedIdle === undefined) delete process.env.FORGE_JOB_KEEPER_IDLE_MS;
+      else process.env.FORGE_JOB_KEEPER_IDLE_MS = savedIdle;
+      if (!child.killed) child.kill();
+    }
+  }, 20_000);
+
+  it('retires a keeper that was warmed and then never given a job', async () => {
+    // `warmWindowsJobKeeper` runs before a spawn, so a command that never
+    // arrives — or arrives minutes later — used to leave the keeper holding its
+    // ~75 MB for the whole window: only a release or a stop armed the idle check.
+    const savedIdle = process.env.FORGE_JOB_KEEPER_IDLE_MS;
+    process.env.FORGE_JOB_KEEPER_IDLE_MS = '40';
+    try {
+      await warmWindowsJobKeeper();
+      expect(keeperIsReady()).toBe(true);
+      expect(await waitForLine(/^quit$/u, 5_000)).toBe('quit');
+      expect(protectedPids()).toHaveLength(0);
+    } finally {
+      if (savedIdle === undefined) delete process.env.FORGE_JOB_KEEPER_IDLE_MS;
+      else process.env.FORGE_JOB_KEEPER_IDLE_MS = savedIdle;
+    }
+  });
+
   it('skips a child whose pid is not there, instead of starting a keeper for it', () => {
     // A stubbed spawn reports a pid that never existed. Asking the keeper to
     // protect it costs a PowerShell and a Win32 error for nothing.

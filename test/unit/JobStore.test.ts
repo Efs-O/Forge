@@ -112,6 +112,23 @@ describe('JobStore', () => {
     expect((await store.load('disk'))?.state.last_run_at).toBeNull();
   });
 
+  it('a write cannot revive the artifacts of a job another window deleted', async () => {
+    await store.saveJob(job());
+    store.patchState('disk', { last_run_at: 1 });
+    await store.appendRun('disk', { at: 1, outcome: 'ok', summary: 'ran', delivered: 0 });
+    // A second store over the same root is another window: its `deletedJobs`
+    // set is its own, so this one still believes the job is alive.
+    await new JobStore(root).delete('disk');
+
+    store.patchState('disk', { last_run_at: 2 });
+    await store.saveState('disk', { last_run_at: 3, consecutive_failures: 0 });
+    await store.appendRun('disk', { at: 4, outcome: 'ok', summary: 'ran', delivered: 0 });
+
+    expect(fs.existsSync(path.join(root, 'state', 'disk.json'))).toBe(false);
+    expect(fs.existsSync(path.join(root, 'runs', 'disk.jsonl'))).toBe(false);
+    expect(await store.load('disk')).toBeUndefined();
+  });
+
   it('patchState treats malformed state as the default, like load does', async () => {
     await store.saveJob(job());
     const stateFile = path.join(root, 'state', 'disk.json');
@@ -158,6 +175,7 @@ describe('JobStore', () => {
 
 describe('JobStore run log', () => {
   it('appends run rows only; they are never rewritten', async () => {
+    await store.saveJob(job());
     const row = (at: number) => ({
       at,
       late: false,
@@ -179,6 +197,7 @@ describe('JobStore run log', () => {
   });
 
   it('a run row that violates the schema is rejected', async () => {
+    await store.saveJob(job());
     await expect(
       store.appendRun('disk', { at: 1, outcome: 'bogus', summary: 'x' } as never),
     ).rejects.toThrow();
