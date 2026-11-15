@@ -1,5 +1,11 @@
 # Forge — Recent Changes
 
+## 0.17.182
+
+**A helper that has been told to retire no longer answers for the one running.**
+
+- When a window replaces its process-keeping helper, the old one can still be shutting down, and it was allowed to speak: its late "ready" line was taken as the *new* helper saying it was ready, before that one had finished getting itself going. The command that started next therefore had no job to join, and stopping it left its child running — the same leak 0.17.178 and 0.17.181 were about, arriving by a different route. Seen as a test failing under load: the wait for a helper that never answers came back 2.5 seconds early, because a dead helper had answered on its behalf.
+
 ## 0.17.181
 
 **A stopped command now takes every leftover with it, and a deleted job stays deleted.**
