@@ -352,6 +352,52 @@ describe('the warm-up a stoppable command waits for', () => {
     }
   }, 30_000);
 
+  /**
+   * The shape that made the warm-up above finish 2.5 s early in a full suite run
+   * on 2026-11-15 (`expected 471 to be greater than or equal to 2500`): a keeper
+   * that had been told to quit was still alive, its late `ready` line landed
+   * after a replacement had been spawned, and it marked the replacement ready
+   * before that one had compiled. The command that spawned next had no job to
+   * join, which is the leak the warm-up exists to prevent.
+   */
+  it('ignores a ready line from a keeper it has already replaced', async () => {
+    const saved = process.env.FORGE_JOB_KEEPER_READY_DELAY_MS;
+    shutdownJobKeeper();
+    await vi.waitFor(() => expect(keeperIsReady()).toBe(false), { timeout: 5_000 });
+    const first = liveChild();
+    const second = liveChild();
+    try {
+      // A answers late, so it is still writing when it is retired.
+      process.env.FORGE_JOB_KEEPER_READY_DELAY_MS = '250';
+      protectProcessTree(first);
+      shutdownJobKeeper();
+      await stopChild(first);
+      // B is told never to answer within the test, so any `ready` from here on
+      // can only have come from the retired keeper.
+      process.env.FORGE_JOB_KEEPER_READY_DELAY_MS = '60000';
+      protectProcessTree(second);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(keeperIsReady(), 'a retired keeper marked the fresh one ready').toBe(false);
+      const started = Date.now();
+      await warmWindowsJobKeeper();
+      // It waited its ceiling for B, rather than believing A on its behalf.
+      expect(Date.now() - started).toBeGreaterThanOrEqual(2_500);
+    } finally {
+      if (saved === undefined) delete process.env.FORGE_JOB_KEEPER_READY_DELAY_MS;
+      else process.env.FORGE_JOB_KEEPER_READY_DELAY_MS = saved;
+      await stopChild(second);
+      shutdownJobKeeper();
+      // The logging keeper answers at once, so the next test gets a live one.
+      await vi.waitFor(
+        async () => {
+          await warmWindowsJobKeeper();
+          expect(keeperIsReady()).toBe(true);
+        },
+        { timeout: 15_000 },
+      );
+    }
+  }, 30_000);
+
   it('returns at once where there is no keeper to start', async () => {
     if (process.platform === 'win32') return; // Windows always has PowerShell.
     const saved = process.env.FORGE_JOB_KEEPER_CMD;

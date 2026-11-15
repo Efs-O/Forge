@@ -179,8 +179,18 @@ function scheduleIdleShutdown(): void {
   idleTimer.unref?.();
 }
 
-/** The keeper's first line out is `ready`; after that every line is a report. */
-function handleKeeperLine(line: string): void {
+/** The keeper's first line out is `ready`; after that every line is a report.
+ *  A line from a keeper this module has already replaced is dropped.
+ *  `forget()` runs on the child's `exit` event, so between a retire and that
+ *  event the old process can still write, and its `ready` would mark the NEW
+ *  keeper ready before the new one had compiled: the next command then spawns
+ *  against a keeper that is ready on paper and not in fact, which is the leak
+ *  the warm-up exists to prevent. Measured 2026-11-15 as a full-suite failure of
+ *  the warm-up ceiling test — `expected 471 to be greater than or equal to
+ *  2500`, the wait ending 2.5 s early because a dead keeper answered for the
+ *  live one. */
+function handleKeeperLine(from: ChildProcess, line: string): void {
+  if (keeper !== from) return;
   if (line.trim() !== 'ready') {
     reportKeeperProblem(line);
     return;
@@ -226,7 +236,7 @@ function ensureKeeper(): ChildProcess | undefined {
     pending += chunk;
     const lines = pending.split('\n');
     pending = lines.pop() ?? '';
-    for (const line of lines) handleKeeperLine(line);
+    for (const line of lines) handleKeeperLine(child, line);
   });
   const forget = (): void => {
     if (keeper !== child) return;
