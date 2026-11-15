@@ -10,6 +10,7 @@ import {
   keeperIsReady,
   protectProcessTree,
   shutdownJobKeeper,
+  warmWindowsJobKeeper,
 } from '../../src/util/windowsJobKeeper';
 import { removeTreeWhenFree } from '../support/removeTempTree';
 
@@ -117,10 +118,15 @@ maybe('a stopped command and its whole tree', () => {
   it('job object: the same stop terminates the grandchild too', async () => {
     // The keeper starts lazily and costs about 270 ms cold, while Git Bash
     // reaches its first fork about 140 ms after the spawn, so the first
-    // protected command in a window is not covered. Warm it up for this arm.
-    const warmup = spawn('ping.exe', ['-n', '3', '127.0.0.1'], { stdio: 'ignore' });
-    protectProcessTree(warmup);
-    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    // protected command in a window is not covered. Warm it up for this arm and
+    // wait for the keeper's `ready` line rather than for a fixed sleep: a
+    // 1 500 ms sleep covers the cold start on an idle machine (this arm passed
+    // 3/3 runs alone) but not while the full suite saturates the CPU, where the
+    // keeper's compile overruns the sleep, the protect lands after Git Bash's
+    // fork, and the grandchild escapes the job (2/2 failures inside `npm test`
+    // on 2026-11-15).
+    await warmWindowsJobKeeper();
+    await vi.waitFor(() => expect(keeperIsReady()).toBe(true), { timeout: 20_000 });
 
     const child = startCommand(GUARDED_SLEEP);
     protectProcessTree(child);

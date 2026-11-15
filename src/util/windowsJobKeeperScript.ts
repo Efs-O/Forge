@@ -12,7 +12,8 @@
  * not created" is otherwise invisible and the only symptom is an orphan that
  * outlived its stop. Reports go to stdout, not stderr: PowerShell serialises a
  * redirected stderr as a CLIXML stream whose `#< CLIXML` banner arrives first, so
- * a report read from stderr is half banner and half answer.
+ * a report read from stderr is half banner and half answer. The caller acts on a
+ * line only when it starts with `err`, so the warm-up echo below is ignored.
  *
  * The first line out is `ready`, written once the C# compile is finished and the
  * read loop is about to start. It is the only way a caller can tell that a job
@@ -155,13 +156,24 @@ public static class ForgeJobKeeper {
   }
 }
 '@
+# Pay the first-call cost of the P/Invoke path before saying ready. Measured
+# 2026-11-15: against a keeper that had only just printed ready, the first job
+# line it ever handled lost the race against Git Bash's forker - the grandchild
+# was created 49 ms after the request, so it joined no job and outlived the
+# stop (1 of 10 tries in isolation, clean on the 9 that followed). Create a job
+# for the keeper's own pid and release it without the kill flag, so nothing is
+# signalled and the real first command finds the path already warm. Handle is
+# the only public entry point, and the loop below uses that same one.
+$warm = [ForgeJobKeeper]::Handle('job warm ' + $PID)
+[ForgeJobKeeper]::Handle('release warm') | Out-Null
+if ($warm) { [Console]::Out.WriteLine('warm ' + $warm) }
 [Console]::Out.WriteLine('ready')
 while ($true) {
   $line = [Console]::In.ReadLine()
   if ($null -eq $line) { break }
   if ($line.Trim() -eq 'quit') { break }
   $reply = [ForgeJobKeeper]::Handle($line)
-  if (reply) { [Console]::Out.WriteLine($reply) }
+  if ($reply) { [Console]::Out.WriteLine($reply) }
 }
 [ForgeJobKeeper]::ReleaseAll()
 `;

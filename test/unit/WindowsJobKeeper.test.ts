@@ -17,6 +17,7 @@ import {
   sweepProtectedTree,
   warmWindowsJobKeeper,
 } from '../../src/util/windowsJobKeeper';
+import { KEEPER_SCRIPT } from '../../src/util/windowsJobKeeperScript';
 import { removeTreeWhenFree } from '../support/removeTempTree';
 
 /**
@@ -490,3 +491,31 @@ async function tokenFor(pid: number): Promise<string> {
   const line = await waitForLine(new RegExp(`^job \\d+ ${String(pid)}$`, 'u'));
   return line.split(' ')[1]!;
 }
+
+/**
+ * Two lines of the keeper script itself are load-bearing, and the OS-level arm
+ * in `WindowsJobObjectKill.test.ts` can only show them by failing slowly:
+ *
+ *  - It warms the P/Invoke path before it says `ready`. Measured 2026-11-15: the
+ *  first `job` line a fresh keeper ever handled lost the race with Git Bash's
+ *  forker — 1 of 10 tries in isolation, 0 of 40 once the keeper creates and
+ *  releases a job for its own pid first — so the first command a window protects
+ *  still leaked its grandchild, which is what the warm-up exists to prevent.
+ *  - The report line tests `$reply`. Written as a bare `reply`, PowerShell ran it
+ *  as a command instead of testing the variable, so every `err …` report the
+ *  script exists to emit was thrown away and a job that was never created stayed
+ *  invisible: the one symptom the protocol was designed to report.
+ */
+describe('the keeper script itself', () => {
+  it('warms its first job before it says ready', () => {
+    const warm = KEEPER_SCRIPT.indexOf("[ForgeJobKeeper]::Handle('job warm ' + $PID)");
+    const ready = KEEPER_SCRIPT.indexOf("[Console]::Out.WriteLine('ready')");
+    expect(warm).toBeGreaterThan(-1);
+    expect(ready).toBeGreaterThan(warm);
+    expect(KEEPER_SCRIPT).toContain("[ForgeJobKeeper]::Handle('release warm')");
+  });
+
+  it('tests the reply variable, so a keeper report is not thrown away', () => {
+    expect(KEEPER_SCRIPT).toContain('if ($reply) { [Console]::Out.WriteLine($reply) }');
+  });
+});

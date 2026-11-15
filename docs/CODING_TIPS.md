@@ -40,6 +40,7 @@
 17. `npm test 2>&1 > run.log` → vitest writes failures to stderr, so they print to the terminal and the file holds only the summary: grep finds no FAIL. write `> run.log 2>&1`
 18. `npx eslint test/unit/x.test.ts` → "none of those TSConfigs include this file": the lint script is `eslint src webview-ui`, so tests have no typed-lint config. lint `src` only
 19. an approval-gated command inside `A && B && C` → the card can expire with the owner away and B/C never run. restore a tracked file with `git show HEAD:path > path`: no card
+20. a pid taken in Git Bash (`$$`, `$!`) → an MSYS pid, so Win32 `OpenProcess` answers 87 and `Get-CimInstance` finds nothing. take it from the Windows side (PowerShell `$PID`) or a Win32 tool
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green: never run `record-ci-pass.mjs` by hand — the `ci:steps` `&&` chain writes it. run the suite after the commit it certifies
@@ -56,6 +57,7 @@
 8. an `edit_file` whose `new_str` turns out to be the text already there → reports Applied, nothing changes, and the fix I meant never lands. diff the file, not the reply
 9. an `edit_file` where `old_str` spans more than `new_str` replaces → the extra line is deleted or the next line glues on. end both anchors at the same point; re-include an anchored body line
 10. deleting entries from a numbered list by replacing a block → the renumbering duplicated one entry and silently dropped another. rewrite the section's whole tail, then read it back
+11. new text inside a `String.raw` template literal containing a backtick → the template ends early and the parse error names a later line. no backticks in prose inside a template literal
 
 ## TEST
 1. a harness that only emits calls, or a threshold measured by a script whose pair list differs from the gate's → the number certifies neither. dispatch the calls; measure with the gate's own list
