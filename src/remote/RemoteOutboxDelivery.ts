@@ -1,3 +1,5 @@
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import type { RemoteRequestStore } from './RemoteRequestStore';
 import type { RemoteChannel, RemoteOutboxRecord } from './types';
 import type { RemoteAuth } from './RemoteAuth';
@@ -313,6 +315,36 @@ export class RemoteOutboxDelivery {
       );
     }
     await send.call(this.channel, item.chatId, chosen.absolutePath, caption, this.signal);
+    // Only now: a throw above keeps the preview for the retry, and the render
+    // that went out is the one the owner still has on disk.
+    await this.deleteTelegramPreview(item.media.previewPath);
+  }
+
+  /**
+   * Delete the `.telegram-preview` copy beside a media render once the send has
+   * landed. Nothing archives these: a preview survived even when the original
+   * was small enough to send whole, so every oversized render left one behind
+   * for good. The path comes out of a persisted store, so it is treated as data
+   * — only a workspace-relative file whose own name carries the preview marker
+   * is removed — and a failure here never requeues an already-delivered item.
+   */
+  private async deleteTelegramPreview(previewPath: string | undefined): Promise<void> {
+    if (!previewPath || !this.workspaceRoot) return;
+    const absolute = path.resolve(this.workspaceRoot, previewPath);
+    const relative = path.relative(this.workspaceRoot, absolute);
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return;
+    if (!/\.telegram-preview\.[a-z0-9]+$/i.test(path.basename(absolute))) return;
+    try {
+      await fs.rm(absolute);
+    } catch (err) {
+      if ((err as { code?: string }).code !== 'ENOENT') {
+        try {
+          this.onError?.(`Forge could not delete a Telegram preview: ${String(err)}`);
+        } catch {
+          // Best-effort: the item is delivered; a broken reporter must not requeue it.
+        }
+      }
+    }
   }
 
   private async scheduleRetry(): Promise<void> {

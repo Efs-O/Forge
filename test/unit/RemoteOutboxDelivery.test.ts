@@ -138,7 +138,8 @@ describe('RemoteOutboxDelivery unlock backlog cap', () => {
     const handle = await fs.open(original, 'w');
     await handle.truncate(50 * 1024 * 1024 + 1);
     await handle.close();
-    await fs.writeFile(path.join(mediaDir, 'large.telegram-preview.mp4'), 'preview');
+    const preview = path.join(mediaDir, 'large.telegram-preview.mp4');
+    await fs.writeFile(preview, 'preview');
     const state = new RemoteRequestStore(path.join(directory, 'state.json'));
     await state.load();
     const channel = new MediaChannel();
@@ -150,15 +151,47 @@ describe('RemoteOutboxDelivery unlock backlog cap', () => {
       },
     });
     const outbox = delivery(channel, state, 5, vi.fn(), workspace);
+    // The preview is gone the moment the send lands, so its real path is taken
+    // before the delivery starts.
+    const previewReal = await fs.realpath(preview);
 
     outbox.start();
     await vi.waitFor(() => expect(channel.sentMedia).toHaveLength(1));
     await outbox.stop();
 
-    expect(await fs.realpath(channel.sentMedia[0]!.filePath)).toBe(
-      await fs.realpath(path.join(mediaDir, 'large.telegram-preview.mp4')),
-    );
+    expect(channel.sentMedia[0]!.filePath).toBe(previewReal);
     expect(channel.sentMedia[0]?.caption).toContain('media/large.mp4');
+    // Nothing archives a preview: once the message landed, only the original the
+    // caption names is left behind.
+    await expect(fs.stat(preview)).rejects.toThrow();
+  });
+
+  it('deletes only a preview: a previewPath naming the original is left alone', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-outbox-preview-name-'));
+    tempDirs.push(directory);
+    const workspace = path.join(directory, 'workspace');
+    const mediaDir = path.join(workspace, 'media');
+    await fs.mkdir(mediaDir, { recursive: true });
+    const original = path.join(mediaDir, 'large.mp4');
+    await fs.writeFile(original, 'small enough to send whole');
+    const state = new RemoteRequestStore(path.join(directory, 'state.json'));
+    await state.load();
+    const channel = new MediaChannel();
+    await state.notifyOutbox('fake', 'chat-1', 'Video render completed.', {
+      media: {
+        kind: 'video',
+        workspacePath: 'media/large.mp4',
+        previewPath: 'media/large.mp4',
+      },
+    });
+    const outbox = delivery(channel, state, 5, vi.fn(), workspace);
+
+    outbox.start();
+    await vi.waitFor(() => expect(channel.sentMedia).toHaveLength(1));
+    await outbox.stop();
+
+    expect(await fs.realpath(channel.sentMedia[0]!.filePath)).toBe(await fs.realpath(original));
+    expect(await fs.readFile(original, 'utf8')).toBe('small enough to send whole');
   });
 
   it('omits ephemeral lines from the summary and preserves an uncapped backlog', async () => {
