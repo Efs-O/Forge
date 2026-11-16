@@ -87,8 +87,15 @@ export class RemoteAttachmentStore {
     for (const conversation of conversations) {
       if (!conversation.isDirectory()) continue;
       const directory = path.join(inbox, conversation.name);
-      const stat = await fs.stat(directory);
-      if (stat.mtimeMs < cutoff) await fs.rm(directory, { recursive: true, force: true });
+      try {
+        const stat = await fs.stat(directory);
+        if (stat.mtimeMs < cutoff) await fs.rm(directory, { recursive: true, force: true });
+      } catch (err) {
+        // Removed between readdir and here (another window's prune, a workspace
+        // delete): there is nothing left to remove, and that is not a failure.
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        throw err;
+      }
     }
   }
 

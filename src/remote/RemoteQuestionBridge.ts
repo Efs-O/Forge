@@ -90,7 +90,9 @@ export class RemoteQuestionBridge {
   republish(chatId: string): void {
     for (const [id, entry] of this.questions) {
       if (entry.chatId === chatId && !entry.delivered) {
-        void this.enqueue(entry, () => this.publish(id));
+        void this.enqueue(entry, () => this.publish(id)).catch((err: unknown) => {
+          this.report('question publish', err);
+        });
       }
     }
   }
@@ -366,7 +368,9 @@ export class RemoteQuestionBridge {
       actionQueue: Promise.resolve(),
     };
     this.questions.set(event.id, entry);
-    void this.enqueue(entry, () => this.publish(event.id));
+    void this.enqueue(entry, () => this.publish(event.id)).catch((err: unknown) => {
+      this.report('question publish', err);
+    });
   }
 
   private chatFor(conversationId: string): string | undefined {

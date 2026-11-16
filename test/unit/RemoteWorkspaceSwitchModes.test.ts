@@ -354,6 +354,22 @@ describe('/workspace while Forge is busy', () => {
     expect(channel.sent.at(-1)?.text).toContain('switching to Halluscribe');
   });
 
+  it('answers the same confirmation for the retained /new alias', async () => {
+    const store = await requestStore();
+    const channel = new FakeRemoteChannel();
+    const switched: string[] = [];
+    const ctx = commandContext(channel, store, busyHost(), switched);
+
+    // `/new <n>` is the silent alias of `/workspace <n>`, so it has to carry the
+    // verb too. The handler read only the first operand there, so `/new
+    // halluscribe replace` re-asked and the switch never ran.
+    await handleRemoteCommand(textEvent('/new halluscribe'), ctx, 'new-ask');
+    await expect(
+      handleRemoteCommand(textEvent('/new halluscribe replace'), ctx, 'new-yes'),
+    ).resolves.toMatchObject({ kind: 'handled' });
+    expect(switched).toEqual(['halluscribe']);
+  });
+
   it('refuses a cold `replace` until the warning has been sent', async () => {
     const store = await requestStore();
     const channel = new FakeRemoteChannel();

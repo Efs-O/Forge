@@ -19,6 +19,9 @@ function rig(
     toolName?: string;
     detail?: string;
     dangerous?: boolean;
+    /** `canDeliver` rejects, the way a SecretStorage read behind it can. */
+    canDeliverThrows?: boolean;
+    onError?: (message: string) => void;
   } = {},
 ) {
   const channel = new FakeRemoteChannel();
@@ -33,7 +36,10 @@ function rig(
         : [],
   } as unknown as RemoteRequestStore;
   const auth = {
-    canDeliver: async () => true,
+    canDeliver: async () => {
+      if (options.canDeliverThrows) throw new Error('secret read failed');
+      return true;
+    },
     approvalNonce: async () => 'nonce-1',
   } as unknown as RemoteAuth;
   const host = {
@@ -63,7 +69,7 @@ function rig(
     host,
     new AbortController().signal,
     4_000,
-    undefined,
+    options.onError,
     options.cleanup,
   );
   bridge.start();
@@ -238,6 +244,26 @@ describe('RemoteApprovalBridge', () => {
     await vi.waitFor(() => expect(channel.sent).toHaveLength(1));
     expect(channel.sent[0]?.chatId).toBe('chat-1');
     expect(channel.sent[0]?.text).toContain('write_file');
+  });
+
+  it('reports an approval publish that rejected, instead of waiting for a card', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => void unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const onError = vi.fn();
+      const { channel, request } = rig({ canDeliverThrows: true, onError });
+      request();
+      await vi.waitFor(() =>
+        expect(onError).toHaveBeenCalledWith('Forge remote approval publish: secret read failed'),
+      );
+      // Nothing reached the phone, so the gate is still open and a republish
+      // after the read starts working can still put the card up.
+      expect(channel.sent).toHaveLength(0);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+    expect(unhandled).toEqual([]);
   });
 
   it('offers the same chat rule over Telegram and resolves the callback as allowChat', async () => {

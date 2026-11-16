@@ -398,14 +398,15 @@ export class RemoteRuntime {
       inactivityTimeoutMinutes: config.remote.auth.inactivity_timeout_minutes,
     });
     await this.store.load();
-    if (
-      this.options.workspaceRoot &&
-      config.remote.attachments.enabled &&
-      config.remote.attachments.retain_days !== null
-    ) {
-      await new RemoteAttachmentStore(this.options.workspaceRoot).prune(
-        config.remote.attachments.retain_days,
-      );
+    const retainDays = config.remote.attachments.retain_days;
+    if (this.options.workspaceRoot && config.remote.attachments.enabled && retainDays !== null) {
+      try {
+        await new RemoteAttachmentStore(this.options.workspaceRoot).prune(retainDays);
+      } catch (err) {
+        this.options.notifyLocal(
+          `Forge remote attachment cleanup failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
     // Started before the transports, and left running whatever they do: a
     // window that loses the lease race still has to be able to claim a chat

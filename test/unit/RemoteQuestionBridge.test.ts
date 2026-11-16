@@ -16,6 +16,9 @@ beforeEach(() => { openQuickInputs.length = 0; });
 function bridgeRig(
   options: {
     canDeliver?: boolean;
+    /** `canDeliver` rejects, the way a SecretStorage read behind it can. */
+    canDeliverThrows?: boolean;
+    onError?: (message: string) => void;
     remoteRequestId?: string | undefined;
     /** Chat bound to c1, standing in for a paired phone. */
     boundChatId?: string;
@@ -41,7 +44,10 @@ function bridgeRig(
           ]
         : [],
   } as unknown as RemoteRequestStore;
-  const canDeliver = vi.fn(async () => options.canDeliver ?? true);
+  const canDeliver = vi.fn(async () => {
+    if (options.canDeliverThrows) throw new Error('secret read failed');
+    return options.canDeliver ?? true;
+  });
   const auth = { canDeliver } as unknown as RemoteAuth;
   const host = {
     addQuestionSink: (sink: Parameters<ForgeHostFacade['addQuestionSink']>[0]) =>
@@ -72,7 +78,7 @@ function bridgeRig(
     host,
     new AbortController().signal,
     4_000,
-    undefined,
+    options.onError,
     options.cleanup,
   );
   bridge.start();
@@ -512,6 +518,26 @@ describe('RemoteQuestionBridge', () => {
     void service.ask({ prompt: 'TOP SECRET question', conversationId: 'c1' });
     await deliveryDecided(1);
     expect(channel.sent).toHaveLength(0);
+  });
+
+  it('reports a question publish that rejected, instead of waiting forever', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => void unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const onError = vi.fn();
+      const { bridge, service } = bridgeRig({ canDeliverThrows: true, onError });
+      void service.ask({ prompt: 'Which file?', conversationId: 'c1' });
+      await vi.waitFor(() =>
+        expect(onError).toHaveBeenCalledWith('Forge remote question publish: secret read failed'),
+      );
+      // The question is still there to be shown once the read works; only the
+      // send failed, so a later republish can still reach the phone.
+      expect(bridge.hasPending('chat-1')).toBe(true);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+    expect(unhandled).toEqual([]);
   });
 
   it('shows a question asked while locked once the chat authenticates, and only once', async () => {

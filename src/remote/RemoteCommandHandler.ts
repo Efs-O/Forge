@@ -301,10 +301,8 @@ async function executeRemoteCommand(
   // `/new <n>` is retained as a silent alias: it is in muscle memory and in
   // older help screenshots. `/workspace <n>` is the documented spelling,
   // because `/new` reads as "make me a new one" and never joined anything.
-  if (command === '/new' && argument) {
-    const [firstNew, secondNew] = argument.trim().split(/\s+/);
-    return switchWorkspaceCommand(firstNew ?? argument, event, context, secondNew);
-  }
+  if (command === '/new' && argument)
+    return switchWorkspaceCommand(argument, event, context, operands[1]);
   if (command === '/new') {
     const conv = await context.host.createConversation({ activate: false });
     await context.store.setBinding({
