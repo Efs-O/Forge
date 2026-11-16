@@ -10,7 +10,6 @@ import {
   renderRecordedActionsBlock,
 } from '../../src/sidebar/compactionLedger';
 import { TOOL_INTERRUPTED_RESULT } from '../../src/sidebar/sessionPersistence';
-import { formatExecCommandOutput } from '../../src/tools/execHelpers';
 import { makeReadToolResultTool } from '../../src/tools/toolResultTools';
 import { compactionPersistedSchema } from '../../src/sidebar/compactionPersistedSchema';
 import type { ChatMessage } from '../../src/llm/types';
@@ -174,13 +173,29 @@ describe('collectCommandActions', () => {
   });
 
   it('reads the exit code from exec_command’s structured result', () => {
-    const ok = formatExecCommandOutput('npm', {
+    // The exact strings the deleted `formatExecCommandOutput` produced; this
+    // test is about the ledger reading a structured `exec_command` result.
+    const ok = JSON.stringify({
+      kind: 'success',
+      program: 'npm',
+      exitCode: 0,
       stdout: 'Downloaded model.bin\nSaved to /models/model.bin',
       stderr: '',
-      exitCode: 0,
     });
-    const failed = formatExecCommandOutput('npm', { stdout: '', stderr: 'boom', exitCode: 2 });
-    const killed = formatExecCommandOutput('npm', { stdout: '', stderr: '', exitCode: null });
+    const failed = JSON.stringify({
+      kind: 'non_zero_exit',
+      program: 'npm',
+      exitCode: 2,
+      stdout: '',
+      stderr: 'boom',
+    });
+    const killed = JSON.stringify({
+      kind: 'non_zero_exit',
+      program: 'npm',
+      exitCode: null,
+      stdout: '',
+      stderr: '',
+    });
     const actions = collectCommandActions([
       call('a', 'exec_command', { command: 'npm', args: ['ci'] }),
       result('a', ok),

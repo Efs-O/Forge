@@ -7,7 +7,11 @@ import {
 } from '../../src/agent/toolResultContext';
 import { CONTEXT_INPUT_EXHAUSTED_MESSAGE, runToolCallingLoop } from '../../src/agent/ToolCallingLoop';
 import type { ChatMessage } from '../../src/llm/types';
-import { makeReadToolResultTool, MAX_TOOL_RESULT_READ_CHARS } from '../../src/tools/toolResultTools';
+import { makeReadToolResultTool } from '../../src/tools/toolResultTools';
+import { DEFAULT_TOOL_OUTPUT_LIMITS } from '../../src/tools/toolOutputLimits';
+
+/** The page bound `read_tool_result` offers: the default `resultPageChars`. */
+const resultPageChars = DEFAULT_TOOL_OUTPUT_LIMITS.resultPageChars;
 
 const model = { name: 'local', num_ctx: 12_000, spawn: { n_parallel: 1 } } as never;
 
@@ -117,20 +121,20 @@ describe('read_tool_result', () => {
     ).join('');
     const tool = makeReadToolResultTool();
     const result = await tool.handler(
-      { tool_call_id: 'old', offset: 123, max_chars: MAX_TOOL_RESULT_READ_CHARS },
+      { tool_call_id: 'old', offset: 123, max_chars: resultPageChars },
       {
         beforeMutate: () => undefined,
         conversationMessages: [{ role: 'tool', tool_call_id: 'old', name: 'run_tests', content: raw }],
       },
     );
-    expect(result).toContain(raw.slice(123, 123 + MAX_TOOL_RESULT_READ_CHARS));
-    expect(result).not.toContain(raw.slice(123 + MAX_TOOL_RESULT_READ_CHARS));
+    expect(result).toContain(raw.slice(123, 123 + resultPageChars));
+    expect(result).not.toContain(raw.slice(123 + resultPageChars));
   });
 
   it('clamps an oversized text window and points to offset paging', async () => {
-    const raw = 'data'.repeat(MAX_TOOL_RESULT_READ_CHARS);
+    const raw = 'data'.repeat(resultPageChars);
     const result = await makeReadToolResultTool().handler(
-      { tool_call_id: 'old', max_chars: MAX_TOOL_RESULT_READ_CHARS + 1 },
+      { tool_call_id: 'old', max_chars: resultPageChars + 1 },
       {
         beforeMutate: () => undefined,
         conversationMessages: [
@@ -138,9 +142,9 @@ describe('read_tool_result', () => {
         ],
       },
     );
-    expect(result).toContain(`max_chars clamped to ${MAX_TOOL_RESULT_READ_CHARS}`);
+    expect(result).toContain(`max_chars clamped to ${resultPageChars}`);
     expect(result).toContain('use offset to page further');
-    expect(result).toContain(raw.slice(0, MAX_TOOL_RESULT_READ_CHARS));
+    expect(result).toContain(raw.slice(0, resultPageChars));
   });
 
   it('uses the model-scaled page bound and names the runtime clamp', async () => {
@@ -258,7 +262,7 @@ describe('read_tool_result', () => {
       { query: 'needle', max_matches: 10 },
       { beforeMutate: () => undefined, conversationMessages: messages },
     );
-    expect(result.length).toBeLessThanOrEqual(MAX_TOOL_RESULT_READ_CHARS);
+    expect(result.length).toBeLessThanOrEqual(resultPageChars);
     expect(result).toContain('40 of 50 matching messages not shown');
     expect(result).toContain('use a narrower query');
     expect(result).toContain('message_index 49');

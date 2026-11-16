@@ -9,11 +9,9 @@
  * grows past `maxChars` no matter how much the child writes — while the pipes
  * keep draining (every chunk is consumed; only the middle is dropped).
  *
- * The head+tail split matches the model-facing formatter (`storedStream` in
- * tools/execHelpers.ts, `STORED_HEAD_SHARE = 0.25`), so what the model
- * eventually sees is a faithful head+tail of the real output. The 200k budget
- * matches the background path's `MAX_BACKGROUND_OUTPUT_CHARS`; the formatter
- * then applies its own smaller bound on what returns to the model.
+ * What a reader gets is a faithful head+tail of the real output: only the
+ * middle is dropped, and `text()` marks where it was. The 200k budget matches
+ * the background path's `MAX_BACKGROUND_OUTPUT_CHARS`.
  */
 export const MAX_FOREGROUND_OUTPUT_CHARS = 200_000;
 

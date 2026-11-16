@@ -2,8 +2,6 @@ import type { ChatMessage, ContentPart } from '../llm/types';
 import type { RegisteredTool, ToolHandlerContext } from './ToolRegistry';
 import { DEFAULT_TOOL_OUTPUT_LIMITS } from './toolOutputLimits';
 
-/** A bounded range keeps recovery from recreating the original context spike. */
-export const MAX_TOOL_RESULT_READ_CHARS = 6_000;
 const MAX_TOOL_RESULT_READ_CEILING = 24_000;
 
 const MODE_GUIDANCE =
