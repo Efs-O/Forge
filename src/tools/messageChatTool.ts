@@ -92,6 +92,9 @@ export function makeMessageChatTool(options: {
   return {
     definition: messageChatDefinition({ newChat: false, steer: false }),
     describe: () => messageChatDefinition(actionFlags(options.getConfig)),
+    // Hidden until the owner turns the agent bus on, exactly like `ask_agent`:
+    // a tool this chat cannot act on is a schema paid on every round.
+    advertise: () => options.getConfig?.().agent_bus?.enabled === true,
     permission: 'delegate',
     // Sending a bounded text message is intentional and must not prompt once per send.
     autoApprove: true,

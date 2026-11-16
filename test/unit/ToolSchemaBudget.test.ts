@@ -165,7 +165,12 @@ import {
 // end_line — the first shipped tip), "When omitted," on shell's cwd (which read as an
 // instruction to omit it), and that shader_check opens no page and uses no network or
 // GPU (an operational fact, not filler). Headroom is now 2,626.
-const MEASURED_CHARS = 68_014;
+// 2026-11-16: 68,011 (−3, re-measured, no schema change here). The recorded 68,014 had
+// gone stale: an earlier commit shortened a description by 3 chars without re-measuring,
+// so this gate was the thing that found it. Measured again after the dead-code sweep
+// (the test-only exec formatter, MAX_TOOL_RESULT_READ_CHARS, the message_chat advertise
+// gate and the stale-literal pass): none of them touches advertised schema text.
+const MEASURED_CHARS = 68_011;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.

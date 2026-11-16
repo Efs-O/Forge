@@ -234,6 +234,8 @@ describe('registerAllTools canonical coordinator catalog', () => {
           // ask_agent needs the absent agent_bus block.
           name !== 'ask_agent' &&
           name !== 'list_agent_targets' &&
+          // message_chat is registered always but hidden until agent_bus.enabled.
+          name !== 'message_chat' &&
           // set_checkin needs the absent elapsed_time_note block.
           name !== 'set_checkin' &&
           // desktop_* drive Win32 input and capture; registered everywhere,
@@ -247,7 +249,11 @@ describe('registerAllTools canonical coordinator catalog', () => {
     const registry = makeRegistry({ search: true, delegation: true });
     const names = registry.definitions(ALL_PERMISSIONS).map((tool) => tool.function.name);
     expect(names.filter((name) => CORE_TOOL_NAMES.includes(name)).sort()).toEqual(
-      CORE_TOOL_NAMES.filter((name) => registry.names().includes(name)).sort(),
+      // message_chat is registered here but hidden while `agent_bus.enabled` is
+      // off, so it is the one core tool advertised only with the block present.
+      CORE_TOOL_NAMES.filter(
+        (name) => name !== 'message_chat' && registry.names().includes(name),
+      ).sort(),
     );
     expect(CORE_TOOL_NAMES).toContain('shell');
     const groups: Record<string, string[]> = {

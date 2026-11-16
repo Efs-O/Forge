@@ -105,6 +105,22 @@ function makeTool(status = hostStatus(), now?: () => number) {
 }
 
 describe('message_chat tool contract and handler', () => {
+  it('is advertised only while the agent bus is on', () => {
+    const sidebar = makeSidebar(hostStatus());
+    const noConfig = makeMessageChatTool({ getSidebar: () => sidebar });
+    expect(noConfig.advertise?.()).toBe(false);
+    const off = makeMessageChatTool({
+      getSidebar: () => sidebar,
+      getConfig: () => ({ agent_bus: { enabled: false } }) as ForgeConfig,
+    });
+    expect(off.advertise?.()).toBe(false);
+    const on = makeMessageChatTool({
+      getSidebar: () => sidebar,
+      getConfig: () => ({ agent_bus: { enabled: true } }) as ForgeConfig,
+    });
+    expect(on.advertise?.()).toBe(true);
+  });
+
   it('passes its job mark to local send and new deliveries', async () => {
     const sidebar = makeSidebar(hostStatus());
     const tool = makeMessageChatTool({
