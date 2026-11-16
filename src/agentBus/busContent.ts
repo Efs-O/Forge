@@ -172,13 +172,15 @@ costs Forge no model tokens, so use it instead of messaging Forge to ask how it 
 
 ## Waiting for a turn to finish
 
-\`forge.sh wait <your-name> [minutes]\` blocks until your chat with Forge is
+\`forge.sh wait <your-name> [minutes] [--to <conversationId>]\` blocks until your chat with Forge is
 idle with nothing of yours queued, then prints the final status and the latest
 answer (the same text \`view <your-name> 1\` shows), so a supervising agent that
 runs it in the background wakes with the result. It polls \`status\` internally
 about every 55 seconds and prints nothing in between; the timeout is in
 minutes (default 60) and a timed-out wait prints the last status to stderr and
-exits 124. Ctrl-C stops it. Use it instead of re-asking Forge how it is going.
+exits 124. With \`--to\` it waits on that chat instead, as \`status --to\` reads
+it; use it when your session drives more than one Forge chat. Ctrl-C stops it.
+Use it instead of re-asking Forge how it is going.
 
 ## Steering (interrupt a running turn)
 

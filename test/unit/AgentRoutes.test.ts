@@ -2411,7 +2411,7 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
     expect(said.out).toContain('not reachable');
   }, 30_000);
 
-  it('wait: refuses bad names, timeout arguments, and env overrides before any request', async (ctx) => {
+  it('wait: refuses bad names, timeout arguments, flags, and env overrides before any request', async (ctx) => {
     if (!usable) ctx.skip();
     const results = await Promise.all([
       runClient(['wait', 'a b'], ''),
@@ -2419,12 +2419,17 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
       runClient(['wait', 'x', '0'], ''),
       runClient(['wait', 'x', '100001'], ''),
       runClient(['wait', 'x', '1', 'extra'], ''),
+      runClient(['wait', 'x', '--to'], ''),
+      runClient(['wait', 'x', '--to', 'a b'], ''),
+      runClient(['wait', 'x', '--bogus'], ''),
+      runClient(['wait', 'x', '1', '2'], ''),
+      runClient(['wait', 'x', '--to', 'c1', '--to', 'c2'], ''),
       runClient(['wait', 'x'], '', { FORGE_WAIT_POLL_MS: 'nope' }),
       runClient(['wait', 'x'], '', { FORGE_WAIT_POLL_MS: '0' }),
       runClient(['wait', 'x'], '', { FORGE_WAIT_TIMEOUT_SECONDS: 'nope' }),
       runClient(['wait', 'x'], '', { FORGE_WAIT_TIMEOUT_SECONDS: '0' }),
     ]);
-    expect(results.map((result) => result.code)).toEqual(Array(9).fill(2));
+    expect(results.map((result) => result.code)).toEqual(Array(14).fill(2));
     expect(accepted).toEqual([]);
   }, 30_000);
 
@@ -2483,6 +2488,60 @@ describe.skipIf(!TEST_BASH)('forge.sh against the routes', () => {
     expect(res.out).toContain('Queued from you: 0');
     expect(res.out).toContain('the answer');
     expect(polls).toBe(2);
+  }, 30_000);
+
+  it('wait: --to sends the conversation id to both the status poll and the view read', async (ctx) => {
+    if (!usable) ctx.skip();
+    const statusIds: Array<string | undefined> = [];
+    const viewIds: Array<string | undefined> = [];
+    installClientRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      status: (_from, _sender, conversationId) => {
+        statusIds.push(conversationId);
+        return {
+          ok: true,
+          text:
+            `Chat: t · c9\n` +
+            `State: idle\n` +
+            `Model: m\n` +
+            `Context: 1/2\n` +
+            `Queued from you: 0\n` +
+            `Work: 1 model request(s), 0 tool call(s), 0 compaction(s) in this chat`,
+        };
+      },
+      view: (_from, _count, _sender, conversationId) => {
+        viewIds.push(conversationId);
+        return { ok: true, text: 'the answer' };
+      },
+    });
+
+    // `--to` before or after the minutes: the argument loop reads it wherever it sits.
+    const flagFirst = await runClient(
+      ['wait', 'x', '--to', 'c9', '1'],
+      '',
+      { FORGE_WAIT_POLL_MS: '1' },
+      10_000,
+    );
+    const minutesFirst = await runClient(
+      ['wait', 'x', '1', '--to', 'c9'],
+      '',
+      { FORGE_WAIT_POLL_MS: '1' },
+      10_000,
+    );
+    expect(flagFirst.code, flagFirst.out).toBe(0);
+    expect(minutesFirst.code, minutesFirst.out).toBe(0);
+    expect(statusIds).toEqual(['c9', 'c9']);
+    expect(viewIds).toEqual(['c9', 'c9']);
+
+    // With no `--to` nothing is sent, so the route reads this session's own chat.
+    statusIds.length = 0;
+    viewIds.length = 0;
+    const unnamed = await runClient(['wait', 'x'], '', { FORGE_WAIT_POLL_MS: '1' }, 10_000);
+    expect(unnamed.code, unnamed.out).toBe(0);
+    expect(statusIds).toEqual([undefined]);
+    expect(viewIds).toEqual([undefined]);
   }, 30_000);
 
   it('wait: idle with a queue keeps polling until the queue drains', async (ctx) => {

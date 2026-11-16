@@ -14,7 +14,7 @@
 #   forge.sh who                      every live Forge window's linked agent sessions, one row per linked chat (titles may contain brackets or quotes)
 #   forge.sh status <your-name> [--to <conversationId>]  what your chat with Forge is doing now (tool, last words, context); --to reads a chat linked to your session, and a chat that is not linked is refused by name; before your first turn starts, your queue
 #   forge.sh view <your-name> [n] [--to <conversationId>]  the last n answers in your chat (default 3, max 10); --to reads a chat linked to your session
-#   forge.sh wait <your-name> [minutes]  block until your chat is idle with nothing queued (default 60 min, exit 124 on timeout)
+#   forge.sh wait <your-name> [minutes] [--to <conversationId>]  block until your chat is idle with nothing queued (default 60 min, exit 124 on timeout); --to waits on that chat, which must be linked to your session
 #   Agent sessions identify themselves from their kind-specific session environment variable.
 #   Every verb that knows your session identity follows that session's link to the Forge window holding it, so a second window being focused does not send your read somewhere else; who reads every live window.
 #   A chat you start with --new runs in Clanker mode: Clanker answers routine approvals and still asks the owner before destructive actions, Forge guard files, skill writes, and a secret read followed by egress.
@@ -251,9 +251,18 @@ if [ "$VERB" = "wait" ]; then
   # with the result. Polls /agent/status silently (no per-poll output); Ctrl-C
   # stops it. Exit 124 on timeout (last status to stderr), 1 on endpoint/auth
   # failure, 2 on bad arguments.
-  NAME="${2:-}"; MINUTES="${3:-}"
-  [ $# -le 3 ] || usage
+  NAME="${2:-}"; MINUTES=""; WAIT_CONVERSATION_ID=""
+  [ $# -ge 2 ] || usage
+  shift 2
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --to) [ $# -ge 2 ] && [ -z "$WAIT_CONVERSATION_ID" ] || usage; WAIT_CONVERSATION_ID="$2"; shift 2;;
+      --*) usage;;
+      *) [ -z "$MINUTES" ] || usage; MINUTES="$1"; shift;;
+    esac
+  done
   case "$NAME" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
+  case "$WAIT_CONVERSATION_ID" in ""|*[!A-Za-z0-9._-]*) [ -z "$WAIT_CONVERSATION_ID" ] || { echo "forge.sh: bad conversation id '$WAIT_CONVERSATION_ID'" >&2; exit 2; };; esac
   if [ -n "$MINUTES" ]; then
     case "$MINUTES" in *[!0-9]*) echo "forge.sh: minutes is a positive whole number" >&2; exit 2;; esac
     [ "$MINUTES" -ge 1 ] || { echo "forge.sh: minutes is a positive whole number" >&2; exit 2; }
@@ -270,6 +279,11 @@ if [ "$VERB" = "wait" ]; then
   if [ -n "$SENDER_KIND" ]; then
     IDENTITY_ARGS+=(--data-urlencode "kind=$SENDER_KIND" --data-urlencode "sessionId=$SENDER_ID")
   fi
+  # --to names the chat to wait on, the same conversation_id the status and view
+  # routes already take, so a session driving two Forge chats can wait on the one
+  # it needs instead of the most recent one.
+  TARGET_ARGS=()
+  [ -z "$WAIT_CONVERSATION_ID" ] || TARGET_ARGS+=(--data-urlencode "conversation_id=$WAIT_CONVERSATION_ID")
   # ~55 s between polls: cheap for Forge, and a turn that ends between polls is
   # picked up on the next one. The test-only overrides keep route integration
   # tests deterministic without waiting for the production interval.
@@ -297,14 +311,14 @@ if [ "$VERB" = "wait" ]; then
   LIMIT=$((START + TIMEOUT_SECONDS))
   LAST=""
   while :; do
-    if LAST="$(curl -sS --fail-with-body -G -H "Authorization: Bearer $TOKEN" --data-urlencode "from=$NAME" "${IDENTITY_ARGS[@]}" "$URL/agent/status")"; then
+    if LAST="$(curl -sS --fail-with-body -G -H "Authorization: Bearer $TOKEN" --data-urlencode "from=$NAME" "${IDENTITY_ARGS[@]}" "${TARGET_ARGS[@]}" "$URL/agent/status")"; then
       STATE="$(printf '%s\n' "$LAST" | sed -n 's/^State: //p' | head -n 1)"
       QUEUED="$(printf '%s\n' "$LAST" | sed -n 's/^Queued from you: //p' | head -n 1)"
       case "$STATE" in
         idle*)
           if [ "$QUEUED" = "0" ]; then
             printf '%s\n' "$LAST"
-            curl -sS --fail-with-body -G -H "Authorization: Bearer $TOKEN" --data-urlencode "from=$NAME" --data-urlencode "count=1" "${IDENTITY_ARGS[@]}" "$URL/agent/view" \
+            curl -sS --fail-with-body -G -H "Authorization: Bearer $TOKEN" --data-urlencode "from=$NAME" --data-urlencode "count=1" "${IDENTITY_ARGS[@]}" "${TARGET_ARGS[@]}" "$URL/agent/view" \
               || { echo "forge.sh: Forge's endpoint did not accept it (see above)." >&2; exit 1; }
             exit 0
           fi;;

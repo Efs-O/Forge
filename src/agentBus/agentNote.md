@@ -48,8 +48,8 @@ an empty `who` is normal before any session is linked.
 - `status <your-name>`: what your Forge chat is doing now — before your first message
   has started it answers `State: queued` with how many of your messages are waiting,
   which is normal, not an error. `view <your-name> [n]`: its last answers; it refuses
-  until your first answer exists. `wait <your-name> [minutes]`: block until it is idle
-  with nothing queued.
+  until your first answer exists. `wait <your-name> [minutes] [--to <conversationId>]`: block
+  until it is idle with nothing queued.
 - `reply <id> [file]`: answer a question Forge is waiting on.
 - `read-verdict <your-name> <exchangeId>` and `ack-verdict <your-name> <exchangeId>`:
   read a retained answer, then remove its retained copy.
