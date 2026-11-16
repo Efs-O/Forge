@@ -48,16 +48,7 @@ const NETWORK_PROGRAM_NAMES: Readonly<Record<string, string>> = {
  * Programs that reach the network only for some of their verbs, and those verbs.
  */
 const VERB_NETWORK_PROGRAMS: Record<string, Set<string>> = {
-  git: new Set([
-    'push',
-    'pull',
-    'clone',
-    'fetch',
-    'ls-remote',
-    'remote',
-    'submodule',
-    'cherry-pick',
-  ]),
+  git: new Set(['push', 'pull', 'clone', 'fetch', 'ls-remote', 'remote', 'submodule']),
   npm: new Set([
     'install',
     'ci',
@@ -83,12 +74,25 @@ const VERB_NETWORK_PROGRAMS: Record<string, Set<string>> = {
 /**
  * Does this statement name a program that reaches a host, and which one?
  *
- * Whole tokens only, resolved the way the deny list resolves them, so a commit
- * message that merely contains the word `push` is not a network command. The name is
- * the program for a downloader or a remote shell, and `program-verb` for the ones
- * that reach a host only for some verbs (`git push` is `git-push`, `npm publish` is
- * `npm-publish`), because the verb is the half that says whether bytes left: a key
- * for `git` as a whole would have allowed the wrong thing by accident.
+ * Whole tokens only, resolved the way the deny list resolves them, so a quoted
+ * commit message that merely contains the word `push` is not a network command.
+ * The name is the program for a downloader or a remote shell, and `program-verb`
+ * for the ones that reach a host only for some verbs (`git push` is `git-push`,
+ * `npm publish` is `npm-publish`), because the verb is the half that says whether
+ * bytes left: a key for `git` as a whole would have allowed the wrong thing by
+ * accident. `git remote` stays in the verb set even though most of its verbs are
+ * local, because `git remote update` fetches.
+ *
+ * Every token after the program that is not a flag is tested, not just the first,
+ * and this is fail-closed on purpose. The value of an option that takes one sits
+ * in the same slot as a verb (`git -C <dir> push`, `npm --registry <url> install`),
+ * and telling the two apart takes an option table per program: git has one
+ * (`splitGitGlobals` in `shellCommandTokens.ts`), npm has none, and a rule exact for
+ * one program and blind for the rest would still let `npm install` out of a flagged
+ * chat unasked. So the first known verb anywhere wins, and the cost is a false
+ * positive on a statement that names a verb only as an option value
+ * (`git commit -m push`): one extra card in a flagged chat, against `git push`
+ * leaving that chat unasked.
  */
 export function statementNetworkProgram(statement: readonly string[]): string | undefined {
   const program = baseProgram(statement[0] ?? '');
@@ -100,7 +104,7 @@ export function statementNetworkProgram(statement: readonly string[]): string | 
   for (const token of statement.slice(1)) {
     if (token.startsWith('-')) continue;
     const verb = token.toLowerCase();
-    return verbs.has(verb) ? `${program}-${verb}` : undefined;
+    if (verbs.has(verb)) return `${program}-${verb}`;
   }
   return undefined;
 }
