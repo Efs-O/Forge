@@ -11,6 +11,7 @@ vi.mock('vscode', () => {
 
 import * as vscode from 'vscode';
 import { readDocument } from '../../src/documents';
+import { markdownToDocx } from '../../src/documents/docxFromMarkdown';
 import { unzipTextParts } from '../../src/documents/zipXml';
 import * as atomicWrite from '../../src/util/atomicWrite';
 import { makeExportDocumentTool } from '../../src/tools/exportDocumentTool';
@@ -272,5 +273,57 @@ describe('export_document', () => {
         output: path.join(os.tmpdir(), 'outside.docx'),
       }),
     ).rejects.toThrow(/outside the workspace/);
+  });
+});
+
+// ── DOCX image destinations ─────────────────────────────────────────────────
+
+/**
+ * A destination with a space in it has two shapes, and both used to disappear:
+ * `(<path>)`, which is the valid CommonMark one, and `path with a space.png`,
+ * which is not. Neither was embedded, and neither was named, so the export lost
+ * a screenshot and said nothing about it.
+ */
+describe('DOCX image destinations', () => {
+  const fixture = new URL('../fixtures/documents/sample.png', import.meta.url);
+  beforeAll(() => {
+    fs.copyFileSync(fixture, path.join(root, 'my shot.png'));
+  });
+
+  const exportDocx = async (markdown: string) => {
+    const omitted: string[] = [];
+    const bytes = await markdownToDocx(
+      markdown,
+      path.join(root, 'doc.md'),
+      root,
+      [],
+      undefined,
+      { omittedImages: omitted },
+    );
+    return { bytes, omitted };
+  };
+  const embedded = (bytes: Buffer) => /word\/media\/[^\u0000]+\.png/.test(bytes.toString('latin1'));
+
+  it('embeds an angle-bracket destination that contains a space', async () => {
+    const { bytes, omitted } = await exportDocx('![a](<my shot.png>)\n');
+    expect(embedded(bytes)).toBe(true);
+    expect(omitted).toEqual([]);
+  });
+
+  it('names a missing angle-bracket image instead of dropping it', async () => {
+    const { omitted } = await exportDocx('![a](<missing one.png>)\n');
+    expect(omitted).toEqual(['missing one.png']);
+  });
+
+  it('names a bare destination with a space, which cannot be embedded', async () => {
+    const { bytes, omitted } = await exportDocx('![a](my shot.png)\n');
+    expect(embedded(bytes)).toBe(false);
+    expect(omitted).toEqual(['my shot.png']);
+  });
+
+  it('leaves a spaced-out URL out of both the document and the omissions', async () => {
+    const { bytes, omitted } = await exportDocx('![a](https://x.example/a b.png)\n');
+    expect(embedded(bytes)).toBe(false);
+    expect(omitted).toEqual([]);
   });
 });

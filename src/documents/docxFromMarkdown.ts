@@ -114,8 +114,35 @@ export async function markdownToDocx(
       );
     }
   }
+  // The walk above only sees the shapes it can embed. Anything with a
+  // destination it cannot read at all is named here rather than dropped.
+  omitSpaceSeparatedImages(markdown, images);
   const document = new Document({ sections: [{ children }] });
   return Packer.toBuffer(document);
+}
+
+/**
+ * Name the Markdown images whose destination has a bare space in it —
+ * `![shot](my shot.png)`. CommonMark wants that destination written in angle
+ * brackets, and `imageRuns` matches only the bracketed or the space-free form,
+ * so this shape is not embedded. It still has to be named: an image that
+ * vanishes from a report with no word about it is the defect the owner
+ * reported, and the name is the only thing that says which image was meant.
+ * A URL can hold the same shape, and a URL is not a local file to go and find,
+ * so it is skipped exactly as `imageRuns` skips it.
+ */
+function omitSpaceSeparatedImages(markdown: string, walk: DocxImageWalk): void {
+  const names = walk.omittedImages;
+  if (!names) return;
+  const expression = /!\[[^\]]*\]\(([^)<>\n]*\s[^)<>\n]*)\)/g;
+  for (const match of markdown.matchAll(expression)) {
+    const destination = (match[1] ?? '')
+      .trim()
+      .replace(/\s+"[^"]*"$/, '')
+      .trim();
+    if (!destination || /^[a-z][a-z0-9+.-]*:/i.test(destination)) continue;
+    names.push(path.basename(destination) || destination);
+  }
 }
 
 function plainText(markdown: string): string {
@@ -142,9 +169,14 @@ function plainText(markdown: string): string {
  */
 async function imageRuns(markdown: string, walk: DocxImageWalk): Promise<ImageRun[]> {
   const runs: ImageRun[] = [];
-  const expression = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)/g;
+  // `(<path>)` is how CommonMark writes a destination that contains a space.
+  // Without this alternative `![shot](<my shot.png>)` matched nothing at all:
+  // the image was neither embedded nor named in `omittedImages`, so a report
+  // quietly lost a screenshot and nothing said which one. Group 2 is the
+  // angle-bracket destination, group 3 the bare one, group 4 the title.
+  const expression = /!\[([^\]]*)\]\((?:<([^>\n]+)>|([^)\s]+))(?:\s+"([^"]*)")?\)/g;
   for (const match of markdown.matchAll(expression)) {
-    const href = match[2] ?? '';
+    const href = match[2] ?? match[3] ?? '';
     if (!href || /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('/') || href.startsWith('\\'))
       continue;
     let relative: string;
@@ -186,7 +218,7 @@ async function imageRuns(markdown: string, walk: DocxImageWalk): Promise<ImageRu
           data,
           type,
           transformation: { width: 400, height: 300 },
-          altText: { name: match[1] || 'image', description: match[3] || match[1] || 'image' },
+          altText: { name: match[1] || 'image', description: match[4] || match[1] || 'image' },
         }),
       );
     } catch {
