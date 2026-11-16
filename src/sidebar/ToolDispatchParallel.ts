@@ -337,6 +337,12 @@ export async function dispatchWithParallelReads(
       }
       callIndex = nextIndex;
     }
+    // The round can end with a parked call still in `held`, and that parked call can
+    // have failed. Draining inside the `try` is what routes its error through
+    // `drainHeldQuietly` below, so every OTHER held result still commits: a drain
+    // after the `catch` threw past it, and the calls behind the failed one lost
+    // their tool-result rows — a call the model sent that never answered.
+    await drainHeld();
   } catch (error) {
     // A parked call still owes the model a tool-result row: commit whatever the
     // parked calls produced before this error propagates. A transcript with a call
@@ -345,7 +351,6 @@ export async function dispatchWithParallelReads(
     await drainHeldQuietly();
     throw error;
   }
-  await drainHeld();
 }
 
 /**

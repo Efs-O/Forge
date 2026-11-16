@@ -12,7 +12,11 @@ import type { CheckpointStack } from '../../src/checkpoint/CheckpointStack';
 import type { KeepUndoCodeLensProvider } from '../../src/sidebar/KeepUndoCodeLens';
 import type { DiffDecorations } from '../../src/sidebar/DiffDecorations';
 import type { ToolFailureTracker } from '../../src/tools/StripTools';
-import type { RegisteredTool, ToolHandlerContext, ToolPermission } from '../../src/tools/ToolRegistry';
+import type {
+  RegisteredTool,
+  ToolHandlerContext,
+  ToolPermission,
+} from '../../src/tools/ToolRegistry';
 import { ToolRegistry } from '../../src/tools/ToolRegistry';
 import { clearConversationUntrustedState } from '../../src/tools/exfilTaint';
 import { resetLazyToolGroups } from '../../src/tools/lazyToolGroups';
@@ -435,15 +439,15 @@ describe('ToolDispatch parallel read batches', () => {
     await dispatch.dispatch(calls, allowed, messages, 'abort-batch', controller.signal);
 
     expect(started).toBe(10);
-    expect(messages.map((message) => message.tool_call_id)).toEqual(
-      calls.map((call) => call.id),
-    );
+    expect(messages.map((message) => message.tool_call_id)).toEqual(calls.map((call) => call.id));
     expect(messages.map((message) => message.content)).toEqual(
       calls.map(() => 'Error: tool execution cancelled'),
     );
     expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
     expect(failureTracker.reset).not.toHaveBeenCalled();
-    expect(post.mock.calls.map(([event]) => event.toolCallId)).toEqual(calls.map((call) => call.id));
+    expect(post.mock.calls.map(([event]) => event.toolCallId)).toEqual(
+      calls.map((call) => call.id),
+    );
     expect(vscode.workspace.openTextDocument).not.toHaveBeenCalled();
   });
 
@@ -473,6 +477,66 @@ describe('ToolDispatch parallel read batches', () => {
     expect(trackerUpdates).toEqual(['reset:failure-order']);
     expect(messages.map((message) => message.tool_call_id)).toEqual(['success', 'failure']);
     expect(messages[1]?.content).toContain('read failed');
+  });
+
+  it('still commits every other result when the round-ending drain rethrows a failed parked call', async () => {
+    // The parked call is the head of the held queue, and the read behind it commits
+    // only once the head settles. When that head has FAILED, the drain that ends the
+    // round is the one that throws — and it has to throw through the `catch` that
+    // drains the rest, or the read's tool-result row never reaches the model and its
+    // call is left permanently unanswered.
+    toolRegistry.register(
+      readTool(
+        'read_file',
+        async () => 'never returns',
+        () => ({ dangerous: true, detail: 'secret path' }),
+      ),
+    );
+    toolRegistry.register(readTool('list_directory', async () => 'entries'));
+    const context: ToolDispatchRoundContext = {
+      allowed,
+      convId: 'final-drain',
+      signal: undefined,
+      checkpoint: undefined,
+      budget: undefined,
+      recordFileDiff: undefined,
+      unavailableTools: undefined,
+      setPlan: undefined,
+      tellArrived: undefined,
+      modelContext: undefined,
+    };
+
+    await expect(
+      dispatchWithParallelReads(
+        [
+          makeToolCall('read_file', { path: '.env' }, 'parked'),
+          makeToolCall('list_directory', { path: '.' }, 'listing'),
+        ],
+        context,
+        toolRegistry,
+        messages,
+        failureTracker,
+        post,
+        async () => {
+          throw new Error('dispatchSerial must not run here');
+        },
+        async (call, _approval, effects) => {
+          if (call.id === 'parked') {
+            // Still unsettled while the read behind it is emitted: that is what
+            // leaves both of them in the queue for the round-ending drain.
+            await pause(20);
+            throw new Error('the parked call failed');
+          }
+          effects.messages.push({
+            role: 'tool',
+            tool_call_id: call.id,
+            content: 'entries',
+          });
+        },
+      ),
+    ).rejects.toThrow('the parked call failed');
+
+    expect(messages.map((message) => message.tool_call_id)).toEqual(['listing']);
   });
 });
 
