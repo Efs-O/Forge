@@ -1,10 +1,15 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.17.186
 
-**The background-job watch tool now says its own 60-second cap.**
+**A desktop click now says what it actually did, and Office files can be read, changed and printed without opening the app.**
 
-- `monitor_execution` told you "Max wait in ms (default 10000)" and left the 60,000 bound in the schema alone, where the reader had already stopped. An agent that asked for a longer wait was refused and lost a round finding out. The range is now in the sentence you read.
+- `desktop_click` answered `Clicked (left, 1×)` even when the click landed on a label or a control's border and changed nothing. It now reads which control holds keyboard focus before and after, and where the cursor really landed, and reports it: `Keyboard focus did not move (still Edit) — a click on a label or a control's border does not focus a field.`, or `Keyboard focus moved: Edit → ComboBox.`, or `Keyboard focus moved to another control of the same kind`. Two fields in one dialog share a window class, so the tool decides on the focused window handle and only calls the control by its class.
+- `desktop_focus_window` accepts a numeric `window_id`, which is the form its own `desktop_windows` prints. A parameter that allows both a string and a number is now validated against both types instead of neither, so a boolean or an object is still refused.
+- `desktop_capture` now says it approved the window WITHOUT bringing it forward, which is why the next click or keystroke was refused with `target lost focus`.
+- New shipped skill `office-files`: dump a `.docx`/`.xlsx`/`.pptx` showing each paragraph's run count and every look-alike character's codepoint, patch text without breaking the file's XML namespaces, and check what a print queue really proves — plus the rules for driving a window that cost the most to learn.
+- A broken tool-call block no longer ends a run silently: the loop nudges the model once to re-issue the call instead of returning the markup as the answer.
+- The background-job watch tool says its own 60-second cap. `monitor_execution` told you "Max wait in ms (default 10000)" and left the 60,000 bound in the schema alone, where the reader had already stopped. An agent that asked for a longer wait was refused and lost a round finding out. The range is now in the sentence you read.
 
 ## 0.17.185
 
