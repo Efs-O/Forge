@@ -1,4 +1,4 @@
-import { formatAthensDateTime, parseResult } from './agentTaskPrompt';
+import { formatLocalDateTime, localTimeZoneName, parseResult } from './agentTaskPrompt';
 
 /**
  * The two sentences a stopped turn reports, exported so the resumed-run
@@ -85,7 +85,7 @@ export function reportMessage(
       ? `${outcome.finalText.slice(0, REPORT_BODY_CHARS).trimEnd()}\n…(report clipped)`
       : outcome.finalText;
   return (
-    `Date/time (Europe/Athens, 24-hour): ${formatAthensDateTime(startedAt)}\n` +
+    `Date/time (${localTimeZoneName()}, 24-hour): ${formatLocalDateTime(startedAt)}\n` +
     `${outcome.kind}: ${outcome.sentence} ` +
     `(${formatDuration(durationMs)})` +
     (conversationId ? ` — conversation ${conversationId}` : '') +

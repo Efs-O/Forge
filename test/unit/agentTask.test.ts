@@ -19,9 +19,11 @@ import {
   canStartNow,
   parseResult,
   schedulePeriodMs,
+  type AgentTaskAction,
   type AgentTaskDeps,
 } from '../../src/jobs/agentTask';
 import { reportMessage } from '../../src/jobs/agentTaskReport';
+import { buildAgentTaskPrompt } from '../../src/jobs/agentTaskPrompt';
 import {
   restartAfterTurn,
   RESTART_CAP_MS,
@@ -368,6 +370,25 @@ ${'Detail for the record: digests checked. '.repeat(40)}RESULT: ok — installed
     const message = reportMessage(outcome('x'.repeat(6_000)), 0, 1_000, null);
     expect(message).toContain('…(report clipped)');
     expect(message.length).toBeLessThan(4_200);
+  });
+});
+
+// ── buildAgentTaskPrompt ─────────────────────────────────────────────────────
+
+describe('buildAgentTaskPrompt', () => {
+  const jobFile: JobFile = { job: baseJob(), state: JobStateSchema.parse({}) };
+  const store = { readRuns: async () => [] } as unknown as JobStore;
+
+  /** The stamp used to name Europe/Athens whatever the machine's own zone is
+   * (CLAUDE.md: no hardcoded OS or user values). A job that fires at 03:00 UTC
+   * on a machine in another zone now says the clock that machine reads. */
+  it('names the local time zone in the scheduled run time', async () => {
+    const action = baseJob().action as AgentTaskAction;
+    const prompt = await buildAgentTaskPrompt(store, jobFile, action);
+    expect(prompt).toContain(
+      `(${Intl.DateTimeFormat().resolvedOptions().timeZone}, 24-hour format)`,
+    );
+    expect(prompt).toContain('Scheduled run time: ');
   });
 });
 

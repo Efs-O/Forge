@@ -81,16 +81,17 @@ export const ToolsConfigSchema = z
   .optional();
 
 /**
- * `skills:` — the top-level block that turns the skills feature on.
+ * `skills:` — the top-level block that turns the skills feature off.
  *
- * Absent means off, the same shape as every other optional block here: a config
- * that never mentions skills keeps the tool list, the prompt prefix and the
- * catalog it always had, because an advertised `load_skill` and a catalog nobody
- * can fill in are cost with no benefit. Strict on purpose: an owner who writes a
- * key that does not exist should be told, not have it dropped silently — a
- * skill's own `config.json` is where a skill's settings live, never here.
- * Unlike `edit_diagnostics` above, this block does not break the file's "absent
- * means off" rule; it follows it.
+ * Absent means ON: the only thing this block can do is turn skills off, and it
+ * takes `skills.enabled: false` to do it (`SkillsService.isEnabled` reads
+ * `skills?.enabled !== false`). A config that never mentions `skills:` still
+ * gets the catalog and the advertised `load_skill`. So unlike `edit_diagnostics`
+ * above, this block does NOT follow the "absent means off" rule the rest of this
+ * file follows — it is the one block here that defaults to on. Strict on purpose:
+ * an owner who writes a key that does not exist should be told, not have it
+ * dropped silently — a skill's own `config.json` is where a skill's settings
+ * live, never here.
  */
 export const SkillsConfigSchema = z
   .object({

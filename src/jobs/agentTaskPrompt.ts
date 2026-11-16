@@ -2,10 +2,13 @@ import type { JobStore } from './JobStore';
 import type { JobFile } from './jobSchema';
 import type { AgentTaskAction } from './agentTask';
 
-/** A stable, locale-independent 24-hour timestamp for Athens job reports. */
-export function formatAthensDateTime(epochMs: number): string {
+/**
+ * A 24-hour timestamp in the machine's own time zone. Nothing here pins a
+ * region: the shape (ISO-style date, `h23` clock) is fixed by the format
+ * options, while the clock the stamp reads is wherever this machine says it is.
+ */
+export function formatLocalDateTime(epochMs: number): string {
   const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Europe/Athens',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -15,6 +18,11 @@ export function formatAthensDateTime(epochMs: number): string {
   }).formatToParts(new Date(epochMs));
   const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
   return `${values['year']}-${values['month']}-${values['day']} ${values['hour']}:${values['minute']}`;
+}
+
+/** The time zone `formatLocalDateTime` prints in, named so a report can say so. */
+export function localTimeZoneName(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
 
 /**
@@ -31,7 +39,7 @@ export async function buildAgentTaskPrompt(
   action: AgentTaskAction,
 ): Promise<string> {
   const { job, state } = jobFile;
-  const runTime = formatAthensDateTime(Date.now());
+  const runTime = formatLocalDateTime(Date.now());
   const runs = await store.readRuns(job.id);
   const recent = runs.slice(-3);
   const runLines = recent.length
@@ -39,7 +47,7 @@ export async function buildAgentTaskPrompt(
     : ['(no earlier runs)'];
   const parts = [
     `${JOB_TASK_PROMPT_MARKER}${job.name}":`,
-    `Scheduled run time: ${runTime} (Europe/Athens, 24-hour format).`,
+    `Scheduled run time: ${runTime} (${localTimeZoneName()}, 24-hour format).`,
     '',
     action.task,
     '',
