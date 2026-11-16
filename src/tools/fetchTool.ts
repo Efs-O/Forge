@@ -209,7 +209,7 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
       // whatever the content type claims. Decoding entities can rebuild the
       // wrapper's closing tag from `&lt;/UNTRUSTED_CONTENT&gt;`, so the marker
       // is defused after decoding, or a page could step outside its fence.
-      const text = htmlToText(html).replace(/<\/?\s*UNTRUSTED_CONTENT\s*>/giu, '[marker removed]');
+      const text = defuseMarkers(htmlToText(html));
 
       if (find === undefined) {
         // Say when the page was cut, or the model takes the first window for the whole page.
