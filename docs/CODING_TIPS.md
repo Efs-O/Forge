@@ -21,10 +21,10 @@
 8. `search_sessions` returning `total_matches: 0` → not proof the archive lacks the topic. probe with a term you expect to hit (`project: "Forge"` → 672) and check `date_from` before reporting a gap
 9. a follow-up search that drops one alternative from the `rg -l "a|b"` that listed the file → it matched the other one; the narrow search is empty and reads as a phantom. repeat the whole pattern
 10. a `grep_search` query holding `\n` (or `\(a\|b\n`) → `rg: the literal "\n" is not allowed in a regex`. nothing ran; match one line, or list the alternatives without the newline
-11. `rg --include='*.ts'` → unrecognized flag: that is grep's spelling. filter files with `rg -g '*.ts'`
+11. `rg --include='*.ts'` or `grep --no-ignore` → unrecognized flag: each is the other tool's spelling. rg filters with `-g '*.ts'`; GNU grep has no ignore flag
 12. an `rg` pattern with a look-around (`(?=`, `(?!`, `(?<=`) → `look-around ... is not supported`. add `--pcre2`
 13. `grep_search` with a `path:` argument → refused: unknown argument, nothing ran. the file filter is `include`
-14. `rg -n "x" .` over the repo → `dist/`, `coverage/`, `.forge/tmp/` and one-line `test/fixtures/*.json` drown the answer (42 MB once). exclude each with `-g`
+14. `rg -n "x" .` over the repo → `dist/`, `coverage/`, `.forge/tmp/`, `docs/local/**` corpora and one-line `test/fixtures/*.json` drown the answer (42 MB once). exclude each with `-g`
 
 ## RUN
 1. `cd "C:/Users/…/sessions" && python -c "…"` → refused: the write is judged from the folder the command started in. pass `cwd: "C:/Users/…/sessions"` and the command alone
@@ -75,6 +75,8 @@
 15. an `edit_file` `new_str` with a typed `\n` between two statements → both land on one line, inside the comment above them. type real newlines; re-read a multi-line insert
 16. `edit_file` `new_str` written as `\n` → the two characters land in the file, not a newline, and the next edit anchors on text that is not there. write the real newline
 17. repairing a mangled line from memory instead of rereading it → the fix re-adds what survived: `describe('x', () => { () => {`. read the line back, then fix it once
+18. `edit_file` on a backtick I thought `write_file` had escaped → old_str not found: the file holds exactly what I typed. read_file it back before blaming the write
+19. budgeting the net lines of a 500-line file → the tool warns "now 501 lines": an inserted documented method is doc+body+blank = 5 lines, not 4 → `wc -l` after the edit
 
 ## TEST
 1. a harness that only emits calls, or a threshold measured by a script whose pair list differs from the gate's → the number certifies neither. dispatch the calls; measure with the gate's own list
