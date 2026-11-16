@@ -30,6 +30,9 @@ const DEFAULT_EXCLUDE_GLOBS = [
 ];
 const DEFAULT_MAX_FILE_SIZE_KB = 256;
 const EMBEDDING_BATCH_SIZE = 24;
+/** How many files one `fs.stat` wave covers: a large workspace in one
+ *  `Promise.all` would open every handle at once. */
+const STAT_BATCH = 64;
 
 export class IndexManager {
   private readonly client: EmbeddingClient;
@@ -238,17 +241,23 @@ export class IndexManager {
   }
 
   private async statFiles(relativePaths: string[]): Promise<SearchIndexFile['files']> {
-    const entries = await Promise.all(
-      relativePaths.map(async (relPath) => {
-        try {
-          const stat = await fs.stat(path.join(this.workspaceRoot(), relPath));
-          return [relPath, { mtimeMs: stat.mtimeMs, size: stat.size }] as const;
-        } catch {
-          return null;
-        }
-      }),
-    );
-    return Object.fromEntries(entries.filter((entry) => entry !== null));
+    const found: SearchIndexFile['files'] = {};
+    for (let index = 0; index < relativePaths.length; index += STAT_BATCH) {
+      const wave = await Promise.all(
+        relativePaths.slice(index, index + STAT_BATCH).map(async (relPath) => {
+          try {
+            const stat = await fs.stat(path.join(this.workspaceRoot(), relPath));
+            return [relPath, { mtimeMs: stat.mtimeMs, size: stat.size }] as const;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      for (const entry of wave) {
+        if (entry) found[entry[0]] = entry[1];
+      }
+    }
+    return found;
   }
 
   /** Empties the set BEFORE the embedding await, so a file saved during it is
