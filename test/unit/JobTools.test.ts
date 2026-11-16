@@ -170,6 +170,16 @@ describe('manage_jobs — definition and permissions', () => {
       path.join(root, 'disk.json'),
       path.join(root, 'state', 'disk.json'),
     ]);
+    // `delete` also removes the run log, so Undo must copy that too.
+    expect(tool.mutation!.paths({ action: 'delete', job: 'disk' })).toEqual([
+      path.join(root, 'disk.json'),
+      path.join(root, 'state', 'disk.json'),
+      path.join(root, 'runs', 'disk.jsonl'),
+    ]);
+    expect(tool.mutation!.paths({ action: 'pause', job: 'disk' })).toEqual([
+      path.join(root, 'disk.json'),
+      path.join(root, 'state', 'disk.json'),
+    ]);
     expect(tool.mutation!.paths({ action: 'list' })).toEqual([]);
   });
 

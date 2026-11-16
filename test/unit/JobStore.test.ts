@@ -246,6 +246,37 @@ describe('JobStore delete', () => {
     await expect(store.delete('ghost')).resolves.toBeUndefined();
   });
 
+  it('a definition restored after delete (Undo) takes writes again', async () => {
+    await store.saveJob(job());
+    const defFile = path.join(root, 'disk.json');
+    const defText = fs.readFileSync(defFile, 'utf8');
+    await store.appendRun('disk', {
+      at: 1,
+      late: false,
+      outcome: 'ok',
+      changed: false,
+      summary: 'first',
+      delivered: 0,
+    });
+    await store.delete('disk');
+    // Turn Undo puts the definition back. The in-memory delete mark must stop
+    // swallowing this job's state and run writes until the window reloads.
+    fs.writeFileSync(defFile, defText);
+    await store.saveState('disk', { last_run_at: 2, consecutive_failures: 0 });
+    await store.appendRun('disk', {
+      at: 3,
+      late: false,
+      outcome: 'ok',
+      changed: false,
+      summary: 'second',
+      delivered: 0,
+    });
+    expect(await fs.promises.readFile(path.join(root, 'state', 'disk.json'), 'utf8')).toContain(
+      '"last_run_at": 2',
+    );
+    expect(await store.readRuns('disk')).toEqual([expect.objectContaining({ at: 3 })]);
+  });
+
   it('removes a staged llamacpp_update build, so a deleted job cannot still switch', async () => {
     await store.saveJob(job());
     const stagedDir = path.join(root, 'staged');

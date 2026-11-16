@@ -150,11 +150,11 @@ export function makeManageJobsTool(deps: ManageJobsDeps): RegisteredTool {
       if (typeof action === 'string' && WRITE_ACTIONS.has(action as Action)) return ['write'];
       return [];
     },
-    // Job files live under `~/.forge/jobs/` (outside the workspace), so no editor diff.
     mutation: {
       paths: (args) => {
         const action = args['action'];
-        if (typeof action !== 'string' || !WRITE_ACTIONS.has(action as Action)) return [];
+        const mutates = action === DELETE_ACTION || WRITE_ACTIONS.has(action as Action);
+        if (!mutates) return []; // Undo copies the files the action writes or removes
         if (action === 'create') {
           const definition = args['definition'];
           const name =
@@ -162,8 +162,7 @@ export function makeManageJobsTool(deps: ManageJobsDeps): RegisteredTool {
               ? (definition as Record<string, unknown>)['name']
               : undefined;
           if (typeof name !== 'string' || !name.trim()) return [];
-          // A collision may add a numeric suffix, but both files stay under these folders.
-          const slug = jobSlug(name);
+          const slug = jobSlug(name); // a collision may add a suffix; both files stay here
           return [
             path.join(deps.store.root, `${slug}.json`),
             path.join(deps.store.root, 'state', `${slug}.json`),
@@ -174,9 +173,10 @@ export function makeManageJobsTool(deps: ManageJobsDeps): RegisteredTool {
         return [
           path.join(deps.store.root, `${id}.json`),
           path.join(deps.store.root, 'state', `${id}.json`),
+          ...(action === DELETE_ACTION ? [path.join(deps.store.root, 'runs', `${id}.jsonl`)] : []),
         ];
       },
-      showDiff: false,
+      showDiff: false, // job files live outside the workspace, so there is no editor diff
     },
     // Advertised only when a `jobs:` block is present.
     advertise: () => deps.getConfig().jobs?.enabled === true,
