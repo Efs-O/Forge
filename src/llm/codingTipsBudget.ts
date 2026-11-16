@@ -16,14 +16,25 @@
  * `CodingTipsInjection.test.ts` now pins the relationship.
  */
 
-/** The shipped table is the vendor's: it gets room for the whole list. Sized to
- *  hold a full 180-entry table (`CodingTipsDoc.test.ts`'s cap): 90 entries
- *  measured 12.7 KB on 2026-11-14, so an allowance under 25 KB would truncate a
- *  table the cap allows. */
-export const SHIPPED_TIPS_ALLOWANCE = 32_000;
+/** The table's shape, pinned by `CodingTipsDoc.test.ts` for the project table
+ *  and used here to size both allowances. Raised from 200 characters per entry
+ *  on 2026-11-16: entries were being cut to fit, and the part that went first
+ *  was "what to write instead". */
+export const TIPS_TABLE_MAX_LINES = 180;
+export const TIPS_ENTRY_MAX_CHARS = 300;
 
-/** The project table grows one line per recorded mistake, so it is capped on its own. */
-export const PROJECT_TIPS_ALLOWANCE = 16_000;
+/** Room for a table of the largest legal shape: every line a full entry plus
+ *  its newline, and about 10% more for multi-byte characters (`→` is 3 bytes),
+ *  since the allowances are clamped in UTF-8 bytes. Before 2026-11-16 the
+ *  project allowance was 16,000 while the test allowed about 36 KB of table, so
+ *  the loader silently cut a table the test called legal. */
+const FULL_TABLE_ALLOWANCE = 60_000;
+
+/** The shipped table is the vendor's: it gets room for the whole list. */
+export const SHIPPED_TIPS_ALLOWANCE = FULL_TABLE_ALLOWANCE;
+
+/** The project table grows one line per recorded mistake; it gets the same room. */
+export const PROJECT_TIPS_ALLOWANCE = FULL_TABLE_ALLOWANCE;
 
 /** What `loadCodingTips` adds AROUND the two tables: the shipped heading, the
  *  project heading, the duplicate note, and the blank lines between parts. The

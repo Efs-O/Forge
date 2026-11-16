@@ -14,6 +14,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { describe, expect, it } from 'vitest';
+import {
+  PROJECT_TIPS_ALLOWANCE,
+  SHIPPED_TIPS_ALLOWANCE,
+  TIPS_ENTRY_MAX_CHARS,
+  TIPS_TABLE_MAX_LINES,
+} from '../../src/llm/codingTipsBudget';
 
 const root = path.resolve(__dirname, '..', '..');
 const docPath = path.join(root, 'docs', 'CODING_TIPS.md');
@@ -37,9 +43,9 @@ const SECTIONS = [
 /** Doubled from 90 on 2026-11-14: the table reached its cap on the day the cap was
  *  meant to be a safety net, not a wall. The byte allowances in `codingTips.ts` are
  *  raised with it — a cap the loader truncates under is not a cap, it is a lie. */
-const MAX_LINES = 180;
+const MAX_LINES = TIPS_TABLE_MAX_LINES;
 const MAX_PER_SECTION = 25;
-const MAX_ENTRY_CHARS = 200;
+const MAX_ENTRY_CHARS = TIPS_ENTRY_MAX_CHARS;
 /** Lines allowed before the first heading: the title and the two rules about duplication. */
 const HEADER_BUDGET = 8;
 
@@ -68,6 +74,14 @@ describe('docs/CODING_TIPS.md stays an exact-syntax table', () => {
       lines.length,
       `past ${MAX_LINES} lines this is a wall again, not a lookup table`,
     ).toBeLessThanOrEqual(MAX_LINES);
+  });
+
+  it('fits the loader whole: the shape the test allows is never truncated', () => {
+    // Every line a full entry plus its newline, in UTF-8 bytes at 1.1 per char.
+    const largestLegalTable = Math.ceil(MAX_LINES * (MAX_ENTRY_CHARS + 1) * 1.1);
+    expect(largestLegalTable).toBeLessThanOrEqual(PROJECT_TIPS_ALLOWANCE);
+    expect(largestLegalTable).toBeLessThanOrEqual(SHIPPED_TIPS_ALLOWANCE);
+    expect(Buffer.byteLength(doc, 'utf8')).toBeLessThanOrEqual(PROJECT_TIPS_ALLOWANCE);
   });
 
   it('groups by the action the mistake belongs to', () => {

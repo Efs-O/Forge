@@ -19,6 +19,7 @@
 7. `rg -F "phrase"` as the proof nothing was missed → it skips gitignored files silently, so the proof is hollow. pass `--no-ignore` (`include_ignored: true`) or name the file
 8. `search_sessions` returning `total_matches: 0` → not proof the archive lacks the topic. probe with a term you expect to hit (`project: "Forge"` → 672) and check `date_from` before reporting a gap
 9. a follow-up search that drops one alternative from the `rg -l "a|b"` that listed the file → it matched the other one; the narrow search is empty and reads as a phantom. repeat the whole pattern
+10. a `grep_search` query holding `\n` (or `\(a\|b\n`) → `rg: the literal "\n" is not allowed in a regex`. nothing ran; match one line, or list the alternatives without the newline
 
 ## RUN
 1. `cd "C:/Users/…/sessions" && python -c "…"` → refused: the write is judged from the folder the command started in. pass `cwd: "C:/Users/…/sessions"` and the command alone
@@ -34,23 +35,25 @@
 11. a 2nd gated call after one card expired → `... needs the approval that went unanswered earlier in this turn, so no new card was shown` → only the first card burns time
 12. a gated call batched with later gated calls → each raises its own card and waits the full `approval_timeout_minutes`; an expired card silences only that approval key
 13. a heredoc terminator with a command after it (`MSG; echo ok`) → never seen as a terminator: the command text lands in the commit message and never runs. keep it alone on its line
-14. a result's field names are not its input names (`next_stdout_cursor` vs `stdout_cursor`) → refused: unknown arguments. the refusal lists the valid names; resend with those
-15. a field a tool does not declare → refused: `edit_file` `edits[]` items take only `old_str`/`new_str`/`replace_all` (`path` once at top); `ask_user` `header` is per-question, not top-level
+14. a field name that is not an input name (`next_stdout_cursor` vs `stdout_cursor`; a stray `=` in `=query`) → refused: unknown arguments. the refusal lists the valid names; resend with those
+15. an undeclared field → refused: `edit_file` `edits[]` take `old_str`/`new_str`/`replace_all` (`path` at top); `ask_user` `header` is per-question; `remember` takes `key`/`value`/`description`
 16. `stop_execution` on a background `npm run ci` → the wrapper dies, the child tree lives and holds the ci-lock, so the next run waits forever: `MSYS_NO_PATHCONV=1 taskkill /PID <top> /T /F`
 17. `npm test 2>&1 > run.log` → vitest writes failures to stderr, so they print to the terminal and the file holds only the summary: grep finds no FAIL. write `> run.log 2>&1`
 18. `npx eslint test/unit/x.test.ts` → "none of those TSConfigs include this file": the lint script is `eslint src webview-ui`, so tests have no typed-lint config. lint `src` only
 19. an approval-gated command inside `A && B && C` → the card can expire with the owner away and B/C never run. restore a tracked file with `git show HEAD:path > path`: no card
 20. a pid taken in Git Bash (`$$`, `$!`) → an MSYS pid, so Win32 `OpenProcess` answers 87 and `Get-CimInstance` finds nothing. take it from the Windows side (PowerShell `$PID`) or a Win32 tool
+21. `"$Config:"` in a PowerShell double-quoted string → `ParserError`: the colon starts a drive-qualified variable name. write `${Config}:`
+22. `node -e "import('N:/x/y.mjs')"` on Windows → `ERR_UNSUPPORTED_ESM_URL_SCHEME ... Received protocol 'n:'`. pass a file URL: `import('file:///N:/x/y.mjs')`
 
 ## GIT
-1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green: never run `record-ci-pass.mjs` by hand — the `ci:steps` `&&` chain writes it. run the suite after the commit it certifies
+1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green and the tree stood still: never run `record-ci-pass.mjs` by hand — the `ci:steps` chain writes it
 2. `git commit -- <file> -m "msg"` → git reads `-m` and the message as pathspecs after `--`. put every flag before `--`, the files last; a new file needs `git add` first: untracked is not a pathspec
 
 ## EDIT
 1. an `edit_file` whose `old_str` is a heading → the heading disappears when `new_str` omits it, orphaning the text under it. re-include the heading in `new_str`
 2. `apply_line_edits` or `edit_file` anchored on text from before a formatter pass or earlier in the turn → refused: stale. re-read after `prettier --write`, edit in the same round
 3. an `old_str` rebuilt from wrapped prose → refused: not found. the wrap is a real newline, and a sentence that starts mid-line cannot be anchored mid-sentence: copy the whole physical line
-4. a rename that lengthens an identifier → a line passes printWidth 100 and fails the formatter gate. after any rename: `git diff -U0 | grep '^+' | awk 'length > 101'`, re-wrap in the same pass
+4. a rename lengthens an identifier, or a new call takes several arguments on one line → the `prettier/prettier` gate fails at printWidth 100. fix: `npx prettier --write <file>`
 5. `apply_line_edits` with `expected_lines` invented rather than copied → refused: has N lines but the range is M. the refusal prints the current lines verbatim; copy them from there
 6. `apply_line_edits` on `docs/TOOL_COVERAGE.md` → `ToolHarness.test.ts` diffs it against a fresh generation and normalises only `Generated:`. restore_file it after a demo
 7. a multi-line string edit that drops the `+` between two literals → the parse error names a later line, not the missing one. after editing a joined description, re-read the block
@@ -67,11 +70,13 @@
 5. `fs.rmSync` on a killed child's cwd → EPERM is not in `maxRetries`' retried set, so the retries do nothing. use `removeTreeWhenFree` (test/support/removeTempTree.ts): polls until removable
 6. a tool rename swept only src+test → a bench script and its JSON fixture still named the old tool, and only the full suite found it. sweep scripts/ and benchmarks/ in the same pass
 7. a describe-level `path.join(dir, 'x')`, dir set in beforeEach → runs at collection while dir is '': a RELATIVE path, and the test overwrote a real repo file. build temp paths in the test
+8. a `ToolApprovalService` card asserted on the posted `confirmRequest` → none arrives: `pump()` posts it only when `getView()` answers truthy. pass a fake view, mock `commands.executeCommand`
 
 ## PATHS
 1. `~/.forge/sessions/<short-id>.jsonl` → no such file: logs carry the full 8-4-4-4-12 chat id. resolve a short id with a prefix glob
 2. `ls ~/.forge/jobs/*` in `shell` → it lists them: reads under `~/.forge/` are allowed. only a change is refused — `rm -f ~/.forge/x` → "refuses to change Forge's own files"
 3. `list_directory "~/.forge/jobs"` → resolves now (0.17.171), but `find_files "~/**"` still opens nothing outside the workspace. pass the absolute `C:/Users/<name>/.forge/jobs`
+4. comparing a tool's resolved path with the workspace root in a test → `fs.realpathSync` keeps the 8.3 short form `EFSOOF~1`, `fs/promises` `realpath` expands it: use the tool's resolver
 
 ## FORENSICS
 1. pairing calls with results → pair the `tool_calls` row with the `tool` rows that follow it, positionally; the rendered chat hides tool failures entirely

@@ -114,3 +114,15 @@ Entry shape (copy it, fill it, newest entry last):
 - Should: as now; a background job does not need a long foreground ceiling
 - Workaround: `background: true` with the default, then `monitor_execution`
 - Status: by design
+
+## `remember` reports success, but the note is gone from disk the next day
+
+- Seen: 2026-11-16, Forge 0.17.17x, chat "Basalt Windows multi-GPU watch" (scheduled job, 2026-11-15 run)
+- Tool: `remember` key `basalt-watch-2026-11-13` (written 2026-11-15), then `recall` of the same key on 2026-11-16
+- Did: the write returned `Remembered.`; the next day's `recall` returned `(not found)`, and
+  `list_directory C:/Users/efso office/.forge/memories/Forge-5f7df423` lists
+  `basalt-watch-2026-11-14.md` and `basalt-watch-2026-11-15.md` but no `-2026-11-13.md`
+- Should: keep what it accepted, or report that the write did not persist — a silent loss makes
+  the previous day's "already reported" state unusable for dedupe
+- Workaround: re-derive the lost facts from the current watch run and fold them into the new note
+- Status: open
