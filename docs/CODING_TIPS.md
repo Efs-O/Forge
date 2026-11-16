@@ -91,7 +91,7 @@
 6. a tool rename swept only src+test → a bench script and its JSON fixture still named the old tool, and only the full suite found it. sweep scripts/ and benchmarks/ in the same pass
 7. a describe-level `path.join(dir, 'x')`, dir set in beforeEach → runs at collection while dir is '': a RELATIVE path, and the test overwrote a real repo file. build temp paths in the test
 8. a `ToolApprovalService` card asserted on the posted `confirmRequest` → none arrives: `pump()` posts it only when `getView()` answers truthy. pass a fake view, mock `commands.executeCommand`
-9. `vi.spyOn(fs, 'stat')` on `fs/promises` → Cannot spy on export: Module namespace is not configurable in ESM. wrap the call in a `vi.mock('fs/promises')` passthrough factory
+9. `vi.spyOn(fs, 'stat')` on `fs` or `fs/promises` → Cannot spy on export: Module namespace is not configurable in ESM. Count fs calls with a `vi.mock('fs', async (orig) => ({...await orig(), readFileSync: wrapped}))` factory, then `await import` the module under test
 10. vitest fake timers do not patch `node:timers/promises` → that sleep waits real time, so a fake-timer test times out at 5 s. use `sleepOrThrow` from `src/util/abortableSleep`
 
 ## PATHS
