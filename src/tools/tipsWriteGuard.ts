@@ -21,8 +21,11 @@
  */
 
 import * as fs from 'fs';
+import * as path from 'path';
 
 import { resolveShippedTipsPath } from '../llm/codingTips';
+import { normalizePathForMatch } from './secretPaths';
+import { defaultWorkspaceRoot } from '../util/WorkspacePaths';
 
 /** Numbered tips entries only — prose and headings are not tips. */
 const ENTRY = /^\s*\d+\.\s+\S/;
@@ -41,9 +44,29 @@ function entryKey(line: string): string {
     .toLowerCase();
 }
 
-/** The tips file an agent may write, matched on the tail so no workspace root is needed. */
-export function isProjectTipsPath(filePath: string): boolean {
-  return filePath.replace(/\\/g, '/').toLowerCase().endsWith('docs/coding_tips.md');
+/**
+ * The tips file of the open workspace, and only that one: `<root>/docs/CODING_TIPS.md`.
+ *
+ * Matching the tail instead was too wide — `mydocs/coding_tips.md` sits at the same
+ * depth, and a nested repository's own `sub/docs/CODING_TIPS.md` is a different
+ * table that no prompt injects. Guarding those as if they were the injected one
+ * refuses a perfectly ordinary write, and the count it reports is someone else's.
+ *
+ * No workspace folder means no project table, so no guard: an absolute write
+ * outside any workspace is not this file's business. A root spelled unlike the
+ * tool's resolved path (an 8.3 short name, a junction) is not recognised either,
+ * and the guard simply does not fire — the same way it never fires for any other
+ * file: it stays quiet rather than refusing the wrong thing.
+ */
+export function isProjectTipsPath(
+  filePath: string,
+  workspaceRoot: string | undefined = defaultWorkspaceRoot(),
+): boolean {
+  if (!workspaceRoot) return false;
+  return (
+    normalizePathForMatch(filePath) ===
+    normalizePathForMatch(path.join(workspaceRoot, 'docs', 'CODING_TIPS.md'))
+  );
 }
 
 function entryKeys(text: string): string[] {
@@ -119,8 +142,9 @@ export function guardTipsWrite(
   proposed: string,
   previous: string,
   shippedPath?: string,
+  workspaceRoot?: string,
 ): void {
-  if (!isProjectTipsPath(filePath)) return;
+  if (!isProjectTipsPath(filePath, workspaceRoot)) return;
   const refusal = tipsWriteRefusal({ proposed, previous, shippedPath });
   if (refusal) throw new Error(`${refusal} No changes were written.`);
 }
@@ -139,8 +163,13 @@ export function guardTipsWrite(
  * accepted: the shell cannot be intercepted here, and the Phase 3 overlap test
  * catches a duplicate that slips in, one turn later.
  */
-export function tipsWriteNote(filePath: string, previous: string, shippedPath?: string): string {
-  if (!isProjectTipsPath(filePath) || !fs.existsSync(filePath)) return '';
+export function tipsWriteNote(
+  filePath: string,
+  previous: string,
+  shippedPath?: string,
+  workspaceRoot?: string,
+): string {
+  if (!isProjectTipsPath(filePath, workspaceRoot) || !fs.existsSync(filePath)) return '';
   const shippedKeys = new Set(entryKeys(readShipped(shippedPath)));
   const unreviewedNow = new Set(
     entryKeys(fs.readFileSync(filePath, 'utf8')).filter((k) => !shippedKeys.has(k)),

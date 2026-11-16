@@ -285,7 +285,13 @@ describe('isolated file and directory tool execution', () => {
   });
 
   it('refuses a duplicated tips line from every writer, and counts a new one', async () => {
-    const tips = path.join(root, 'docs', 'CODING_TIPS.md');
+    // The guard matches the workspace root against the path the tool resolved, and
+    // that one is real-pathed with `fs/promises`. `os.tmpdir()` on this machine is
+    // an 8.3 short path and only that resolver expands it, so the root is real-pathed
+    // the same way — `fs.realpathSync` would leave the two spellings apart.
+    const realRoot = await fs.promises.realpath(root);
+    vscode.workspace.workspaceFolders.splice(0, Infinity, { uri: vscode.Uri.file(realRoot) });
+    const tips = path.join(realRoot, 'docs', 'CODING_TIPS.md');
     fs.mkdirSync(path.dirname(tips), { recursive: true });
     fs.writeFileSync(tips, '## EDIT\n1. alpha → one\n', 'utf8');
     const duplicate = '## EDIT\n1. alpha → one\n1. alpha → one\n';

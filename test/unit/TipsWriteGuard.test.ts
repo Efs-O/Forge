@@ -32,11 +32,30 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 
 describe('the tips write guard speaks only for the project table', () => {
-  it('matches the tips path in either slash style, and nothing else', () => {
-    expect(isProjectTipsPath('N:/repo/docs/CODING_TIPS.md')).toBe(true);
-    expect(isProjectTipsPath('N:\\repo\\docs\\coding_tips.md')).toBe(true);
-    expect(isProjectTipsPath('N:/repo/docs/TOOL_TRAPS.md')).toBe(false);
-    expect(() => guardTipsWrite('N:/repo/src/a.ts', '1. x → one\n1. x → one\n', '')).not.toThrow();
+  it('matches the tips file of the open workspace, in either slash style', () => {
+    expect(isProjectTipsPath('N:/x/Forge/docs/CODING_TIPS.md', 'N:/x/Forge')).toBe(true);
+    if (process.platform === 'win32') {
+      expect(isProjectTipsPath('N:\\x\\Forge\\docs\\coding_tips.md', 'N:\\x\\Forge')).toBe(true);
+    }
+    expect(isProjectTipsPath('N:/x/Forge/docs/TOOL_TRAPS.md', 'N:/x/Forge')).toBe(false);
+    // A root spelled with a trailing separator is the same root.
+    expect(isProjectTipsPath('N:/x/Forge/docs/CODING_TIPS.md', 'N:/x/Forge/')).toBe(true);
+    expect(() =>
+      guardTipsWrite('N:/x/Forge/src/a.ts', '1. x → one\n1. x → one\n', ''),
+    ).not.toThrow();
+  });
+
+  it('is not the project table when the path only looks like it', () => {
+    const root = 'N:/x/Forge';
+    // A folder whose name merely ENDS in `docs`, and a nested repository's own
+    // table: neither is the file every prompt injects.
+    expect(isProjectTipsPath('N:/x/Forge/mydocs/coding_tips.md', root)).toBe(false);
+    expect(isProjectTipsPath('N:/x/Forge/sub/docs/CODING_TIPS.md', root)).toBe(false);
+    expect(isProjectTipsPath('N:/x/Other/docs/CODING_TIPS.md', root)).toBe(false);
+  });
+
+  it('guards nothing while no workspace folder is open', () => {
+    expect(isProjectTipsPath('N:/x/Forge/docs/CODING_TIPS.md', undefined)).toBe(false);
   });
 });
 
@@ -111,6 +130,7 @@ describe('an exact duplicate is refused before anything is written', () => {
         `${PROJECT.trim()}\n1. a project tip → recorded here\n`,
         PROJECT,
         shippedPath,
+        'N:/repo',
       ),
     ).toThrow(/No changes were written/);
   });
@@ -133,42 +153,49 @@ describe('the count and the every-tenth review ping', () => {
 
   it('says how many entries the shipped list does not have', () => {
     const one = writeEntries(1);
-    expect(tipsWriteNote(file(), one, shippedPath)).toContain(
+    expect(tipsWriteNote(file(), one, shippedPath, dir)).toContain(
       '1 entry in docs/CODING_TIPS.md is not in the shipped table',
     );
     const nine = writeEntries(9);
-    expect(tipsWriteNote(file(), nine, shippedPath)).toContain(
+    expect(tipsWriteNote(file(), nine, shippedPath, dir)).toContain(
       '9 entries in docs/CODING_TIPS.md are not in the shipped table',
     );
   });
 
   it('pings on the crossing of a tenth, once — not on every write that sits at one', () => {
     const nine = writeEntries(9);
-    expect(tipsWriteNote(file(), nine, shippedPath)).not.toContain('tell the owner now');
+    expect(tipsWriteNote(file(), nine, shippedPath, dir)).not.toContain('tell the owner now');
     const ten = writeEntries(10);
-    expect(tipsWriteNote(file(), nine, shippedPath)).toContain('tell the owner now');
+    expect(tipsWriteNote(file(), nine, shippedPath, dir)).toContain('tell the owner now');
     // A re-word while the count sits at 10 stays quiet: nothing crossed.
-    expect(tipsWriteNote(file(), ten, shippedPath)).not.toContain('tell the owner now');
-    expect(tipsWriteNote(file(), writeEntries(11), shippedPath)).not.toContain(
+    expect(tipsWriteNote(file(), ten, shippedPath, dir)).not.toContain('tell the owner now');
+    expect(tipsWriteNote(file(), writeEntries(11), shippedPath, dir)).not.toContain(
       'tell the owner now',
     );
     // A write that adds two tips across the boundary still fires, exactly once.
     const nineAgain = writeEntries(9);
     writeEntries(11);
-    expect(tipsWriteNote(file(), nineAgain, shippedPath)).toContain('tell the owner now');
+    expect(tipsWriteNote(file(), nineAgain, shippedPath, dir)).toContain('tell the owner now');
     const nineteen = writeEntries(19);
     writeEntries(20);
-    expect(tipsWriteNote(file(), nineteen, shippedPath)).toContain('tell the owner now');
+    expect(tipsWriteNote(file(), nineteen, shippedPath, dir)).toContain('tell the owner now');
     expect(ten.length).toBeGreaterThan(0);
   });
 
   it('says nothing when the project table holds nothing the shipped one does not', () => {
     fs.mkdirSync(path.dirname(file()), { recursive: true });
     fs.writeFileSync(file(), SHIPPED, 'utf8');
-    expect(tipsWriteNote(file(), SHIPPED, shippedPath)).toBe('');
+    expect(tipsWriteNote(file(), SHIPPED, shippedPath, dir)).toBe('');
   });
 
   it('says nothing for any other file', () => {
-    expect(tipsWriteNote(path.join(dir, 'notes.md'), '', shippedPath)).toBe('');
+    expect(tipsWriteNote(path.join(dir, 'notes.md'), '', shippedPath, dir)).toBe('');
+  });
+
+  it("says nothing for a table one folder deeper, which is not this workspace's", () => {
+    writeEntries(1);
+    expect(
+      tipsWriteNote(path.join(dir, 'sub', 'docs', 'CODING_TIPS.md'), '', shippedPath, dir),
+    ).toBe('');
   });
 });
