@@ -1,3 +1,4 @@
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,12 +13,20 @@ import {
   staleReason,
   tryAcquire,
 } from '../../scripts/ci-lock.mjs';
+import { treeHashOfWorkingTree } from '../../scripts/record-ci-pass.mjs';
 
 let dir: string;
 let path: string;
 
 function record(token: string, pid = process.pid) {
-  return { pid, childPid: null, token, cwd: 'N:/x', command: 'npm run ci:steps', started: new Date().toISOString() };
+  return {
+    pid,
+    childPid: null,
+    token,
+    cwd: 'N:/x',
+    command: 'npm run ci:steps',
+    started: new Date().toISOString(),
+  };
 }
 
 beforeEach(() => {
@@ -50,9 +59,16 @@ describe('ci-lock', () => {
     const now = Date.now();
     const dead = { ...record('a', 999_999), childPid: 999_998 };
     expect(staleReason(dead, { now, alive: () => false, mtimeMs: now })).toContain('have exited');
-    expect(staleReason(record('a'), { now, alive: (pid: number) => pid === process.pid, mtimeMs: now })).toBeNull();
+    expect(
+      staleReason(record('a'), { now, alive: (pid: number) => pid === process.pid, mtimeMs: now }),
+    ).toBeNull();
     // The child still running keeps the lock even when the wrapper died.
-    expect(staleReason({ ...dead, childPid: 5 }, { now, alive: (pid: number) => pid === 5, mtimeMs: now })).toBeNull();
+    expect(
+      staleReason(
+        { ...dead, childPid: 5 },
+        { now, alive: (pid: number) => pid === 5, mtimeMs: now },
+      ),
+    ).toBeNull();
   });
 
   it('expires a lock older than the age limit and an unreadable one past the grace', () => {
@@ -60,13 +76,18 @@ describe('ci-lock', () => {
     const old = { ...record('a'), started: new Date(now - MAX_AGE_MS - 1).toISOString() };
     expect(staleReason(old, { now, alive: () => true, mtimeMs: now })).toContain('older than');
     expect(staleReason('unreadable', { now, alive: () => true, mtimeMs: now - 1_000 })).toBeNull();
-    expect(staleReason('unreadable', { now, alive: () => true, mtimeMs: now - 60_000 })).toContain('unreadable');
+    expect(staleReason('unreadable', { now, alive: () => true, mtimeMs: now - 60_000 })).toContain(
+      'unreadable',
+    );
   });
 
   it('acquire replaces a stale lock and says why', async () => {
     writeFileSync(path, JSON.stringify({ ...record('old', 999_999), childPid: 999_998 }));
     const logs: string[] = [];
-    const held = await acquire(path, record('new'), { log: (l: string) => logs.push(l), alive: () => false });
+    const held = await acquire(path, record('new'), {
+      log: (l: string) => logs.push(l),
+      alive: () => false,
+    });
     expect(held).toBe(true);
     expect(readLock(path)).toMatchObject({ token: 'new' });
     expect(logs[0]).toContain('taking over a stale lock');
@@ -108,5 +129,44 @@ describe('ci-lock', () => {
   it('writes valid JSON with the run details', () => {
     tryAcquire(path, record('a'));
     expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({ pid: process.pid, token: 'a' });
+  });
+
+  // The proof the run leaves behind has to name the tree the suite READ, and the
+  // suite starts minutes before it ends. `ci-lock` is the one place that knows when
+  // the run began, so it hashes the working tree there and hands the hash down.
+  it('hands the child the working tree as FORGE_CI_START_TREE once it holds the lock', () => {
+    const repo = mkdtempSync(join(tmpdir(), 'ci-lock-tree-'));
+    const gitIn = (args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+    try {
+      gitIn(['init', '-q', '-b', 'main']);
+      gitIn(['config', 'user.name', 'Forge Test']);
+      gitIn(['config', 'user.email', 'forge@test.invalid']);
+      writeFileSync(join(repo, 'a.txt'), 'one\n');
+      gitIn(['add', 'a.txt']);
+      gitIn(['commit', '-q', '-m', 'chore: base']);
+      const probe = join(dir, 'print-start-tree.mjs');
+      writeFileSync(
+        probe,
+        "process.stdout.write('START_TREE=' + (process.env.FORGE_CI_START_TREE || 'unset') + '\\n');\n",
+      );
+      const expected = treeHashOfWorkingTree(repo);
+      const env = { ...process.env } as Record<string, string | undefined>;
+      delete env.FORGE_CI_LOCK_HELD;
+      delete env.GITHUB_ACTIONS;
+      env.FORGE_CI_LOCK_PATH = path;
+      const ciLock = join(__dirname, '..', '..', 'scripts', 'ci-lock.mjs');
+      const run = spawnSync(process.execPath, [ciLock, `node "${probe}"`], {
+        cwd: repo,
+        encoding: 'utf8',
+        env,
+      });
+      expect(run.stderr).toBe('');
+      expect(run.status).toBe(0);
+      expect(run.stdout).toContain(`START_TREE=${expected}`);
+      // The lock belongs to the run that is over: it is released on the way out.
+      expect(existsSync(path)).toBe(false);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 });

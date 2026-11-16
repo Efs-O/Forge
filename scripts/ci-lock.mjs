@@ -9,6 +9,7 @@ import { readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { treeHashOfWorkingTree } from './record-ci-pass.mjs';
 
 export const POLL_MS = 5_000;
 export const NOTICE_EVERY_MS = 5 * 60_000;
@@ -63,7 +64,8 @@ export function staleReason(lock, { now, alive = pidAlive, mtimeMs }) {
   }
   const age = now - Date.parse(lock.started);
   if (!(age < MAX_AGE_MS)) return `the lock is older than ${MAX_AGE_MS / 3_600_000} h`;
-  if (!alive(lock.pid) && !alive(lock.childPid)) return `its processes (pid ${lock.pid}) have exited`;
+  if (!alive(lock.pid) && !alive(lock.childPid))
+    return `its processes (pid ${lock.pid}) have exited`;
   return null;
 }
 
@@ -93,7 +95,10 @@ export function release(path, token) {
 /** Remove a stale lock, unless another waiter replaced it since it was judged. */
 function removeIfSame(path, judged) {
   const now = readLock(path);
-  const same = judged === 'unreadable' ? now === 'unreadable' : now !== 'unreadable' && now?.token === judged.token;
+  const same =
+    judged === 'unreadable'
+      ? now === 'unreadable'
+      : now !== 'unreadable' && now?.token === judged.token;
   if (!same) return;
   try {
     unlinkSync(path);
@@ -179,10 +184,37 @@ async function main(argv) {
   const skip = skipReason();
   const token = randomUUID();
   if (!skip) {
-    const record = { pid: process.pid, childPid: null, token, cwd: process.cwd(), command, started: new Date().toISOString() };
+    const record = {
+      pid: process.pid,
+      childPid: null,
+      token,
+      cwd: process.cwd(),
+      command,
+      started: new Date().toISOString(),
+    };
     if (!(await acquire(path, record))) process.exit(EXIT_WAIT_TIMED_OUT);
     process.on('exit', () => release(path, token));
-    const child = spawn(command, { shell: true, stdio: 'inherit', env: { ...process.env, FORGE_CI_LOCK_HELD: token } });
+    // The proof has to name the tree the suite started reading, not whatever the
+    // last agent left behind minutes later: this worktree is shared, and a second
+    // lane edits while CI runs. Handed over as env, so nothing new is written to
+    // disk and no new state has to be cleaned up.
+    let startTree;
+    try {
+      startTree = treeHashOfWorkingTree();
+    } catch (err) {
+      console.log(
+        `ci-lock: could not hash the working tree (${err.message}); the pass will be recorded from the tree at the end of the run.`,
+      );
+    }
+    const child = spawn(command, {
+      shell: true,
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        FORGE_CI_LOCK_HELD: token,
+        ...(startTree ? { FORGE_CI_START_TREE: startTree } : {}),
+      },
+    });
     if (child.pid) recordChildPid(path, record, child.pid);
     return forward(child);
   }

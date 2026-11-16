@@ -9,14 +9,8 @@
  * read (working tree, uncommitted edits included), a marker that cannot be read is never a
  * pass, and the directory stays bounded.
  */
-import { execFileSync } from 'node:child_process';
-import {
-  existsSync,
-  mkdtempSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -107,7 +101,7 @@ function repoWithOneCommit(): string {
 }
 
 describe('the tree a recorded pass is keyed by', () => {
-  it('is HEAD\'s tree exactly when nothing is uncommitted', () => {
+  it("is HEAD's tree exactly when nothing is uncommitted", () => {
     const root = repoWithOneCommit();
     expect(treeHashOfWorkingTree(root)).toBe(treeHashOfHead(root));
   });
@@ -143,7 +137,7 @@ describe('the tree a recorded pass is keyed by', () => {
     expect(entries).not.toContain('skip.log');
   });
 
-  it('does not disturb the repository index, so another agent\'s staged change survives', () => {
+  it("does not disturb the repository index, so another agent's staged change survives", () => {
     const root = repoWithOneCommit();
     writeFileSync(join(root, 'staged.txt'), 'staged by another agent\n');
     gitIn(root, ['add', 'staged.txt']);
@@ -151,5 +145,58 @@ describe('the tree a recorded pass is keyed by', () => {
     writeFileSync(join(root, 'a.txt'), 'dirty but never staged\n');
     treeHashOfWorkingTree(root);
     expect(gitIn(root, ['diff', '--cached', '--name-only'])).toBe(before);
+  });
+});
+
+/**
+ * The suite takes minutes, and this worktree is shared, so the tree standing at the
+ * end of a run is not necessarily the one the tests read. `ci-lock` hashes it when
+ * it takes the lock and hands the hash down as `FORGE_CI_START_TREE`; the recorder
+ * refuses to certify a tree that moved while CI ran.
+ */
+const recorder = join(__dirname, '..', '..', 'scripts', 'record-ci-pass.mjs');
+
+/** Runs the recorder the way the `ci:steps` chain does: cwd is the repo, and the
+ *  marker folder is the relative `.forge/ci-pass`, so it lands in the temp repo. */
+function runRecorder(root: string, startTree?: string) {
+  const env = { ...process.env } as Record<string, string | undefined>;
+  delete env.FORGE_CI_START_TREE;
+  if (startTree !== undefined) env.FORGE_CI_START_TREE = startTree;
+  return spawnSync(process.execPath, [recorder], { cwd: root, encoding: 'utf8', env });
+}
+
+describe('the pass a finished run records, against the tree it started on', () => {
+  it('is recorded when the tree at the end is the tree the run started on', () => {
+    const root = repoWithOneCommit();
+    const start = treeHashOfWorkingTree(root);
+    const run = runRecorder(root, start);
+    expect(run.status).toBe(0);
+    expect(readMarker(join(root, '.forge', 'ci-pass'), start)).toMatchObject({ tree: start });
+  });
+
+  it('records nothing, and says so, when another lane edited while the suite ran', () => {
+    const root = repoWithOneCommit();
+    const start = treeHashOfWorkingTree(root);
+    writeFileSync(join(root, 'a.txt'), 'edited while CI ran\n');
+    const end = treeHashOfWorkingTree(root);
+    expect(end).not.toBe(start);
+    const run = runRecorder(root, start);
+    expect(run.status).toBe(0);
+    expect(run.stdout.trim()).toBe(
+      `ci-pass: the working tree changed while CI ran (started at ${start.slice(0, 12)}, ` +
+        `ended at ${end.slice(0, 12)}); no CI pass recorded.`,
+    );
+    const markerDir = join(root, '.forge', 'ci-pass');
+    expect(existsSync(markerDir)).toBe(false);
+    expect(readMarker(markerDir, end)).toBeUndefined();
+    expect(readMarker(markerDir, start)).toBeUndefined();
+  });
+
+  it('is recorded from the tree at the end when no start tree was handed over', () => {
+    const root = repoWithOneCommit();
+    const head = treeHashOfHead(root);
+    const run = runRecorder(root);
+    expect(run.status).toBe(0);
+    expect(readMarker(join(root, '.forge', 'ci-pass'), head)).toMatchObject({ tree: head });
   });
 });

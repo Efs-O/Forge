@@ -11,6 +11,11 @@
  * what the suite read: uncommitted edits included. So a run before a commit certifies the bytes
  * it tested, and it starts counting for a push the moment a commit has exactly that tree. Run
  * `npm run ci` after the commit it certifies to record it under HEAD's tree directly.
+ *
+ * The suite takes minutes, and this worktree is shared, so the tree at the END is not the tree
+ * the suite read. `scripts/ci-lock.mjs` therefore hashes the working tree the moment it takes the
+ * lock and hands the hash down as `FORGE_CI_START_TREE`; if the tree moved while CI ran, this
+ * script records nothing and says so. The suite passed — there is simply no proof to keep.
  */
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -131,13 +136,27 @@ export function prune(dir, keep = KEEP_MARKERS) {
 }
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
-  const headTree = treeHashOfHead();
+  const startTree = process.env.FORGE_CI_START_TREE;
   const treeHash = treeHashOfWorkingTree();
+  if (startTree !== undefined && startTree !== treeHash) {
+    // Another lane edited while the suite ran, so the tree in front of this script
+    // is not the one the tests read. Recording it would repeat, one step later, the
+    // mistake this file exists to prevent — so nothing is recorded, and the exit
+    // stays 0: a green suite is not undone by a proof it cannot write.
+    console.log(
+      `ci-pass: the working tree changed while CI ran (started at ${startTree.slice(0, 12)}, ` +
+        `ended at ${treeHash.slice(0, 12)}); no CI pass recorded.`,
+    );
+    process.exit(0);
+  }
+  const headTree = treeHashOfHead();
   const file = record({ dir: MARKER_DIR, treeHash });
   const removed = prune(MARKER_DIR);
   console.log(
     `ci-pass: recorded a green run for tree ${treeHash.slice(0, 12)} (${basename(file)})` +
-      (removed.length ? `; pruned ${removed.length} older marker${removed.length === 1 ? '' : 's'}` : ''),
+      (removed.length
+        ? `; pruned ${removed.length} older marker${removed.length === 1 ? '' : 's'}`
+        : ''),
   );
   if (treeHash !== headTree) {
     console.log(
