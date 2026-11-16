@@ -53,6 +53,12 @@ export interface FileSettleDeps {
   /** The files that must be quiet before `onLoad` runs. */
   paths: readonly string[];
   onLoad: () => void;
+  /**
+   * True once the caller has gone away — the window closed, the watcher was disposed.
+   * Checked when each wait fires: a reload nobody is waiting for is dropped rather than
+   * run, and the settle loop stops rather than rescheduling itself forever.
+   */
+  cancelled?: () => boolean;
   /** Injectable for tests: the wait itself, and the fingerprint of the files. */
   settleMs?: number;
   sleep?: (ms: number, run: () => void) => void;
@@ -64,7 +70,8 @@ export interface FileSettleDeps {
  * Run `onLoad` once the watched files have been unchanged for one settle window.
  * A file that is still being written pushes the read back, up to `maxRounds`
  * times; after that the read happens anyway, because refusing to load a config
- * would leave the window without one at all.
+ * would leave the window without one at all. A caller that has already gone away
+ * (`cancelled`) gets no read at all, and no further rounds.
  */
 export function runWhenFilesSettled(deps: FileSettleDeps, round = 0): void {
   const settleMs = deps.settleMs ?? FILE_SETTLE_MS;
@@ -73,6 +80,8 @@ export function runWhenFilesSettled(deps: FileSettleDeps, round = 0): void {
   const maxRounds = deps.maxRounds ?? MAX_FILE_SETTLE_ROUNDS;
   const before = snapshot(deps.paths);
   sleep(settleMs, () => {
+    // Checked before anything else: the caller may have closed while this window ran.
+    if (deps.cancelled?.()) return;
     if (snapshot(deps.paths) !== before && round < maxRounds) {
       runWhenFilesSettled(deps, round + 1);
       return;

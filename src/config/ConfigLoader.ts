@@ -372,6 +372,10 @@ export function watchForgeConfigPaths(
 ): vscode.Disposable {
   const forgeDir = path.dirname(primaryConfigYamlPath);
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Set by the disposable below. The settle loop runs on its own timer, so this is
+   *  the only way a reload can learn the window has closed: a save just before
+   *  dispose would otherwise reload a config nobody is listening to any more. */
+  let disposed = false;
   /** Reloads this function asked for itself, after finding the file had moved
    *  under the load. Bounded, so a file edited in a tight loop cannot reload the
    *  extension forever; a real save resets the count. */
@@ -403,7 +407,11 @@ export function watchForgeConfigPaths(
     if (debounceTimer !== undefined) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       debounceTimer = undefined;
-      runWhenFilesSettled({ paths: [...normalizedSeen], onLoad: reload });
+      runWhenFilesSettled({
+        paths: [...normalizedSeen],
+        onLoad: reload,
+        cancelled: () => disposed,
+      });
     }, 150);
   };
 
@@ -443,6 +451,7 @@ export function watchForgeConfigPaths(
 
   watchers.push(
     new vscode.Disposable(() => {
+      disposed = true;
       if (debounceTimer !== undefined) clearTimeout(debounceTimer);
     }),
   );

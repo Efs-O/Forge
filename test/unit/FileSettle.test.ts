@@ -97,6 +97,48 @@ describe('runWhenFilesSettled', () => {
     });
     expect(seen).toEqual([200]);
   });
+
+  it('drops the read and stops asking for more once the caller has gone away', () => {
+    const sleep = fakeSleep();
+    const onLoad = vi.fn();
+    let cancelled = false;
+    let round = 0;
+    runWhenFilesSettled({
+      paths: ['p.yaml'],
+      settleMs: 1,
+      sleep: sleep.sleep,
+      snapshot: () => `round ${String(round)}`, // never settles, so every round reschedules
+      cancelled: () => cancelled,
+      onLoad,
+    });
+    // Two rounds of a file that keeps moving: still alive, so still waiting.
+    round = 1;
+    expect(sleep.runNext()).toBe(1);
+    round = 2;
+    expect(sleep.runNext()).toBe(1);
+    expect(onLoad).not.toHaveBeenCalled();
+    // The window closes here; the round already waiting must not read, and must not
+    // hand itself another round to wait out.
+    cancelled = true;
+    round = 3;
+    expect(sleep.runNext()).toBe(0);
+    expect(onLoad).not.toHaveBeenCalled();
+  });
+
+  it('reads exactly once while the caller is still there', () => {
+    const sleep = fakeSleep();
+    const onLoad = vi.fn();
+    runWhenFilesSettled({
+      paths: ['p.yaml'],
+      settleMs: 5,
+      sleep: sleep.sleep,
+      snapshot: () => 'same',
+      cancelled: () => false,
+      onLoad,
+    });
+    sleep.runNext();
+    expect(onLoad).toHaveBeenCalledExactlyOnceWith();
+  });
 });
 
 describe('snapshotWatchedFiles', () => {
