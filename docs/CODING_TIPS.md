@@ -20,11 +20,10 @@
 7. `rg -F "phrase"` as the proof nothing was missed → it skips gitignored files silently, so the proof is hollow. pass `--no-ignore` (`include_ignored: true`) or name the file
 8. `search_sessions` returning `total_matches: 0` → not proof the archive lacks the topic. probe with a term you expect to hit (`project: "Forge"` → 672) and check `date_from` before reporting a gap
 9. a follow-up search that drops one alternative from the `rg -l "a|b"` that listed the file → it matched the other one; the narrow search is empty and reads as a phantom. repeat the whole pattern
-10. a `grep_search` query holding `\n` (or `\(a\|b\n`) → `rg: the literal "\n" is not allowed in a regex`. nothing ran; match one line, or list the alternatives without the newline
+10. a `grep_search` query holding a newline or the escape `\n` → refused before the search: a regex cannot span lines. match one line, or list the alternatives without the newline
 11. `rg --include='*.ts'` or `grep --no-ignore` → unrecognized flag: each is the other tool's spelling. rg filters with `-g '*.ts'`; GNU grep has no ignore flag
 12. an `rg` pattern with a look-around (`(?=`, `(?!`, `(?<=`) → `look-around ... is not supported`. add `--pcre2`
-13. `grep_search` with a `path:` argument → refused: unknown argument, nothing ran. the file filter is `include`
-14. `rg -n "x" .` over the repo → `dist/`, `coverage/`, `.forge/tmp/`, `docs/local/**` corpora and one-line `test/fixtures/*.json` drown the answer (42 MB once). exclude each with `-g`
+13. `rg -n "x" .` over the repo → `dist/`, `coverage/`, `.forge/tmp/`, `docs/local/**` corpora and one-line `test/fixtures/*.json` drown the answer (42 MB once). exclude each with `-g`
 
 ## RUN
 1. `cd "C:/Users/…/sessions" && python -c "…"` → refused: the write is judged from the folder the command started in. pass `cwd: "C:/Users/…/sessions"` and the command alone
@@ -56,6 +55,7 @@
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green and the tree stood still: never run `record-ci-pass.mjs` by hand — the `ci:steps` chain writes it
 2. `git commit -- <file> -m "msg"` → git reads `-m` and the message as pathspecs after `--`. put every flag before `--`, the files last; a new file needs `git add` first: untracked is not a pathspec
 3. `git commit -m '…the cell's body…'` → the apostrophe closes the bash quote, so git reads the rest as pathspecs (`pathspec 'body' did not match`). write the message to a file and `git commit -F` it
+4. `git log --since/--until` after a rebase → committer dates were rewritten, so the window matches hundreds of old commits. filter `%ad` (author date) instead
 
 ## EDIT
 1. an `edit_file` whose `old_str` is a heading → the heading disappears when `new_str` omits it, orphaning the text under it. re-include the heading in `new_str`
