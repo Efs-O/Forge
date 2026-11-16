@@ -308,11 +308,12 @@ describe('Connect to my desktop', () => {
       // address is 127.0.0.1 is how a test reaches the fake desktop by name.
       runTailscale: async () =>
         JSON.stringify({
-          Peer: [
-            { Self: true, Online: true, NodeName: 'laptop.', TailscaleIPs: ['127.0.0.1'] },
-            { Online: true, NodeName: 'desktop.tailnet.ts', TailscaleIPs: ['127.0.0.1'] },
-            { Online: false, NodeName: 'studio', TailscaleIPs: ['127.0.0.1'] },
-          ],
+          // The real shape: this machine is `Self`, `Peer` is keyed by node key.
+          Self: { Online: true, DNSName: 'laptop.tailnet.ts.', TailscaleIPs: ['127.0.0.1'] },
+          Peer: {
+            'nodekey:desktop': { Online: true, DNSName: 'desktop.tailnet.ts.', TailscaleIPs: ['127.0.0.1'] },
+            'nodekey:studio': { Online: false, DNSName: 'studio.tailnet.ts.', TailscaleIPs: ['127.0.0.1'] },
+          },
         }),
     };
   }
@@ -408,7 +409,7 @@ describe('Connect to my desktop', () => {
       ...depsFor(9999, 8797),
       starterPort: 9999,
       runTailscale: async () =>
-        JSON.stringify({ Peer: [{ Online: true, NodeName: 'desktop', TailscaleIPs: ['127.0.0.1'] }] }),
+        JSON.stringify({ Peer: { 'nodekey:desktop': { Online: true, HostName: 'desktop', TailscaleIPs: ['127.0.0.1'] } } }),
     });
     expect(message).toMatch(/http:\/\/127\.0\.0\.1:9999/);
     expect(message).toMatch(/Check connection/);
