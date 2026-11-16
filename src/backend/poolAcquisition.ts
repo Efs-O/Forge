@@ -148,14 +148,19 @@ export async function stopAllSlots(ctx: StopAllContext): Promise<void> {
       /* best-effort */
     }
   });
-  await settleAll([...slotStops, ...ollamaStops]);
-
-  for (const [model, slot] of [...ctx.slots.entries()]) {
-    if (retained(model)) continue;
-    ctx.registry.removeOwner(ctx.runtimeKey(model));
-    ctx.freeSlot(model, slot);
+  try {
+    await settleAll([...slotStops, ...ollamaStops]);
+  } finally {
+    // Even when one stop rejected: a slot whose backend is gone still has to
+    // lose its port and its owner record, or the next start believes a runtime
+    // nobody owns is still live.
+    for (const [model, slot] of [...ctx.slots.entries()]) {
+      if (retained(model)) continue;
+      ctx.registry.removeOwner(ctx.runtimeKey(model));
+      ctx.freeSlot(model, slot);
+    }
+    ctx.ollamaSlots.clear();
   }
-  ctx.ollamaSlots.clear();
   log.info('[BackendPool] all slots stopped');
 }
 

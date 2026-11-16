@@ -25,6 +25,8 @@ const harness = vi.hoisted(() => ({
   /** While true, stop() parks until the test releases it. */
   blockStops: false,
   failStops: false,
+  /** Ports whose stop() alone rejects, so one failing backend can be staged. */
+  failPorts: [] as number[],
   pendingStops: [] as Array<() => void>,
 }));
 
@@ -36,6 +38,7 @@ function resetHarness(): void {
   harness.pendingStops.length = 0;
   harness.blockStops = false;
   harness.failStops = false;
+  harness.failPorts.length = 0;
 }
 
 /** Let every already-scheduled promise callback run. */
@@ -63,7 +66,8 @@ vi.mock('../../src/backend/DirectBackend', () => {
     async stop(): Promise<void> {
       this.ready = false;
       harness.events.push(`stop:${this.port}`);
-      if (harness.failStops) throw new Error('termination failed');
+      if (harness.failStops || harness.failPorts.includes(this.port))
+        throw new Error('termination failed');
       if (harness.blockStops) {
         await new Promise<void>((resolve) => harness.pendingStops.push(resolve));
       }
@@ -291,6 +295,41 @@ describe('BackendPool port accounting', () => {
     await pool.stopAll();
     expect(pool.loadedModelNames()).toEqual([]);
     expect([...freePortsOf(pool)].sort()).toEqual([8080, 8081]);
+  });
+
+  /**
+   * The cleanup after `settleAll` ran only when every stop succeeded, so one
+   * backend throwing at termination skipped `removeOwner` and `freeSlot` for
+   * every model: the ports were never returned and the owner records stayed
+   * published, so another window kept being told a runtime nobody owns is live.
+   */
+  it('frees every slot even when one backend stop rejects', async () => {
+    const pool = new BackendPool(makeConfig(2)); // freePorts [8080, 8081]
+
+    const acquireA = pool.acquire('A');
+    harness.pending[0].resolve();
+    await acquireA;
+    const acquireB = pool.acquire('B');
+    harness.pending[1].resolve();
+    await acquireB;
+
+    const internals = pool as unknown as {
+      freeSlot(model: string, slot: unknown): void;
+      sharedRegistry: { removeOwner(key: string): void };
+      runtimeKey(model: string): string;
+      ollamaSlots: Map<string, unknown>;
+    };
+    const freed = vi.spyOn(internals, 'freeSlot');
+    const owners = vi.spyOn(internals.sharedRegistry, 'removeOwner');
+    harness.failPorts.push(8080); // only A's backend fails to terminate
+
+    await expect(pool.stopAll()).rejects.toThrow('termination failed');
+    // The error still reaches the caller, and both slots were cleaned anyway.
+    expect(freed.mock.calls.map(([model]) => model).sort()).toEqual(['A', 'B']);
+    expect(owners.mock.calls.map(([key]) => key).sort()).toEqual(
+      ['A', 'B'].map((model) => internals.runtimeKey(model)).sort(),
+    );
+    expect(internals.ollamaSlots.size).toBe(0);
   });
 
   it('survives more load/stop cycles than it has ports', async () => {
