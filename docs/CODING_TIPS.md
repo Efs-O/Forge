@@ -93,6 +93,7 @@
 8. a `ToolApprovalService` card asserted on the posted `confirmRequest` → none arrives: `pump()` posts it only when `getView()` answers truthy. pass a fake view, mock `commands.executeCommand`
 9. `vi.spyOn(fs, 'stat')` on `fs` or `fs/promises` → Cannot spy on export: Module namespace is not configurable in ESM. Count fs calls with a `vi.mock('fs', async (orig) => ({...await orig(), readFileSync: wrapped}))` factory, then `await import` the module under test
 10. vitest fake timers do not patch `node:timers/promises` → that sleep waits real time, so a fake-timer test times out at 5 s. use `sleepOrThrow` from `src/util/abortableSleep`
+11. `arr.sort(stringComparator)` on an array of objects → both coerce to `[object Object]`, the comparator returns 0, so the array silently keeps insertion order. write a comparator that takes the objects; only an order-pinning test catches it
 
 ## PATHS
 1. `~/.forge/sessions/<short-id>.jsonl` → no such file: logs carry the full 8-4-4-4-12 chat id. resolve a short id with a prefix glob
