@@ -97,7 +97,10 @@ export async function bootstrapWorkspace(
   }
 
   registerAgentMeshNoteCommand(context, {
-    getConfig: () => config,
+    // The same reason as the desktop bridge above: this is a palette command, so
+    // it runs long after this call returned, and the note it renders describes
+    // the config as it stands now, not the one activation was handed.
+    getConfig,
     getConfigPath: () => configPath,
   });
   // The keeping-up notice stays behind the no-folder return: it is not a palette
