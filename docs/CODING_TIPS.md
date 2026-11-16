@@ -8,6 +8,7 @@
 1. `read_file` with a guessed `end_line` → refused: start_line is past end_line. read whole, or take the range from a search hit, never from memory
 2. `web_fetch` with `find=` on a large file → it searches only the window it returns, so "No match" proves nothing. curl the raw URL to /tmp and `rg` the file locally
 3. first `code_intel` call of a session → `No symbol provider answered ... may still be starting` → the file has symbols; retry it once and it answers in full → do not fall back to whole-file reads
+4. `read_file` with only `start_line`/`end_line` → refused: `neither path nor reads was given`. `path` is required on every call, a range just as much
 
 ## SEARCH
 1. `rg -l "a string" <folder>` → proves it exists somewhere, not whose file it is. read the record that names the file before attributing the hit
@@ -20,6 +21,10 @@
 8. `search_sessions` returning `total_matches: 0` → not proof the archive lacks the topic. probe with a term you expect to hit (`project: "Forge"` → 672) and check `date_from` before reporting a gap
 9. a follow-up search that drops one alternative from the `rg -l "a|b"` that listed the file → it matched the other one; the narrow search is empty and reads as a phantom. repeat the whole pattern
 10. a `grep_search` query holding `\n` (or `\(a\|b\n`) → `rg: the literal "\n" is not allowed in a regex`. nothing ran; match one line, or list the alternatives without the newline
+11. `rg --include='*.ts'` → unrecognized flag: that is grep's spelling. filter files with `rg -g '*.ts'`
+12. an `rg` pattern with a look-around (`(?=`, `(?!`, `(?<=`) → `look-around ... is not supported`. add `--pcre2`
+13. `grep_search` with a `path:` argument → refused: unknown argument, nothing ran. the file filter is `include`
+14. `rg -n "x" .` over the repo → `dist/`, `coverage/`, `.forge/tmp/` and one-line `test/fixtures/*.json` drown the answer (42 MB once). exclude each with `-g`
 
 ## RUN
 1. `cd "C:/Users/…/sessions" && python -c "…"` → refused: the write is judged from the folder the command started in. pass `cwd: "C:/Users/…/sessions"` and the command alone
@@ -36,7 +41,7 @@
 12. a gated call batched with later gated calls → each raises its own card and waits the full `approval_timeout_minutes`; an expired card silences only that approval key
 13. a heredoc terminator with a command after it (`MSG; echo ok`) → never seen as a terminator: the command text lands in the commit message and never runs. keep it alone on its line
 14. a field name that is not an input name (`next_stdout_cursor` vs `stdout_cursor`; a stray `=` in `=query`) → refused: unknown arguments. the refusal lists the valid names; resend with those
-15. an undeclared field → refused: `edit_file` `edits[]` take `old_str`/`new_str`/`replace_all` (`path` at top); `ask_user` `header` is per-question; `remember` takes `key`/`value`/`description`
+15. an undeclared field → refused as unknown: `edit_file` `edits[]` take `old_str`/`new_str`/`replace_all`; `ask_user` `header` is per-question; `remember` `key`/`value`/`description`; `shell` `command`/`cwd`/`timeout_ms`/`background`/…; `update_plan` items `text`/`status`
 16. `stop_execution` on a background `npm run ci` → the wrapper dies, the child tree lives and holds the ci-lock, so the next run waits forever: `MSYS_NO_PATHCONV=1 taskkill /PID <top> /T /F`
 17. `npm test 2>&1 > run.log` → vitest writes failures to stderr, so they print to the terminal and the file holds only the summary: grep finds no FAIL. write `> run.log 2>&1`
 18. `npx eslint test/unit/x.test.ts` → "none of those TSConfigs include this file": the lint script is `eslint src webview-ui`, so tests have no typed-lint config. lint `src` only
@@ -44,14 +49,17 @@
 20. a pid taken in Git Bash (`$$`, `$!`) → an MSYS pid, so Win32 `OpenProcess` answers 87 and `Get-CimInstance` finds nothing. take it from the Windows side (PowerShell `$PID`) or a Win32 tool
 21. `"$Config:"` in a PowerShell double-quoted string → `ParserError`: the colon starts a drive-qualified variable name. write `${Config}:`
 22. `node -e "import('N:/x/y.mjs')"` on Windows → `ERR_UNSUPPORTED_ESM_URL_SCHEME ... Received protocol 'n:'`. pass a file URL: `import('file:///N:/x/y.mjs')`
+23. `sed -n '140,185'` → `missing command`: the range alone prints nothing. write `sed -n '140,185p'`
+24. `npx prettier --check .forge/x.ts` → "All matched files use Prettier code style!" while nothing was checked: prettier matches no file in a dot-folder. copy it into `test/unit/`
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green and the tree stood still: never run `record-ci-pass.mjs` by hand — the `ci:steps` chain writes it
 2. `git commit -- <file> -m "msg"` → git reads `-m` and the message as pathspecs after `--`. put every flag before `--`, the files last; a new file needs `git add` first: untracked is not a pathspec
+3. `git commit -m '…the cell's body…'` → the apostrophe closes the bash quote, so git reads the rest as pathspecs (`pathspec 'body' did not match`). write the message to a file and `git commit -F` it
 
 ## EDIT
 1. an `edit_file` whose `old_str` is a heading → the heading disappears when `new_str` omits it, orphaning the text under it. re-include the heading in `new_str`
-2. `apply_line_edits` or `edit_file` anchored on text from before a formatter pass or earlier in the turn → refused: stale. re-read after `prettier --write`, edit in the same round
+2. `apply_line_edits` or `edit_file` anchored on text from before a formatter pass or earlier in the turn → refused: stale, or `old_str` not found. re-read the file, edit in the same round
 3. an `old_str` rebuilt from wrapped prose → refused: not found. the wrap is a real newline, and a sentence that starts mid-line cannot be anchored mid-sentence: copy the whole physical line
 4. a rename lengthens an identifier, or a new call takes several arguments on one line → the `prettier/prettier` gate fails at printWidth 100. fix: `npx prettier --write <file>`
 5. `apply_line_edits` with `expected_lines` invented rather than copied → refused: has N lines but the range is M. the refusal prints the current lines verbatim; copy them from there
@@ -61,6 +69,12 @@
 9. an `edit_file` where `old_str` spans more than `new_str` replaces → the extra line is deleted or the next line glues on. end both anchors at the same point; re-include an anchored body line
 10. deleting entries from a numbered list by replacing a block → the renumbering duplicated one entry and silently dropped another. rewrite the section's whole tail, then read it back
 11. new text inside a `String.raw` template literal containing a backtick → the template ends early and the parse error names a later line. no backticks in prose inside a template literal
+12. `npx prettier --write` on a test file → it rewrites lines nobody touched: `test/` is not prettier-clean (lint is `eslint src webview-ui`). --write only the src files the gate lints
+13. an `edit_file` that inserts a new function just above `export async function f` → f's doc comment ends up describing the new function. anchor above that doc comment, not below it
+14. an edit that grows a src file past 500 lines → eslint `max-lines` errors, same limit as the tool's warning. check `wc -l <file>` first; move the code into a leaf module
+15. an `edit_file` `new_str` with a typed `\n` between two statements → both land on one line, inside the comment above them. type real newlines; re-read a multi-line insert
+16. `edit_file` `new_str` written as `\n` → the two characters land in the file, not a newline, and the next edit anchors on text that is not there. write the real newline
+17. repairing a mangled line from memory instead of rereading it → the fix re-adds what survived: `describe('x', () => { () => {`. read the line back, then fix it once
 
 ## TEST
 1. a harness that only emits calls, or a threshold measured by a script whose pair list differs from the gate's → the number certifies neither. dispatch the calls; measure with the gate's own list
@@ -71,12 +85,16 @@
 6. a tool rename swept only src+test → a bench script and its JSON fixture still named the old tool, and only the full suite found it. sweep scripts/ and benchmarks/ in the same pass
 7. a describe-level `path.join(dir, 'x')`, dir set in beforeEach → runs at collection while dir is '': a RELATIVE path, and the test overwrote a real repo file. build temp paths in the test
 8. a `ToolApprovalService` card asserted on the posted `confirmRequest` → none arrives: `pump()` posts it only when `getView()` answers truthy. pass a fake view, mock `commands.executeCommand`
+9. `vi.spyOn(fs, 'stat')` on `fs/promises` → Cannot spy on export: Module namespace is not configurable in ESM. wrap the call in a `vi.mock('fs/promises')` passthrough factory
+10. vitest fake timers do not patch `node:timers/promises` → that sleep waits real time, so a fake-timer test times out at 5 s. use `sleepOrThrow` from `src/util/abortableSleep`
 
 ## PATHS
 1. `~/.forge/sessions/<short-id>.jsonl` → no such file: logs carry the full 8-4-4-4-12 chat id. resolve a short id with a prefix glob
 2. `ls ~/.forge/jobs/*` in `shell` → it lists them: reads under `~/.forge/` are allowed. only a change is refused — `rm -f ~/.forge/x` → "refuses to change Forge's own files"
 3. `list_directory "~/.forge/jobs"` → resolves now (0.17.171), but `find_files "~/**"` still opens nothing outside the workspace. pass the absolute `C:/Users/<name>/.forge/jobs`
 4. comparing a tool's resolved path with the workspace root in a test → `fs.realpathSync` keeps the 8.3 short form `EFSOOF~1`, `fs/promises` `realpath` expands it: use the tool's resolver
+5. `zipfile.ZipFile('test/fixtures/sample.xlsx')` in a scan → FileNotFoundError: that is not where the fixture lives. read the test's `fixture()` helper for the real path first
+6. `npx tsc --noEmit` → checks `src` only: the root tsconfig excludes `webview-ui` and `test`. a webview-ui change needs `npx tsc --noEmit -p webview-ui/tsconfig.json`
 
 ## FORENSICS
 1. pairing calls with results → pair the `tool_calls` row with the `tool` rows that follow it, positionally; the rendered chat hides tool failures entirely
