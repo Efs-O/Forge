@@ -5,7 +5,11 @@ import { carriesUntrustedContent, hasConversationReadSecret } from '../tools/exf
 import { isDangerousDelete } from './deletePreview';
 import { resolveWorkspacePath, pathIsInWorkspace } from '../util/WorkspacePaths';
 import type { OwnerOnlySet } from '../tools/ownerPaths';
-import { isOpenForgeWriteTarget } from '../tools/ownerPathsOpen';
+import {
+  isOpenForgeWriteTarget,
+  isForgeSkillsWriteTarget,
+  SKILL_WRITE_REASON,
+} from '../tools/ownerPathsOpen';
 import { normalizePathForMatch } from '../tools/secretPaths';
 import { decideUntrustedExit, type UntrustedExitInput } from './untrustedExitPolicy';
 import type { ToolDispatchRoundContext } from './toolDispatchTypes';
@@ -29,9 +33,43 @@ export function isMutationPathOutsideWorkspace(filePath: string, ownerSet: Owner
   return !pathIsInWorkspace(filePath) && !isOpenForgeWriteTarget(normalized, ownerSet);
 }
 
+/** The environment these two questions are asked with: the owner's own home, on
+ *  this OS, with no roots — the open areas are built in, not configured. */
+function forgeOwnerSet(): OwnerOnlySet {
+  return { roots: [], home: os.homedir(), platform: process.platform };
+}
+
 function outsideWorkspaceMutationPaths(paths: readonly string[]): string[] {
-  const ownerSet: OwnerOnlySet = { roots: [], home: os.homedir(), platform: process.platform };
+  const ownerSet = forgeOwnerSet();
   return paths.filter((filePath) => isMutationPathOutsideWorkspace(filePath, ownerSet));
+}
+
+/** A write that lands in `~/.forge/skills`, whatever else the call touches. */
+function writesForgeSkill(paths: readonly string[]): boolean {
+  const ownerSet = forgeOwnerSet();
+  return paths.some((filePath) =>
+    isForgeSkillsWriteTarget(normalizePathForMatch(filePath, ownerSet.platform), ownerSet),
+  );
+}
+
+/** The card a skill write owes the owner, layered on whatever the tool's own gate
+ *  said, so a tool that already raised a card keeps its detail and gate kind.
+ *
+ * `approvalKey` and `approvalTargets` go, because the call no longer asks the
+ * thing that key describes: with no key and `dangerous` set, `approvalKeysFor`
+ * fails closed, so the card carries no offer and Clanker and an unattended run
+ * both leave it to the owner. `cardTextOnly` goes for the same reason in reverse:
+ * it means "no gate", and this is one. */
+function skillWriteGate(
+  metadata: ToolApprovalMetadata | undefined,
+  mutationPaths: readonly string[],
+): ToolApprovalMetadata | undefined {
+  if (!writesForgeSkill(mutationPaths)) return metadata;
+  const base: ToolApprovalMetadata = { ...(metadata ?? {}) };
+  delete base.approvalKey;
+  delete base.approvalTargets;
+  delete base.cardTextOnly;
+  return { ...base, dangerous: true, clankerStop: true, cardReason: SKILL_WRITE_REASON };
 }
 
 export async function readToolApprovalMetadata(
@@ -57,11 +95,13 @@ export function evaluateToolApproval(
   toolRegistry: ToolRegistry,
 ): ToolApprovalEvaluation {
   if (cached.kind === 'error') throw cached.error;
-  const approvalMetadata = cached.metadata;
-  const isDangerous =
-    approvalMetadata?.dangerous ?? (tc.function.name === 'delete_file' && isDangerousDelete(args));
   const rawMutationPaths = reg.mutation?.paths(args) ?? [];
   const mutationPaths = rawMutationPaths.map((filePath) => resolveWorkspacePath(filePath));
+  // Read from the resolved paths: a skill file spelled `~/.forge/skills/...` or
+  // relative to the workspace is the same write the tool is about to make.
+  const approvalMetadata = skillWriteGate(cached.metadata, mutationPaths);
+  const isDangerous =
+    approvalMetadata?.dangerous ?? (tc.function.name === 'delete_file' && isDangerousDelete(args));
   const outsideMutationPaths = outsideWorkspaceMutationPaths(mutationPaths);
   const exitInput: UntrustedExitInput = {
     toolName: tc.function.name,
