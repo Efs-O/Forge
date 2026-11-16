@@ -1,5 +1,19 @@
 # Forge — Recent Changes
 
+## 0.17.183
+
+**A chat another agent opens runs in Clanker mode, and the general agent rules ship with Forge.**
+
+- A chat that Claude, Codex or Copilot opens with `forge.sh say --new` now starts in Clanker mode: Clanker answers routine approvals and still asks you before destructive actions, Forge guard files, skill writes, and a secret read followed by sending data out. `say --unattended` is gone; the client refuses it and says why. Scheduled jobs still run unattended, using only their policy allow lists.
+- Writing to a skill asks you every time, in Clanker mode too.
+- The general working rules (reply only when asked to, keep the whole output of every check, and the rest) now ship in the built-in system prompt, so a new install gets them without copying a FORGE.md. The agent note and the FORGE.md starter are plain Markdown files, and none of the shipped instruction files contain a machine path.
+- AI setup does everything itself except sign-ins and choices only you can make, and installs the CLI agents you selected when they are missing.
+- One coding tip may be up to 300 characters, and a tips table of a legal size is never cut short.
+- When one parked tool call failed, the other results of the same round were dropped; they are now kept. The activity row names the tool that actually runs, not its alias.
+- A job report carries the whole final turn, not its last 800 characters.
+- An MCP server named like a built-in tool group gets a group of its own; a closed config loader no longer reloads on a late file event; Codex discovery reports the app server's error output when it exits.
+- The CI proof names the exact tree the run tested, and a run whose tree changed underneath it records no proof.
+
 ## 0.17.182
 
 **A helper that has been told to retire no longer answers for the one running.**
