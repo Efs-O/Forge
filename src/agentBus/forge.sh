@@ -376,6 +376,10 @@ if [ "$VERB" = "say" ]; then
     case "$1" in
       --model) [ $# -ge 2 ] || usage; MODEL="$2"; shift 2;;
       --new) NEW_CHAT=true; shift;;
+      # Temporary (added 2026-11-16, v0.17.183): remove this --unattended line and its test
+      # ("refuses the removed say --unattended flag", test/unit/AgentBus.test.ts) after
+      # 2026-12-16, once old notes that still pass the flag have aged out. The --*) usage
+      # line below then refuses it.
       --unattended) echo "forge.sh: --unattended was removed. A chat you start with say --new runs in Clanker mode, which still asks the owner before destructive actions, Forge guard files, skill writes, and a secret read followed by egress." >&2; exit 2;;
       --to) [ $# -ge 2 ] || usage; CONVERSATION_ID="$2"; shift 2;;
       --to-running) TO_RUNNING=true; shift;;
