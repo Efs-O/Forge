@@ -474,8 +474,10 @@ export function saveSidebarSession(
   );
   // Keep the pointer in step so it is always the authoritative answer on load,
   // rather than a value that may be older than the blob beside it.
-  persistMemento(workspaceState, ACTIVE_ID_KEY, session.activeConversationId);
-  return saved;
+  // The returned promise covers the pointer too: a caller that awaits the save
+  // (a reload, a test) must not read the store between the two writes.
+  const pointer = persistMemento(workspaceState, ACTIVE_ID_KEY, session.activeConversationId);
+  return Promise.all([saved, pointer]).then(([blob, active]) => blob && active);
 }
 
 /**
