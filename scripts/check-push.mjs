@@ -81,7 +81,6 @@ const mainTarget = targets.find((t) => t.remoteRef === 'refs/heads/main' && !t.e
 const pushSha = mainTarget ? mainTarget.localSha : git('rev-parse', 'HEAD').trim();
 const treeHash = git('rev-parse', `${pushSha}^{tree}`).trim();
 const markerDir = join('.forge', 'ci-pass');
-const marker = join(markerDir, `${treeHash}.json`);
 
 if (recordCi) {
   // Report-only since 0.17.167. This block used to write the marker without running anything,
@@ -246,8 +245,9 @@ if (version) {
   }
 }
 
-// 5. A recorded green CI for this exact tree.
-if (!existsSync(marker)) {
+// 5. A recorded green CI for this exact tree. An unreadable or malformed marker is not a
+// proof either, so the gate asks readMarker rather than trusting the file's existence.
+if (!readMarker(markerDir, treeHash)) {
   if (process.env.FORGE_PUSH_SKIP_CI === '1') {
     warnings.push('no recorded CI pass for this tree, and FORGE_PUSH_SKIP_CI=1');
   } else {

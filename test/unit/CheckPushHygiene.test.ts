@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { record } from '../../scripts/record-ci-pass.mjs';
 
 /**
  * The push gate (scripts/check-push.mjs): what it refuses, and the fact that
@@ -59,6 +60,35 @@ describe('push hygiene gate', () => {
     expect(run.stderr).toContain('check-push');
     expect(run.status).toBe(0);
     expect(run.stdout).toContain('is clean (1 commit');
+  });
+
+  /** Runs the gate with the CI-pass check live, so the marker is what is being tested. */
+  function gateRequiringCi() {
+    return spawnSync(process.execPath, [script, 'HEAD~1..HEAD'], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, FORGE_PUSH_SKIP_CI: '0' },
+    });
+  }
+
+  it('accepts the marker the recorder writes for the pushed tree', () => {
+    repoWith(good);
+    const markerDir = path.join(root!, '.forge', 'ci-pass');
+    fs.mkdirSync(markerDir, { recursive: true });
+    record({ dir: markerDir, treeHash: git(['rev-parse', 'HEAD^{tree}']) });
+    const run = gateRequiringCi();
+    expect(run.status).toBe(0);
+  });
+
+  it('reads a marker file holding `{}` as no recorded CI pass at all', () => {
+    repoWith(good);
+    const markerDir = path.join(root!, '.forge', 'ci-pass');
+    fs.mkdirSync(markerDir, { recursive: true });
+    const tree = git(['rev-parse', 'HEAD^{tree}']);
+    fs.writeFileSync(path.join(markerDir, `${tree}.json`), '{}');
+    const run = gateRequiringCi();
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain('no recorded CI pass for tree');
   });
 
   it.each([

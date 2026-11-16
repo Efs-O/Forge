@@ -1,5 +1,5 @@
 /**
- * Records that the full CI steps just passed for the tree at HEAD, so the push gate has a
+ * Records that the full CI steps just passed for the tree they tested, so the push gate has a
  * proof it did not have to trust an agent's word for.
  *
  * Before this, `check-push.mjs --record-ci` wrote the proof and never ran anything: on
@@ -7,10 +7,12 @@
  * now comes from the run itself — `npm run ci:steps` reaches this script only when every
  * earlier step exited 0, because the steps are chained with `&&`. A red suite leaves no marker.
  *
- * Markers are keyed by tree hash, so the run has to happen **after** the commit it certifies:
- * commit, then `npm run ci`, then push. A suite run before the commit certifies a tree that is
- * no longer the tip.
+ * Markers are keyed by tree hash, and the hash is taken from the working tree, because that is
+ * what the suite read: uncommitted edits included. So a run before a commit certifies the bytes
+ * it tested, and it starts counting for a push the moment a commit has exactly that tree. Run
+ * `npm run ci` after the commit it certifies to record it under HEAD's tree directly.
  */
+import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import {
   existsSync,
@@ -22,6 +24,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -35,6 +38,34 @@ export function markerName(treeHash) {
 
 export function treeHashOfHead(cwd = process.cwd()) {
   return execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd, encoding: 'utf8' }).trim();
+}
+
+/**
+ * The tree of the **working tree**, uncommitted edits included — which is what `npm run ci`
+ * actually tested. Builds it in a throw-away index under `os.tmpdir()` so the repository's real
+ * index, and therefore any other agent's staged changes, are untouched. `git add -A` skips
+ * ignored files, exactly as it does for a normal add.
+ */
+export function treeHashOfWorkingTree(cwd = process.cwd()) {
+  const index = join(tmpdir(), `forge-ci-pass-index-${process.pid}-${randomUUID()}`);
+  const git = (args) =>
+    execFileSync('git', args, {
+      cwd,
+      encoding: 'utf8',
+      env: { ...process.env, GIT_INDEX_FILE: index },
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  try {
+    git(['read-tree', 'HEAD']);
+    git(['add', '-A']);
+    return git(['write-tree']).trim();
+  } finally {
+    try {
+      unlinkSync(index);
+    } catch {
+      // Git never created the index, or something else already removed it: nothing to clean.
+    }
+  }
 }
 
 /**
@@ -100,11 +131,18 @@ export function prune(dir, keep = KEEP_MARKERS) {
 }
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
-  const treeHash = treeHashOfHead();
+  const headTree = treeHashOfHead();
+  const treeHash = treeHashOfWorkingTree();
   const file = record({ dir: MARKER_DIR, treeHash });
   const removed = prune(MARKER_DIR);
   console.log(
     `ci-pass: recorded a green run for tree ${treeHash.slice(0, 12)} (${basename(file)})` +
       (removed.length ? `; pruned ${removed.length} older marker${removed.length === 1 ? '' : 's'}` : ''),
   );
+  if (treeHash !== headTree) {
+    console.log(
+      `CI pass recorded for the working tree ${treeHash.slice(0, 12)}, which is not HEAD's tree. ` +
+        'It counts for a push only once a commit has exactly this tree.',
+    );
+  }
 }
