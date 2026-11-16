@@ -11,10 +11,11 @@ import os
 import re
 import sys
 from collections import Counter, defaultdict
+from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-SESSIONS = r"C:/Users/efso office/.forge/sessions"
+SESSIONS = Path.home() / ".forge" / "sessions"
 PATTERN = re.compile(r"nobody answered the approval for (\w[\w.]*) within (\d+) min")
 CARRIED = re.compile(r"needs the approval that went unanswered earlier in this turn \((\d+) min\)")
 EARLIER = re.compile(r"an approval earlier in this turn went unanswered for (\d+) min")

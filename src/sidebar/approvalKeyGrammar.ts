@@ -228,8 +228,8 @@ function isDriveOrOsRoot(value: string): boolean {
  * guards under `~/.forge/`, the config, the session the owner is reading. A rule
  * that NAMES one of them, or that names a folder CONTAINING one of them, would let
  * a chat approve deleting the ground the guards and the work itself stand on:
- * `rdelete:C:/Users` with the profile at `C:/Users/efso office` deletes the whole
- * user profile, `.forge` included, and `rdelete:N:/vs code apps` deletes the
+ * `rdelete:C:/Users` with the profile at `C:/Users/<name>` deletes the whole
+ * user profile, `.forge` included, and `rdelete:D:/projects` deletes the
  * workspace through its parent. That is why the check runs in both directions —
  * "is this folder inside a root" alone never notices an ancestor of one.
  *

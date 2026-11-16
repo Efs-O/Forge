@@ -19,6 +19,7 @@
  *                                                   ... or by send order
  *   node scripts/voice-fixtures.mjs --generate \
  *        --piper <exe> --voices <dir> --ffmpeg <exe>
+ *        (--piper and --voices are required: no machine path is guessed here)
  *
  * Nothing here is wired into `npm run ci`: it needs Piper and ffmpeg, which are
  * Tier B dependencies (docs/VOICE_STT_TTS_IMPLEMENTATION_PLAN.md §24).
@@ -253,11 +254,15 @@ const importDir = arg('import', undefined);
 if (importDir) {
   importRecordings(importDir, { ffmpeg, ordered: process.argv.includes('--ordered') });
 } else if (process.argv.includes('--generate')) {
-  synthesize({
-    piper: arg('piper', 'N:/vs code apps/Gemma4kids/piper/win/piper.exe'),
-    voices: arg('voices', 'N:/vs code apps/Gemma4kids/voices'),
-    ffmpeg,
-  });
+  // No default paths: Piper and its voices live wherever the machine keeps them,
+  // and a wrong guess would quietly skip every synthetic entry.
+  const piper = arg('piper');
+  const voices = arg('voices');
+  if (!piper || !voices) {
+    console.error('voice-fixtures: pass --piper <piper.exe> and --voices <folder>.');
+    process.exit(1);
+  }
+  synthesize({ piper, voices, ffmpeg });
 } else {
   list();
 }

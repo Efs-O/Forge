@@ -24,10 +24,11 @@ import re
 import statistics
 import sys
 from collections import Counter, defaultdict
+from pathlib import Path
 
 SESS = os.path.expanduser("~/.forge/sessions")
-FORGE = r"N:/vs code apps/Forge"
-EXCLUDE = os.path.join(FORGE, "docs", "reports", "session-scan", "test-chats.exclude")
+FORGE = Path(__file__).resolve().parents[2]  # the repo this script lives in
+EXCLUDE = FORGE / "docs" / "reports" / "session-scan" / "test-chats.exclude"
 MASK = [(re.compile(r"call_[0-9a-f]+", re.I), "call_ID"), (re.compile(r"\b\d[\d.,]*\b"), "N")]
 
 

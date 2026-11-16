@@ -12,8 +12,12 @@ import shutil
 import sys
 from pathlib import Path
 
-FORGE = Path(r"N:/vs code apps/Forge")
-TARGET = Path(r"N:/vs code apps/Qwen_fine_tuning")
+FORGE = Path(__file__).resolve().parents[2]  # the repo this script lives in
+_target = os.environ.get("FORGE_LAB_TARGET")
+if not _target:
+    print("Set FORGE_LAB_TARGET to the lab checkout to sync into.", file=sys.stderr)
+    sys.exit(1)
+TARGET = Path(_target)
 MIRROR = TARGET / "lab"
 
 # Only lab files are mirrored (the owner's old report folders stay out).

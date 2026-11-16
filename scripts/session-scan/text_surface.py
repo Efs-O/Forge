@@ -1,6 +1,6 @@
 import re, sys, pathlib, glob
 sys.stdout.reconfigure(encoding='utf-8')
-R = pathlib.Path('N:/vs code apps/Forge')
+R = pathlib.Path(__file__).resolve().parents[2]  # the repo this script lives in
 RATIO = 4.62  # chars/token measured 2026-09-30, llama.cpp b11243 + Qwen3.8-27B Q6_K (ToolSchemaBudget.test.ts)
 
 def report(name, text):
