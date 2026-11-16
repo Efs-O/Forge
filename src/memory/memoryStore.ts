@@ -192,7 +192,7 @@ export class MemoryStore {
       skipped.push(`Skipped ${memory.fileName}: another file has the same name "${memory.key}"`);
       return false;
     });
-    return { memories: kept.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)), skipped };
+    return { memories: kept.sort(compareMemories), skipped };
   }
 
   list(): StoredMemory[] {
@@ -237,6 +237,8 @@ export class MemoryStore {
     updated = new Date().toISOString(),
   ): StoredMemory {
     const desc = descriptionFor(value, description);
+    // One scan per write. parsedFiles() has already dropped keys that appear in two files, so
+    // the index rendered below excludes them exactly as a second scan would have.
     const files = this.parsedFiles().memories;
     const all = [
       ...files.filter((memory) => memory.key !== key),
@@ -251,6 +253,8 @@ export class MemoryStore {
       ]);
     for (const group of groups.values())
       if (group.length > 1) group.forEach(({ key: name }) => colliding.add(name));
+    const named: StoredMemory[] = [];
+    let written: StoredMemory | undefined;
     for (const memory of all) {
       const safe =
         SAFE.test(memory.key) && !RESERVED.test(memory.key) && !colliding.has(memory.key);
@@ -259,21 +263,27 @@ export class MemoryStore {
       if (memory.key !== key && memory.fileName !== fileName) {
         fs.renameSync(path.join(this.directory, memory.fileName), target);
       }
-      if (memory.key === key)
+      const entry: StoredMemory = { ...memory, fileName };
+      if (memory.key === key) {
         this.writeAtomic(
           target,
           this.serialize(memory.key, memory.description, memory.value, updated),
         );
+        written = entry;
+      }
+      named.push(entry);
     }
-    this.regenerateIndex();
-    return this.read(key)!;
+    named.sort(compareMemories);
+    this.regenerateIndex(named);
+    return written!;
   }
 
   forget(key: string): boolean {
-    const memory = this.read(key);
+    const { memories } = this.parsedFiles();
+    const memory = memories.find((entry) => entry.key === key);
     if (!memory) return false;
     fs.unlinkSync(path.join(this.directory, memory.fileName));
-    this.regenerateIndex();
+    this.regenerateIndex(memories.filter((entry) => entry !== memory));
     return true;
   }
 
@@ -302,8 +312,7 @@ export class MemoryStore {
     return current;
   }
 
-  regenerateIndex(): string {
-    const { memories } = this.parsedFiles();
+  regenerateIndex(memories: StoredMemory[] = this.parsedFiles().memories): string {
     const body = [
       INDEX_HEADER,
       ...memories.map(
@@ -360,6 +369,10 @@ export class MemoryStore {
 
 function compareKeys(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function compareMemories(a: StoredMemory, b: StoredMemory): number {
+  return compareKeys(a.key, b.key);
 }
 
 const stores = new WeakMap<vscode.Memento, MemoryStore>();
