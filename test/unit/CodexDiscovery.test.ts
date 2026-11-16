@@ -201,4 +201,34 @@ describe('CodexDiscovery start failures (pinned)', () => {
     expect(failure.message).not.toContain('write failed');
     await d.dispose();
   });
+
+  it('names the app-server stderr when it exits on its own', async () => {
+    fake.behaviour = {
+      stderrText: 'error: invalid configuration in `~/.codex/config.toml`: unknown key `modelx`\n',
+      exit: { code: 1 },
+    };
+    const d = new CodexDiscovery({
+      executable: 'forge_probe_app_server',
+      cwd: process.cwd(),
+    });
+    const failure = await d.discover().catch((error) => error as Error);
+    expect(failure.message).toBe(
+      'Codex app-server exited with code 1 before thread/list completed. ' +
+        'stderr: error: invalid configuration in `~/.codex/config.toml`: unknown key `modelx`',
+    );
+    await d.dispose();
+  });
+
+  it('keeps the plain message when the app-server said nothing on stderr', async () => {
+    fake.behaviour = { stderrText: '   \n', exit: { code: 3 } };
+    const d = new CodexDiscovery({
+      executable: 'forge_probe_app_server',
+      cwd: process.cwd(),
+    });
+    const failure = await d.discover().catch((error) => error as Error);
+    expect(failure.message).toBe(
+      'Codex app-server exited with code 3 before thread/list completed.',
+    );
+    await d.dispose();
+  });
 });

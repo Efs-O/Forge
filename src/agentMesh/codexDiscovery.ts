@@ -167,16 +167,25 @@ export class CodexDiscovery {
       stdin: 'pipe',
     });
     this.child = child;
-    collectStderrTail(child);
+    // Keep the tail: an app-server that dies on its own usually says why on
+    // stderr, and that line is the only record of a failure the agent will see.
+    const stderr = collectStderrTail(child);
     this.input = child.stdout
       ? readline.createInterface({ input: child.stdout, crlfDelay: Infinity })
       : undefined;
     this.input?.on('line', (line) => this.handleLine(line));
     void waitForCliProcessExit(child).then((exit) => {
       if (this.child !== child) return;
+      const exited = `Codex app-server exited with code ${exit.code ?? '?'} before thread/list completed.`;
+      // The reason lives in the child's stderr, which nothing else reports: without
+      // it the agent is told only that something exited, and cannot tell a bad
+      // config from a missing binary.
+      const tail = stderr.tail().trim();
       this.protocolError = exit.error
         ? `Codex app-server transport failed: ${exit.error.message}`
-        : `Codex app-server exited with code ${exit.code ?? '?'} before thread/list completed.`;
+        : tail
+          ? `${exited} stderr: ${tail}`
+          : exited;
       this.pending.rejectAll(new Error(this.protocolError));
     });
     const onAbort = (): void => {
