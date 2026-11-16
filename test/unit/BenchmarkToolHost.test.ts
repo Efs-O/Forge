@@ -43,6 +43,33 @@ describe('benchmark file write limits', () => {
   });
 });
 
+describe('benchmark edit_file', () => {
+  it('writes $ patterns in new_text as the literal characters they are', async () => {
+    // `String.prototype.replace` interprets `$'`, `$&` and `$1` in a string
+    // replacement, so a model writing `A$'B` used to get text lifted out of the
+    // surrounding file instead of what it asked for.
+    fs.writeFileSync(path.join(root, 'dollar.txt'), 'a X b');
+    const host = createBenchmarkToolHost(root);
+    const result = await host.dispatch(
+      {
+        id: 'edit-dollar',
+        type: 'function',
+        function: {
+          name: 'edit_file',
+          arguments: JSON.stringify({
+            path: 'dollar.txt',
+            old_text: 'X',
+            new_text: "A$'B",
+          }),
+        },
+      },
+      new AbortController().signal,
+    );
+    expect(result).toContain('dollar.txt');
+    expect(fs.readFileSync(path.join(root, 'dollar.txt'), 'utf8')).toBe("a A$'B b");
+  });
+});
+
 describe('benchmark grep_search contract', () => {
   it('supports regex by default, literal searches and invalid-pattern guidance', async () => {
     fs.writeFileSync(path.join(root, 'search.ts'), 'target.heal(value); call foo(value);');

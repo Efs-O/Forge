@@ -112,6 +112,10 @@ async function jsonRequest(url, init) {
 }
 
 function requires(definition, args) {
+  // A tool call whose `arguments` were not JSON has no arguments to check, and
+  // `Object.hasOwn(undefined, key)` throws: the whole run would abort before it
+  // wrote a report instead of recording the call as a miss.
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return false;
   const parameters = definition.function.parameters;
   if (parameters.type !== 'object' || !Array.isArray(parameters.required)) return false;
   return parameters.required.every((key) => Object.hasOwn(args, key));

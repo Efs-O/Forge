@@ -287,10 +287,13 @@ export function createBenchmarkToolHost(root: string): BenchmarkToolHost {
         throw new Error(
           `old_text matched ${count} times; set replace_all or provide more context.`,
         );
+      // A replacer function, so `$'`, `$&` and `$1` in the model's new_text stay
+      // the literal characters the model wrote, instead of text lifted out of the
+      // surrounding file the way a string replacement interprets them.
       const after =
         args.replace_all === true
           ? before.split(oldText).join(newText)
-          : before.replace(oldText, newText);
+          : before.replace(oldText, () => newText);
       fs.writeFileSync(target, after, 'utf8');
       return `Edited ${relative(root, target)}`;
     },
