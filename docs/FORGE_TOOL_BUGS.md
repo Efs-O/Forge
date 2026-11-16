@@ -126,3 +126,35 @@ Entry shape (copy it, fill it, newest entry last):
   the previous day's "already reported" state unusable for dedupe
 - Workaround: re-derive the lost facts from the current watch run and fold them into the new note
 - Status: open
+
+## `desktop_click` on a dialog field reports success but does not move focus
+
+- Seen: 2026-11-16, Forge 0.17.185, chat 86b15ced-06cb-4e3b-9591-c2a2d1d5bda2 (Word 2010 Find and Replace)
+- Tool: `desktop_click` at (300,118) inside the "Replace with" combo box
+- Did: reported `Clicked (left, 1×)`; the next `desktop_type` still went to "Find what", which read
+  `27/724/12` — the click was a silent no-op for focus
+- Should: focus the control it hit, or report that focus did not move
+- Workaround: move between dialog fields with `desktop_press` `tab`; clear with `ctrl+a` + `delete`
+- Status: fixed on main (commit 7e16d9f1) — the driver reads the focused control before and after the click and the tool says which; the decision is made on the focused HWND, not the class
+
+## `desktop_capture` approves a target but does not foreground it
+
+- Seen: 2026-11-16, Forge 0.17.185, chat 86b15ced-06cb-4e3b-9591-c2a2d1d5bda2
+- Tool: `desktop_capture` "Find and Replace", then `desktop_press` / `desktop_click`
+- Did: input refused — `target lost focus (foreground is 'Strata (127.0.0.1:8091) - Forge - Visual Studio Code')`;
+  and capturing a second window drops the first capture id: `unknown capture_id "cap-10"; call desktop_capture first`
+- Should: say in the result that the capture is not foreground, so the next action needs `desktop_focus_window`
+- Workaround: `desktop_focus_window` immediately before every click or keystroke
+- Status: fixed on main (commit 7e16d9f1) — a window capture now ends with "Captured without bringing the window forward: call desktop_focus_window before any input action."
+
+## `desktop_focus_window` refuses `window_id` as a number, after accepting the same form
+
+- Seen: 2026-11-16, Forge 0.17.185, chat 86b15ced-06cb-4e3b-9591-c2a2d1d5bda2
+- Tool: `desktop_focus_window` with `window_id` 4523544, copied from `desktop_windows` output
+- Did: refused three times — `must be a JSON string, not a number. Resend the call with
+  window_id as "text"` — while the identical numeric form was accepted twice earlier in
+  the same chat (41617738, 27987174). The refusal cannot be honoured: the parameter block
+  renders the value the same way each time
+- Should: accept what its own `desktop_windows` prints, or normalise a number to a string
+- Workaround: pass `window_title` instead (a case-insensitive substring)
+- Status: fixed on main (commit 7e16d9f1) — the schema takes `["string","number"]` and `ToolRegistry.invalidArgs` now checks every type of a union instead of none, so a boolean or an object is still refused

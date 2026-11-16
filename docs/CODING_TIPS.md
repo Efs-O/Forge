@@ -24,6 +24,7 @@
 11. `rg --include='*.ts'` or `grep --no-ignore` → unrecognized flag: each is the other tool's spelling. rg filters with `-g '*.ts'`; GNU grep has no ignore flag
 12. an `rg` pattern with a look-around (`(?=`, `(?!`, `(?<=`) → `look-around ... is not supported`. add `--pcre2`
 13. `rg -n "x" .` over the repo → `dist/`, `coverage/`, `.forge/tmp/`, `docs/local/**` corpora and one-line `test/fixtures/*.json` drown the answer (42 MB once). exclude each with `-g`
+14. `grep_search` with `path`/`glob` → refused as unknown arguments: it takes `include` only, and a folder or absolute glob goes inside `include`
 
 ## RUN
 1. `cd "C:/Users/…/sessions" && python -c "…"` → refused: the write is judged from the folder the command started in. pass `cwd: "C:/Users/…/sessions"` and the command alone
@@ -78,6 +79,8 @@
 17. repairing a mangled line from memory instead of rereading it → the fix re-adds what survived: `describe('x', () => { () => {`. read the line back, then fix it once
 18. `edit_file` on a backtick I thought `write_file` had escaped → old_str not found: the file holds exactly what I typed. read_file it back before blaming the write
 19. budgeting the net lines of a 500-line file → the tool warns "now 501 lines": an inserted documented method is doc+body+blank = 5 lines, not 4 → `wc -l` after the edit
+20. `SKILL.md` `description:` → the catalog carries only 240 chars (`MAX_SKILL_DESCRIPTION_CHARS`), so the trigger words must fit there; discovery also refuses a wrapped description, or a `name` that is not the folder name
+21. driving a dialog to edit a file: `desktop_click` on a field can leave the caret where it was → the text runs on behind it. move with `tab`, clear with `ctrl+a`+`delete`; a new `desktop_capture` drops the old `capture_id`
 
 ## TEST
 1. a harness that only emits calls, or a threshold measured by a script whose pair list differs from the gate's → the number certifies neither. dispatch the calls; measure with the gate's own list
@@ -111,6 +114,8 @@
 9. a Fisher p quoted without its variant → the same 2×2 gives 0.21 strict vs 1.0 standard two-sided. name the variant; re-run the same function, never a library default
 10. a tool call with no result row for minutes → not a hang: an unanswered approval card writes its `gate` row only when answered or expired (one timeout period). read the `gate` rows first
 11. a tool-result string quoted from a rep's staging file → it is the build that rep ran, not the current one. read the source before filing it as a live defect
+12. a print job parked in `JobStatus Printing` with `PrinterStatus 4` for minutes → the driver is waiting in its own preview window (Canon IJ Preview: Start Printing). screenshot the screen; the queue proves nothing
+13. `Get-PrintQueue`/`Get-PrintJob` → not recognized here (no PrintQueue module). job state: `Get-CimInstance Win32_PrintJob`; printer state: `Win32_Printer` `PrinterStatus` (3=idle 4=processing)
 
 ## DELEGATE
 1. `notify_user` with no remote chat bound → `Shown in the VS Code window only`: a local toast, never a phone ping. do not report that the user was notified remotely
