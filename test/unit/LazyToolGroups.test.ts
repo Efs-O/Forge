@@ -289,6 +289,34 @@ describe('lazy tool groups', () => {
     }
   });
 
+  it('refuses an MCP server that claims a built-in group name, and gives it its own', () => {
+    // A server configured as `files` used to merge into the native `files`
+    // group. That group is advertised on every request, so the server's tools
+    // arrived unasked in every conversation and disappeared again with the
+    // native ones when it was hidden.
+    expect(lazyGroupForServer('files')).toBe('mcp-files');
+    expect(lazyGroupForServer('Files')).toBe('mcp-Files'); // matched case-insensitively
+    expect(lazyGroupForServer('background')).toBe('mcp-background');
+    expect(lazyGroupForServer('git')).toBe('mcp-git');
+    expect(lazyGroupForServer('files', true)).toBeUndefined();
+    // A name nothing else uses is returned untouched, exactly as before.
+    expect(lazyGroupForServer('github')).toBe('github');
+
+    const registry = new ToolRegistry();
+    registry.register(makeLoadToolGroupTool());
+    recordNativeLazyTool('move_file'); // so the native `files` group has a member
+    bridge(registry, 'files', OTHER_MCP_TOOLS);
+    // Two separate groups, and the name the model is told is the one that works.
+    expect(lazyGroupNames()).toEqual(expect.arrayContaining(['files', 'mcp-files']));
+    expect(modelFacingTools(registry, 'conv-a')).not.toContain('fetch_page');
+    // The native group being active (it is always advertised) does not reveal them.
+    activateLazyGroup('conv-a', 'files');
+    expect(modelFacingTools(registry, 'conv-a')).not.toContain('fetch_page');
+    activateLazyGroup('conv-a', 'mcp-files');
+    expect(modelFacingTools(registry, 'conv-a')).toContain('fetch_page');
+    expect(modelFacingTools(registry, 'conv-b')).not.toContain('fetch_page');
+  });
+
   it('registers the rare native and MCP groups with their tool families', () => {
     const registry = new ToolRegistry();
     registry.register(makeLoadToolGroupTool());

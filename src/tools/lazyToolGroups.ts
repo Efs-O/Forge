@@ -6,7 +6,9 @@
 /**
  * Which MCP server tools are advertised, and when. Every server's tools arrive
  * in a demand-loaded group named after the server — the same mechanism the
- * native groups use — unless its `mcp_servers` entry sets `eager: true`.
+ * native groups use — unless its `mcp_servers` entry sets `eager: true`. A
+ * server whose name is already a built-in group gets `mcp-<name>` instead, so
+ * its tools cannot ride along inside a native group unasked.
  *
  * The default flipped from eager to demand-loaded on 2026-11-14: the one server
  * that used to stay eager here was the Blender bridge, 11 tools and 11,913
@@ -140,6 +142,14 @@ const NATIVE_GROUP_BY_TOOL: ReadonlyMap<string, string> = new Map([
   ['get_system_status', 'system'],
 ]);
 
+/**
+ * Every built-in group name, lower-cased, so an MCP server cannot be given one.
+ * Built from the map's own values: a group added here needs no second list.
+ */
+const NATIVE_GROUP_NAMES: ReadonlySet<string> = new Set(
+  [...new Set(NATIVE_GROUP_BY_TOOL.values())].map((group) => group.toLowerCase()),
+);
+
 /** Tools actually registered or bridged in, per group. */
 const membersByGroup = new Map<string, Set<string>>();
 const activeByConversation = new Map<string, Set<string>>();
@@ -148,9 +158,16 @@ const activeByConversation = new Map<string, Set<string>>();
  * The lazy group an MCP server's tools belong to: its own name, so
  * `load_tool_group` can fetch them by the name the user configured. Returns
  * undefined only for a server that asks to stay advertised on every request.
+ *
+ * A server whose name IS a built-in group cannot have it: its tools would join
+ * that group, load and hide with the native ones, and for `files` and
+ * `background` — the two groups advertised on every request — the server would
+ * pay its schemas in every conversation without being asked. Such a server gets
+ * `mcp-<name>`, which is the name `load_tool_group` is then told to pass.
  */
 export function lazyGroupForServer(serverName: string, eager = false): string | undefined {
-  return eager ? undefined : serverName;
+  if (eager) return undefined;
+  return NATIVE_GROUP_NAMES.has(serverName.toLowerCase()) ? `mcp-${serverName}` : serverName;
 }
 
 export function lazyGroupForTool(toolName: string): string | undefined {
