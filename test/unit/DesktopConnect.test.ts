@@ -353,30 +353,75 @@ describe('choosing the desktop', () => {
   });
 
   it('offers online tailnet peers by name, and nothing else', () => {
+    // The shape `tailscale status --json` really returns (Tailscale 1.104): a
+    // `Peer` OBJECT keyed by node key, whose entries name themselves with
+    // `DNSName` (trailing dot) and `HostName`, and no `Self` entry for this
+    // machine — that is the top-level `Self` object, which this fake carries.
     const json = JSON.stringify({
-      Peer: [
-        { Self: true, Online: true, NodeName: 'laptop.', TailscaleIPs: ['100.64.0.20'] },
-        {
+      Self: { HostName: 'laptop', TailscaleIPs: ['100.64.0.20'] },
+      Peer: {
+        'nodekey:self': {
+          Self: true,
           Online: true,
-          NodeName: 'desktop.tailnet.ts',
-          TailscaleIPs: ['100.64.0.10', 'fd7a:115c:a1e0::1'],
+          HostName: 'laptop',
+          DNSName: 'laptop.example-tailnet.ts.net.',
+          TailscaleIPs: ['100.64.0.20'],
         },
-        { Online: false, NodeName: 'studio', TailscaleIPs: ['100.64.0.9'] },
-        { Online: true, NodeName: 'no-address', TailscaleIPs: [] },
-        { Online: true, NodeName: 'ipv6-only', TailscaleIPs: ['fd7a:115c:a1e0::2'] },
-      ],
-      Peer2: [{ Online: true, NodeName: 'old-shape', Addresses: ['100.64.0.5'] }],
+        'nodekey:a1': {
+          HostName: 'DESKTOP-PC',
+          DNSName: 'desktop.example-tailnet.ts.net.',
+          TailscaleIPs: ['100.64.0.10', 'fd7a:115c:a1e0::1'],
+          Online: true,
+        },
+        'nodekey:b1': {
+          HostName: 'STUDIO-OLD',
+          DNSName: 'studio.example-tailnet.ts.net.',
+          TailscaleIPs: ['100.64.0.8'],
+          Online: false,
+        },
+        'nodekey:c1': {
+          HostName: 'SILENT',
+          DNSName: 'no-address.example-tailnet.ts.net.',
+          TailscaleIPs: [],
+          Online: true,
+        },
+        'nodekey:d1': {
+          HostName: 'V6-ONLY',
+          DNSName: 'ipv6-only.example-tailnet.ts.net.',
+          TailscaleIPs: ['fd7a:115c:a1e0::2'],
+          Online: true,
+        },
+        'nodekey:e1': {
+          HostName: 'studio-pc',
+          DNSName: '',
+          TailscaleIPs: ['100.64.0.9'],
+          Online: true,
+        },
+      },
+      Peer2: { 'nodekey:z': { HostName: 'old-shape', TailscaleIPs: ['100.64.0.5'] } },
     });
     expect(parseTailnetPeers(json)).toEqual([
-      // Self, offline peers and peers with no usable IPv4 are left out, and the
-      // `.tailnet.ts` suffix is trimmed because two tailnets can name the same
-      // machine differently and the owner has to be able to tell them apart.
+      // An entry marked `Self`, an offline peer and peers with no usable IPv4 are
+      // left out, and the `.example-tailnet.ts.net.` suffix is trimmed because
+      // two tailnets can name the same machine differently and the owner has to
+      // be able to tell them apart. A peer with no `DNSName` falls back to
+      // `HostName` rather than disappearing from the picker.
       { name: 'desktop', addresses: ['100.64.0.10'] },
+      { name: 'studio-pc', addresses: ['100.64.0.9'] },
     ]);
     // Unparsable or a shape this Tailscale does not produce is an empty list, so
     // the picker falls back to typing rather than pretending to know the tailnet.
     expect(parseTailnetPeers('not json').length).toBe(0);
     expect(parseTailnetPeers(JSON.stringify({ Peer: 'nope' })).length).toBe(0);
+    // An ARRAY of peers is the shape older Forge builds read, and the one shape
+    // the CLI never writes: reading it back has to be empty, not a guess.
+    expect(
+      parseTailnetPeers(
+        JSON.stringify({
+          Peer: [{ HostName: 'desktop', TailscaleIPs: ['100.64.0.10'], Online: true }],
+        }),
+      ),
+    ).toEqual([]);
   });
 
   it('accepts an address in any form a person would type, and refuses a name', () => {
@@ -387,6 +432,15 @@ describe('choosing the desktop', () => {
       url: 'http://192.168.1.70:8798',
     });
     expect(parseStarterAddress('192.168.1.70:8801')).toEqual({ url: 'http://192.168.1.70:8801' });
+    // An IPv6 tailnet address keeps its brackets in the URL the caller dials:
+    // without them `:8798` reads as another label of the address, and the
+    // starter's own `new URL` would reject the result.
+    expect(parseStarterAddress('http://[fd7a:115c:a1e0::1]:8798')).toEqual({
+      url: 'http://[fd7a:115c:a1e0::1]:8798',
+    });
+    expect(parseStarterAddress('http://[fd7a:115c:a1e0::1]')).toEqual({
+      url: 'http://[fd7a:115c:a1e0::1]:8798',
+    });
     // A name is refused with the schema's own words, because the starter's Host
     // check would reject it on every later request.
     const named = parseStarterAddress('desktop.tailnet.ts');

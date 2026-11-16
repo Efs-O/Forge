@@ -19,9 +19,12 @@
  *
  * `tailscale` is never run here (the lane rule): the CLI is injected, so links 1
  * and 2 are driven by JSON this file writes. The field names in that JSON are the
- * ones the installed CLI really returns, read off this machine's daemon
- * (`BackendState`, `CurrentTailnet.MagicDNSSuffix`, `Peer[].NodeName`,
- * `TailscaleIPs`, `Online`), not guessed. Tailnet addresses (100.x) are dialled
+ * ones the installed CLI really returns (Tailscale 1.104): `BackendState`,
+ * `CurrentTailnet.MagicDNSSuffix`, and `Peer` as an OBJECT keyed by node key,
+ * whose entries carry `DNSName` (`"desktop.example-tailnet.ts.net."`, trailing
+ * dot), `HostName`, `TailscaleIPs` and `Online` — there is no `NodeName`, and
+ * this machine is the top-level `Self`, never an entry in `Peer`. Tailnet
+ * addresses (100.x) are dialled
  * only through an injected `fetch`, because this machine IS a desktop with real
  * listeners on its loopback ports that a test must not reach.
  */
@@ -69,7 +72,11 @@ vi.mock('vscode', () => ({
   env: { remoteName: undefined },
 }));
 
-/** A `tailscale status --json` this file controls. */
+/** A `tailscale status --json` this file controls. `Peer` is the shape the CLI
+ *  really returns: an object keyed by node key, whose entries name themselves
+ *  with a trailing-dot `DNSName` and a `HostName`, never a `NodeName`. The
+ *  caller's `name` below is that DNS name, so what the check reports is the
+ *  first label of it, exactly as it reads off a real tailnet. */
 function statusJson(
   options: {
     state?: string;
@@ -77,16 +84,22 @@ function statusJson(
     peers?: Array<{ name: string; ips: string[]; online: boolean }>;
   } = {},
 ): string {
+  const suffix = options.tailnet ?? 'example-tailnet.ts.net';
+  const peerMap: Record<string, unknown> = {};
+  (options.peers ?? []).forEach((peer, index) => {
+    const dnsName = peer.name.endsWith('.') ? peer.name : `${peer.name}.${suffix}.`;
+    peerMap[`nodekey:${index}`] = {
+      HostName: (dnsName.split('.')[0] ?? peer.name).toUpperCase(),
+      DNSName: dnsName,
+      TailscaleIPs: peer.ips,
+      Online: peer.online,
+    };
+  });
   return JSON.stringify({
     Version: '1.104.2-test',
     BackendState: options.state ?? 'Running',
-    CurrentTailnet: { MagicDNSSuffix: options.tailnet ?? 'example-tailnet.ts.net' },
-    Peer: (options.peers ?? []).map((peer) => ({
-      Self: false,
-      NodeName: peer.name,
-      TailscaleIPs: peer.ips,
-      Online: peer.online,
-    })),
+    CurrentTailnet: { MagicDNSSuffix: suffix },
+    Peer: peerMap,
   });
 }
 

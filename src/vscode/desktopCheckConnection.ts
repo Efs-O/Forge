@@ -47,6 +47,7 @@ import type { ForgeConfig } from '../config/types';
 import { getLogger } from '../util/logger';
 import { DESKTOP_CHECK_COMMAND, errText, firstAnsweringRelay } from './desktopConnect';
 import { starterCandidatesFromConfig } from './desktopConnectPlan';
+import { tailscaleStatusPeers } from './tailscalePeers';
 import { TAILSCALE_READ_TIMEOUT_MS, runTailscaleCli } from './tailscaleCli';
 
 const log = getLogger();
@@ -352,12 +353,13 @@ function defaultRunTailscale(args: string[], signal?: AbortSignal): Promise<stri
 }
 
 /** What this computer's Tailscale says about itself and the machines it sees.
- *  Its own parse, deliberately not `parseTailnetPeers` from `desktopConnectPlan.ts`:
- *  Connect wants only the online devices because it is offering them in a picker,
- *  while a check has to name an offline desktop and say so — and it needs the
- *  daemon's own state, which the picker never asks for. Same JSON fields, read
- *  defensively, because a Tailscale version that renames one costs a note here
- *  rather than a crash. */
+ *  Its own parse of the JSON, deliberately not `parseTailnetPeers` from
+ *  `desktopConnectPlan.ts`: Connect wants only the online devices because it is
+ *  offering them in a picker, while a check has to name an offline desktop and
+ *  say so — and it needs the daemon's own state, which the picker never asks
+ *  for. The peer entries themselves come from `tailscaleStatusPeers`, the one
+ *  reader of that shape, so a Tailscale that changes it costs a note here rather
+ *  than a crash. */
 interface TailscaleView {
   state: string | null;
   tailnet: string | null;
@@ -378,25 +380,12 @@ function parseTailscaleView(json: string): TailscaleView {
     };
   }
   const doc = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
-  const peers = Array.isArray(doc.Peer) ? doc.Peer : [];
-  const out: TailscaleView['peers'] = [];
-  for (const raw of peers) {
-    const peer = raw as Record<string, unknown>;
-    if (peer?.Self === true) continue;
-    const name = typeof peer.NodeName === 'string' ? (peer.NodeName.split('.')[0] ?? '') : '';
-    const addresses = Array.isArray(peer.TailscaleIPs)
-      ? peer.TailscaleIPs.filter(
-          (value): value is string => typeof value === 'string' && /^\d+(\.\d+){3}$/.test(value),
-        )
-      : [];
-    if (!name || !addresses.length) continue;
-    out.push({ name, addresses, online: peer.Online === true });
-  }
+  const peers = tailscaleStatusPeers(doc);
   const tailnet = (doc.CurrentTailnet as Record<string, unknown> | undefined)?.MagicDNSSuffix;
   return {
     state: typeof doc.BackendState === 'string' ? doc.BackendState : null,
     tailnet: typeof tailnet === 'string' && tailnet.length ? tailnet : null,
-    peers: out,
+    peers,
     failure: null,
   };
 }

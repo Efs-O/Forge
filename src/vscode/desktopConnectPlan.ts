@@ -35,6 +35,7 @@ import { normalizeOpenAiCompatibleBaseUrl } from '../llm/CloudProviders';
 import * as net from 'net';
 import type { RelayModelRow } from '../llm/RemoteStarterHttp';
 import type { ForgeConfig, ModelConfig } from '../config/types';
+import { tailscaleStatusPeers } from './tailscalePeers';
 
 /** One entry of `groups:` — `GroupSchema`'s shape, taken from the parsed config
  *  so a Connect-created group cannot drift from what the schema accepts. */
@@ -369,12 +370,10 @@ export interface TailnetPeer {
   addresses: string[];
 }
 
-/** Read `tailscale status --json` for the peers a laptop could connect to.
- *  Anything unparsable, or a shape this version of Tailscale does not produce,
- *  comes back as an empty list — the caller then asks for an address instead of
- *  pretending to know the tailnet. Self and offline peers are left out, and
- *  IPv6 link-local addresses are not offered, because `tailscale serve` forwards
- *  the tailnet IPv4 the peer's `tailscaleIPs` carries first. */
+/** Read `tailscale status --json` for the peers a laptop could connect to: the
+ *  online ones only, since a picker that offered a machine nobody can reach
+ *  would fail the connect the owner just picked. `tailscaleStatusPeers` owns the
+ *  shape; unparsable input is an empty list, so the picker falls back to typing. */
 export function parseTailnetPeers(json: string): TailnetPeer[] {
   let parsed: unknown;
   try {
@@ -382,23 +381,9 @@ export function parseTailnetPeers(json: string): TailnetPeer[] {
   } catch {
     return [];
   }
-  const peers = (parsed as { Peer?: unknown[] })?.Peer;
-  if (!Array.isArray(peers)) return [];
-  const out: TailnetPeer[] = [];
-  for (const raw of peers) {
-    const peer = raw as Record<string, unknown>;
-    if (peer?.Self === true) continue;
-    if (peer?.Online !== true) continue;
-    const name = typeof peer.NodeName === 'string' ? peer.NodeName : '';
-    const addresses = Array.isArray(peer.TailscaleIPs)
-      ? peer.TailscaleIPs.filter(
-          (value): value is string => typeof value === 'string' && /^\d+(\.\d+){3}$/.test(value), // IPv4 only
-        )
-      : [];
-    if (!name || !addresses.length) continue;
-    out.push({ name: name.split('.')[0] ?? name, addresses });
-  }
-  return out;
+  return tailscaleStatusPeers(parsed)
+    .filter((peer) => peer.online)
+    .map(({ name, addresses }) => ({ name, addresses }));
 }
 
 /** Turn what the user typed or what a peer offered into a starter address.
@@ -435,7 +420,11 @@ export function parseStarterAddress(
   if (!Number.isInteger(port) || port <= 0 || port > 65535) {
     return { error: `port ${url.port} is not a valid TCP port.` };
   }
-  return { url: `http://${host}:${port}` };
+  // `net.isIP` wants the bare address, but a URL host needs its brackets back or
+  // the port reads as the last label of the address: `http://[fd7a::1]:8798`, not
+  // `http://fd7a:115c:a1e0::1:8798`.
+  const address = net.isIP(host) === 6 ? `[${host}]` : host;
+  return { url: `http://${address}:${port}` };
 }
 
 /** The message when nothing answered: every address named with its reason, then
