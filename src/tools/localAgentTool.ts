@@ -1,5 +1,4 @@
 import type { RegisteredTool } from './ToolRegistry';
-import type { ToolDefinition } from '../llm/types';
 import type { LocalDelegationService } from '../delegation/LocalDelegationService';
 import type { ForgeConfig } from '../config/types';
 import { listEligibleDelegationTargets, resolveDelegationTarget } from '../delegation/eligibility';
@@ -88,16 +87,11 @@ export function describeDelegationTargets(config: ForgeConfig): string {
  * away — the trade `load_tool_group` already makes.
  *
  * The static literal stays the canonical `definition`
- * (scripts/tool-audit-catalog.mjs extracts it from source); `describe()` only
- * rewrites this one description string, so the name and schema shape never move.
+ * (scripts/tool-audit-catalog.mjs extracts it from source).
  */
 const MODEL_ARG_DESCRIPTION =
   'Model to delegate to. Do NOT read config.yaml to find one, and do not guess a ' +
   'name: call list_delegation_targets.';
-
-function describeWithTargets(base: ToolDefinition, _config: ForgeConfig): ToolDefinition {
-  return base;
-}
 
 /**
  * Discovery for `ask_local_agent`, and the reason its schema is small.
@@ -181,7 +175,6 @@ export function makeLocalAgentTool(
         },
       },
     },
-    describe: () => describeWithTargets(tool.definition, getConfig()),
     permission: 'delegate',
     /** The task text, and any `context_files` content read into it, goes to
      *  another model — a local engine, a cloud provider or a CLI agent with its

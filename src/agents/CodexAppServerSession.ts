@@ -367,23 +367,6 @@ export class CodexAppServerSession {
     if (active.interrupted) this.sendInterrupt(active);
   }
 
-  /**
-   * F-06: interrupt the active turn (a `priority=steer` message). Sends the
-   * `turn/interrupt` RPC so the running turn stops and resolves as `cancelled`,
-   * letting the FIFO proceed to the steer. A no-op when no turn is active.
-   *
-   * The live path for this is `send()`'s own abort listener, which reaches the
-   * same `sendInterrupt` through the turn's signal; nothing calls this method
-   * directly any more, so it is not a second way to stop a turn — see
-   * `WarmCliSession`, which does not declare it.
-   */
-  interrupt(): void {
-    if (this.active) {
-      this.active.interrupted = true;
-      this.sendInterrupt(this.active);
-    }
-  }
-
   private sendInterrupt(active: ActiveTurn): void {
     if (!active.turnId || active.interruptSent) return;
     active.interruptSent = true;

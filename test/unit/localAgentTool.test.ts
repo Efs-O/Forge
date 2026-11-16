@@ -452,7 +452,7 @@ describe('describeDelegationTargets', () => {
     const tool = makeLocalAgentTool(service, () => cfg);
     const read = () =>
       (
-        tool.describe!().function.parameters as {
+        tool.definition.function.parameters as {
           properties: { model: { description: string } };
         }
       ).properties.model.description;
