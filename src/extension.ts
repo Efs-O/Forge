@@ -205,7 +205,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const { diffDecorations, codeLensProvider } = setupKeepUndo(context, () => sidebarProvider);
 
   // ── Workspace bootstrap: session migration (v2) + FORGE.md auto-create ──
-  await bootstrapWorkspace(context, workspaceRoot, config, activeConfigPath);
+  await bootstrapWorkspace(context, workspaceRoot, config, activeConfigPath, getConfig);
 
   // ── Sidebar ───────────────────────────────────────────────────────────────
   const forgeLoader = createForgeInstructionsLoader();

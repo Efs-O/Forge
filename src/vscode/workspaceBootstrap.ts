@@ -39,12 +39,21 @@ import { getLogger } from '../util/logger';
  * unless `forge.agentMesh.installNote` is run: a user who deletes the marked
  * section has said they do not want it, and re-adding it on every start would
  * be Forge arguing with that.
+ *
+ * `config` is the activation-time snapshot, and it is the right thing for
+ * everything this function itself does. `getConfig` is the live getter, and it
+ * belongs to the desktop bridge: those commands run whenever the owner picks
+ * them from the palette, long after this call returned, and `extension.ts`
+ * reassigns its `config` on every config.yaml reload. Handed the value, they
+ * keep a dead snapshot for the window's whole life and plan a `tailscale serve`
+ * for a port the current config no longer mentions.
  */
 export async function bootstrapWorkspace(
   context: vscode.ExtensionContext,
   workspaceRoot: string,
   config: ForgeConfig,
   configPath: string,
+  getConfig: () => ForgeConfig,
 ): Promise<void> {
   const log = getLogger();
   const autoCreate = config.forge_instructions?.auto_create;
@@ -64,8 +73,8 @@ export async function bootstrapWorkspace(
   // palette, and until they are registered here the owner gets "command not
   // found" from a command the extension says it provides. Registered in this
   // module rather than in `extension.ts`, which is at its 500-line cap and
-  // already calls this with the context, the config and its path.
-  const desktopDeps = { getConfig: () => config, getConfigPath: () => configPath };
+  // already calls this with the context, the config, its path and the live getter.
+  const desktopDeps = { getConfig, getConfigPath: () => configPath };
   registerDesktopConnectCommands(context, desktopDeps);
   registerDesktopShareCommands(context, desktopDeps);
   registerDesktopCheckConnectionCommands(context, desktopDeps);

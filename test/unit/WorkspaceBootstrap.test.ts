@@ -55,6 +55,10 @@ const { DESKTOP_SHARE_COMMAND, DESKTOP_STOP_SHARING_COMMAND } =
 const MARKER = 'forge.migrated.sessions.v2';
 const meshOn = { agent_bus: { enabled: true }, control_server: { enabled: true, port: 8799 } };
 const meshOff = { agent_bus: { enabled: false } };
+// The fifth argument is the live-config getter the desktop-bridge commands read;
+// the note and the migration below still take the `config` value above.
+const getMeshOn = () => meshOn as never;
+const getMeshOff = () => meshOff as never;
 const infoMock = () =>
   vscodeMock.window.showInformationMessage as unknown as ReturnType<typeof vi.fn>;
 const warnMock = () => vscodeMock.window.showWarningMessage as unknown as ReturnType<typeof vi.fn>;
@@ -99,7 +103,7 @@ function read(name: string): string {
 describe('bootstrapWorkspace session migration', () => {
   it('retires the import without copying or changing the global session', async () => {
     const { workspace, context } = fakeContext();
-    await bootstrapWorkspace(context, '', meshOn as never, 'config.yaml');
+    await bootstrapWorkspace(context, '', meshOn as never, 'config.yaml', getMeshOn);
     expect(workspace.has(SESSION_KEY_V1)).toBe(false);
     expect(workspace.get(MARKER)).toBe(true);
     expect((context as { globalState: { get: unknown } }).globalState.get).not.toHaveBeenCalled();
@@ -112,7 +116,7 @@ describe('bootstrapWorkspace session migration', () => {
     const { workspace, context } = fakeContext(true);
     const localSession = { conversations: [{ id: 'keep-this-chat' }] };
     workspace.set(SESSION_KEY_V1, localSession);
-    await expect(bootstrapWorkspace(context, '', meshOn as never, 'config.yaml')).rejects.toThrow(
+    await expect(bootstrapWorkspace(context, '', meshOn as never, 'config.yaml', getMeshOn)).rejects.toThrow(
       'disk full',
     );
     expect(workspace.has(MARKER)).toBe(false);
@@ -123,8 +127,8 @@ describe('bootstrapWorkspace session migration', () => {
     const { workspace, context } = fakeContext();
     const localSession = { conversations: [{ id: 'local-chat' }] };
     workspace.set(SESSION_KEY_V1, localSession);
-    await bootstrapWorkspace(context, '', meshOn as never, 'config.yaml');
-    await bootstrapWorkspace(context, '', meshOn as never, 'config.yaml');
+    await bootstrapWorkspace(context, '', meshOn as never, 'config.yaml', getMeshOn);
+    await bootstrapWorkspace(context, '', meshOn as never, 'config.yaml', getMeshOn);
     expect(workspace.get(SESSION_KEY_V1)).toBe(localSession);
   });
 });
@@ -132,7 +136,7 @@ describe('bootstrapWorkspace session migration', () => {
 describe('the agent note on workspace bootstrap', () => {
   it('writes it into a new folder on the first start, and says what it allows', async () => {
     const { workspace, context } = fakeContext();
-    await bootstrapWorkspace(context, scratch, meshOn as never, 'C:/Users/x/config.yaml');
+    await bootstrapWorkspace(context, scratch, meshOn as never, 'C:/Users/x/config.yaml', getMeshOn);
 
     const content = read('AGENTS.md');
     expect(countAgentMeshSections(content)).toBe(1);
@@ -166,7 +170,7 @@ describe('the agent note on workspace bootstrap', () => {
           click = resolve;
         }),
     );
-    await bootstrapWorkspace(context, scratch, meshOn as never, 'config.yaml');
+    await bootstrapWorkspace(context, scratch, meshOn as never, 'config.yaml', getMeshOn);
     // Activation returned, the note and its marker are on disk, and the popup
     // is still waiting: nothing dismissed it, and nothing was waiting on it.
     expect(typeof click).toBe('function');
@@ -193,7 +197,7 @@ describe('the agent note on workspace bootstrap', () => {
     openDocMock().mockImplementationOnce(async () => {
       throw new Error('no such file');
     });
-    await bootstrapWorkspace(context, scratch, meshOn as never, 'config.yaml');
+    await bootstrapWorkspace(context, scratch, meshOn as never, 'config.yaml', getMeshOn);
     await vi.waitFor(() =>
       expect(
         warnMock()
@@ -213,13 +217,13 @@ describe('the agent note on workspace bootstrap', () => {
 
   it('does not write it again on the next start of the same workspace', async () => {
     const first = fakeContext();
-    await bootstrapWorkspace(first.context, scratch, meshOn as never, 'config.yaml');
+    await bootstrapWorkspace(first.context, scratch, meshOn as never, 'config.yaml', getMeshOn);
     const written = read('AGENTS.md');
     // The same persisted workspaceState, which is what a window reload keeps.
     const second = fakeContext();
     second.workspace.set(NOTE_INSTALLED_MARKER, true);
     vi.clearAllMocks();
-    await bootstrapWorkspace(second.context, scratch, meshOn as never, 'config.yaml');
+    await bootstrapWorkspace(second.context, scratch, meshOn as never, 'config.yaml', getMeshOn);
     expect(read('AGENTS.md')).toBe(written);
     expect(infoMock()).not.toHaveBeenCalled();
   });
@@ -228,7 +232,7 @@ describe('the agent note on workspace bootstrap', () => {
     const own = '# My project\nBuild with npm run ci.\nDo not touch main.\n';
     fs.writeFileSync(path.join(scratch, 'AGENTS.md'), own);
     const { context } = fakeContext();
-    await bootstrapWorkspace(context, scratch, meshOn as never, 'config.yaml');
+    await bootstrapWorkspace(context, scratch, meshOn as never, 'config.yaml', getMeshOn);
     const content = read('AGENTS.md');
     expect(content.startsWith(own)).toBe(true);
     expect(countAgentMeshSections(content)).toBe(1);
@@ -238,14 +242,14 @@ describe('the agent note on workspace bootstrap', () => {
     fs.writeFileSync(path.join(scratch, 'AGENTS.md'), 'own\n');
     fs.writeFileSync(path.join(scratch, 'CLAUDE.md'), 'own2\n');
     const { context } = fakeContext();
-    await bootstrapWorkspace(context, scratch, meshOn as never, 'config.yaml');
+    await bootstrapWorkspace(context, scratch, meshOn as never, 'config.yaml', getMeshOn);
     expect(countAgentMeshSections(read('AGENTS.md'))).toBe(1);
     expect(countAgentMeshSections(read('CLAUDE.md'))).toBe(1);
   });
 
   it('writes nothing when the mesh is off', async () => {
     const { workspace, context } = fakeContext();
-    await bootstrapWorkspace(context, scratch, meshOff as never, 'config.yaml');
+    await bootstrapWorkspace(context, scratch, meshOff as never, 'config.yaml', getMeshOff);
     expect(fs.existsSync(path.join(scratch, 'AGENTS.md'))).toBe(false);
     expect(workspace.get(NOTE_INSTALLED_MARKER)).toBeUndefined();
   });
@@ -263,10 +267,10 @@ describe('the agent note on workspace bootstrap', () => {
     // which is what "once" has to mean here.
     const { workspace, context } = fakeContext();
     workspace.set(NOTE_INSTALLED_MARKER, true); // Forge wrote it in an earlier session
-    await bootstrapWorkspace(context, scratch, meshOff as never, 'config.yaml');
+    await bootstrapWorkspace(context, scratch, meshOff as never, 'config.yaml', getMeshOff);
     expect(countAgentMeshSections(read('AGENTS.md'))).toBe(1);
     expect(workspace.get(NOTE_OFF_NOTICE_MARKER)).toBe(true);
-    await bootstrapWorkspace(context, scratch, meshOff as never, 'config.yaml');
+    await bootstrapWorkspace(context, scratch, meshOff as never, 'config.yaml', getMeshOff);
     expect(infoMock()).toHaveBeenCalledTimes(1);
     expect(countAgentMeshSections(read('AGENTS.md'))).toBe(1);
   });
@@ -278,7 +282,7 @@ describe('the agent note on workspace bootstrap', () => {
     // problem this phase exists to fix.
     const missingRoot = path.join(scratch, 'not-on-disk');
     const { workspace, context } = fakeContext();
-    await bootstrapWorkspace(context, missingRoot, meshOn as never, 'config.yaml');
+    await bootstrapWorkspace(context, missingRoot, meshOn as never, 'config.yaml', getMeshOn);
     expect(workspace.get(NOTE_INSTALLED_MARKER)).toBeUndefined();
     expect(warnMock()).toHaveBeenCalledTimes(1);
   });
@@ -304,7 +308,7 @@ describe('the desktop bridge on workspace bootstrap', () => {
       DESKTOP_CHECK_COMMAND,
     ];
     const { workspace, context } = fakeContext();
-    await bootstrapWorkspace(context, '', meshOn as never, 'C:/Users/x/config.yaml');
+    await bootstrapWorkspace(context, '', meshOn as never, 'C:/Users/x/config.yaml', getMeshOn);
     const registered = (
       vscodeMock.commands.registerCommand as unknown as ReturnType<typeof vi.fn>
     ).mock.calls
