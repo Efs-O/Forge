@@ -435,6 +435,66 @@ describe('the file named inside the operations', () => {
     }
   });
 
+  it('refuses an operation naming a different file than the top-level path, by name', async () => {
+    // The top-level `path` used to win silently: the operation naming another
+    // file was applied to the file above it, and nothing said so.
+    const refusal = await makeApplyLineEditsTool()
+      .handler({
+        path: 'src/a.ts',
+        operations: [
+          {
+            path: 'src/b.ts',
+            start_line: 1,
+            end_line: 1,
+            expected_lines: ['x'],
+            replacement_lines: ['y'],
+          },
+        ],
+      })
+      .then(
+        () => '',
+        (error: Error) => error.message,
+      );
+
+    expect(refusal).toBe(
+      'apply_line_edits: operation path "src/b.ts" differs from the call\'s path "src/a.ts"; ' +
+        'one call edits one file. Send a separate call for "src/b.ts".',
+    );
+  });
+
+  it('allows an operation that repeats the top-level path in another spelling', async () => {
+    const { tool, relative, file, cleanup } = fixture();
+    try {
+      const result = String(
+        await tool.handler(
+          {
+            path: `.${path.sep}${relative}`,
+            operations: [
+              {
+                path: relative,
+                start_line: 1,
+                end_line: 1,
+                expected_lines: ['one'],
+                replacement_lines: ['ONE'],
+              },
+              {
+                start_line: 3,
+                end_line: 3,
+                expected_lines: ['three'],
+                replacement_lines: ['THREE'],
+              },
+            ],
+          },
+          context,
+        ),
+      );
+      expect(result).toContain('"operationsApplied":2');
+      expect(fs.readFileSync(file, 'utf8')).toBe('ONE\ntwo\nTHREE\n');
+    } finally {
+      cleanup();
+    }
+  });
+
   it('checkpoints the lifted file, and nothing when the call cannot be resolved', () => {
     const tool = makeApplyLineEditsTool();
     expect(tool.mutation?.paths({ operations: [{ path: 'src/a.ts' }, { path: 'src/a.ts' }] })).toEqual(

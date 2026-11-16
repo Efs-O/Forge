@@ -6,12 +6,18 @@
  * 5,000 ms bound, the viewport refusal text, and the fact that a failed action
  * is named and its cause preserved rather than converted to success or retried.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import {
   LOCATOR_ACTION_TIMEOUT_MS,
   requireViewportPoint,
   withLocatorActionTimeout,
 } from '../../src/tools/browser/browserActionGuards';
+import { makeBrowserActionTools } from '../../src/tools/browser/browserActionTools';
+import type { BrowserToolContext } from '../../src/tools/browser/browserTools';
+import type { MultimodalToolResult } from '../../src/tools/ToolRegistry';
 
 describe('locator action bound (Phase 3 item 1)', () => {
   it('is 5,000 ms — the documented bound, not Playwright\'s 30 s default', () => {
@@ -119,5 +125,54 @@ describe('viewport point bound (Phase 1, report §3.8)', () => {
     expect(() => requireViewportPoint({ width: 400, height: 300 }, 500, 10, 'a')).toThrow(
       /outside the 400×300 viewport/,
     );
+  });
+});
+
+/**
+ * `browser_screenshot` lists the tabs AFTER the capture, so the tab can close in
+ * between and the list comes back empty. The PNG is still real: the line must
+ * say whose tab it was instead of throwing over a tab that is no longer there.
+ */
+function screenshotTool(mgr: Record<string, ReturnType<typeof vi.fn>>) {
+  const context = {
+    mgr,
+    inputApproval: () => () => undefined,
+    markTargetOrigin: () => undefined,
+    str: (args: Record<string, unknown>, key: string) =>
+      typeof args[key] === 'string' ? (args[key] as string) : undefined,
+  } as unknown as BrowserToolContext;
+  const tool = makeBrowserActionTools(context).find(
+    (candidate) => candidate.definition.function.name === 'browser_screenshot',
+  );
+  if (!tool) throw new Error('browser_screenshot was not registered');
+  return tool;
+}
+
+describe('browser_screenshot tab naming', () => {
+  const png = Buffer.from('89504e4d0d0a1a0a', 'hex');
+
+  async function capture(tabs: unknown[]): Promise<string> {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-browser-shot-'));
+    process.env.FORGE_SCREENSHOT_DIR = dir;
+    try {
+      const tool = screenshotTool({
+        screenshot: vi.fn(async () => ({ png, width: 1280, height: 720 })),
+        tabs: vi.fn(async () => tabs),
+      });
+      const result = (await tool.handler({})) as MultimodalToolResult;
+      return result.text;
+    } finally {
+      delete process.env.FORGE_SCREENSHOT_DIR;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('names the closed tab when no tab is listed', async () => {
+    expect(await capture([])).toMatch(/^Screenshot of the closed tab, 1280×720 px, /u);
+  });
+
+  it('names the live tab when one is listed', async () => {
+    const text = await capture([{ id: 't1', title: 'Example', url: 'https://x.test', active: true }]);
+    expect(text.startsWith('Screenshot of tab t1 ("Example"), 1280×720 px, ')).toBe(true);
   });
 });

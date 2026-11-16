@@ -137,7 +137,6 @@ export function summaryLine(
   options?: VideoOptions,
 ): string {
   const at = times.map((time) => `${time.toFixed(1)}s`).join(', ');
-  const requested = options?.requestedFrames;
   // State the window explicitly. Otherwise a windowed result is indistinguishable
   // from a short clip, and the model reasons about the wrong span of time.
   // The end is clamped to the clip as `resolveWindow` clamps it, so an
@@ -153,20 +152,14 @@ export function summaryLine(
     start > 0 || end < probe.durationSeconds
       ? ` Sampled only ${start.toFixed(1)}s-${end.toFixed(1)}s of the clip, not all of it.`
       : '';
-  // Explain an explicit request that returned fewer frames than requested.
-  const why =
-    requested !== undefined && requested > times.length
-      ? ` You asked for ${requested}; ${times.length} is the configured ceiling (video.max_frames).`
-      : '';
   return (
     `Video ${relativePath} — ${probe.durationSeconds.toFixed(1)}s, ${probe.width}x${probe.height}. ` +
-    `${times.length} still frame${times.length === 1 ? '' : 's'} sampled at ${at}.${windowed}${pastEnd}${why} ` +
+    `${times.length} still frame${times.length === 1 ? '' : 's'} sampled at ${at}.${windowed}${pastEnd} ` +
     'These are stills, not motion: you cannot see what happens between them, and you have no audio.'
   );
 }
 
 export function makeViewVideoTool(getVideoConfig?: () => VideoConfig | undefined): RegisteredTool {
-  const maxFrames = getVideoConfig?.()?.max_frames ?? VIDEO_DEFAULTS.maxFrames;
   return {
     definition: {
       type: 'function',
@@ -190,12 +183,12 @@ export function makeViewVideoTool(getVideoConfig?: () => VideoConfig | undefined
             max_frames: {
               type: 'integer',
               minimum: 1,
-              maximum: maxFrames,
               description:
                 'How many frames to sample. Omit and Forge samples about one frame per second, ' +
                 'with a minimum of 4 and maximum of 10, clamped by video.max_frames. Pass a ' +
                 'number to choose more or fewer when you need a different count; explicit ' +
-                `requests are honoured within the configured range 1-${maxFrames}. Each extra frame costs prompt tokens.`,
+                'requests are honoured from 1 up to video.max_frames ' +
+                `(default ${VIDEO_DEFAULTS.maxFrames}). Each extra frame costs prompt tokens.`,
             },
             frame_max_dimension: {
               type: 'integer',

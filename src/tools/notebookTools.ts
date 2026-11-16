@@ -81,6 +81,11 @@ export function makeReadNotebookTool(): RegisteredTool {
         notebookUri(requestedPath),
       );
       const requested = args['cell_index'] as number | undefined;
+      if (requested !== undefined && (requested < 0 || requested >= document.cellCount)) {
+        throw new Error(
+          `read_notebook: cell_index ${requested} is outside this ${document.cellCount}-cell notebook.`,
+        );
+      }
       const cells =
         requested === undefined ? [...document.getCells()] : [document.cellAt(requested)];
       const value = {

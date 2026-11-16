@@ -160,6 +160,22 @@ describe('notebook tools', () => {
     });
   });
 
+  it('refuses a cell_index outside the notebook, with the same wording as the edit tool', async () => {
+    vscodeMocks.openNotebookDocument.mockResolvedValue(
+      notebook([cell(0, 'first'), cell(1, 'second', 1, 'markdown')]),
+    );
+
+    for (const index of [5, -1]) {
+      const message = await makeReadNotebookTool()
+        .handler({ path: 'notes.ipynb', cell_index: index })
+        .then(
+          () => '',
+          (error: Error) => error.message,
+        );
+      expect(message).toBe(`read_notebook: cell_index ${index} is outside this 2-cell notebook.`);
+    }
+  });
+
   it('rejects an edit at or past the cell count before applying an edit', async () => {
     vscodeMocks.openNotebookDocument.mockResolvedValue(notebook([cell(0, 'source')]));
 

@@ -244,16 +244,6 @@ describe('max_frames reaches ffmpeg', () => {
     expect(options.requestedFrames).toBeUndefined();
   });
 
-  it('explains the ceiling when it clipped the request, instead of leaving it to guess', () => {
-    const line = summaryLine('clips/a.mp4', PROBE, [0.8, 2.5, 4.2], {
-      ...VIDEO_DEFAULTS,
-      maxFrames: 3,
-      requestedFrames: 10,
-    });
-    expect(line).toContain('You asked for 10');
-    expect(line).toContain('video.max_frames');
-  });
-
   it('reports sampled clip details without repeating default sampling guidance', () => {
     const line = summaryLine('clips/a.mp4', PROBE, [0.8, 2.5, 4.2], VIDEO_DEFAULTS);
     expect(line).toBe(
@@ -277,8 +267,32 @@ describe('per-call ffmpeg overrides', () => {
       properties: Record<string, { description?: string }>;
     };
     expect(params.properties['max_frames']?.description).toBe(
-      'How many frames to sample. Omit and Forge samples about one frame per second, with a minimum of 4 and maximum of 10, clamped by video.max_frames. Pass a number to choose more or fewer when you need a different count; explicit requests are honoured within the configured range 1-26. Each extra frame costs prompt tokens.',
+      'How many frames to sample. Omit and Forge samples about one frame per second, with a minimum of 4 and maximum of 10, clamped by video.max_frames. Pass a number to choose more or fewer when you need a different count; explicit requests are honoured from 1 up to video.max_frames (default 26). Each extra frame costs prompt tokens.',
     );
+  });
+
+  it('advertises no ceiling, so a config raised after registration is not contradicted', () => {
+    const tool = makeViewVideoTool(() => ({ max_frames: 40 }));
+    const properties = (tool.definition.function.parameters as {
+      properties: Record<string, { maximum?: number; description?: string }>;
+    }).properties;
+
+    expect(properties['max_frames']?.maximum).toBeUndefined();
+    expect(properties['max_frames']?.description).toContain('video.max_frames');
+  });
+
+  it('accepts a count above the default once config raises the ceiling', async () => {
+    writeClip('clips/ss01.mp4');
+
+    await makeViewVideoTool(() => ({ max_frames: 40 })).handler({
+      path: 'clips/ss01.mp4',
+      max_frames: 30,
+    });
+
+    expect(extractFrames.mock.calls[0]?.[3]).toMatchObject({
+      requestedFrames: 30,
+      maxFrames: 40,
+    });
   });
 
   it('advertises the three tunable knobs', () => {

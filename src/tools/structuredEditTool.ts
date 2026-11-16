@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as path from 'path';
 import type { RegisteredTool } from './ToolRegistry';
 import { defaultWorkspaceRoot, resolveRealWorkspacePath } from '../util/WorkspacePaths';
 import { agentWriteOptions, delayedWriteNote, writeFileAtomic } from '../util/atomicWrite';
@@ -182,6 +183,21 @@ export function makeApplyLineEditsTool(
       // This branch replaced the thrown missing-`path` error, so it must still
       // count as the failure it was.
       if (suppliedPath === undefined) throw new Error(missingPathRefusal(args));
+      // A top-level `path` wins over the operations', so an operation naming a
+      // DIFFERENT file would silently be applied to the file above it. Refuse it:
+      // which file that operation meant is the model's call, not a guess.
+      const topLevel = typeof args['path'] === 'string' ? args['path'] : '';
+      if (topLevel.trim().length > 0) {
+        const disagreeing = operationPathNames(args['operations']).find(
+          (named) => path.normalize(named) !== path.normalize(topLevel),
+        );
+        if (disagreeing !== undefined) {
+          throw new Error(
+            `apply_line_edits: operation path "${disagreeing}" differs from the call's path ` +
+              `"${topLevel}"; one call edits one file. Send a separate call for "${disagreeing}".`,
+          );
+        }
+      }
       const liftedFromOperations =
         typeof args['path'] === 'string' && args['path'].trim().length > 0
           ? 0

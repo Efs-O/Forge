@@ -51,12 +51,15 @@ export function makeBrowserActionTools(ctx: BrowserToolContext): RegisteredTool[
         const shot = await ctx.mgr.screenshot(tabId, fullPage);
         const tabs = await ctx.mgr.tabs();
         const active = tabs.find((t) => t.active) ?? tabs[0];
+        // The tab can close between the capture and this listing, which leaves
+        // nothing to name. The image is still real, so name whose tab it was.
+        const where = active ? `tab ${tabLabel(active)}` : 'the closed tab';
         const saved = await saveScreenshot(toolCtx?.conversationId, shot.png);
         const coordNote = fullPage
           ? 'coord_space=image_px (FULL PAGE — x,y coordinate actions use viewport space, not this image; use a viewport screenshot or scroll for x,y)'
           : 'coord_space=image_px (x,y in this image match the viewport)';
         const text =
-          `Screenshot of tab ${tabLabel(active)}, ${shot.width}×${shot.height} px, ` +
+          `Screenshot of ${where}, ${shot.width}×${shot.height} px, ` +
           `${coordNote}. Saved to ${saved}.`;
         const content: ContentPart[] = [
           { type: 'text', text },
