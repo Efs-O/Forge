@@ -768,6 +768,16 @@ describe('manage_jobs — exact id for changes', () => {
     expect(await call({ action: 'get', job: 'dis' })).toContain('Job "Disk" [disk]');
     expect(await call({ action: 'pause', job: 'disk' })).toContain('Paused job "Disk" [disk]');
   });
+
+  // The Undo copy names `disk.json`, so the job whose id is `disk` is the one
+  // that must be paused — never the job that happens to be named "disk".
+  it('changes the job whose id matches, not another job named that', async () => {
+    await store.saveJob(job({ id: 'alpha', name: 'disk' }));
+    await store.saveJob(job({ id: 'disk', name: 'Disk' }));
+    expect(await call({ action: 'pause', job: 'disk' })).toContain('Paused job "Disk" [disk]');
+    expect((await store.load('alpha'))?.job.enabled).toBe(true);
+    expect((await store.load('disk'))?.job.enabled).toBe(false);
+  });
 });
 
 describe('manage_jobs — run_now', () => {

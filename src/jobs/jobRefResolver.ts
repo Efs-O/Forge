@@ -18,12 +18,15 @@ export type JobMatch =
   | { kind: 'ambiguous'; candidates: JobFile[] }
   | { kind: 'one'; jobFile: JobFile };
 
-/** Resolve a job by exact id, exact name, or unique substring (case-insensitive). */
+/** Resolve a job by exact id, then exact name, then a unique substring (case-insensitive). */
 export function resolveJobRef(all: readonly JobFile[], ref: string): JobMatch {
   const needle = ref.trim().toLowerCase();
-  const exact = all.find(
-    (jf) => jf.job.id.toLowerCase() === needle || jf.job.name.toLowerCase() === needle,
-  );
+  // An id beats another job's name: the id is what a caller can hold to, while a
+  // name is only a convenience. Matching the two in one pass let a job named
+  // "disk" answer to the id "disk" of a different job.
+  const exact =
+    all.find((jf) => jf.job.id.toLowerCase() === needle) ??
+    all.find((jf) => jf.job.name.toLowerCase() === needle);
   if (exact) return { kind: 'one', jobFile: exact };
   const partial = all.filter(
     (jf) => jf.job.id.toLowerCase().includes(needle) || jf.job.name.toLowerCase().includes(needle),
