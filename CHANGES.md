@@ -1,5 +1,11 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+**The background-job watch tool now says its own 60-second cap.**
+
+- `monitor_execution` told you "Max wait in ms (default 10000)" and left the 60,000 bound in the schema alone, where the reader had already stopped. An agent that asked for a longer wait was refused and lost a round finding out. The range is now in the sentence you read.
+
 ## 0.17.185
 
 **A wrong argument name costs less, and a search that cannot match says so before it runs.**

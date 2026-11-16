@@ -173,7 +173,10 @@ import {
 // 2026-11-16: 68,005 (-6) after manage_jobs said the `job` argument must be the exact id
 // for a change: the Undo copy names the file that argument gives, so a name or partial
 // match copied a path that does not exist. `get` and Telegram `/job` stay fuzzy.
-const MEASURED_CHARS = 68_005;
+// 2026-11-16: 68,017 (+12) after monitor_execution named its own ceiling in prose: the
+// bound sat only in the schema's `maximum`, so an agent that guessed a longer wait was
+// refused and lost a round.
+const MEASURED_CHARS = 68_017;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.

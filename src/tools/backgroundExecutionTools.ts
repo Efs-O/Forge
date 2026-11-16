@@ -56,7 +56,8 @@ export function makeMonitorExecutionTool(): RegisteredTool {
               type: 'integer',
               minimum: 0,
               maximum: 60000,
-              description: 'Max wait in ms (default 10000). Reuse suggested_next_wait_ms.',
+              description:
+                'Max wait in ms (0 to 60000, default 10000). Reuse suggested_next_wait_ms.',
             },
             stdout_cursor: {
               type: 'integer',
