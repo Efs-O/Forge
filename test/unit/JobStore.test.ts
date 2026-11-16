@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JobStore } from '../../src/jobs/JobStore';
 import { JobSchema, type Job } from '../../src/jobs/jobSchema';
 
@@ -419,6 +419,22 @@ describe('JobStore local change listeners', () => {
     stop();
     store.patchState('disk', { last_run_at: 3 });
     expect(panel).toHaveLength(2);
+  });
+
+  it('a second watch() closes the first watcher instead of leaking it', async () => {
+    // jobsSetup retries `startIfEnabled` after a scheduler start that failed,
+    // and `watch()` used to overwrite `this.watcher`: the first fs.FSWatcher and
+    // its debounce timer stayed alive for the life of the window, and a write
+    // to the jobs directory fired the stale callback as well as the new one.
+    store.watch(() => undefined);
+    const first = (store as unknown as { watcher?: fs.FSWatcher }).watcher;
+    expect(typeof first?.close).toBe('function');
+    const close = vi.spyOn(first!, 'close');
+    store.watch(() => undefined);
+    const second = (store as unknown as { watcher?: fs.FSWatcher }).watcher;
+    expect(close).toHaveBeenCalledOnce();
+    expect(second).not.toBe(first);
+    store.unwatch();
   });
 
   it('a listener that throws cannot fail the write that triggered it', async () => {

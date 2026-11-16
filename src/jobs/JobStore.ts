@@ -451,14 +451,14 @@ export class JobStore {
   }
 
   /**
-   * Watch the job definitions for changes (a `manage_jobs` edit from any
-   * window). Debounced 1s so a burst of writes coalesces into one callback.
-   * The callback is invoked with no arguments; the caller reloads. Only
-   * definition names count: the lease heartbeat writes a temporary every 5 s,
-   * and matching the final lease name alone let those through (audit A4).
-   * A null filename (platform could not say) still counts.
+   * Watch the job definitions for changes (a `manage_jobs` edit from any window),
+   * debounced 1s so a burst of writes coalesces into one callback. It takes no
+   * arguments; the caller reloads. Only definition names count: the lease heartbeat
+   * writes a temporary every 5 s, and matching the final lease name alone lets
+   * those through (audit A4). A null filename (platform could not say) counts.
    */
   watch(onChange: () => void): void {
+    this.unwatch();
     this.onChangeCallback = onChange;
     // Synchronous, and only the watched directory: fs.watch below needs it to
     // exist now. This was a fire-and-forget ensureDirs(), which both raced the
@@ -475,7 +475,7 @@ export class JobStore {
     });
   }
 
-  /** Stop watching. */
+  /** Stop watching; `watch` calls this first, so re-warming never leaves an old fs.FSWatcher and its debounce timer behind. */
   unwatch(): void {
     if (this.watchDebounce) {
       clearTimeout(this.watchDebounce);
