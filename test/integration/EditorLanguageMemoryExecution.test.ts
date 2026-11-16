@@ -26,6 +26,25 @@ import {
 import { makeAskUserTool } from '../../src/tools/askUserTool';
 import type { IndexManager } from '../../src/search/IndexManager';
 
+// Code intel primes a symbol with a ripgrep search. These tests must not need
+// an rg on PATH, so a node word search over the top-level files stands in.
+const RG_WORD_SEARCH = [
+  "const fs = require('fs');",
+  "const name = process.argv[process.argv.indexOf('--regexp') + 1];",
+  "const word = new RegExp('\\\\b' + name + '\\\\b');",
+  "for (const f of fs.readdirSync('.')) {",
+  "  if (fs.statSync(f).isFile() && word.test(fs.readFileSync(f, 'utf8'))) console.log(f);",
+  '}',
+].join('\n');
+vi.mock('../../src/tools/RipgrepResolver', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/tools/RipgrepResolver')>()),
+  resolveRipgrep: () => ({
+    command: process.execPath,
+    argsPrefix: ['-e', RG_WORD_SEARCH, '--'],
+    candidates: [],
+  }),
+}));
+
 describe('isolated editor, language, search, and memory tool execution', () => {
   let root: string;
 

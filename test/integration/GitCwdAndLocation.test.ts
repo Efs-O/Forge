@@ -7,6 +7,25 @@ import { execFileSync } from 'child_process';
 import { getRepo, getRepoForPaths, gitCwd, withGitError } from '../../src/tools/gitRepo';
 import { makeCodeIntelTool } from '../../src/tools/codeIntelTool';
 
+// Code intel primes a symbol with a ripgrep search. These tests must not need
+// an rg on PATH, so a node word search over the top-level files stands in.
+const RG_WORD_SEARCH = [
+  "const fs = require('fs');",
+  "const name = process.argv[process.argv.indexOf('--regexp') + 1];",
+  "const word = new RegExp('\\\\b' + name + '\\\\b');",
+  "for (const f of fs.readdirSync('.')) {",
+  "  if (fs.statSync(f).isFile() && word.test(fs.readFileSync(f, 'utf8'))) console.log(f);",
+  '}',
+].join('\n');
+vi.mock('../../src/tools/RipgrepResolver', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/tools/RipgrepResolver')>()),
+  resolveRipgrep: () => ({
+    command: process.execPath,
+    argsPrefix: ['-e', RG_WORD_SEARCH, '--'],
+    candidates: [],
+  }),
+}));
+
 function initRepo(dir: string): void {
   fs.mkdirSync(dir, { recursive: true });
   execFileSync('git', ['init', '-b', 'main'], { cwd: dir });
@@ -74,7 +93,13 @@ describe('git repository discovery', () => {
   it('finds a linked worktree, whose .git is a file rather than a directory', async () => {
     initRepo(root);
     fs.writeFileSync(path.join(root, 'seed.txt'), 'seed\n', 'utf8');
-    const env = { ...process.env, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@t.invalid', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@t.invalid' };
+    const env = {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'T',
+      GIT_AUTHOR_EMAIL: 't@t.invalid',
+      GIT_COMMITTER_NAME: 'T',
+      GIT_COMMITTER_EMAIL: 't@t.invalid',
+    };
     execFileSync('git', ['add', 'seed.txt'], { cwd: root, env });
     execFileSync('git', ['commit', '-m', 'seed'], { cwd: root, env });
     const linked = path.join(root, 'wt');
@@ -214,7 +239,8 @@ describe('definition location rendering', () => {
         targetSelectionRange: range(0, 13),
       },
     ]);
-    const out = await makeCodeIntelTool().handler({ operation: 'definition',
+    const out = await makeCodeIntelTool().handler({
+      operation: 'definition',
       path: 'Game.js',
       line: 0,
       character: 13,
@@ -229,7 +255,12 @@ describe('definition location rendering', () => {
     vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue([
       { uri: vscode.Uri.file(path.join(root, 'Game.js')), range: range(2, 5) },
     ]);
-    const out = await makeCodeIntelTool().handler({ operation: 'definition', path: 'Game.js', line: 2, character: 7 });
+    const out = await makeCodeIntelTool().handler({
+      operation: 'definition',
+      path: 'Game.js',
+      line: 2,
+      character: 7,
+    });
     expect(String(out)).toBe(
       'Game.js:2:5\n\nPositions are zero-based line:character, the same as the line and character inputs.',
     );
@@ -238,7 +269,12 @@ describe('definition location rendering', () => {
   it('reports no definition rather than throwing', async () => {
     vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue([]);
     await expect(
-      makeCodeIntelTool().handler({ operation: 'definition', path: 'Game.js', line: 0, character: 0 }),
+      makeCodeIntelTool().handler({
+        operation: 'definition',
+        path: 'Game.js',
+        line: 0,
+        character: 0,
+      }),
     ).resolves.toBe(
       "No definition found for `export` at Game.js line 0 character 0 (zero-based). That line reads: `export class Game {}`. If `export` is not the symbol you meant (for example a word in a comment or a string), point line and character at the symbol's name.",
     );
@@ -265,7 +301,10 @@ describe('LSP tools prime the language service', () => {
     // returned "No symbols found." for a file containing `export class Game`.
     const open = vi.spyOn(vscode.workspace, 'openTextDocument').mockResolvedValue({} as never);
     vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue([]);
-    await makeCodeIntelTool().handler({ operation: 'document_symbols', path: 'Game.js' }, undefined);
+    await makeCodeIntelTool().handler(
+      { operation: 'document_symbols', path: 'Game.js' },
+      undefined,
+    );
     expect(open).toHaveBeenCalledOnce();
   });
 
