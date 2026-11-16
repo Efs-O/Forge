@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { RegisteredTool } from './ToolRegistry';
 import { resolveWorkspaceUri } from '../util/WorkspacePaths';
+import { sleepOrThrow } from '../util/abortableSleep';
 import { withDiagnosticsReady } from './codeActionTools';
 import { describePosition, primeSymbolAtPosition } from './symbolSearch';
 import {
@@ -135,24 +136,26 @@ function hoverText(result: vscode.Hover[] | undefined): string {
   return parts.join('\n\n');
 }
 
-async function hoverWithLoadingRetry(uri: vscode.Uri, position: vscode.Position): Promise<string> {
-  let answer = hoverText(
-    await vscode.commands.executeCommand<vscode.Hover[] | undefined>(
-      'vscode.executeHoverProvider',
-      uri,
-      position,
-    ),
-  );
-  for (const delay of [250, 500, 1000, 2000, 4000]) {
-    if (!answer.includes('(loading...)')) return answer;
-    await new Promise((resolve) => setTimeout(resolve, delay));
-    answer = hoverText(
+async function hoverWithLoadingRetry(
+  uri: vscode.Uri,
+  position: vscode.Position,
+  signal?: AbortSignal,
+): Promise<string> {
+  const ask = async (): Promise<string> =>
+    hoverText(
       await vscode.commands.executeCommand<vscode.Hover[] | undefined>(
         'vscode.executeHoverProvider',
         uri,
         position,
       ),
     );
+  let answer = await ask();
+  for (const delay of [250, 500, 1000, 2000, 4000]) {
+    if (!answer.includes('(loading...)')) return answer;
+    // `sleepOrThrow` rejects on abort, so Stop ends the retry loop instead of
+    // leaving up to 7.75 s of loading retries running after the turn is over.
+    await sleepOrThrow(delay, signal, () => new Error('hover retry aborted by Stop'));
+    answer = await ask();
   }
   return answer.includes('(loading...)') ? `${answer}${HOVER_LOADING_NOTE}` : answer;
 }
@@ -350,13 +353,13 @@ export function makeGetHoverTool(): RegisteredTool {
       },
     },
     permission: 'read',
-    handler: async (args) => {
+    handler: async (args, context) => {
       const displayPath = args['path'] as string;
       const uri = await openForAnalysis(displayPath);
       const position = new vscode.Position(args['line'] as number, args['character'] as number);
       const description = await describePosition(uri, position, displayPath);
       if (!description.word) return noSymbolMessage(description, position);
-      const answer = await hoverWithLoadingRetry(uri, position);
+      const answer = await hoverWithLoadingRetry(uri, position, context?.abortSignal);
       return answer || noProviderAnswer('hover information', description);
     },
   };

@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import * as path from 'path';
 import { MediaConfigSchema } from '../../src/config/mediaSchema';
 import { checkMediaSetup } from '../../src/media/mediaSetupCheck';
-import { defaultVideoEngineMessage, resolveVideoEngine } from '../../src/tools/media/mediaEngineSetup';
+import {
+  adapterRunnerMessage,
+  defaultVideoEngineMessage,
+  resolveVideoEngine,
+} from '../../src/tools/media/mediaEngineSetup';
 
 const validFfmpeg = () => ({
   ffmpeg: 'C:/tools/ffmpeg.exe',
@@ -197,5 +201,26 @@ describe('resolveVideoEngine: LTX-2.5 is the default, H3 only by id', () => {
     expect(selection?.id).toBe('h3');
     expect(selection?.engine.kind).toBe('comfyui_workflow');
     expect(resolveVideoEngine(media, 'ltx25')).toBeUndefined();
+  });
+});
+
+/**
+ * The refusal an unconfigured adapter runner gets. The sentence used to end at
+ * "then ": the rest was a separate statement after the `return`, so the model
+ * was told to do something unnamed.
+ */
+describe('adapterRunnerMessage', () => {
+  it('names the interpreter and the retry, in one complete sentence', () => {
+    const media = MediaConfigSchema.parse({ comfyui: { python: '' } });
+
+    expect(adapterRunnerMessage(media, 'generate_image')).toBe(
+      'generate_image: media.comfyui.python is empty, and it is the interpreter every shipped adapter runs under. Set it to a Python 3 (the ComfyUI venv works), then call the tool again.',
+    );
+  });
+
+  it('stays silent when a runner is configured', () => {
+    const media = MediaConfigSchema.parse({ comfyui: { python: 'C:/ComfyUI/.venv/Scripts/python.exe' } });
+
+    expect(adapterRunnerMessage(media, 'generate_music')).toBeUndefined();
   });
 });

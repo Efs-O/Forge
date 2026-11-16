@@ -157,6 +157,28 @@ describe('language-server readiness reporting', () => {
     expect(mocks.executeCommand).toHaveBeenCalledTimes(6);
   });
 
+  it('rejects the loading hover retry loop when the turn is aborted', async () => {
+    // No fake timers to advance: Stop aborts while the first provider call is
+    // running, and an already-aborted signal makes the next sleep reject at once,
+    // so the loop never schedules a retry.
+    const controller = new AbortController();
+    mocks.executeCommand.mockImplementation(async () => {
+      controller.abort();
+      return [{ contents: [loading] }];
+    });
+
+    const failure = await makeGetHoverTool()
+      .handler(baseArgs, { abortSignal: controller.signal })
+      .then(
+        () => undefined,
+        (caught: unknown) => caught as { message: string },
+      );
+
+    expect(failure?.message).toContain('aborted');
+    // Stopped at the first sleep: the 500/1000/2000/4000 ms retries never ran.
+    expect(mocks.executeCommand).toHaveBeenCalledTimes(1);
+  });
+
   it('returns a rename result without a note when no old-name text remains', async () => {
     mocks.openTextDocument.mockResolvedValue({ uri: { fsPath: 'N:/workspace/src/math.ts' } });
     mocks.executeCommand.mockResolvedValue({ entries: () => [] });

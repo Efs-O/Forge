@@ -209,6 +209,6 @@ export function adapterRunnerMessage(media: MediaConfig, toolName: string): stri
   return media.comfyui.python.trim()
     ? undefined
     : `${toolName}: media.comfyui.python is empty, and it is the interpreter every ` +
-        'shipped adapter runs under. Set it to a Python 3 (the ComfyUI venv works), then ';
-  ('call the tool again.');
+        'shipped adapter runs under. Set it to a Python 3 (the ComfyUI venv works), then ' +
+        'call the tool again.';
 }
