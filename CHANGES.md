@@ -1,5 +1,21 @@
 # Forge — Recent Changes
 
+## 0.17.184
+
+**Undo brings back a job the agent deleted, and the agent changes a job only by its exact id.**
+
+- Deleting a job with `manage_jobs` now saves its definition, state and run log first, so Undo restores the job, and the restored job records its runs again without a window reload.
+- `manage_jobs` changes, pauses, resumes, runs or deletes a job only by its exact id, as `list` shows it; a name or partial match is refused with the id to resend. Before, a near match changed one job while Undo saved another job's file. `get` and Telegram `/job` still accept a name, and an exact id now wins over another job that has that id as its name.
+- `forge.sh wait --to <conversationId>` waits on a named linked chat, for a session that drives more than one Forge chat.
+- A chat another agent opens with `say --new` starts in Clanker mode reliably; `message_chat` is offered only while the agent bus is on.
+- Saving a chat waits until the active-chat pointer is saved too, so a reload reopens the chat you were in.
+- Telegram: the reply preview is deleted once the real message is sent, and a question or approval that fails to post is reported instead of hanging.
+- The desktop commands read the live config, and the Tailscale peer list reads the shape the CLI actually returns.
+- Documents: Word images with angle-bracket paths are embedded, a titled image is no longer listed as omitted, and Excel self-closing cells are skipped instead of misaligned.
+- Job times are shown in your local time zone, and a job watcher is closed before a new one starts.
+- A shell command whose option value hides a network verb is refused instead of let through.
+- Stopping a backend pool frees every slot even when one stop fails; the compaction repair prompt fits the context window; video limits are read live; bad notebook and edit targets are refused with the reason.
+
 ## 0.17.183
 
 **A chat another agent opens runs in Clanker mode, and the general agent rules ship with Forge.**
