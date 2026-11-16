@@ -50,7 +50,7 @@
 22. `node -e "import('N:/x/y.mjs')"` on Windows → `ERR_UNSUPPORTED_ESM_URL_SCHEME ... Received protocol 'n:'`. pass a file URL: `import('file:///N:/x/y.mjs')`
 23. `sed -n '140,185'` → `missing command`: the range alone prints nothing. write `sed -n '140,185p'`
 24. `npx prettier --check .forge/x.ts` → "All matched files use Prettier code style!" while nothing was checked: prettier matches no file in a dot-folder. copy it into `test/unit/`
-25. `monitor_execution` `wait_ms: 90000` → refused: must be within 0 to 60000. the cap is not in the description; the 900 s ceiling belongs to the `wait` tool
+25. a ceiling remembered from a neighbouring tool (`wait`'s 900 s sent to `monitor_execution` as `wait_ms: 90000`) → refused: must be within 0 to 60000. re-read the advertised bounds instead of recalling them
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green and the tree stood still: never run `record-ci-pass.mjs` by hand — the `ci:steps` chain writes it
