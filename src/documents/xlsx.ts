@@ -7,6 +7,20 @@ import {
   xmlText,
 } from './zipXml';
 
+/** The `<c>` cells of one `<row>`, as their attribute text and inner XML. A
+ *  self-closing `<c r="A2" s="1"/>` — what Excel and LibreOffice write for an
+ *  empty formatted cell — is skipped, not paired with the cell after it: the old
+ *  pattern let its `/` sit inside the attribute group, so the empty cell ate the
+ *  next cell's body and that value disappeared from the sheet. */
+export function sheetRowCells(row: string): Array<{ attributes: string; body: string }> {
+  const cells: Array<{ attributes: string; body: string }> = [];
+  for (const match of row.matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+    if (match[2] === undefined) continue;
+    cells.push({ attributes: match[1] ?? '', body: match[2] });
+  }
+  return cells;
+}
+
 export function readXlsx(bytes: Buffer, abortSignal?: AbortSignal): string {
   const parts = unzipTextParts(bytes, (name) => /\.(?:xml|rels)$/.test(name), abortSignal);
   const workbook = requiredPart(parts, 'xl/workbook.xml');
@@ -33,9 +47,9 @@ export function readXlsx(bytes: Buffer, abortSignal?: AbortSignal): string {
     const sheet = requiredPart(parts, file);
     const rows = xmlElements(sheet, 'row')
       .flatMap((row) => {
-        const cells = [...row.matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/g)].map((match) => {
-          const attributes = `<c ${match[1] ?? ''}>`;
-          const cell = match[2] ?? '';
+        const cells = sheetRowCells(row).map((matched) => {
+          const attributes = `<c ${matched.attributes}>`;
+          const cell = matched.body;
           const ref = xmlAttr(attributes, 'r') ?? '?';
           const type = xmlAttr(attributes, 't');
           const value = xmlElements(cell, 'v').map(xmlText)[0] ?? '';

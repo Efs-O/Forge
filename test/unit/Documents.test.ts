@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
 import { describe, expect, it } from 'vitest';
 import { readDocument } from '../../src/documents';
+import { sheetRowCells } from '../../src/documents/xlsx';
 
 const fixture = (name: string) =>
   readFileSync(new URL(`../fixtures/documents/${name}`, import.meta.url));
@@ -87,6 +88,26 @@ describe('document readers', () => {
     expect(error).not.toBeInstanceOf(RangeError);
     expect((error as Error).message).toMatch(
       /ZIP part "word\/document\.xml": local header is past the end of the file\./,
+    );
+  });
+});
+
+describe('xlsx cell parsing', () => {
+  it('skips a self-closing cell instead of pairing it with the next one', () => {
+    // An empty formatted cell, which is how Excel and LibreOffice write one. The
+    // old pattern let its `/` sit inside the attribute group, so `A2` swallowed
+    // `B2`'s body and the sheet lost the value 7 without saying so.
+    expect(sheetRowCells('<row r="2"><c r="A2" s="1"/><c r="B2" t="s"><v>7</v></c></row>')).toEqual(
+      [{ attributes: ' r="B2" t="s"', body: '<v>7</v>' }],
+    );
+  });
+
+  it('returns the ordinary cells of a row, in order', () => {
+    expect(sheetRowCells('<row r="3"><c r="A1" t="s"><v>1</v></c><c r="B1"><v>2</v></c></row>')).toEqual(
+      [
+        { attributes: ' r="A1" t="s"', body: '<v>1</v>' },
+        { attributes: ' r="B1"', body: '<v>2</v>' },
+      ],
     );
   });
 });
