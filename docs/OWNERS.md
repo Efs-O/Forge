@@ -377,7 +377,8 @@ overlaps with an existing owner, extend the owner instead.
 | Memory-only linked-agent force-reply rendezvous  | `src/remote/remoteAgentAsk.ts`                  |
 | Bot API inline keyboard markup and callback limit | `src/remote/telegramInlineKeyboard.ts`          |
 | Remote absolute and relative date formatting      | `src/remote/RemoteDateTime.ts`                   |
-| Forge approval presentation + correlation     | `src/remote/RemoteApprovalBridge.ts`            |
+| Forge approval gate bookkeeping + correlation | `src/remote/RemoteApprovalBridge.ts`            |
+| Remote approval card and waiting-line text    | `src/remote/RemoteApprovalMessages.ts`          |
 | Telegram Bot API transport                    | `src/remote/TelegramChannel.ts`                 |
 | Telegram media multipart transport            | `src/remote/TelegramMedia.ts`                   |
 | Telegram `/media`, `/video`, `/music` dispatch | `src/remote/RemoteMediaCommands.ts`             |
