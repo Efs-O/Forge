@@ -116,7 +116,27 @@ export function registerRemoteCommands(
       }
     }),
     vscode.commands.registerCommand('forge.remote.setTimeout', async (value: unknown) => {
-      const minutes = parseTimeout(value);
+      // Picked from the palette, this command arrives with no argument, and the
+      // owner used to get nothing but an error: no way to say how many minutes
+      // they meant. So the palette call asks. A call that DOES pass a value (a
+      // keybinding, or any future programmatic caller) behaves exactly as
+      // before and never opens a box.
+      let requested = value;
+      if (requested === undefined) {
+        const text = await vscode.window.showInputBox({
+          title: 'Forge remote: idle sign-out',
+          prompt:
+            'Sign the phone out after how many idle minutes? Enter 1 to 1440, or 0 to stay signed in.',
+          placeHolder: '30',
+          validateInput: (input) =>
+            input.trim() === '' || parseTimeout(Number(input.trim())) === undefined
+              ? 'Enter a whole number from 1 to 1440, or 0 to stay signed in.'
+              : undefined,
+        });
+        if (text === undefined) return; // cancelled
+        requested = Number(text.trim());
+      }
+      const minutes = parseTimeout(requested);
       if (minutes === undefined) {
         void vscode.window.showErrorMessage(
           'Forge remote timeout must be 0 or an integer from 1 to 1440.',
