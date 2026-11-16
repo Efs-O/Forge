@@ -364,9 +364,7 @@ export async function runPromptToMarkdown(
         try {
           const parsed = parseJson(call.function.arguments);
           if (!parsed.ok || !isJsonObject(parsed.value)) {
-            throw parsed.ok
-              ? new Error('Repaired tool arguments are not a JSON object')
-              : parsed.error;
+            throw parsed.ok ? new Error('Tool arguments are not a JSON object') : parsed.error;
           }
           const args = parsed.value as Record<string, unknown>;
           result = await options.dispatchContactTool(call.function.name, args);

@@ -123,7 +123,13 @@ function visibleOutputLimit(input: CompactionSummaryInput, withHeadroom: boolean
   return plan.outputTokens;
 }
 
-function oneShotPrompt(input: CompactionSummaryInput, outputTokens: number) {
+/**
+ * The request the summarizer sees. `suffix` is text the caller appends after
+ * the transcript, so it is part of the request the fit has to make room for:
+ * without it the transcript is cut to the window's last character and the
+ * suffix pushes the request over it.
+ */
+function oneShotPrompt(input: CompactionSummaryInput, outputTokens: number, suffix?: string) {
   return fitSummaryPrompt(
     input.budget,
     input.modelMaxTokens,
@@ -141,7 +147,7 @@ function oneShotPrompt(input: CompactionSummaryInput, outputTokens: number) {
           previousSummaryMaxChars: input.budget.summaryCeilingChars,
           ...(input.floorMode ? { floorMode: true } : {}),
         },
-      ),
+      ) + (suffix ?? ''),
     input.reasoningTokens,
     outputTokens,
   );
@@ -249,20 +255,25 @@ async function summarizeCompactionCounted(
   const missing = missingSummarySections(summary);
   let repairedSections: string[] | undefined;
   if (missing.length > 0) {
-    const repairPrompt = [
-      prompt,
-      '',
-      'SUMMARY SECTION REPAIR',
-      'Use the same conversation transcript above. Return only the missing sections listed below, in the required summary format, under these exact headings:',
-      ...missing.map((section) => `${section}:`),
-      '',
-      'Already-written summary for context (do not repeat these sections):',
-      summary,
-      '',
-      'Do not repeat any section already present. Output only the requested missing sections.',
-    ].join('\n');
+    // The repair carries the whole summary plus its own instructions, so it is
+    // a larger request than the one that just fitted. Re-fit it: the transcript
+    // sheds source, the repair text does not.
+    const repairSuffix =
+      '\n' +
+      [
+        '',
+        'SUMMARY SECTION REPAIR',
+        'Use the same conversation transcript above. Return only the missing sections listed below, in the required summary format, under these exact headings:',
+        ...missing.map((section) => `${section}:`),
+        '',
+        'Already-written summary for context (do not repeat these sections):',
+        summary,
+        '',
+        'Do not repeat any section already present. Output only the requested missing sections.',
+      ].join('\n');
     let repairWritten: string;
     try {
+      const repairPrompt = oneShotPrompt(input, outputTokens, repairSuffix).prompt;
       repairWritten = (await runOneShot(input, repairPrompt, outputTokens)).trim();
     } catch (error) {
       if (compactionFailureCategory(error) === 'cancelled') throw error;

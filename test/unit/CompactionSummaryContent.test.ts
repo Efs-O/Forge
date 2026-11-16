@@ -319,6 +319,81 @@ describe('compaction summary section repair', () => {
     expect(result.summary).toBe(completeSummary);
     expect(result.calls).toBe(1);
   });
+
+  it('re-fits the section-repair request so the appended text cannot overflow', async () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: `typed request ${'U'.repeat(40_000)}` },
+      ...Array.from({ length: 10 }, (_, index) => ({
+        role: 'assistant' as const,
+        content: `assistant ${index} ${'A'.repeat(3_000)}`,
+      })),
+    ];
+    const summaryChars = 8_000;
+    // A window this size pins the output cap at the bare allowance plus the
+    // maximum headroom. Measure the base prompt on a window wide enough to cut
+    // nothing, then size the tight one so the base request just fits and the
+    // repair's own text does not.
+    const wide = compactionBudget(0, 200_000, 1_000_000, 0, undefined, 1_000_000);
+    const basePrompt = buildSummaryPrompt('test time', undefined, messages, '', '', undefined, {
+      sourceMaxChars: wide.sourceMaxChars,
+      summaryMaxChars: summaryChars,
+      previousSummaryMaxChars: 9_428,
+    });
+    const charsPerToken = wide.charsPerToken;
+    const outputTokens = Math.floor((summaryChars - 256) / charsPerToken) + 4_000;
+    const modelMaxTokens =
+      Math.ceil(basePrompt.length / charsPerToken) + outputTokens + 6_000 + 120;
+    const budget = compactionBudget(0, 200_000, modelMaxTokens, 0, undefined, modelMaxTokens);
+    expect(budget.sourceMaxChars).toBeGreaterThan(basePrompt.length);
+
+    const prompts: string[] = [];
+    const caps: number[] = [];
+    let calls = 0;
+    const result = await summarizeCompaction({
+      messages,
+      currentLocalTime: 'test time',
+      recordedFacts: '',
+      userContext: '',
+      modelMaxTokens,
+      outputLimitTokens: 8_000,
+      reasoningTokens: 0,
+      budget,
+      maximumSummaryChars: summaryChars,
+      conversationId: 'repair-fit-test',
+      runPrompt: async (text, _conversationId, options) => {
+        prompts.push(text);
+        caps.push(options.outputTokens);
+        calls += 1;
+        return calls === 1
+          ? missingTwo
+          : 'Next: continue the exact pending task.\nReference: src/a.ts.';
+      },
+    });
+
+    expect(result.calls).toBe(2);
+    // The first request is untouched; only the repair is fitted again.
+    expect(prompts[0]!.length).toBe(basePrompt.length);
+    const unfittedRepair = [
+      prompts[0],
+      '',
+      'SUMMARY SECTION REPAIR',
+      'Use the same conversation transcript above. Return only the missing sections listed below, in the required summary format, under these exact headings:',
+      'Next:',
+      'Reference:',
+      '',
+      'Already-written summary for context (do not repeat these sections):',
+      missingTwo,
+      '',
+      'Do not repeat any section already present. Output only the requested missing sections.',
+    ].join('\n');
+    expect(prompts[1]!.length).toBeLessThan(unfittedRepair.length);
+    expect(prompts[1]).toContain('SUMMARY SECTION REPAIR');
+    expect(prompts[1]).toContain(
+      `Already-written summary for context (do not repeat these sections):\n${missingTwo}`,
+    );
+    const estimatedTokens = Math.ceil(prompts[1]!.length / budget.charsPerToken);
+    expect(estimatedTokens + caps[1]! + 6_000).toBeLessThanOrEqual(modelMaxTokens);
+  });
 });
 
 describe('summary source floor mode', () => {
