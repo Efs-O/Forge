@@ -100,7 +100,7 @@ def cls(err):
 
 rows = []
 for line in open(RAW, encoding='utf-8'):
-    p = line.rstrip('\n').split('\t')
+    p = line.rstrip('\n').split('\t', 7)
     if len(p) < 8:
         continue
     rows.append(dict(ts=p[0], bucket=p[1], tool=p[2], model=p[3], sid=p[4], err=p[7][5:]))

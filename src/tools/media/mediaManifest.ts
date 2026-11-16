@@ -31,7 +31,6 @@ export interface MediaManifest {
   engine?: string;
   status?: string;
   outputs?: { path?: string; duration_seconds?: number; silence?: { result?: string } }[];
-  artifacts?: string[];
   warnings?: string[];
   tool_reports?: string[];
 }

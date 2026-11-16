@@ -231,21 +231,7 @@ export interface ModelConfig {
   /** Parallel request slots for this model's llama-server instance (--parallel). Resolved from runtime profile. */
   n_parallel?: number;
   /** Per-model sampling parameter overrides. */
-  sampling?: {
-    temperature?: number;
-    top_p?: number;
-    top_k?: number;
-    min_p?: number;
-    max_tokens?: number;
-    seed?: number;
-    presence_penalty?: number;
-    frequency_penalty?: number;
-    repetition_penalty?: number;
-    repeat_penalty?: number;
-    repeat_last_n?: number;
-    stop?: string | string[];
-    preserve_thinking?: boolean;
-  };
+  sampling?: SamplingConfig;
   /** Model capability hints used for tool-call routing and UI. */
   capabilities?: ('tool-call' | 'vision' | 'long-context')[];
   /** When true, strip tool definitions from the request for this model. */

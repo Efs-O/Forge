@@ -163,15 +163,15 @@ export class BrowserSessionManager {
       page.on('framenavigated', (frame) => {
         if (frame === page.mainFrame()) this.inspections.drop(page);
       });
+      page.on('close', () => {
+        this.tabIds.delete(page);
+        this.inspections.drop(page);
+        if (this.activePage === page) {
+          const remaining = this.context?.pages() ?? [];
+          this.activePage = remaining[remaining.length - 1] ?? null;
+        }
+      });
     }
-    page.on('close', () => {
-      this.tabIds.delete(page);
-      this.inspections.drop(page);
-      if (this.activePage === page) {
-        const remaining = this.context?.pages() ?? [];
-        this.activePage = remaining[remaining.length - 1] ?? null;
-      }
-    });
   }
 
   private pageById(tabId: string): Page | undefined {

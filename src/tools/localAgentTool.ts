@@ -78,13 +78,9 @@ export function describeDelegationTargets(config: ForgeConfig): string {
 }
 
 /**
- * The always-advertised half of target discovery.
- *
- * It names only the two CLI agents, and only when they are configured: they are
- * the targets worth spending schema budget on every turn, because they read the
- * repository through their own tools instead of needing context files pasted in,
- * and they cost no VRAM. Everything else is one `list_delegation_targets` call
- * away — the trade `load_tool_group` already makes.
+ * The `model` argument's description. It names no target: one
+ * `list_delegation_targets` call lists them, the trade `load_tool_group`
+ * already makes.
  *
  * The static literal stays the canonical `definition`
  * (scripts/tool-audit-catalog.mjs extracts it from source).

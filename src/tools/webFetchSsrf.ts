@@ -10,7 +10,7 @@ export class ToolError extends Error {}
 const BLOCKED_SCHEMES = ['file://', 'data:', 'javascript:'];
 export const MAX_REDIRECT_HOPS = 3;
 export const REQUEST_TIMEOUT_MS = 10_000;
-export const USER_AGENT = 'Forge-VSCode/0.16 (local-llm assistant)';
+export const USER_AGENT = 'Forge-VSCode (local-llm assistant)';
 export interface ResolvedAddress {
   address: string;
   family: number;

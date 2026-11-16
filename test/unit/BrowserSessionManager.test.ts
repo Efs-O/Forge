@@ -48,6 +48,25 @@ describe('BrowserSessionManager lifecycle', () => {
     expect(browser.close).toHaveBeenCalledOnce();
     expect(manager.isLaunched()).toBe(false);
   });
+
+  // `adoptPage` runs on both `newPage` and the context's own `page` event, so a
+  // tab can be adopted twice; a second `close` listener would run the same
+  // page's bookkeeping twice.
+  it('registers one close listener per page, even when a page is adopted twice', async () => {
+    const { browser, context } = browserWithContext();
+    mocks.launch.mockResolvedValue(browser);
+    const page = { on: vi.fn() };
+    const manager = new BrowserSessionManager();
+    await manager.launch({ channel: 'chrome', headless: true });
+    const adopt = context.on.mock.calls
+      .find((call) => call[0] === 'page')
+      ?.at(1) as (adopted: unknown) => void;
+    adopt(page);
+    adopt(page);
+    const events = page.on.mock.calls.map((call) => call[0]);
+    expect(events.filter((event) => event === 'close')).toHaveLength(1);
+    expect(events.filter((event) => event === 'framenavigated')).toHaveLength(1);
+  });
 });
 
 describe('BrowserSessionManager scroll into view', () => {

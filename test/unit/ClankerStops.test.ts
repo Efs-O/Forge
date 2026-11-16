@@ -111,7 +111,7 @@ const DROP_CASES: DropCase[] = [
   { source: 'imageSearchTool.ts:103 attached image upload', call: { toolName: 'image_search', dangerous: true } },
   { source: 'generateImageTool.ts:130 generation confirmation', call: { toolName: 'generate_image', dangerous: true } },
   {
-    source: 'localAgentTool.ts:198 local delegation gate',
+    source: 'localAgentTool.ts:191 local delegation gate',
     call: {
       toolName: 'ask_local_agent',
       args: { model: 'local-model' },
