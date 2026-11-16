@@ -110,6 +110,7 @@ overlaps with an existing owner, extend the owner instead.
 | Pure filesystem-miss error text                      | `src/tools/pathMissText.ts`              |
 | Owner-only write roots and open memory/skill exceptions | `src/tools/ownerPaths.ts` + `src/tools/ownerPathsOpen.ts` |
 | Recycle-bin refusal diagnosis + short-lived path cache | `src/tools/trashRefusal.ts`             |
+| Argument names a model reached for that a tool does not declare (rewrites + refusal hints) | `src/tools/argumentAliases.ts` |
 | Tool call execution + result formatting              | `src/sidebar/ToolDispatch.ts`            |
 | Early refusals that stop a tool call before approval (cancelled, bad args, unknown/withheld tool, budget) | `src/sidebar/toolCallPreflight.ts` |
 | Approval gate inputs and verdict for one tool call (shared by serial dispatch and parallel-read preflight) | `src/sidebar/toolApprovalEvaluation.ts` |

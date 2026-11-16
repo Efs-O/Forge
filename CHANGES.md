@@ -1,5 +1,14 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+**A wrong argument name costs less, and a search that cannot match says so before it runs.**
+
+- `grep_search` takes `path` and `glob` as its file filter — the names every other tool and ripgrep itself uses — so the search runs instead of being refused. A call that sends both `path` and `include` is still refused, because only you know which you meant.
+- A query that spans lines is refused with what to do instead, instead of handing back ripgrep's complaint about a pattern that never ran. A fixed-string search of text holding `\n` still runs.
+- A wrong argument name now gets the argument you meant: `shell subject` and `read_file max_chars` are pointed at `command` and `start_line/end_line`, and a key that arrived as `=query` is repaired to `query`.
+- A tool name that is not a tool but starts with one (`shell_file`) now gets "did you mean shell" instead of a bare refusal.
+
 ## 0.17.184
 
 **Undo brings back a job the agent deleted, and the agent changes a job only by its exact id.**

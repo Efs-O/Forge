@@ -59,6 +59,48 @@ describe('isolated grep_search process execution', () => {
     expect(result).toContain('call again with offset 1');
   });
 
+  // Measured 2026-11-16 against the ripgrep this tool ships: a query holding a
+  // newline is refused by ripgrep in both modes, and the model got its stderr
+  // back about a pattern that never ran — then sent the same query again. The
+  // tool now says what to do instead, before spawning anything.
+  it('refuses a query that spans lines, in both regex and literal mode', async () => {
+    for (const extra of [{}, { literal: true }]) {
+      const result = await tool().handler({
+        query: 'alpha\nbeta',
+        include: '**/*.ts',
+        ...extra,
+      });
+      expect(String(result)).toContain('the query spans lines');
+      expect(String(result)).not.toContain('=== first.ts ===');
+    }
+  });
+
+  // The two characters `\n` mean a newline to a regex and ordinary text to a
+  // fixed string, so only the first is refused. Measured the same day.
+  it('refuses a regex query holding the newline escape, and runs it as text when literal', async () => {
+    const escaped = String.raw`parseResult\n|  request\(`;
+    expect(String(await tool().handler({ query: escaped, include: '**/*.ts' }))).toContain(
+      'the query spans lines',
+    );
+    expect(
+      String(await tool().handler({ query: escaped, literal: true, include: '**/*.ts' })),
+    ).not.toContain('the query spans lines');
+  });
+
+  // A query copied out of a heredoc keeps one trailing line break, and that is
+  // not part of the search: refusing it would cost a round for nothing.
+  it('drops a single trailing line break instead of refusing the query', async () => {
+    const result = await tool().handler({ query: 'known fixture\n', include: '**/*.ts' });
+    expect(String(result)).toContain('=== first.ts ===');
+  });
+
+  // An escaped backslash before n is ordinary text for a regex, so the search
+  // runs — only the newline escape itself is refused.
+  it('runs a regex query holding an escaped backslash before n', async () => {
+    const result = await tool().handler({ query: String.raw`a\\nb`, include: '**/*.ts' });
+    expect(String(result)).not.toContain('the query spans lines');
+  });
+
   // The schema is what the model is asked to fill in; four new fields that only
   // the handler honoured would let a backend send nothing at all.
   it('advertises the output modes, context, case and offset it accepts', () => {

@@ -2,6 +2,7 @@ import type { ToolDefinition } from '../llm/types';
 import { recordNativeLazyTool } from './lazyToolGroups';
 import { advertisedValues, cutOffArgumentMismatch, missingArgumentError } from './toolErrorText';
 import { repairParameterMarkup } from './toolArgumentMarkup';
+import { applyArgumentRewrites, unknownArgumentRefusal } from './argumentAliases';
 /** The declarations live in `toolContract.ts`; re-exported from here so every
  *  consumer that has always imported them from the registry keeps working. */
 export {
@@ -236,6 +237,11 @@ export class ToolRegistry {
     const present: Record<string, unknown> = typeof args === 'object' && args !== null ? args : {};
     const markupError = repairParameterMarkup(name, parameters.properties, present);
     if (markupError) return markupError;
+    // The advertised schema, not the static one: `describe()` is what the model
+    // was shown this turn, so a rename must target an argument it could really
+    // have used. The unknown-key refusal below reads the same object.
+    const advertisedParameters = tool.describe ? tool.describe().function.parameters : parameters;
+    applyArgumentRewrites(name, advertisedParameters.properties, present);
     // A quoted boolean is the largest single refusal class we measured (11 hits in one clean
     // window on `shell background` alone, and the same shape on `read_file numbered`), and it is
     // never ambiguous: its lowercase form is "true" or "false", and the property is declared
@@ -265,7 +271,6 @@ export class ToolRegistry {
       const fieldError = updatePlanFieldError(present);
       if (fieldError) return fieldError;
     }
-    const advertisedParameters = tool.describe ? tool.describe().function.parameters : parameters;
     const advertisedProperties = advertisedParameters.properties;
     if (
       advertisedParameters.additionalProperties === false &&
@@ -276,40 +281,13 @@ export class ToolRegistry {
       const unknown = Object.keys(present).filter(
         (key) => !Object.hasOwn(advertisedProperties, key) && present[key] !== undefined,
       );
-      if (unknown.length === 1) {
-        const key = unknown[0];
-        const value = present[key];
-        if (
-          typeof value === 'object' &&
-          value !== null &&
-          !Array.isArray(value) &&
-          (Object.getPrototypeOf(value) === Object.prototype ||
-            Object.getPrototypeOf(value) === null)
-        ) {
-          const innerKeys = Object.keys(value);
-          if (
-            innerKeys.length > 0 &&
-            innerKeys.every((innerKey) => Object.hasOwn(advertisedProperties, innerKey)) &&
-            innerKeys.every((innerKey) => !Object.hasOwn(present, innerKey))
-          ) {
-            const inner = innerKeys.join(', ');
-            return (
-              `Error: ${name}: unknown argument "${key}"; its value holds this tool's own arguments (${inner}), ` +
-              `which go at the top level, not inside "${key}". This tool takes: ${declaredKeys.join(', ')}. ` +
-              `Nothing ran. Resend the call with ${inner} moved out of "${key}".`
-            );
-          }
-        }
-        return (
-          `Error: ${name}: unknown argument "${key}"; this tool takes: ${declaredKeys.join(', ')}. ` +
-          'Nothing ran. Resend the call without it, or use the argument that means what you intended.'
-        );
-      }
-      if (unknown.length > 1) {
-        const quoted = unknown.map((key) => `"${key}"`).join(', ');
-        return (
-          `Error: ${name}: unknown arguments ${quoted}; this tool takes: ${declaredKeys.join(', ')}. ` +
-          'Nothing ran. Resend the call without them, or use the arguments that mean what you intended.'
+      if (unknown.length > 0) {
+        return unknownArgumentRefusal(
+          name,
+          unknown,
+          declaredKeys,
+          advertisedProperties as Record<string, unknown>,
+          present,
         );
       }
     }

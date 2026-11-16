@@ -78,6 +78,26 @@ const UNKNOWN_TOOL_HINT_MAX_CHARS = 200;
 const UNKNOWN_TOOL_HINT_MIN_PREFIX_CHARS = 5;
 
 /**
+ * The tool named by the first word of a name that is not a tool (`shell_file`).
+ *
+ * The prefix rule below stays silent here: no live tool starts with the whole
+ * name the model typed, so it has nothing to compare against and the row comes
+ * back bare. Measured 2026-11-16: one such call, answered with no suggestion at
+ * all. Only the first underscore-separated word counts, and only when it is
+ * exactly one live tool's name — `file` on its own matches a dozen tools, and a
+ * guess that wide is one the model should not follow.
+ */
+function firstWordToolName(
+  eligible: readonly { readonly function: { readonly name: string } }[],
+  name: string,
+): string | undefined {
+  const word = name.split('_')[0];
+  if (!word || word.length < UNKNOWN_TOOL_HINT_MIN_PREFIX_CHARS) return undefined;
+  const hits = eligible.filter((definition) => definition.function.name === word);
+  return hits.length === 1 ? hits[0]?.function.name : undefined;
+}
+
+/**
  * What the model is told when it calls a tool that is not there.
  *
  * Kept beside `retiredToolResult` because both answer the same question — "this
@@ -113,9 +133,8 @@ export function unknownToolResult(
   const matches = eligible.filter(
     (definition) => definition.function.name !== name && definition.function.name.startsWith(name),
   );
-  if (matches.length !== 1) return result;
-
-  const candidate = matches[0]?.function.name;
+  const candidate =
+    matches.length === 1 ? matches[0]?.function.name : firstWordToolName(eligible, name);
   if (!candidate) return result;
   const group = lazyGroupForTool(candidate);
   const groupUnloaded =

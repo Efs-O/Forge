@@ -93,6 +93,22 @@ function outputModeOf(value: unknown): SearchCodeOutputMode {
   );
 }
 
+/**
+ * True when the query can only match across a line break, so ripgrep would
+ * reject it before reading a single file.
+ *
+ * Measured 2026-11-16 against the ripgrep this tool ships: a real newline in the
+ * pattern is refused even with `-F`, and `\n` in a regex is refused too — only
+ * `-U` (multiline) accepts either, and this tool does not run that, because
+ * multiline mode changes what every other pattern in the same call means. The
+ * two-character sequence `\n` with `literal: true` is ordinary text and passes.
+ */
+function spansLines(query: string, literal: boolean): boolean {
+  if (/[\r\n]/u.test(query)) return true;
+  if (literal) return false;
+  return /\\n/u.test(query.replace(/\\\\/gu, ''));
+}
+
 export function makeSearchCodeTool(
   resolveCommand: () => RipgrepResolution = () => resolveRipgrep(vscode.env.appRoot),
   deps: {
@@ -183,7 +199,12 @@ export function makeSearchCodeTool(
     },
     permission: 'read',
     handler: async (args, context) => {
-      const query = args['query'] as string;
+      // A single trailing line break is how a model writes a pattern it copied
+      // out of a heredoc, not part of the search: dropping it is lossless, and
+      // keeping it would refuse a query that means what it says. A query that is
+      // nothing but a line break keeps it, so the refusal still says why.
+      const strippedQuery = (args['query'] as string).replace(/\r?\n$/u, '');
+      const query = strippedQuery.length > 0 ? strippedQuery : (args['query'] as string);
       const literal = args['literal'] === true;
       const include = (args['include'] as string | undefined) ?? '**/*';
       const maxResults = boundedInt(args['max_results'], 20, 1, 200);
@@ -193,6 +214,17 @@ export function makeSearchCodeTool(
       const contextNote = contextClampNote(args['context'], contextLines);
       const ignoreCase = args['ignore_case'] === true;
       const includeIgnored = args['include_ignored'] === true;
+
+      // Say it here rather than handing back ripgrep's own complaint about a
+      // pattern it never ran: the model reads `the literal "\n" is not allowed
+      // in a regex` as a fault in the tool, and retries the same pattern.
+      if (spansLines(query, literal)) {
+        return (
+          'Error: grep_search: the query spans lines, and this tool does not run ripgrep in ' +
+          'multiline mode. Nothing ran. Search one line of the pattern, or split it into two ' +
+          'searches, or keep the text on one line with literal: true.'
+        );
+      }
 
       let found: SearchCodeFound;
       try {

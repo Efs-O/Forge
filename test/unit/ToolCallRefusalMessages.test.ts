@@ -182,9 +182,108 @@ describe('ToolRegistry.invalidArgs unknown-argument refusal', () => {
       permission: 'read',
       handler: async () => 'unused',
     };
-    expect(registry.invalidArgs(searchCode, { query: 'needle', path: 'src' })).toBe(
-      'Error: grep_search: unknown argument "path"; this tool takes: query, include. ' +
+    expect(registry.invalidArgs(searchCode, { query: 'needle', dir: 'src' })).toBe(
+      'Error: grep_search: unknown argument "dir"; this tool takes: query, include. ' +
         'Nothing ran. Resend the call without it, or use the argument that means what you intended.',
+    );
+  });
+
+  // Measured 2026-11-16: 4 of the day's 21 tool refusals were `path` or `glob`
+  // on grep_search — the name every other Forge file tool uses for its target,
+  // and ripgrep's own flag. Both carry exactly what `include` carries, so the
+  // search now runs instead of costing the model a round.
+  it('rewrites grep_search path and glob onto include, leaving the rest of the call alone', () => {
+    const withPath = { query: 'needle', path: 'src' };
+    expect(registry.invalidArgs(fullSearchCode, withPath)).toBeUndefined();
+    expect(withPath).toEqual({ query: 'needle', include: 'src' });
+    const withGlob = { query: 'needle', glob: '*.ts' };
+    expect(registry.invalidArgs(fullSearchCode, withGlob)).toBeUndefined();
+    expect(withGlob).toEqual({ query: 'needle', include: '*.ts' });
+  });
+
+  // Two filters, one meaning: only the caller knows which it wanted, so the
+  // rewrite stands down and the ordinary refusal fires.
+  it('refuses grep_search path when include is already in the call', () => {
+    expect(
+      registry.invalidArgs(fullSearchCode, { query: 'needle', include: '**/*.ts', path: 'src' }),
+    ).toContain('unknown argument "path"');
+  });
+
+  // A wrong key whose value could not be the argument it resembles — an array of
+  // command names, a label — must never be renamed: the guess would run the
+  // wrong thing. The refusal names the argument instead. Measured 2026-11-16:
+  // `shell subject` and `read_file max_chars`, both left guessing at a round.
+  it('names the argument a wrong key was reaching for, and stops guessing when it is already there', () => {
+    const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    const readOnly: RegisteredTool = {
+      definition: {
+        type: 'function',
+        function: {
+          name: 'read_file',
+          description: 'Read a file.',
+          parameters: {
+            type: 'object',
+            properties: { path: { type: 'string' }, start_line: { type: 'integer' } },
+            required: ['path'],
+            additionalProperties: false,
+          },
+        },
+      },
+      permission: 'read',
+      handler: async () => 'unused',
+    };
+    try {
+      const subject = registry.invalidArgs(makeShellTool({ platform: 'win32' }), {
+        subject: 'list files',
+      });
+      expect(subject).toContain('unknown argument "subject"');
+      expect(subject).toContain('did you mean "command"');
+      expect(subject).toContain('Resend the call with "command" instead.');
+      const names = registry.invalidArgs(makeShellTool({ platform: 'win32' }), {
+        command: 'ls',
+        command_names: ['ls'],
+      });
+      expect(names).toContain('unknown argument "command_names"');
+      expect(names).not.toContain('did you mean');
+      const cap = registry.invalidArgs(readOnly, { path: 'a.ts', max_chars: 4000 });
+      // The whole text is pinned: a hint that reads as one quoted key is one a
+      // weak model sends back verbatim, and the round is spent again.
+      expect(cap).toBe(
+        'Error: read_file: unknown argument "max_chars"; did you mean "start_line" or "end_line"? ' +
+          'this tool takes: path, start_line. Nothing ran. Resend the call with "start_line" or "end_line" instead.',
+      );
+    } finally {
+      platform.mockRestore();
+    }
+  });
+
+  // The rewrite is only for a name carrying what `include` carries. A list of
+  // paths is not a filter this tool can run, so the refusal still fires.
+  it('leaves a non-string grep_search path for the ordinary refusal', () => {
+    expect(registry.invalidArgs(fullSearchCode, { query: 'needle', path: ['src', 'test'] })).toContain(
+      'unknown argument "path"',
+    );
+  });
+
+  // A lone `=`, and a doubled one, are not repairs: the first matches nothing,
+  // the second reaches for an argument called `=query`.
+  it('refuses a bare = key and a doubled one', () => {
+    expect(registry.invalidArgs(fullSearchCode, { query: 'a', '=': 'b' })).toContain(
+      'unknown argument "="',
+    );
+    expect(registry.invalidArgs(fullSearchCode, { query: 'a', '==query': 'b' })).toContain(
+      'unknown argument "==query"',
+    );
+  });
+
+  // A key written as `=query` is the same argument with a stray `=` from a model
+  // rendering `--query=` or `<parameter name=query>` as text. Measured once.
+  it('repairs a key that arrived as =query, and still refuses it beside query', () => {
+    const args = { context: 0, '=query': 'sumPrices' };
+    expect(registry.invalidArgs(fullSearchCode, args)).toBeUndefined();
+    expect(args).toEqual({ context: 0, query: 'sumPrices' });
+    expect(registry.invalidArgs(fullSearchCode, { query: 'a', '=query': 'b' })).toContain(
+      'unknown argument "=query"',
     );
   });
 

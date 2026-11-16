@@ -242,6 +242,42 @@ describe('unknown tool name hints', () => {
     );
   });
 
+  // A name made of a real tool's word plus something else (`shell_file`) matches
+  // no live tool by prefix, so the rule above stays silent. Measured 2026-11-16:
+  // one such call, refused with no suggestion at all.
+  it('suggests the tool named by the first word when no prefix matches', async () => {
+    const registry = new ToolRegistry();
+    registry.register(tool('shell'));
+
+    expect(await dispatchUnknown({ name: 'shell_file', registry })).toBe(
+      'Error: unknown tool "shell_file"; did you mean "shell"?',
+    );
+  });
+
+  // Only the first word counts, and only when it is exactly one tool: `read`
+  // alone is not `read_file`, and a guess that wide sends the model somewhere it
+  // did not mean.
+  it('stays silent when the first word is not itself a tool', async () => {
+    const registry = new ToolRegistry();
+    registry.register(tool('read_file'));
+
+    expect(await dispatchUnknown({ name: 'read_file2', registry })).toBe(
+      'Error: unknown tool "read_file2"',
+    );
+  });
+
+  // The suggestion reuses the unloaded-group answer: a first word that names a
+  // tool behind a group has to be told how to reach it, or it retries blind.
+  it('names the group when the first-word tool sits behind an unloaded one', async () => {
+    const registry = new ToolRegistry();
+    registry.register(tool('commit'));
+    registry.register(tool('load_tool_group', { advertise: hasAvailableLazyGroup }));
+
+    expect(await dispatchUnknown({ name: 'commit_all', registry })).toBe(
+      'Error: unknown tool "commit_all"; group "git" is unloaded; call load_tool_group with "git" first to use "commit"',
+    );
+  });
+
   it('does not hint for prefixes shorter than five characters', async () => {
     const registry = new ToolRegistry();
     registry.register(tool('render_html_to_image'));
