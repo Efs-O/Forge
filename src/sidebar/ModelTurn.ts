@@ -20,7 +20,6 @@ import type { MidTurnDrainResult } from '../agent/MidTurnInbox';
 import type { CheckinStage } from '../agent/elapsedTimeNote';
 import { createContextTrimState } from '../agent/toolResultContext';
 import type { ToolDispatch } from './ToolDispatch';
-import { canonicalToolName } from '../tools/toolNameAliases';
 import { stripDecision, type ToolFailureTracker } from '../tools/StripTools';
 import type { TurnLifecycle } from './TurnLifecycle';
 import { createOutputBudgetTracker } from '../util/contextBudget';
@@ -32,7 +31,7 @@ import { hiddenLazyToolNames } from '../tools/lazyToolGroups';
 import { deriveStaticCapabilities } from '../config/ConfigResolver';
 import { applyToolCalls } from './transcriptMutations';
 import { mirrorLiveSessionAnswers } from './liveSessionMirror';
-import { extractToolDetail } from './toolSummary';
+import { extractToolDetail, activityToolName } from './toolSummary';
 import {
   freezeTurnContextAndConsumeResumeNote,
   isNewChatFirstTurn,
@@ -322,7 +321,7 @@ export async function runModelTurn(
         for (const call of toolCalls) {
           // The activity row names the tool the call will reach, not the name the
           // model typed: a renderer keyed on toolName must not miss an alias.
-          const shown = canonicalToolName(call.function.name) ?? call.function.name;
+          const shown = activityToolName(call.function.name, ctx.toolRegistry);
           ctx.emitAgentProgress({ conversationId: conv.id, kind: 'tool', toolName: shown });
           const detail = extractToolDetail(call.function.arguments);
           postC({

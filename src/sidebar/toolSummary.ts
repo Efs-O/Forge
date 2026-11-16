@@ -1,4 +1,22 @@
 import { isJsonObject, parseJson } from '../tools/jsonInput';
+import { canonicalToolName } from '../tools/toolNameAliases';
+import type { ToolRegistry } from '../tools/ToolRegistry';
+
+/**
+ * The tool name the activity row shows for one call.
+ *
+ * The row must name the tool that will RUN, because every renderer keyed on it
+ * reads this name. Preflight and `ToolDispatchParallel` rewrite a foreign name
+ * only when NOTHING is registered under it — an MCP server may expose its own
+ * `bash`, `ls` or `glob`, and then the model's call means that server's tool, not
+ * Forge's shell — so this asks the registry first and reaches for the alias only
+ * when the name is unregistered. Naming the native tool while the MCP one runs
+ * shows the owner a row for a call that never happened.
+ */
+export function activityToolName(name: string, toolRegistry: ToolRegistry): string {
+  if (toolRegistry.get(name)) return name;
+  return canonicalToolName(name) ?? name;
+}
 
 /** Extracts a human-readable detail string from a tool call's argument JSON. */
 export function extractToolDetail(argsJson: string): string {
