@@ -2,13 +2,13 @@ import * as path from 'path';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
-  // Mirrors esbuild's `loader: { '.sh': 'text', '.ps1': 'text' }`: a script import
-  // (the agent-bus .sh client, the Windows desktop .ps1 driver) is its text.
+  // Mirrors esbuild's text loaders: scripts and shipped Markdown imports are
+  // their source text rather than parsed modules.
   plugins: [
     {
       name: 'script-as-text',
       transform(code: string, id: string) {
-        if (id.endsWith('.sh') || id.endsWith('.ps1')) {
+        if (id.endsWith('.sh') || id.endsWith('.ps1') || id.endsWith('.md')) {
           return `export default ${JSON.stringify(code)};`;
         }
         return undefined;

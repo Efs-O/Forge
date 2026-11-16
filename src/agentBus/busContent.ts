@@ -50,8 +50,8 @@ Copilot sessions message each other, each message shown in the receiving window.
 - **Forge**: \`forge.sh\`, or HTTP (below). An idle Forge starts a turn at
   once. A \`say\` to a busy chat is read at its next tool round; its answer
   arrives when the turn ends; use \`steer\` only to stop the current work. A
-  \`say\` with \`--unattended\`, \`--model\` or \`--new\` needs a turn of its own,
-  so it waits until the running turn ends.
+  \`say\` with \`--model\` or \`--new\` needs a turn of its own, so it waits
+  until the running turn ends.
 
 When several Forge windows are open, every verb that knows your session
 identity reaches the window holding that session's link — \`say\`, \`send\`,
@@ -69,17 +69,13 @@ Use \`say <name> --to <conversationId>\` to select a specific Forge chat, or
 \`say <name> --to-running\` to select the currently running chat. The same flags
 work with \`send <name> forge\`; \`send\` to another agent remains a relay.
 \`say\` flags:
-- \`--unattended\`: nobody is watching; dangerous tools are refused at once with
-  a reason instead of opening an approval card that would hang the turn, while
-  any other action that needs approval is refused too unless its approval key is
-  listed in \`approvals.unattended_bus.allow\` in \`~/.forge/policy.yaml\` (the
-  refusal names the key); only a confirmation with no approval key is approved
-  automatically. \`ask_user\` is
-  refused outright, and an ask to a Claude or Codex session is refused unless
-  \`jobs.allow_cli_agents\` is true. Use it whenever the owner may be away.
 - \`--model <name>\` selects the model for this turn. An unknown name is refused
   with the list of configured models, so read the 400 instead of guessing again.
 - \`--new\` opens and links a second chat, keeping the sender's prior chat linked.
+  The new chat runs in Clanker mode: Clanker answers routine approvals and still
+  asks the owner before destructive actions, Forge guard files, skill writes, and
+  a secret read followed by egress. \`--unattended\` was removed; the client
+  refuses it.
 - \`--to <conversationId>\` selects one linked Forge chat.
 - \`--to-running\` selects the currently running Forge chat.
 If a turn needs the owner's approval, it waits for the owner; \`stop\` or \`steer\`
@@ -129,9 +125,6 @@ uses \`forge.sh read-verdict <name> <exchangeId>\` and then separately runs
 \`forge.sh ack-verdict <name> <exchangeId>\`. Reading does not delete
 the artifact; only the acknowledgment does. If a read response is lost, repeat
 the read before acknowledging. Unacknowledged verdicts remain for recovery.
-A \`--unattended\` turn that asks a Claude or Codex session is refused unless
-\`jobs.allow_cli_agents\` is true in the config; the refusal names the key, so
-pass it to the owner instead of retrying.
 
 A \`--new\` needs a free chat tab. If that window is at its chat cap and nothing
 can be archived, \`say --new\` exits non-zero with a 409 naming what is holding

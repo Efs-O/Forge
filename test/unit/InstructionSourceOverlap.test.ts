@@ -29,7 +29,7 @@ const root = path.resolve(__dirname, '..', '..');
 const read = (rel: string): string => fs.readFileSync(path.join(root, rel), 'utf8');
 
 const PROMPT = 'config/templates/builtin/execute.njk';
-const STARTER = 'src/llm/ForgeInstructionsLoader.ts';
+const STARTER = 'resources/instructions/FORGE.starter.md';
 const TIPS = 'docs/CODING_TIPS.md';
 const PROJECT = 'FORGE.md';
 
@@ -81,17 +81,9 @@ function claims(content: string): string[] {
   return out;
 }
 
-/** The starter project file, which ships inside the loader as a template literal. */
+/** The starter project file copied into new workspaces. */
 function starterContent(): string {
-  const source = read(STARTER);
-  const open = source.indexOf('const STARTER_CONTENT = `');
-  expect(open, 'the starter project text must stay a template literal this test can read').not.toBe(
-    -1,
-  );
-  const from = open + 'const STARTER_CONTENT = `'.length;
-  const close = source.indexOf('\n`;', from);
-  expect(close, 'unterminated STARTER_CONTENT literal').toBeGreaterThan(from);
-  return source.slice(from, close);
+  return read(STARTER);
 }
 
 /** FORGE.md as the prompt sees it; the split on MARK is harmless now that the copy is gone. */

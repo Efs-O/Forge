@@ -179,6 +179,19 @@ describe('ensureBus', () => {
     expect(check.status).toBe(0);
   });
 
+  it('refuses the removed say --unattended flag with the exact reason', (ctx) => {
+    if (!TEST_BASH) return ctx.skip();
+    const run = spawnSync(TEST_BASH, ['-s', 'say', 'claude', '--unattended'], {
+      input: CLIENT_SCRIPT,
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home },
+    });
+    expect(run.stderr).toBe(
+      'forge.sh: --unattended was removed. A chat you start with say --new runs in Clanker mode, which still asks the owner before destructive actions, Forge guard files, skill writes, and a secret read followed by egress.\n',
+    );
+    expect(run.status).toBe(2);
+  });
+
   it('ships a README with the size limit filled in', () => {
     expect(BUS_README).toContain('at most\n16000 characters');
   });

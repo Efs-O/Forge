@@ -123,7 +123,6 @@ describe('every client flag is named in the bus README', () => {
       '--reopen-claude',
       '--to',
       '--to-running',
-      '--unattended',
     ]);
   });
 
@@ -141,7 +140,7 @@ describe('every client flag is named in the bus README', () => {
     expect(CLIENT_SCRIPT).toContain(
       'A say to a busy chat is read at its next tool round; its answer arrives when the turn ends;',
     );
-    expect(CLIENT_SCRIPT).toContain('--unattended means nobody is watching');
+    expect(CLIENT_SCRIPT).toContain('A chat you start with --new runs in Clanker mode');
     expect(AGENT_NOTE_TEMPLATE).toContain(
       'A `say` to a busy chat is read at its next tool round; its answer arrives when',
     );
@@ -171,14 +170,12 @@ describe('every client flag is named in the bus README', () => {
   });
 
   it('detects a header flag removed from the README text', () => {
-    const withoutUnattended = BUS_README.replaceAll('--unattended', '');
-    expect(
-      flags.filter((flag) => !namesTheFlag(withoutUnattended, flag)),
-    ).toContain('--unattended');
+    const withoutModel = BUS_README.replaceAll('--model', '');
+    expect(flags.filter((flag) => !namesTheFlag(withoutModel, flag))).toContain('--model');
   });
 
   it('explains each say flag, the file caption, and an owner approval wait', () => {
-    expect(BUS_README).toContain('--unattended`: nobody is watching');
+    expect(BUS_README).toContain('The new chat runs in Clanker mode');
     expect(BUS_README).toContain('--model <name>` selects the model');
     expect(BUS_README).toContain('--new` opens and links a second chat');
     expect(BUS_README).toContain('--to <conversationId>` selects one linked Forge chat');

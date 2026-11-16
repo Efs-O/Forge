@@ -537,7 +537,7 @@ describe('routes', () => {
       title: 'Codex: start a phase',
       id: expect.any(String),
     });
-    expect(asked).toEqual([{ model: 'alpha', title: 'Worker one' }]);
+    expect(asked).toEqual([{ sender: 'forge-x', model: 'alpha', title: 'Worker one' }]);
     // The drain must deliver into that chat, not open another, so the chat is
     // named and the pin it already applied is dropped — the same model is not
     // asked for twice before the turn even starts. `newChat` stays set on

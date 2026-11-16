@@ -21,7 +21,7 @@
 9. a follow-up search that drops one alternative from the `rg -l "a|b"` that listed the file → it matched the other one; the narrow search is empty and reads as a phantom. repeat the whole pattern
 
 ## RUN
-1. `cd "C:/Users/…/sessions" && python -c "…"` → refused: the write is judged from the folder the command started in. pass `cwd: "C:/Users/…/sessions"` and the command alone
+1. `cd "C:/Users/<name>/sessions" && python -c "…"` → refused: the write is judged from the folder the command started in. pass `cwd: "C:/Users/<name>/sessions"` and the command alone
 2. `node -e '… /regex/ …'` under bash → quoting dies through bash → node → regex. use plain string comparisons, or a script file
 3. `… | tail -3; echo "exit: $?"` → `$?` is tail's code, not the command's; same for a background job ending `echo "ci exit: $?"`, whose notice says 0 whatever npm did. read the line the command wrote
 4. an f-string containing `\|` or `\n` inside `{…}` on Python 3.10 → SyntaxError: f-string expression part cannot include a backslash. build the escaped text into a variable first

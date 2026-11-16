@@ -58,6 +58,7 @@ interface AppModule {
             messageCount: number;
             active_model?: string;
             streaming?: boolean;
+            clanker?: boolean;
           }>;
           history: Array<{
             id: string;
@@ -182,6 +183,46 @@ describe('webview App reducer', () => {
 
     expect(synced.streamingIds.has('tab-1')).toBe(true);
     expect(synced.generatingIds.has('tab-1')).toBe(true);
+  });
+
+  it('restores Clanker from session sync when its live event preceded the webview', () => {
+    const armed = appModule.reducer(appModule.initialState, {
+      type: 'SESSION_SYNC',
+      activeId: 'tab-1',
+      tabs: [
+        {
+          id: 'tab-1',
+          title: 'Chat',
+          createdAt: 1,
+          updatedAt: 2,
+          messageCount: 0,
+          clanker: true,
+        },
+      ],
+      history: [],
+      messagesById: {},
+    });
+
+    expect(armed.clankerByConversationId.get('tab-1')).toBe(true);
+    expect(appModule.selectClankerActive(armed)).toBe(true);
+
+    const off = appModule.reducer(armed, {
+      type: 'SESSION_SYNC',
+      activeId: 'tab-1',
+      tabs: [
+        {
+          id: 'tab-1',
+          title: 'Chat',
+          createdAt: 1,
+          updatedAt: 2,
+          messageCount: 0,
+          clanker: false,
+        },
+      ],
+      history: [],
+      messagesById: {},
+    });
+    expect(off.clankerByConversationId.has('tab-1')).toBe(false);
   });
 
   it('adds a queued prompt to its original conversation rather than the active tab', () => {

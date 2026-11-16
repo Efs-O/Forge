@@ -270,8 +270,8 @@ export class AgentInbox {
    * a refactor ran for hours as one turn and a message sat queued throughout,
    * while a Telegram or typed message reached it at the next round. A steer,
    * `--new` or `--model` message still needs a turn of its own and keeps
-   * waiting, and a held message waits for its release. An `--unattended`
-   * message joins only a running turn that is itself unattended under the same
+   * waiting, and a held message waits for its release. An unattended
+   * message (the peer job relay) joins only a running turn that is itself unattended under the same
    * job identity (both without a job, or the same `jobId`): merged into an
    * attended turn, a dangerous tool would raise an approval card nobody
    * answers, and merged into another job's turn it would run under that job's

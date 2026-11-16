@@ -196,7 +196,7 @@ overlaps with an existing owner, extend the owner instead.
 | History legacy-list migration + overflow wiring (bodies via `ConversationBodyStore`) | `src/sidebar/HistoryArchive.ts` |
 | Overflow archived-session bodies and index           | `src/sidebar/ArchivedSessions.ts`        |
 | Shipped helper scripts for hand or agent use (`tools/user/`) | `tools/user/README.md` lists each; downloads **Forge** itself makes stay owned by `src/jobs/jobsFetch.ts` |
-| Starter `FORGE.md` text written into a new workspace | `src/llm/ForgeInstructionsLoader.ts` (`STARTER_CONTENT`) |
+| Starter `FORGE.md` text written into a new workspace | `src/llm/ForgeInstructionsLoader.ts` (`STARTER_CONTENT`), `resources/instructions/FORGE.starter.md` |
 | Session -> webview projections (rows, metas, counts) | `src/sidebar/sessionProjections.ts`      |
 | First-run setup wizard                               | `src/sidebar/FirstRunWizard.ts`          |
 | Add-model setup wizard                               | `src/sidebar/AddModelWizard.ts`          |
@@ -928,7 +928,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Outbox watcher (drains the outbox to the owner chat)       | `src/remote/JobOutboxWatcher.ts`                               |
 | Agent-bus files (ids, wait, replies, orphans, TTL)         | `src/agentBus/agentBus.ts`                                     |
 | Agent-bus shipped text (README, message bodies)            | `src/agentBus/busContent.ts`                                   |
-| Workspace agent note (the marked `AGENTS.md` / `CLAUDE.md` section: text, markers, writer) | `src/agentBus/agentMeshNote.ts` |
+| Workspace agent note (the marked `AGENTS.md` / `CLAUDE.md` section: text, markers, writer) | `src/agentBus/agentMeshNote.ts`, `src/agentBus/agentNote.md` |
 | Which file the agent note goes into, the one-time disclosure, `forge.agentMesh.installNote` | `src/vscode/agentMeshNoteSetup.ts` |
 | Agent-bus client script (`~/.forge/agent-bus/forge.sh`)    | `src/agentBus/forge.sh` (bundled as text by busContent.ts)     |
 | Claude session registry + peer-pipe delivery               | `src/agentBus/claudePeer.ts`                                   |

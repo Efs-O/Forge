@@ -19,7 +19,7 @@ export function agentSetupPrompt(
     `Follow the instructions in ${path.join(extensionPath, 'AI_SETUP.md')} step by step.`,
     `The extension is installed at ${extensionPath}.`,
     `Forge reads its config from one of: global config: ${globalConfigPath}; ${workspaceLine}.`,
-    'Ask me before each optional step, and tell me whenever I need to do something in VS Code.',
+    "Follow AI_SETUP.md's single confirmation and human-only stops; complete the named setup sections without further questions.",
   ].join('\n');
 }
 

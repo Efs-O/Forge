@@ -26,6 +26,45 @@ import type { ToolDefinition } from '../../src/llm/types';
 
 const root = path.resolve(__dirname, '..', '..');
 const engine = new TemplateEngine(path.join(root, 'config', 'templates', 'builtin'));
+const generalRulesTailLines = [
+  'a preview result is a tool result.',
+  '- A question is not an instruction to build; wait for an explicit change request.',
+  '- Commit, build or install requests do not authorize a push; get approval for the exact range.',
+  '- Name leftovers in the final report or clean them up.',
+  '- Separate measured values from preferences and enforced gates.',
+  '- `shell.timeout_ms` is 1,000–600,000 ms; run longer work in the background.',
+  '- `ask_user`: 1–4 questions, labels ≤80 chars, descriptions ≤500; `message_chat` needs `action` and caps messages at 16,000.',
+  '- Use bare JSON booleans and JSON arrays for tool arguments.',
+  '- Handle Windows-shaped paths with Windows semantics on every OS; configure identity inside temporary Git repositories.',
+  '- Check git history for past decisions; verify current status instead of trusting stale notes.',
+  '- For durable or delivered state, test failure, retry, restart, duplicates, order, boundaries and documented limits.',
+  '- On long unattended turns, checkpoint with `notify_user`; state an assumption and continue instead of blocking on `ask_user`.',
+  '- Choose image dimensions from the requested composition; avoid timing claims based on one machine.',
+  '- After using task memories, save durable facts and clear completed pending notes.',
+  '- Follow a refusal and its stated alternative; never route around it.',
+  '- When asked to reply only, answer without tools or writes.',
+  '- For `edit_file`, use the shortest unique verbatim anchor from the newest read and account for prior batch edits.',
+  '- Before an audit, establish its exact range and baseline; report pre-existing defects separately from new ones.',
+  '- Plans need acceptance checks that name invariants and how each is validated.',
+  '- For durable state, map create, delete, pause, crash, owner death and expiry.',
+  '- Add missing plan sections before implementation; do not stop to ask whether they are needed.',
+  '- Check shared-workspace changes before editing; stop if file ownership is unclear.',
+  '- Use separate worktrees for overlapping concurrent edits and agree on ownership and landing order.',
+  '- Commit only your own named files.',
+  "- Leave other agents' failing tests untouched and report them.",
+  '- For new waits, timers, deliveries and child processes, test cancellation and correct session or sender attribution.',
+  '- Test doubles for external programs must match real output, files and errors.',
+  '- For UI symptoms, inspect the durable record before tracing its writer.',
+  '- Present fixed choices in prioritized `ask_user` cards; state each outcome and mark one recommended.',
+  '- The creator owns worktree cleanup and verifies the folder is gone.',
+];
+
+function renderedBaseRulesTail(rendered: string): string {
+  const start = rendered.indexOf(generalRulesTailLines[0]);
+  const closingTag = '</rules>';
+  const end = rendered.indexOf(closingTag, start);
+  return start < 0 || end < 0 ? '' : rendered.slice(start, end + closingTag.length);
+}
 
 const def = (name: string): ToolDefinition => ({
   type: 'function',
@@ -113,9 +152,9 @@ describe('the delegation block in the system prompt', () => {
     expect(rendered).not.toContain('Delegate for thinking');
     expect(rendered).not.toContain('Never claim a delegate ran');
     expect(rendered).not.toContain('ask_local_agent');
-    // The off case must be byte-identical to what this template printed before
-    // the block existed: no blank line left where the conditional was.
-    expect(rendered).toContain('a preview result is a tool result.\n</rules>');
+    // Pin the exact current base rules tail so changes to the template cannot
+    // silently loosen the rendered output or leave a gap before the close.
+    expect(renderedBaseRulesTail(rendered)).toBe([...generalRulesTailLines, '</rules>'].join('\n'));
   });
 
   it('says who to delegate to, and how, when either tool is offered', () => {
@@ -134,7 +173,11 @@ describe('the delegation block in the system prompt', () => {
     // about the mesh-run Codex reviewer, belong in this repo's FORGE.md.
     expect(rendered).not.toContain('Forge Relay');
     expect(rendered).not.toContain('COORDINATION.md');
-    expect(rendered).toContain('a preview result is a tool result.\n- You implement by default');
+    const baseTailAndDelegation = [...generalRulesTailLines, '- You implement by default'].join(
+      '\n',
+    );
+    const start = rendered.indexOf(generalRulesTailLines[0]);
+    expect(rendered.slice(start, start + baseTailAndDelegation.length)).toBe(baseTailAndDelegation);
   });
 
   it('is a bounded addition to the prompt when it is on', () => {

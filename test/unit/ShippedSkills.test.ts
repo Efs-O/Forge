@@ -180,18 +180,14 @@ describe('resources/skills/ (the shipped skill folder)', () => {
   });
 
   it('the starter FORGE.md a new workspace gets points at skills, not the retired folder', () => {
-    const source = fs.readFileSync(
-      path.join(REPO_ROOT, 'src/llm/ForgeInstructionsLoader.ts'),
+    const starter = fs.readFileSync(
+      path.join(REPO_ROOT, 'resources/instructions/FORGE.starter.md'),
       'utf8',
     );
-    const start = source.indexOf('const STARTER_CONTENT = `');
-    expect(start).toBeGreaterThan(-1);
-    const starter = source.slice(start, source.indexOf('`;', start + 10));
     expect(starter).toContain('load_skill');
     expect(starter).toContain('.forge/skills');
     expect(starter).toContain('hf_parallel_dl');
     expect(starter).not.toContain('tools/user/');
-    expect(source).not.toContain('tools/user/');
   });
 
   it('tools/user/ is retired: the folder, its test and its ignore line are all gone', () => {

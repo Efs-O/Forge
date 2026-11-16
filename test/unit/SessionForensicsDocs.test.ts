@@ -17,9 +17,10 @@ import { describe, expect, it } from 'vitest';
 
 const root = path.resolve(__dirname, '..', '..');
 const doc = fs.readFileSync(path.join(root, 'docs', 'WORKSPACE_FORENSICS.md'), 'utf8');
-const loader = fs.readFileSync(path.join(root, 'src', 'llm', 'ForgeInstructionsLoader.ts'), 'utf8');
-const starterStart = loader.indexOf('const STARTER_CONTENT = `');
-const starter = loader.slice(starterStart, loader.indexOf('`;', starterStart + 10));
+const starter = fs.readFileSync(
+  path.join(root, 'resources', 'instructions', 'FORGE.starter.md'),
+  'utf8',
+);
 
 /** Every `forge.*` string literal the source actually writes as a storage key. */
 const quotedKeys = new Set<string>();

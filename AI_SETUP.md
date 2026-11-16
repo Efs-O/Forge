@@ -5,29 +5,39 @@ LLM** VS Code extension and asked you to set it up on this machine. This file
 ships inside the extension; the prompt that pointed you here gave you its path
 and the two places Forge looks for its config.
 
-Work through the steps in order. After each step, run its **Check** and report
-the result before moving on. Ask the user before every optional section — do
-not set up what they did not ask for. Step 7 is not one of those sections: the
-agent mesh ships on, and the note Forge writes into the workspace is part of it.
+Work through the steps in order, run each **Check**, and continue without asking
+between steps. Set up an optional section only when the user's setup request
+named it; never ask which sections to add. The agent mesh is part of the core
+setup.
 
 ## Ground rules
 
 1. **No secrets in files.** API keys, bot tokens and cloud tokens never go in
    `config.yaml`, in git, or in your reply. Forge keeps them in VS Code
    SecretStorage; the user enters them with the Forge command this file names.
-2. **Hand back what only a human can do**: VS Code window reloads, Command
-   Palette commands, logins (`claude`, `codex login`, Ollama sign-in),
-   Telegram/BotFather, scanning a QR code, UAC prompts. Say exactly what to
-   click or type, then wait. Never claim one of these happened.
-3. **Back up before you replace.** If a `config.yaml` already exists, copy it
+2. **One confirmation, then proceed.** After Step 0, show the one-time plan
+   summary described there and wait for one yes/no answer. After yes, do not ask
+   again about anything in that summary.
+3. **Human-only stops:** required logins (`claude`, `codex login`,
+   `ollama auth login`); API keys and bot tokens entered through Forge's own
+   commands; Windows UAC or SmartScreen prompts; and the first VS Code window
+   reload before Forge's control server starts. Give the exact command or click,
+   wait, then check the result. For requested Telegram setup, BotFather bot
+   creation, sending the pairing code, and scanning/confirming the authenticator
+   are part of this authentication stop. Never claim the user did it before
+   they do.
+4. **Owner-only security choices.** Never edit or propose edits to
+   `~/.forge/policy.yaml`, never use **Always in this project**, and never turn
+   Clanker on for ordinary chats. Name all three in the final report.
+5. **Back up before you replace.** If a `config.yaml` already exists, copy it
    to `config.yaml.bak` first, and keep its comments when editing — users
    record VRAM measurements in them.
-4. **Stay in scope.** Write only the Forge config, the llama.cpp install folder
-   (step 2), and `~/.claude/settings.json` if the user asks for the mesh
-   (step 7). Forge writes the workspace agent note itself, so leave the user's
-   `AGENTS.md` and `CLAUDE.md` alone — check what Forge put there, do not
-   rewrite it. Kill no process you did not start.
-5. **Trust Forge, not yourself.** A step is done when its Check passes, not
+6. **Stay in scope.** Write the Forge config, the llama.cpp install folder,
+   `~/.claude/settings.json` only for the stated mesh setting, and `FORGE.md`
+   only when the workspace has none. Forge writes the workspace agent note;
+   leave `AGENTS.md` and `CLAUDE.md` alone and verify the marked section. Kill
+   no process you did not start.
+7. **Trust Forge, not yourself.** A step is done when its Check passes, not
    when the file looks right.
 
 Where the extension is installed, `config/config.example.yaml` is the full,
@@ -36,7 +46,7 @@ minimal starting points. Read them instead of guessing a key.
 
 ## Step 0 — Survey the machine
 
-Collect, and show the user in a short table:
+Collect and show the user in a short table:
 
 - OS and shell. **On Windows, bare `bash` may be WSL, not Git Bash.** Use
   PowerShell, or Git Bash by full path (`C:\Program Files\Git\bin\bash.exe`).
@@ -47,11 +57,19 @@ Collect, and show the user in a short table:
   `~/.cache/huggingface/hub`, `~/.cache/lm-studio`, other drives) for `*.gguf`,
   excluding `mmproj-*` projector files. Note size and quantization from the
   filename.
+- If the request names image, video, or music generation, inventory those
+  engines' model and companion files, disk space, runtimes, and GPU needs too.
+  Include the exact sizes of any missing files in the plan summary.
 - Is Ollama running? `curl http://127.0.0.1:11434/api/tags`
-- Are `llama-server`, `claude`, `codex` on PATH? Is there an existing Forge
-  config at either path the prompt gave you?
+- Are `llama-server`, `claude`, `codex` on PATH, and is `pwsh` available if
+  Codex is selected on Windows? Is there an existing Forge config at either
+  path the prompt gave you?
+- Is `FORGE.md` already present at the repository root?
+- On Windows, is Git for Windows' `bash.exe` available? If Claude Code is
+  installed, is it configured to run in bypass-permissions mode?
 
-Then recommend **one** backend and tell the user why:
+Then choose **one** backend from the survey and state why. Apply that choice;
+do not ask the user to choose:
 
 - **llama.cpp** — fastest and the most control; needs a GGUF that fits.
 - **Ollama** — simplest if it is already installed and has models.
@@ -62,17 +80,57 @@ A model fits when its GGUF size plus the KV cache for the context fits in free
 VRAM with **at least 1 GB spare**. On Windows a GPU that runs out does not
 fail; it pages to system RAM and slows to a crawl.
 
+Use a suitable model already on disk or in the existing config when possible.
+Otherwise choose a general-purpose instruction model that fits the surveyed
+hardware; include any required projector or companion files. Before presenting
+the plan, get each download's exact filename and size from its official release
+or model repository metadata. For Ollama, include the exact tag and reported
+download size. Do not start a download before the confirmation.
+
+After the survey and backend choice, show one concise summary containing:
+
+- every model file and release archive to download, with its exact filename
+  and size;
+- every install, including the selected llama.cpp build, any missing selected
+  CLI and its prerequisites, and on Windows only when Git Bash is missing,
+  `winget install --id Git.Git -e`; include the exact install method and
+  release details;
+- each trust switch already on and each one to turn on:
+  `control_server`, `agent_bus`, `permissions.agents.delegate`, and
+  `crossSessionInbound` in `~/.claude/settings.json` when Claude Code uses
+  bypass-permissions mode;
+- the exact config file path to write, plus which optional sections were named
+  in the user's request; and whether it will create `FORGE.md` because the
+  workspace has no project instruction file.
+
+Ask **“Proceed with this setup plan? (yes/no)”** and wait. A no means stop
+without changing files, installing software, or downloading models. After yes,
+do not ask again about a listed download, install, switch, config path, or
+optional section. If an unlisted dependency becomes necessary, skip that part
+and explain why in **Finish** instead of asking for another plan confirmation.
+
 ## Step 1 — Choose the config location
 
 - **Workspace**: `<workspace>/.forge/config.yaml` — for this project only.
 - **Global**: the global path from the prompt — for every workspace.
 
-Default to global unless the user wants per-project settings. A workspace
-config wins over the global one when both exist.
+Use an existing workspace config if it is already the active config. Otherwise
+use the global path unless the user's request explicitly asks for a
+per-project config. A workspace config wins over the global one when both
+exist. Do not ask which location to use; include the selected path in the plan
+summary.
+
+If a repository root is open and it has no `FORGE.md`, copy
+`<extension>/resources/instructions/FORGE.starter.md` to `FORGE.md` in that
+root. Fill **Project facts** and **Commands** from that repository's README,
+build and test files; leave every other starter section unchanged. Existing
+`FORGE.md` files are left untouched. If no repository root is open, skip this
+and explain why in **Finish**.
 
 ## Step 2 — llama.cpp backend (skip for Ollama / cloud)
 
-Get a `llama-server` binary if none is on PATH:
+If the chosen backend is llama.cpp and no `llama-server` is on PATH, install
+the build selected for this machine and listed in the plan summary:
 
 - **Windows + NVIDIA**: from the newest release on
   `https://github.com/ggml-org/llama.cpp/releases`, download
@@ -85,7 +143,9 @@ Get a `llama-server` binary if none is on PATH:
 - **Linux**: the release's Linux asset for the hardware, or build with
   `cmake -B build -DGGML_CUDA=ON && cmake --build build -j` for NVIDIA.
 
-**Check:** `llama-server --version` prints a build number.
+Check each downloaded archive's size and SHA-256 against the official release
+metadata before extracting it. Stop that install if a digest is missing or
+different. **Check:** `llama-server --version` prints the selected build.
 
 Write the config from `config/starter/llama-cpp.yaml`:
 
@@ -101,30 +161,36 @@ Write the config from `config/starter/llama-cpp.yaml`:
   (see `config.example.yaml`).
 - `active_model`: the model to start with.
 
-## Step 3 — Ollama backend (skip for llama.cpp / cloud)
+## Step 3 — Ollama backend (skip unless selected)
 
-Start from `config/starter/ollama.yaml`. Use tags exactly as
-`ollama list` prints them, set `endpoint: http://127.0.0.1:11434`, and choose a
-`num_ctx` the model supports. Ollama cloud models go through the local daemon
-once the user has signed in with the Ollama CLI; Forge sends no key.
+Start from `config/starter/ollama.yaml`. Use tags exactly as `ollama list`
+prints them, set `endpoint: http://127.0.0.1:11434`, and choose a `num_ctx` the
+model supports. If the selected tag is missing, include its exact size in the
+plan, then run `ollama pull <tag>` after confirmation. For Ollama cloud, stop
+for the user's `ollama auth login`, then verify the tag through the local
+daemon; Forge sends no key.
 
-## Step 4 — Cloud or CLI models (only if asked)
+## Step 4 — Cloud or CLI models (when selected from the survey)
 
 - OpenAI-compatible providers (`xai`, `openrouter`, `openai`,
   `openai-compatible`): start from `config/starter/openai-compatible.yaml`.
-  The user stores the key with **Forge: Set Cloud Provider Token**
-  (`forge.setCloudToken`).
-- Claude Code / Codex as a model: the user installs the CLI and logs in
-  (`claude` once, `codex login`), then add
+  If a key is needed, tell the user to run **Forge: Set Cloud Provider Token**
+  (`forge.setCloudToken`) in VS Code, enter it there, and wait. Never request,
+  read, or repeat the key. Verify the selected provider with the Step 6 check.
+- Claude Code / Codex as a model: if the selected CLI is missing, install it
+  from the vendor's current official instructions after the one plan
+  confirmation; include the exact install method and required prerequisites in
+  the summary. Never ask the user to install it. On Windows, Codex also needs
+  PowerShell 7 from the **MSI**, not the Microsoft Store; install it if missing
+  and include it in the summary. Stop for the login only: tell the user to run
+  `claude` or `codex login`, wait, then verify the CLI. Add
   `{ name: claude-code, provider: cli, cli: claude }` (same for `codex`) under
   `models:`. `cli` is a bare name, or a full path to the executable. A `.cmd`
   shim is run through its launcher, which needs Node on PATH. For delegation
-  from Forge also set
-  `permissions.agents.delegate: true`.
-- **Windows:** Codex needs PowerShell 7 installed from the **MSI**; the
-  Microsoft Store package does not work.
+  from Forge also set `permissions.agents.delegate: true` when the mesh is
+  enabled.
 
-## Step 5 — Check the control server
+## Step 5 — Configure the control server and agent mesh
 
 The new starter config enables the control server. If an older config lacks it,
 add this. It binds to `127.0.0.1` only and is how you check the setup (and it
@@ -138,22 +204,29 @@ control_server:
   port: 8799
 ```
 
-Use the port already recorded in the config, or choose an available loopback
-port if you are adding the block yourself. Read `control_server.port` from that
-same config for the checks in step 6 (8799 by default).
+Use the configured port, or keep the starter's loopback default when adding the
+block. Also ensure `agent_bus.enabled: true`. Set
+`permissions.agents.delegate: true` when a supported CLI agent is available.
+If Claude Code uses bypass-permissions mode, merge
+`"crossSessionInbound": "accept"` into `~/.claude/settings.json`, preserving
+other settings. These switches were listed in the one plan confirmation.
 
-Leave `permissions:` as the starter wrote it unless the user asks otherwise.
-Every write, shell command and network call still asks the user for approval
-at run time.
+## Step 6 — First reload, then verify
 
-## Step 6 — Hand over, then verify
+This is the one reload the agent may hand to the user: before this first
+reload, Forge's control server and agent bus are not running. Tell the user to
+open the Command Palette and run **Developer: Reload Window**, then wait. Do
+not ask them to run **Forge: Validate Config**; the control-server checks below
+validate the active config.
 
-Tell the user to **reload the VS Code window** (Command Palette →
-"Developer: Reload Window"), then run **Forge: Validate Config**
-(`forge.validateConfig`). A config error is shown in VS Code; fix it and
-repeat.
+On Windows, read `%LOCALAPPDATA%\forge-llm\control-server.json`. Its
+`ControlServerRecord.url` field contains the selected loopback URL; parse its
+port from that URL instead of assuming the configured port or asking. If
+`LOCALAPPDATA` is unset, the registry path is `null` and no cross-platform
+record is available: say so and ask which port Forge selected.
 
 **Check**, from your shell (on Windows PowerShell use `curl.exe`, not `curl`):
+use the port parsed from `ControlServerRecord.url`:
 
 ```text
 GET  http://127.0.0.1:<control_server.port>/healthz        → {"ok":true}
@@ -162,15 +235,14 @@ POST http://127.0.0.1:<control_server.port>/ensure  {"model":"<active_model>"}  
 POST http://127.0.0.1:<control_server.port>/chat    {"model":"<active_model>","messages":[{"role":"user","content":"Reply with the word ready."}]}
 ```
 
-`/ensure` can take minutes for a large model. If it fails, the user runs
-**Forge: Show Backend Console** (`forge.showBackendConsole`) and pastes the
-`llama-server` output to you. Common causes: wrong path, CUDA runtime DLLs not
-next to the exe, context too large for the VRAM.
-
-If the port was taken, Forge reports the port it selected in the output
-channel; ask the user which value to use.
-
-Then ask the user to open the Forge sidebar and send a first prompt.
+`/ensure` can take minutes for a large model. The `/chat` request is the first
+prompt; do not ask the user to send one. If a backend fails and its details are
+only in VS Code's **Forge - llama-server** output channel, tell the user to run
+**Forge: Show Backend Console** (`forge.showBackendConsole`) and paste the
+error text. If the config is rejected before the control server starts, Forge
+shows the validation error in a VS Code notification; there is no control API
+or readable log file for that startup error, so ask the user to copy the exact
+notification. Do not claim setup passed until the checks succeed.
 
 ## Step 7 — Agent mesh (Forge ⇄ Claude Code ⇄ Codex): core, not optional
 
@@ -186,9 +258,9 @@ the command set.
 **Read the state, do not guess it.** From the config you wrote, report
 `control_server.enabled` and its port, `agent_bus.enabled`,
 `permissions.agents.delegate`, and the path of every agent CLI you found
-(`claude`, `codex`, `copilot`). If a switch is off, ask before turning it on:
-the mesh is *inbound* — it lets other agents act on this workspace's Forge
-chats — so enabling it is a trust change, not a preference. Requirements:
+(`claude`, `codex`, `copilot`). The planned switches have already been
+confirmed; turn on only those listed in the plan. The mesh is *inbound* — it
+lets other agents act on this workspace's Forge chats. Requirements:
 
 - the control server from step 5, and the bus itself (enabled in new starter
   configs; add it to older configs if absent):
@@ -207,14 +279,15 @@ chats — so enabling it is a trust change, not a preference. Requirements:
   `C:\Program Files\Git\bin\bash.exe` for an all-users install and
   `%LOCALAPPDATA%\Programs\Git\bin\bash.exe` for a per-user one. Run the client
   through that path: `& "<that bash.exe>" ~/.forge/agent-bus/forge.sh ...`. If
-  `Get-Command git.exe` finds nothing, say so plainly — the mesh client cannot
-  run without Git for Windows — and offer `winget install --id Git.Git -e`;
-  ask first, and never install unasked. Never fall back to bare `bash`: on
+  `Get-Command git.exe` finds nothing, say so plainly — the plan included
+  `winget install --id Git.Git -e` when available. After the confirmation,
+  install it without asking again; stop only for any Windows prompt. If winget
+  is unavailable, skip the mesh client and report why. Never fall back to bare `bash`: on
   Windows it may be WSL, and WSL's `$HOME` is not the Windows profile that
   holds `~/.forge/agent-bus`, so the client is not where that shell looks;
 - if the user runs Claude Code in bypass-permissions mode, add
   `"crossSessionInbound": "accept"` to `~/.claude/settings.json`, or messages
-  from Forge wait for approval there. Ask first.
+  from Forge wait for approval there. This was included in the plan summary.
 
 Forge writes the agent note itself, so you do not have to. On the first start in
 a workspace whose mesh is on, Forge adds one marked section
@@ -224,21 +297,21 @@ creates `AGENTS.md` when neither does. It never touches text outside the
 markers, never adds the section twice, and never deletes anything when the mesh
 is later turned off. **Verify it instead of writing it:** read the file, confirm
 exactly one marked section is there and that the user's own lines are untouched.
-If it is missing — the mesh was only just turned on, or the write failed — have
-the user run **Forge: Set Up Agent Note** (`forge.agentMesh.installNote`) and
-check again. Say plainly what the section allows: local coding agents can now
+If it is missing after startup, use the running mesh to reload the Forge
+window and check again. Say plainly what the section allows: local coding agents can now
 message, steer and stop this workspace's Forge chats; `agent_bus:
 { enabled: false }` turns that off; deleting everything between the two comment
 lines removes the note.
 
-Approval rules stay owner-controlled. The owner can click **Allow for this chat**
+Approval rules stay owner-controlled. Do not edit `~/.forge/policy.yaml`, do
+not use **Always in this project**, and do not enable Clanker for ordinary
+chats; name these pending owner choices in **Finish**. The owner can click **Allow for this chat**
 on a card to remember its displayed action in that conversation; `/approvals`
 lists the chat and matching project rules, and `/approvals reset` clears only
 that chat's remembered rules. **Always in this project** is an owner button that
 writes `approvals.always` through Forge; no agent tool can write
-`~/.forge/policy.yaml`. If that file is locked, the rule remains chat-only. Jobs
-and `--unattended` bus turns have no card and use only their owner policy allow
-lists; an unmatched refusal names the exact line to add, so do not retry it.
+`~/.forge/policy.yaml`. If that file is locked, the rule remains chat-only. Scheduled
+jobs have no card and use only their owner policy allow list; an unmatched refusal names the exact line to add, so do not retry it.
 The owner may set `permissions.approval_timeout_minutes`: a new install ships 10
 minutes, and a config with no key still waits forever.
 
@@ -263,25 +336,31 @@ file ownership instead of undoing another agent's work, and to commit only named
 files. Overlapping edits, or a full gate running while someone edits, need
 separate worktrees and an agreed commit order; separate files and a short edit
 can share one worktree. Offer the same rule for their `AGENTS.md` / `CLAUDE.md`;
-add it only if they ask.
+leave those files alone apart from Forge's marked agent note.
 
 **Check:** `forge.sh who` reports the linked agent sessions held by open Forge
-windows. An empty list is normal before any session is linked. Then the
-end-to-end check that says setup is really done: start a **new** Claude Code or
-Codex session in this workspace, give it nothing but the instructions in the
-file Forge wrote, and have it run `who`, send `say --new` to a model you name
-explicitly, and read the answer back with `view`. A session that cannot find
-the bridge from that file means the note is not doing its job — say so, do not
-paper over it by explaining the bridge to it.
+windows. An empty list is normal before any session is linked. Then run the
+end-to-end check yourself: send a prompt on stdin with
+`printf 'Reply with the word ready.' | forge.sh say <name> --new`, capture the
+chat id from the command result or `forge.sh who`, and read the finished answer
+with `forge.sh view <name> --to <conversationId>`. A session that cannot find
+the bridge from the file Forge wrote means the note is not doing its job —
+report it without explaining the bridge to that session. After the first reload,
+reload any Forge window with
+`forge.sh reload <name> --to <conversationId>`; get the id from `who` or the
+chat opened by `say --new`.
 
 ## Step 8 — Optional: Telegram remote control
 
-All of it is done by the user; your part is the config and the instructions.
+Run this section only when the user's setup request names Telegram. Do not ask
+whether to add it. The bot token, pairing code, and authenticator QR stay with
+the user; the agent handles the config and checks.
 
-1. The user creates a bot with **@BotFather** (`/newbot`) and keeps the token.
-2. The user runs **Forge: Set Telegram Bot Token**
-   (`forge.remote.setTelegramToken`). Never ask for the token yourself.
-3. You set, keeping any existing `remote:` settings:
+1. If the user has no bot token, tell them to open **@BotFather**, send
+   `/newbot`, and keep the token private. Then tell them to run **Forge: Set
+   Telegram Bot Token** (`forge.remote.setTelegramToken`) in VS Code and enter
+   the token there. Wait, then continue without reading or repeating it.
+2. Set, keeping any existing `remote:` settings:
 
    ```yaml
    # partial: the remote block only, not a whole config
@@ -291,38 +370,48 @@ All of it is done by the user; your part is the config and the instructions.
        enabled: true
    ```
 
-4. The user runs **Forge: Pair Telegram Remote** (`forge.remote.pairTelegram`)
-   and sends the shown `/pair ...` code to the bot in a private chat.
-5. Recommended: **Forge: Set Up Telegram Authenticator**
-   (`forge.remote.setupTelegramTotp`) and scan the QR with an authenticator
-   app.
+3. Tell the user to run **Forge: Pair Telegram Remote**
+   (`forge.remote.pairTelegram`) and send the displayed `/pair ...` code to the
+   bot in a private chat. Wait, then continue.
+4. Tell the user to run **Forge: Set Up Telegram Authenticator**
+   (`forge.remote.setupTelegramTotp`) and scan its QR code with an
+   authenticator app. Wait, then continue.
 
-**Check:** the user runs **Forge: Validate Remote Control**
-(`forge.remote.validate`) and sends `/status` to the bot.
+**Check:** continue after the user reports the bot's pairing response and Forge
+confirms that the authenticator enrollment succeeded. These results are part
+of the Telegram authentication stop; do not ask for another command.
 
 ## Step 9 — Optional: web search
 
-The user stores a Tavily key with **Forge: Set Search API Key**
-(`forge.setSearchApiKey`). You add the `search:` block (see
-`config.example.yaml`) and set `permissions.net.search: true`.
+Run this section only when the user's setup request names web search. If a
+Tavily key is not already stored, tell the user to run **Forge: Set Search API
+Key** (`forge.setSearchApiKey`) in VS Code, enter the key there, and wait. Then
+add the `search:` block (see `config.example.yaml`) and set
+`permissions.net.search: true`. Never request, read, or repeat the key.
 
 ## Step 10 — Optional: image generation
 
-`generate_image` appears only when an `image_generation:` block exists, and it
-needs `permissions.net.fetch: true` (a local backend is fetched over localhost
-too). Ask which route the user wants.
+Run this section only when the user's setup request names image generation. Do
+not ask which route to use: choose the local backend when the surveyed hardware
+has a suitable unused GPU; otherwise use an already configured cloud provider.
+If neither route is available, skip it and state the missing requirement in
+**Finish**. `generate_image` appears only when an `image_generation:` block
+exists, and it needs `permissions.net.fetch: true` (a local backend is fetched
+over localhost too). Include all model and server downloads and sizes in the
+one plan summary.
 
-**Cloud (xAI Grok Imagine, billed per image).** The user stores an xAI key with
-**Forge: Set Cloud Provider Token** (`forge.setCloudToken`). You copy the
+**Cloud (xAI Grok Imagine, billed per image).** If the key is not already
+stored, tell the user to run **Forge: Set Cloud Provider Token**
+(`forge.setCloudToken`) in VS Code and enter it there. Wait, then copy the
 `image_generation:` block with the `grok-imagine` backend from
 `config.example.yaml`. Every call asks for approval.
 
 **Local (stable-diffusion.cpp + Qwen-Image-2.1 Turbo, free per image).** Forge
 does not ship the image server or the models; it starts `sd-server` when the
-first image is asked for and stops it after `idle_timeout_ms`. Tested on
-Windows with an RTX 3060 12 GB. It needs **one NVIDIA GPU with about 12 GB the
-chat model is not using**. On a smaller or shared card, tell the user it is
-untested and expect it to fail or to fall back to slow tiling.
+first image is asked for and stops it after `idle_timeout_ms`. It needs **one
+NVIDIA GPU with about 12 GB that the chat model is not using**. If the surveyed
+card does not meet that requirement, choose the configured cloud route or skip
+image setup and explain why.
 
 1. **The server.** The tested build is release `master-929-3f8527a` from
    `https://github.com/leejet/stable-diffusion.cpp/releases/tag/master-929-3f8527a`.
@@ -361,9 +450,7 @@ untested and expect it to fail or to fall back to slow tiling.
      for a 12 GB card, not measured limits. Forge refuses to start the server
      when the card has less free than `min_free_vram_mb` — if a display is
      plugged into that card, read its free VRAM with `nvidia-smi` and set the
-     value about 300 MB lower. On this machine's 12 GB card with the display
-     moved to it, 10300 is what works (2026-10-23: at 11200 a busy desktop
-     refused the render).
+     value about 300 MB lower.
    - Keep `steps: 8`, `cfg_scale: 1.0`, `sampler: euler` and the `--sigmas`
      list in `extra_args`: the Turbo model is trained for exactly that 8-step
      schedule.
@@ -374,34 +461,24 @@ untested and expect it to fail or to fall back to slow tiling.
      retrying with spatial tiling` means these flags are missing; it is slow,
      not broken.
    - `idle_timeout_ms` must be at least `request_timeout_ms + 60000`.
-   - `confirm_on_start: true` asks once before the GPU is occupied;
-     `confirm_each: false` because local images cost nothing.
+   - `confirm_on_start: false` because the one plan confirmation approved this
+     local backend; `confirm_each: false` because local images cost nothing.
 
-**Check:** after **Forge: Validate Config** and a window reload, the user asks
-in the Forge sidebar:
-
-> Generate a landscape image with seed 42: A wide green field in the
-> countryside at sunrise, soft morning mist over the grass, wildflowers in the
-> foreground, a single oak tree on a gentle hill, warm golden light, a dramatic
-> sky full of big white cumulus clouds lit pink and gold by the rising sun,
-> photorealistic landscape photograph
-
-On an RTX 3060 it takes 40-45 s once the model files are in the disk cache,
-and up to ~70 s the very first time; an edit with a reference picture takes
-about 65 s. With the official files it should look like
-[assets/readme/image-sample-green-field.jpg](assets/readme/image-sample-green-field.jpg)
-(the same seed on a different GPU or build gives a similar, not identical,
-picture). If the server fails to start, the user runs **Forge: Show Backend
-Console** (`forge.showBackendConsole`) and pastes the `sd-server` output to you.
-Common causes: CUDA runtime DLLs not next to `sd-server.exe`, a mismatched
-vision file, a wrong `cuda_device`, or too little free VRAM.
+**Check:** verify the config with Step 6. Confirm that the selected server
+binary and every configured model file exist. Do not trigger a billed image
+request as a setup check. If the server fails to start and its details are only
+in VS Code's **Forge - image server** output channel, tell the user to run
+**Forge: Show Backend Console** (`forge.showBackendConsole`) and paste the
+error text.
 
 ## Step 11 — Optional: local video and music generation
 
-Ask whether the user wants to set up local media generation. Skip this step if
-they say no. It is off by default and does not download models.
+Run this section only when the user's setup request names video or music
+generation. Do not ask whether to add it. It is off by default; configure only
+the named engines and include every required download and exact size in the
+single plan summary.
 
-If they say yes:
+When requested:
 
 1. Inspect the available GPUs and free VRAM, then locate the existing ComfyUI
    checkout and Python interpreter, `ffmpeg`/`ffprobe`, LTX-2.5 model files,
@@ -431,23 +508,24 @@ If they say yes:
    [stabilityai/stable-audio-3-medium](https://huggingface.co/stabilityai/stable-audio-3-medium)
    plus its ComfyUI text encoder from
    [Comfy-Org/stable-audio-3](https://huggingface.co/Comfy-Org/stable-audio-3).
-   Check each model's license and required files. Load the shipped
-   `hf-download` skill if the user asks for download help; never start a large
-   download without their explicit request.
+   Check each model's license and required files before the plan confirmation.
+   The user's request names the media section; the one plan confirmation
+   authorizes the listed downloads. Download only files needed for the named
+   engine; use LTX-2.5 for video by default and ACE-Step 1.5 for music unless
+   the user's request names a different engine.
 4. Back up the existing config, then fill only the needed `media:` engine
    entries in `config.yaml`. Set the ComfyUI root, interpreter, model paths,
-   `cuda_devices`, and the output directory. Leave `media.enabled: false`
-   until paths and available hardware have been reviewed with the user.
-5. Ask before turning `media.enabled` on. Then have the user reload VS Code and
-   run **Forge: Check Media Setup** (`forge.checkMediaSetup`). Fix each required
-   missing path it names, then check again. The check reads paths and tool
-   versions; it does not launch a render or measure live GPU memory. Render
-   startup checks the configured free-VRAM threshold. A missing
-   text-to-video still backend or music analyzer is optional when that path is
-   not part of the user's chosen workflow.
+   `cuda_devices`, and the output directory. Enable only the requested engines
+   after checking that their paths and hardware fit the survey. Do not turn on
+   unnamed engines.
+5. Check that required paths and tools exist and report each result. This check
+   reads paths and tool versions; it does not launch a render or measure live
+   GPU memory. Render startup checks the configured free-VRAM threshold. A
+   missing text-to-video still backend or music analyzer is optional when that
+   path is not part of the user's chosen workflow.
 
-**Check:** the user confirms the setup report matches the engines and files they
-chose. For full setup instructions, see [docs/MEDIA.md](docs/MEDIA.md).
+**Check:** confirm the setup report matches the requested engines and files.
+For full setup instructions, see [docs/MEDIA.md](docs/MEDIA.md).
 
 ## Finish
 
@@ -457,5 +535,16 @@ Report to the user:
 - the Check results, pass or fail, with the output;
 - whether the agent note is in `AGENTS.md` and/or `CLAUDE.md` (step 7), and
   that the user's own lines in those files are untouched;
-- what you skipped and why;
-- anything left for them to do.
+- one line per unrequested optional section, each with why it was skipped and
+  how to add it later:
+  - Telegram — not requested; name it to follow Step 8 and enter a bot token.
+  - Web search — not requested; name it to follow Step 9 and enter a Tavily key.
+  - Image generation — not requested; name it to follow Step 10.
+  - Video or music — not requested; name it to follow Step 11.
+- any requested section skipped because a prerequisite was missing;
+- each remaining human action and why: plan confirmation, required login or
+  secret entry (including Telegram authentication), Windows prompt, first
+  reload, the port question when `LOCALAPPDATA` is unset, or a VS Code-only
+  startup error;
+- these owner-only choices, unchanged: `~/.forge/policy.yaml`, **Always in this
+  project**, and Clanker for ordinary chats.

@@ -36,7 +36,7 @@
     ],
     "general": [
       {
-        "file": "src/llm/ForgeInstructionsLoader.ts",
+        "file": "resources/instructions/FORGE.starter.md",
         "anchor": "A plan whose feature writes state that outlives its turn lists every artifact"
       }
     ]
@@ -86,7 +86,7 @@
     ],
     "general": [
       {
-        "file": "src/agentBus/agentMeshNote.ts",
+        "file": "src/agentBus/agentNote.md",
         "anchor": "**Who does what.**"
       },
       {
@@ -110,7 +110,7 @@
     ],
     "general": [
       {
-        "file": "src/agentBus/agentMeshNote.ts",
+        "file": "src/agentBus/agentNote.md",
         "anchor": "**Read before first use:**"
       },
       {
@@ -200,7 +200,7 @@
     "copies": [],
     "general": [
       {
-        "file": "src/agentBus/agentMeshNote.ts",
+        "file": "src/agentBus/agentNote.md",
         "anchor": "Workspace memories are editable files"
       },
       {
@@ -250,7 +250,7 @@
     "copies": [],
     "general": [
       {
-        "file": "src/llm/ForgeInstructionsLoader.ts",
+        "file": "resources/instructions/FORGE.starter.md",
         "anchor": "## Other agents in the same repository"
       },
       {
@@ -268,11 +268,11 @@
     "copies": [],
     "general": [
       {
-        "file": "src/llm/ForgeInstructionsLoader.ts",
+        "file": "resources/instructions/FORGE.starter.md",
         "anchor": "A plan whose feature writes state that outlives its turn lists every artifact"
       },
       {
-        "file": "src/llm/ForgeInstructionsLoader.ts",
+        "file": "resources/instructions/FORGE.starter.md",
         "anchor": "Every plan has acceptance criteria listing the invariants and edge cases"
       }
     ]

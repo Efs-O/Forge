@@ -34,6 +34,8 @@ export interface SessionTabMeta {
   title_source?: TitleSource;
   /** Who started it, when an agent-bus prompt did — the sender name as the bus wrote it. */
   origin_agent?: string;
+  /** Whether the chat has Clanker armed; session sync restores the prompt-box colour. */
+  clanker?: boolean;
   /**
    * The remote chat this conversation is bound to, read from the binding list
    * the eviction gate already consults — not a field of the conversation, and

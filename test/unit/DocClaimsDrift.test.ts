@@ -269,17 +269,14 @@ describe('tool names in model-facing text', () => {
   };
 
   const starterContent = ((): string => {
-    const source = read('src/llm/ForgeInstructionsLoader.ts');
-    const start = source.indexOf('const STARTER_CONTENT = `');
-    expect(start).toBeGreaterThan(-1);
-    return source.slice(start, source.indexOf('`;', start + 10));
+    return read('resources/instructions/FORGE.starter.md');
   })();
 
   const descriptionSources: [string, string][] = toolFiles.map(
     (file) => [file, modelFacingText(read(file))] as [string, string],
   );
   const proseSources: [string, string][] = [
-    ['src/llm/ForgeInstructionsLoader.ts', starterContent],
+    ['resources/instructions/FORGE.starter.md', starterContent],
     ...fs
       .readdirSync(path.join(root, 'config/templates/builtin'))
       .filter((name) => name.endsWith('.njk'))

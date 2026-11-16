@@ -19,6 +19,29 @@ const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
 };
 
 describe('AI_SETUP.md', () => {
+  it('requests one plan confirmation and automates the rest of the chosen setup', () => {
+    const text = doc.replace(/\s+/gu, ' ');
+    expect(doc.match(/Proceed with this setup plan/g)).toHaveLength(1);
+    expect(text).toContain('never ask which sections to add');
+    expect(text).toContain('do not ask the user to choose');
+    expect(text).toContain('every model file and release archive');
+    expect(text).toContain('the selected llama.cpp build');
+    expect(text).toContain('any missing selected CLI and its prerequisites');
+    expect(text).toContain('Never ask the user to install it');
+    expect(text).not.toContain('the user installs the CLI');
+    expect(text).toContain('Stop for the login only');
+    expect(text).toContain('winget install --id Git.Git -e');
+    expect(text).toContain('permissions.agents.delegate');
+    expect(text).toContain('crossSessionInbound');
+    expect(text).toContain('the exact config file path to write');
+    expect(text).toContain('resources/instructions/FORGE.starter.md');
+    expect(text).toContain('`FORGE.md` files are left untouched.');
+    expect(text).toContain('not ask them to run **Forge: Validate Config**');
+    expect(text).toContain('do not ask the user to send one');
+    expect(text).toContain('ControlServerRecord.url');
+    expect(text).toContain('If `LOCALAPPDATA` is unset');
+  });
+
   it('names only commands the extension contributes', () => {
     const contributed = new Set(pkg.contributes.commands.map((c) => c.command));
     // Written as **Title** (`forge.id`); the parentheses keep `forge.sh` out.
@@ -77,8 +100,11 @@ describe('AI_SETUP.md', () => {
     expect(step7).toContain('Git for Windows');
     expect(step7).toContain('winget install --id Git.Git -e');
     expect(step7).toMatch(/LOCALAPPDATA.*Git|per-user/i);
-    // Ask, never install on the user's behalf.
-    expect(step7).toMatch(/ask first[^.]*never install unasked/i);
+    // The plan confirmation authorizes the listed install; only OS prompts
+    // return to the user.
+    expect(step7).toContain('After the confirmation');
+    expect(step7).toContain('stop only for any Windows prompt');
+    expect(step7).not.toMatch(/ask first[^.]*never install unasked/i);
     // The check comes before the run: an agent that runs the example first
     // fails on a machine with no Git and has nothing to tell the user.
     const checkAt = step7.indexOf('git --exec-path');
@@ -106,16 +132,27 @@ describe('AI_SETUP.md', () => {
 });
 
 describe('agentSetupPrompt', () => {
-  it('points the agent at the shipped file and both config locations', () => {
-    const prompt = agentSetupPrompt('/ext', '/global/config.yaml', '/ws/.forge/config.yaml');
-    expect(prompt).toContain(path.join('/ext', 'AI_SETUP.md'));
-    expect(prompt).toContain('/global/config.yaml');
-    expect(prompt).toContain('/ws/.forge/config.yaml');
+  it('pins the entire setup prompt for a workspace config', () => {
+    expect(agentSetupPrompt('/ext', '/global/config.yaml', '/ws/.forge/config.yaml')).toBe(
+      [
+        'Set up the Forge LLM VS Code extension on this machine.',
+        `Follow the instructions in ${path.join('/ext', 'AI_SETUP.md')} step by step.`,
+        'The extension is installed at /ext.',
+        'Forge reads its config from one of: global config: /global/config.yaml; workspace config: /ws/.forge/config.yaml.',
+        "Follow AI_SETUP.md's single confirmation and human-only stops; complete the named setup sections without further questions.",
+      ].join('\n'),
+    );
   });
 
-  it('says so when no workspace is open instead of inventing a path', () => {
-    expect(agentSetupPrompt('/ext', '/global/config.yaml', undefined)).toContain(
-      'no folder is open',
+  it('pins the entire setup prompt when no workspace is open', () => {
+    expect(agentSetupPrompt('/ext', '/global/config.yaml', undefined)).toBe(
+      [
+        'Set up the Forge LLM VS Code extension on this machine.',
+        `Follow the instructions in ${path.join('/ext', 'AI_SETUP.md')} step by step.`,
+        'The extension is installed at /ext.',
+        'Forge reads its config from one of: global config: /global/config.yaml; workspace config: none (no folder is open in VS Code).',
+        "Follow AI_SETUP.md's single confirmation and human-only stops; complete the named setup sections without further questions.",
+      ].join('\n'),
     );
   });
 });

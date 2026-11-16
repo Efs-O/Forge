@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #   forge.sh reply <id> [file]        answer a question Forge is waiting on
-#   forge.sh say <your-name> [--model <name>] [--new] [--unattended] [--to <conversationId>|--to-running] [file]  message Forge (the chat this session last addressed; --to any chat this session is linked to, or an open chat that holds none; --new starts and links a second chat, the first keeps its link; --to-running selects the chat running a turn now; set at most one of --to, --to-running and --new, or the bus refuses the message)
+#   forge.sh say <your-name> [--model <name>] [--new] [--to <conversationId>|--to-running] [file]  message Forge (the chat this session last addressed; --to any chat this session is linked to, or an open chat that holds none; --new starts and links a second chat, the first keeps its link; --to-running selects the chat running a turn now; set at most one of --to, --to-running and --new, or the bus refuses the message)
 #   forge.sh send <your-name> <to> [--to <conversationId>|--to-running] [file]  relay (the verdict wakes the sending Forge chat when it is open), or target a Forge chat when <to> is forge
 #   forge.sh send-file <your-name> --to <conversationId> <workspace-relative-path> [--caption-file <file>]  send a file directly to its Telegram chat (no Forge model turn); --to is required, --caption-file holds the caption (1,024 code points)
 #   forge.sh remote-notify <claude|codex|copilot> <exchangeId> [file]  notify the Telegram chat that opened this exchange
@@ -17,9 +17,9 @@
 #   forge.sh wait <your-name> [minutes]  block until your chat is idle with nothing queued (default 60 min, exit 124 on timeout)
 #   Agent sessions identify themselves from their kind-specific session environment variable.
 #   Every verb that knows your session identity follows that session's link to the Forge window holding it, so a second window being focused does not send your read somewhere else; who reads every live window.
-#   --unattended means nobody is watching: dangerous tools are refused, any other action that needs approval is refused unless its approval key is in approvals.unattended_bus.allow in ~/.forge/policy.yaml (the refusal names the key), only a confirmation with no approval key is approved automatically, ask_user is refused, and a Claude/Codex ask is refused unless jobs.allow_cli_agents is true.
+#   A chat you start with --new runs in Clanker mode: Clanker answers routine approvals and still asks the owner before destructive actions, Forge guard files, skill writes, and a secret read followed by egress.
 #   A say to a busy chat is read at its next tool round; its answer arrives when the turn ends; use steer only to stop the current work.
-#   A say with --unattended, --model or --new needs its own turn, so it waits until the running turn ends.
+#   A say with --model or --new needs its own turn, so it waits until the running turn ends.
 #   A say with --new opens that chat and names it before its first message runs, and the answer carries its conversation id: keep it, because a later --to needs it, and a refusal that names a chat id means that chat is already open and empty.
 # The text comes from the file, or from stdin when no file is given.
 # Written by Forge on every start; edits are overwritten.
@@ -369,14 +369,14 @@ if [ "$VERB" = "send-file" ]; then
   exit 0
 fi
 [ $# -ge 2 ] || usage
-ARG=""; SRC="-"; MODEL=""; NEW_CHAT=""; UNATTENDED=""; CONVERSATION_ID=""; TO_RUNNING=""; ORIGIN_CONVERSATION=""; FORCE=""
+ARG=""; SRC="-"; MODEL=""; NEW_CHAT=""; CONVERSATION_ID=""; TO_RUNNING=""; ORIGIN_CONVERSATION=""; FORCE=""
 if [ "$VERB" = "say" ]; then
   shift
   while [ $# -gt 0 ]; do
     case "$1" in
       --model) [ $# -ge 2 ] || usage; MODEL="$2"; shift 2;;
       --new) NEW_CHAT=true; shift;;
-      --unattended) UNATTENDED=true; shift;;
+      --unattended) echo "forge.sh: --unattended was removed. A chat you start with say --new runs in Clanker mode, which still asks the owner before destructive actions, Forge guard files, skill writes, and a secret read followed by egress." >&2; exit 2;;
       --to) [ $# -ge 2 ] || usage; CONVERSATION_ID="$2"; shift 2;;
       --to-running) TO_RUNNING=true; shift;;
       --*) usage;;
@@ -450,7 +450,7 @@ case "$VERB" in
          case "$CONVERSATION_ID" in ""|*[!A-Za-z0-9._-]*) [ -z "$CONVERSATION_ID" ] || { echo "forge.sh: bad conversation id '$CONVERSATION_ID'" >&2; exit 2; };; esac
          [ -z "$CONVERSATION_ID" ] || [ -z "$TO_RUNNING" ] || usage
          [ -z "$NEW_CHAT" ] || { [ -z "$CONVERSATION_ID" ] && [ -z "$TO_RUNNING" ]; } || usage
-         ROUTE=message; QUERY="from=$ARG$SENDER_QUERY"; [ -n "$MODEL" ] && QUERY="$QUERY&model=$MODEL"; [ -n "$NEW_CHAT" ] && QUERY="$QUERY&new_chat=true"; [ -n "$UNATTENDED" ] && QUERY="$QUERY&unattended=true"; [ -n "$CONVERSATION_ID" ] && QUERY="$QUERY&conversation_id=$CONVERSATION_ID"; [ -n "$TO_RUNNING" ] && QUERY="$QUERY&to_running=true" ;;
+         ROUTE=message; QUERY="from=$ARG$SENDER_QUERY"; [ -n "$MODEL" ] && QUERY="$QUERY&model=$MODEL"; [ -n "$NEW_CHAT" ] && QUERY="$QUERY&new_chat=true"; [ -n "$CONVERSATION_ID" ] && QUERY="$QUERY&conversation_id=$CONVERSATION_ID"; [ -n "$TO_RUNNING" ] && QUERY="$QUERY&to_running=true" ;;
   send)  case "$ARG" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
          case "$CONVERSATION_ID" in ""|*[!A-Za-z0-9._-]*) [ -z "$CONVERSATION_ID" ] || { echo "forge.sh: bad conversation id '$CONVERSATION_ID'" >&2; exit 2; };; esac
          [ -z "$CONVERSATION_ID" ] || [ -z "$TO_RUNNING" ] || usage

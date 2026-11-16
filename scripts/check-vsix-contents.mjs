@@ -36,6 +36,7 @@ const ALLOW_LIST = [
   'resources/media/music_analyze.py',
   'resources/skills/**',
   'resources/tips/CODING_TIPS.md',
+  'resources/instructions/FORGE.starter.md',
 ];
 
 const REQUIRED_VSIX_FILES = [

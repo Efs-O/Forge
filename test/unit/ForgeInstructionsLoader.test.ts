@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import starterContent from '../../resources/instructions/FORGE.starter.md';
 
 vi.mock('vscode', () => ({
   workspace: {
@@ -20,8 +21,26 @@ import {
   ForgeInstructionsLoader,
 } from '../../src/llm/ForgeInstructionsLoader';
 import { MAX_INSTRUCTION_BYTES } from '../../src/llm/forgeInstructionsChain';
+import { AGENT_NOTE_TEMPLATE } from '../../src/agentBus/agentMeshNote';
 
 const roots: string[] = [];
+
+describe('shipped Markdown instruction text', () => {
+  it('matches the original note and starter bytes and the instruction budget', () => {
+    const noteBeforeMove = fs.readFileSync(
+      path.join(__dirname, '../fixtures/instruction-baselines/agentNote.md'),
+      'utf8',
+    );
+    const starterBeforeMove = fs.readFileSync(
+      path.join(__dirname, '../fixtures/instruction-baselines/forgeStarter.md'),
+      'utf8',
+    );
+
+    expect(AGENT_NOTE_TEMPLATE).toBe(noteBeforeMove);
+    expect(starterContent).toBe(starterBeforeMove);
+    expect(starterContent).toContain(MAX_INSTRUCTION_BYTES.toLocaleString('en-US'));
+  });
+});
 
 function makeRoot(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-instructions-'));

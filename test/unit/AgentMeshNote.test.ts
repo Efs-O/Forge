@@ -52,8 +52,8 @@ describe('the agent note body', () => {
     expect(note).toContain('202');
   });
 
-  it('explains unattended messages and busy-chat turn-end behavior', () => {
-    expect(note).toContain('--unattended` means nobody is watching');
+  it('explains Clanker for new chats and busy-chat turn-end behavior', () => {
+    expect(note).toContain('A chat you start with `--new` runs in Clanker');
     expect(note).toContain(
       'A `say` to a busy chat is read at its next tool round; its answer arrives when',
     );

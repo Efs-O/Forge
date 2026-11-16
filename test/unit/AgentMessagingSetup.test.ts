@@ -207,6 +207,8 @@ describe('agent bus conversation targeting', () => {
         recentExchanges: () => [],
         createConversation,
         restoreConversation,
+        setClankerMode: vi.fn(),
+        showConversationNotice: vi.fn(),
         send,
       } as unknown as ForgeHostFacade;
       await expect(submitBusMessage(facade, 'hello', options)).resolves.toEqual({
@@ -296,6 +298,8 @@ describe('a --new without --model uses the configured default', () => {
       }),
       restoreConversation: vi.fn(async () => ({})),
       setConversationModel,
+      setClankerMode: vi.fn(),
+      showConversationNotice: vi.fn(),
       send: vi.fn(async () => ({ kind: 'completed' as const })),
     } as unknown as ForgeHostFacade;
     return { facade, setConversationModel };
@@ -355,6 +359,8 @@ describe('a --new without --model uses the configured default', () => {
         models.set(id, model);
         pinned.push([id, model]);
       }),
+      setClankerMode: vi.fn(),
+      showConversationNotice: vi.fn(),
       send: vi.fn(async () => ({ kind: 'completed' as const })),
     } as unknown as ForgeHostFacade;
     await Promise.all([

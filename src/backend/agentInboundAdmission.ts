@@ -80,6 +80,7 @@ export async function admitInboundMessage(options: {
   // locally, so a worker opened from next door behaves like one opened here.
   if (messageOptions.newChat && deps.openBusChat) {
     const opened = await deps.openBusChat({
+      sender: from,
       ...(messageOptions.model ? { model: messageOptions.model } : {}),
       ...(messageOptions.title ? { title: messageOptions.title } : {}),
     });

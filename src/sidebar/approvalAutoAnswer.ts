@@ -5,7 +5,7 @@
  * STATE — its queue, its timers, its mirrors — while the two standing pre-card
  * answers live where their rules can be read and tested on their own:
  *
- *  - An **unattended run** (a job, an `--unattended` bus turn) has no owner to
+ *  - An **unattended run** (a job, or a bus turn a job relays to a peer chat) has no owner to
  *    click. A keyed call policy did not allow is refused naming the exact line to
  *    add; a taint gate is refused because only the owner can clear a taint; a
  *    dangerous call is refused whatever an automated answer would have said; any

@@ -31,6 +31,14 @@ export function applySessionSync(
   // Keep the visible active id even during a partial tab-list reconciliation,
   // so an undo the reader can still see files for is never stranded.
   const openIds = new Set([...action.tabs.map((tab) => tab.id), action.activeId]);
+  const clankerByConversationId = new Map(state.clankerByConversationId);
+  for (const conversationId of clankerByConversationId.keys()) {
+    if (!openIds.has(conversationId)) clankerByConversationId.delete(conversationId);
+  }
+  for (const tab of action.tabs) {
+    if (tab.clanker) clankerByConversationId.set(tab.id, true);
+    else clankerByConversationId.delete(tab.id);
+  }
   const pending = new Set([...state.checkpointPendingIds].filter((id) => openIds.has(id)));
   // A closed conversation is re-sent if it is shown again; bound this cache to
   // open tabs for the lifetime of the webview.
@@ -51,6 +59,7 @@ export function applySessionSync(
     history: action.history,
     archived: action.archived,
     activeConversationId: action.activeId,
+    clankerByConversationId,
     messagesById,
     syncedIds,
   };

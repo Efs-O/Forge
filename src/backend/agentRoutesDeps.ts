@@ -202,12 +202,13 @@ export interface AgentRoutesDeps {
    */
   chatCapBlockers?: (options?: { activate?: boolean }) => string[];
   /**
-   * `--new`: open, pin and name the chat now, so the 202 can name the chat its
+   * `--new`: open, pin, arm Clanker, and name the chat now, so the 202 can name the chat its
    * message will run in, and a pin that fails can be answered 409 with that
    * chat's id while nothing is queued. Absent ⇒ the chat is opened later, inside
    * `drain()`, and the 202 names nothing.
    */
   openBusChat?: (options: {
+    sender: string;
     model?: string;
     title?: string;
   }) => Promise<{ ok: true; id: string; title: string } | { ok: false; id: string; error: string }>;

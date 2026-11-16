@@ -264,14 +264,14 @@ export function busMessageActivityText(
  * changes the configured default for this new chat.
  */
 
-/** Open, pin and name the chat a bus `--new` runs in, under the prologue lock
- *  `message_chat action=new` shares. One owner for the three sidebar calls so a
+/** Open, pin, arm, announce and name the chat a bus `--new` runs in, under the
+ *  prologue lock `message_chat action=new` shares. One owner for those sidebar calls so a
  *  route that answers a 202 naming that chat and the drain that delivers into it
  *  cannot drift apart — and so a pin that fails can be answered with the id of
  *  the chat it left behind, which a throw loses. */
 export async function openBusChat(
   facade: ForgeHostFacade,
-  options: { model?: string; title?: string } = {},
+  options: { sender: string; model?: string; title?: string },
 ): Promise<{ ok: true; id: string; title: string } | { ok: false; id: string; error: string }> {
   return inNewChatPrologueLock(async () => {
     const created = await facade.createConversation({ activate: true });
@@ -286,6 +286,11 @@ export async function openBusChat(
         };
       }
     }
+    facade.setClankerMode(created.id, true);
+    facade.showConversationNotice(
+      created.id,
+      `Clanker is on: ${options.sender} started this chat over the agent bus. Clanker still asks you before destructive actions, Forge guard files, skill writes, and a secret read followed by egress. Turn it off with /clanker.`,
+    );
     return {
       ok: true as const,
       id: created.id,
@@ -305,9 +310,12 @@ export async function submitBusMessage(
 ): Promise<BusTurnEnd> {
   let conversationId: string;
   if (options?.newChat && !options.targetConversationId) {
+    const sender = options.from;
+    if (!sender) throw new Error('A sender is required to open a new bus chat.');
     // A `--new` whose chat already exists — opened by admission so the 202 could
     // name it — is delivered below, not created twice.
     const opened = await openBusChat(facade, {
+      sender,
       ...(options.model ? { model: options.model } : {}),
       ...(options.title ? { title: options.title } : {}),
     });

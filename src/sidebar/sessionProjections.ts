@@ -271,6 +271,7 @@ export function tabMetasFromSession(
       ...(c.agentLinks !== undefined ? { agentLinks: { ...c.agentLinks } } : {}),
       ...(c.title_source !== undefined ? { title_source: c.title_source } : {}),
       ...(c.origin_agent !== undefined ? { origin_agent: c.origin_agent } : {}),
+      clanker: c.clanker === true,
       active_time_ms: getActiveTimeMs?.(c) ?? c.active_time_ms ?? 0,
       ...(streamingIds?.has(c.id) ? { streaming: true } : {}),
     };

@@ -20,7 +20,7 @@ const extensionConfig = {
   // The agent-bus client script is a real file bundled as text (MESH_RUN_1_FINDINGS F1).
   // The Windows desktop driver is the same: a .ps1 bundled as text, written to a
   // temp file at driver start and spawned with `pwsh -File` (no script-text interpolation).
-  loader: { '.sh': 'text', '.ps1': 'text' },
+  loader: { '.sh': 'text', '.ps1': 'text', '.md': 'text' },
   format: 'cjs',
   platform: 'node',
   target: 'node20',

@@ -127,16 +127,15 @@ describe('shell/core-group refactor guards', () => {
   // `~/.forge/`. The lab reps showed agents reaching for `~/.forge/policy.yaml`
   // to change an approval timeout they had no way to change; the guard refused
   // them correctly, but only after the call. 6,800 leaves 47 bytes above the file.
-  // 2026-11-14, +274 bytes (7,027): the background-shell bullet now states the
-  // whole waiting decision, not just the flag. The supervisor itself slept in
-  // foreground shell calls for four rounds while watching a job that had already
-  // promised to wake it, so the rule names what to do instead (end the turn, or
-  // keep working), when `monitor_execution` is the right call, and that `wait`
-  // is for a pause with nothing running. Cap 7,050 leaves 23 bytes above the file.
-  it('config/templates/builtin/execute.njk is at most 7,050 bytes', () => {
+  // 2026-11-16: compact general rules from the owner's local instructions now
+  // reach every installed prompt. Their enforced tool limits match the schemas;
+  // repository paths, machine details and workflow rules stay local. The cap
+  // leaves a small margin for these measured additions without making prompt
+  // growth free.
+  it('config/templates/builtin/execute.njk is at most 9,700 bytes', () => {
     const file = path.join(root, 'config', 'templates', 'builtin', 'execute.njk');
     const size = fs.statSync(file).size;
-    expect(size, `execute.njk is ${size} bytes; the cap is 7050`).toBeLessThanOrEqual(7050);
+    expect(size, `execute.njk is ${size} bytes; the cap is 9700`).toBeLessThanOrEqual(9700);
   });
 
   it('the dead src/templates/builtin copy is deleted', () => {

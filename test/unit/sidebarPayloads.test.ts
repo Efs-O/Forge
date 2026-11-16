@@ -180,6 +180,15 @@ describe('buildSessionSyncMessage transcript scope', () => {
     expect(msg.history).toHaveLength(1);
   });
 
+  it('carries a saved Clanker flag in tab metadata when the webview missed its live event', () => {
+    const sidebar = session();
+    sidebar.conversations[0]!.clanker = true;
+
+    const msg = buildSessionSyncMessage(sidebar, new Set(), () => 0);
+
+    expect(msg.tabs.find((tab) => tab.id === 'a')?.clanker).toBe(true);
+  });
+
   it('also ships a streaming tab, which has tool rows to reconcile while hidden', () => {
     const msg = buildSessionSyncMessage(session(), new Set(['c']), () => 0) as {
       messagesById: Record<string, unknown>;

@@ -672,7 +672,7 @@ rules. The owner can click **Always in this project** to save a matching rule in
 tool. If the file is locked, Forge says **Unlock policy.yaml** and keeps the rule
 for this chat only. Project policy rules are checked before chat rules and Clanker.
 
-Jobs and `--unattended` agent-bus turns cannot show an approval card or use chat
+Scheduled jobs and the unattended bus turns a job relays to a peer chat cannot show an approval card or use chat
 rules or Clanker. To allow a keyed action there, the owner adds it under
 `approvals.jobs.<job-id>.allow` or `approvals.unattended_bus.allow` in
 `~/.forge/policy.yaml`; a refusal names the exact line, and a rule for a removed
@@ -942,10 +942,10 @@ Enable `control_server.enabled` and `agent_bus.enabled` (setup above).
   send again, or send it without `--new`. `--model <name>` runs this message on
   that model instead of the chat's current one; an unknown name is refused with
   the list of configured models, so read the 400 instead of guessing again.
-  `--unattended` says nobody will answer this turn's approval cards:
-  non-dangerous confirmations are auto-approved, a dangerous tool is refused at
-  once, `ask_user` is refused outright, and an ask to a Claude or Codex
-  session is refused unless `jobs.allow_cli_agents` is on. `send-file` needs
+  A chat started with `--new` runs in Clanker mode: Clanker answers routine
+  approvals and still asks the owner before destructive actions, Forge guard
+  files, skill writes, and a secret read followed by egress. (`--unattended`
+  was removed; the client refuses it.) `send-file` needs
   `--to` and takes an optional `--caption-file` (capped at 1,024 code points).
 - **Agent → agent.** `forge.sh send claude codex` and `forge.sh send codex claude`
   (or either sender to `copilot`) reach only the recipient linked to the
