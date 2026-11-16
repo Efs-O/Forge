@@ -11,7 +11,7 @@ import * as vscode from 'vscode';
 import type { ForgeConfig } from '../config/types';
 import { defaultState, type JobStore } from '../jobs/JobStore';
 import { JOB_SCHEDULE_KINDS, JobSchema, type JobFile } from '../jobs/jobSchema';
-import { resolveJobRef, type JobMatch } from '../jobs/jobRefResolver';
+import { exactJobIdRefusal, resolveJobRef } from '../jobs/jobRefResolver';
 import { jobSlug, uniqueJobId } from '../jobs/jobId';
 import { appendHomeNote } from '../jobs/jobsHome';
 import { nextDue } from '../jobs/schedule';
@@ -120,9 +120,9 @@ export function makeManageJobsTool(deps: ManageJobsDeps): RegisteredTool {
             job: {
               type: 'string',
               description:
-                'The job id or name, fuzzy-matched. Required for every action except `list` and ' +
-                '`create`. An ambiguous match returns the candidates instead of guessing. Never the ' +
-                'job definition: that goes in `definition`.',
+                'The job id, exactly as `list` shows it. Required for every action except `list` ' +
+                'and `create`; `get` also accepts the name or a unique part of it. Never the job ' +
+                'definition: that goes in `definition`.',
             },
             definition: {
               type: 'object',
@@ -190,9 +190,9 @@ export function makeManageJobsTool(deps: ManageJobsDeps): RegisteredTool {
       if (args['action'] !== DELETE_ACTION) return undefined;
       const ref = args['job'];
       if (typeof ref === 'string' && ref.trim()) {
-        const match = await resolveJob(deps, ref);
-        if (match.kind === 'one') {
-          const { id, name } = match.jobFile.job;
+        const exact = (await deps.store.loadAll()).find((jf) => jf.job.id === ref);
+        if (exact) {
+          const { id, name } = exact.job;
           return {
             dangerous: true,
             detail: `Delete job "${name}" (${id}). Its definition, state, and run log are removed.`,
@@ -289,7 +289,13 @@ async function runManageJobs(deps: ManageJobsDeps, args: Record<string, unknown>
   if (typeof ref !== 'string' || !ref.trim()) {
     throw new Error(`manage_jobs: \`job\` (id or name) is required for ${action}.`);
   }
-  const match = await resolveJob(deps, ref);
+  const all = await deps.store.loadAll();
+  if (action !== 'get') {
+    // The Undo copy names the file `job` says, so a change takes the exact id.
+    const refusal = exactJobIdRefusal(all, ref, action);
+    if (refusal) throw new Error(refusal);
+  }
+  const match = resolveJobRef(all, ref);
   if (match.kind === 'none') {
     throw new Error(
       `manage_jobs: no job matches "${ref}". List the jobs with {action:"list"} to see the ids and names.`,
@@ -327,11 +333,6 @@ async function runManageJobs(deps: ManageJobsDeps, args: Record<string, unknown>
     default:
       throw new Error(`manage_jobs: unhandled action "${action}".`);
   }
-}
-
-/** Resolve a job by exact id, exact name, or unique substring (case-insensitive). */
-async function resolveJob(deps: ManageJobsDeps, ref: string): Promise<JobMatch> {
-  return resolveJobRef(await deps.store.loadAll(), ref);
 }
 
 /** One line per job: name, enabled, schedule, last run and outcome, next due. */

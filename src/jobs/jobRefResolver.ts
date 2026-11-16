@@ -32,3 +32,27 @@ export function resolveJobRef(all: readonly JobFile[], ref: string): JobMatch {
   if (partial.length === 1) return { kind: 'one', jobFile: partial[0]! };
   return { kind: 'ambiguous', candidates: partial };
 }
+
+/**
+ * Why `ref` is not a job id, or undefined when a job's id is exactly `ref`.
+ * The agent's job tool changes a job only by its exact id: its Undo copy is
+ * taken from the path that id names, before the job is looked up.
+ */
+export function exactJobIdRefusal(
+  all: readonly JobFile[],
+  ref: string,
+  action: string,
+): string | undefined {
+  if (all.some((jf) => jf.job.id === ref)) return undefined;
+  const match = resolveJobRef(all, ref);
+  const head = `manage_jobs: \`${action}\` needs the exact job id.`;
+  if (match.kind === 'one') {
+    const { id, name } = match.jobFile.job;
+    return `${head} "${ref}" matches "${name}" (${id}). Resend with job: "${id}". Nothing changed.`;
+  }
+  if (match.kind === 'ambiguous') {
+    const names = match.candidates.map((jf) => `${jf.job.name} (${jf.job.id})`).join(', ');
+    return `${head} "${ref}" matches: ${names}. Resend with one of those ids. Nothing changed.`;
+  }
+  return `${head} No job has the id "${ref}". List the jobs with {action:"list"} to see the ids. Nothing changed.`;
+}

@@ -170,7 +170,10 @@ import {
 // so this gate was the thing that found it. Measured again after the dead-code sweep
 // (the test-only exec formatter, MAX_TOOL_RESULT_READ_CHARS, the message_chat advertise
 // gate and the stale-literal pass): none of them touches advertised schema text.
-const MEASURED_CHARS = 68_011;
+// 2026-11-16: 68,005 (-6) after manage_jobs said the `job` argument must be the exact id
+// for a change: the Undo copy names the file that argument gives, so a name or partial
+// match copied a path that does not exist. `get` and Telegram `/job` stay fuzzy.
+const MEASURED_CHARS = 68_005;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.

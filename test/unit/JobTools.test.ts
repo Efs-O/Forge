@@ -96,8 +96,8 @@ describe('manage_jobs — definition and permissions', () => {
       properties: { job: { description: string } };
     };
     expect(schema.properties.job.description).toBe(
-      'The job id or name, fuzzy-matched. Required for every action except `list` and `create`. ' +
-        'An ambiguous match returns the candidates instead of guessing. Never the job definition: ' +
+      'The job id, exactly as `list` shows it. Required for every action except `list` and ' +
+        '`create`; `get` also accepts the name or a unique part of it. Never the job definition: ' +
         'that goes in `definition`.',
     );
   });
@@ -648,10 +648,20 @@ describe('manage_jobs — pause and resume', () => {
 describe('manage_jobs — delete', () => {
   it('keys a resolved job delete using its id and name', async () => {
     await store.saveJob(job());
-    await expect(tool.approval?.({ action: 'delete', job: 'Disk' })).resolves.toEqual({
+    await expect(tool.approval?.({ action: 'delete', job: 'disk' })).resolves.toEqual({
       dangerous: true,
       detail: 'Delete job "Disk" (disk). Its definition, state, and run log are removed.',
       approvalKey: 'job-delete:disk',
+    });
+  });
+
+  // The Undo copy is taken from the path the `job` argument names, so a card
+  // that can be pre-answered must come from an exact id, not a fuzzy match.
+  it('leaves a delete by name unkeyable, since the handler will refuse it', async () => {
+    await store.saveJob(job());
+    await expect(tool.approval?.({ action: 'delete', job: 'Disk' })).resolves.toEqual({
+      dangerous: true,
+      detail: 'Delete job "Disk". Its definition, state, and run log are removed.',
     });
   });
 
@@ -696,6 +706,67 @@ describe('manage_jobs — delete', () => {
     expect(fs.existsSync(path.join(root, 'run_requests', 'disk'))).toBe(true);
     await call({ action: 'delete', job: 'disk' });
     expect(fs.existsSync(path.join(root, 'run_requests', 'disk'))).toBe(false);
+  });
+});
+
+/**
+ * A change is keyed to the exact id: the Undo copy is taken from the path the
+ * `job` argument names, before the job is looked up, so a name or a partial
+ * match would copy a file that does not exist and leave Undo nothing to
+ * restore. `get` keeps the fuzzy match, because it changes nothing.
+ */
+describe('manage_jobs — exact id for changes', () => {
+  async function refusal(args: Record<string, unknown>): Promise<string> {
+    try {
+      await call(args);
+    } catch (error) {
+      return (error as Error).message;
+    }
+    throw new Error(`expected manage_jobs ${String(args['action'])} to refuse`);
+  }
+
+  it('refuses an update by name and leaves the job enabled', async () => {
+    await store.saveJob(job());
+    expect(await refusal({ action: 'update', job: 'Disk', definition: { enabled: false } })).toBe(
+      'manage_jobs: `update` needs the exact job id. "Disk" matches "Disk" (disk). ' +
+        'Resend with job: "disk". Nothing changed.',
+    );
+    expect((await store.load('disk'))?.job.enabled).toBe(true);
+  });
+
+  it('refuses a case-different id, since the copy path is built from the raw argument', async () => {
+    await store.saveJob(job());
+    expect(await refusal({ action: 'pause', job: 'DISK' })).toBe(
+      'manage_jobs: `pause` needs the exact job id. "DISK" matches "Disk" (disk). ' +
+        'Resend with job: "disk". Nothing changed.',
+    );
+    expect((await store.load('disk'))?.job.enabled).toBe(true);
+  });
+
+  it('refuses a pause that matches two jobs, naming both as the store lists them', async () => {
+    await store.saveJob(job({ id: 'llama-a', name: 'Llama A' }));
+    await store.saveJob(job({ id: 'llama-b', name: 'Llama B' }));
+    expect(await refusal({ action: 'pause', job: 'llama' })).toBe(
+      'manage_jobs: `pause` needs the exact job id. "llama" matches: Llama A (llama-a), ' +
+        'Llama B (llama-b). Resend with one of those ids. Nothing changed.',
+    );
+    expect((await store.load('llama-a'))?.job.enabled).toBe(true);
+    expect((await store.load('llama-b'))?.job.enabled).toBe(true);
+  });
+
+  it('refuses a delete with no job of that id and deletes nothing', async () => {
+    await store.saveJob(job());
+    expect(await refusal({ action: 'delete', job: 'missing' })).toBe(
+      'manage_jobs: `delete` needs the exact job id. No job has the id "missing". ' +
+        'List the jobs with {action:"list"} to see the ids. Nothing changed.',
+    );
+    expect((await store.load('disk'))?.job.id).toBe('disk');
+  });
+
+  it('still gets a job by a unique substring, and changes it by the exact id', async () => {
+    await store.saveJob(job());
+    expect(await call({ action: 'get', job: 'dis' })).toContain('Job "Disk" [disk]');
+    expect(await call({ action: 'pause', job: 'disk' })).toContain('Paused job "Disk" [disk]');
   });
 });
 
