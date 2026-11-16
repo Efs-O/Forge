@@ -464,7 +464,7 @@ export function saveSidebarSession(
   session.history = session.history.slice(0, MAX_HISTORY_CONVERSATIONS);
   const inFile = archive?.save(session.history, conversationToPersisted);
   const historyFallback = inFile === true ? [] : session.history.map(conversationToPersisted);
-  return openConversationsPersistenceFor(workspaceState, archive?.openConversations).save(
+  const saved = openConversationsPersistenceFor(workspaceState, archive?.openConversations).save(
     workspaceState,
     session,
     conversationToPersisted,
@@ -475,6 +475,7 @@ export function saveSidebarSession(
   // Keep the pointer in step so it is always the authoritative answer on load,
   // rather than a value that may be older than the blob beside it.
   persistMemento(workspaceState, ACTIVE_ID_KEY, session.activeConversationId);
+  return saved;
 }
 
 /**

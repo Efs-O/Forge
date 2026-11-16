@@ -9,6 +9,7 @@ import { HistoryArchive, HISTORY_ARCHIVE_FILE } from '../../src/sidebar/HistoryA
 import { OPEN_CONVERSATIONS_KEY_V2 } from '../../src/sidebar/openConversationsPersistence';
 import { loadSidebarSession, saveSidebarSession } from '../../src/sidebar/sessionPersistence';
 import {
+  ACTIVE_ID_KEY,
   runtimeToPersisted,
   SESSION_KEY_V1,
   sidebarSessionPersistedSchema,
@@ -494,5 +495,23 @@ describe('open conversations persistence', () => {
     };
     expect(v2.order).toEqual(['open']);
     expect(v2.inline.map((conversation) => conversation.id).sort()).toEqual(['history', 'open']);
+  });
+
+  it('writes the active-chat pointer with the session, and again when it moves', async () => {
+    const directory = tempDirectory();
+    const archive = archiveFor(directory);
+    const current = sidebar([chat('a', 'first'), chat('b', 'second', 2)]);
+    current.activeConversationId = 'b';
+    const store: Record<string, unknown> = {};
+    const memento = makeMemento(store);
+
+    expect(await saveSidebarSession(memento, current, archive)).toBe(true);
+    await settle();
+    expect(memento.get(ACTIVE_ID_KEY)).toBe('b');
+
+    current.activeConversationId = 'c';
+    expect(await saveSidebarSession(memento, current, archive)).toBe(true);
+    await settle();
+    expect(memento.get(ACTIVE_ID_KEY)).toBe('c');
   });
 });
