@@ -431,6 +431,7 @@ overlaps with an existing owner, extend the owner instead.
 | Model starter pass-through: `/<model>/v1/<openai path>` forwarded byte for byte to the port that model is on, target set = `remote: true`, streams aborted on disconnect | `src/backend/ModelStarterPassThrough.ts` |
 | Laptop "Connect to my desktop": the two desktop reads (the relay read shared with "Check connection"), the tailnet picker, one config write that never runs a model, the once-per-window keeping-up notice | `src/vscode/desktopConnect.ts` |
 | What Connect decides: the laptop entry field table, the "already there" rule, the relay groups, the starter/relay address choice, the result message | `src/vscode/desktopConnectPlan.ts` |
+| The one reader of the peer list in `tailscale status --json` (`Peer` object keyed by node key; `DNSName`/`HostName`), shared by Connect and Check connection | `src/vscode/tailscalePeers.ts` |
 | The once-per-laptop-window keeping-up notice: one read, one "Add them", "Not now" remembered for the window only | `src/vscode/desktopKeepingUp.ts` |
 | The laptop's "Check connection": the five-link walk, the first broken link named in plain words, the address choice reused from `RemoteStarterRoute`, nothing started and nothing written | `src/vscode/desktopCheckConnection.ts` |
 | Desktop "Share this computer" and "Stop sharing": the confirmed dialog, the one comment-preserving switch write, the two `serve` changes and the window kinds that do nothing at all | `src/vscode/desktopShare.ts` |
