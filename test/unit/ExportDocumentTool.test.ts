@@ -288,6 +288,7 @@ describe('DOCX image destinations', () => {
   const fixture = new URL('../fixtures/documents/sample.png', import.meta.url);
   beforeAll(() => {
     fs.copyFileSync(fixture, path.join(root, 'my shot.png'));
+    fs.copyFileSync(fixture, path.join(root, 'shot.png'));
   });
 
   const exportDocx = async (markdown: string) => {
@@ -318,6 +319,20 @@ describe('DOCX image destinations', () => {
   it('names a bare destination with a space, which cannot be embedded', async () => {
     const { bytes, omitted } = await exportDocx('![a](my shot.png)\n');
     expect(embedded(bytes)).toBe(false);
+    expect(omitted).toEqual(['my shot.png']);
+  });
+
+  /** The space before a title is not a space in the destination: `shot.png` is
+   * a file the walk reads and embeds, so listing it as omitted as well said the
+   * opposite of what the export did. */
+  it('embeds a titled image and does not also list it as omitted', async () => {
+    const { bytes, omitted } = await exportDocx('![a](shot.png "My title")\n');
+    expect(embedded(bytes)).toBe(true);
+    expect(omitted).toEqual([]);
+  });
+
+  it('names a space in the destination even when a title follows it', async () => {
+    const { omitted } = await exportDocx('![a](my shot.png "t")\n');
     expect(omitted).toEqual(['my shot.png']);
   });
 

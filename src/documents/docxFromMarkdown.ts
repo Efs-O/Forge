@@ -128,8 +128,10 @@ export async function markdownToDocx(
  * so this shape is not embedded. It still has to be named: an image that
  * vanishes from a report with no word about it is the defect the owner
  * reported, and the name is the only thing that says which image was meant.
- * A URL can hold the same shape, and a URL is not a local file to go and find,
- * so it is skipped exactly as `imageRuns` skips it.
+ * Only a space in the destination itself counts: the one before a title is not
+ * such a space, and listing an image that is embedded as well says the opposite
+ * of what happened. A URL can hold the same shape, and a URL is not a local
+ * file to go and find, so it is skipped exactly as `imageRuns` skips it.
  */
 function omitSpaceSeparatedImages(markdown: string, walk: DocxImageWalk): void {
   const names = walk.omittedImages;
@@ -140,7 +142,8 @@ function omitSpaceSeparatedImages(markdown: string, walk: DocxImageWalk): void {
       .trim()
       .replace(/\s+"[^"]*"$/, '')
       .trim();
-    if (!destination || /^[a-z][a-z0-9+.-]*:/i.test(destination)) continue;
+    if (!destination || !/\s/.test(destination)) continue;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(destination)) continue;
     names.push(path.basename(destination) || destination);
   }
 }
