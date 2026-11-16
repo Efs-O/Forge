@@ -39,7 +39,7 @@
 11. a 2nd gated call after one card expired → `... needs the approval that went unanswered earlier in this turn, so no new card was shown` → only the first card burns time
 12. a gated call batched with later gated calls → each raises its own card and waits the full `approval_timeout_minutes`; an expired card silences only that approval key
 13. a heredoc terminator with a command after it (`MSG; echo ok`) → never seen as a terminator: the command text lands in the commit message and never runs. keep it alone on its line
-14. a field name that is not an input name (`next_stdout_cursor` vs `stdout_cursor`; a stray `=` in `=query`) → refused: unknown arguments. the refusal lists the valid names; resend with those
+14. a field name from the tool's own OUTPUT resent as an input (`next_stdout_cursor`, `suggested_next_wait_ms`; a stray `=` in `=query`) → refused: unknown arguments. the refusal lists the valid names; resend with those
 15. an undeclared field → refused as unknown: `edit_file` `edits[]` take `old_str`/`new_str`/`replace_all`; `ask_user` `header` is per-question; `remember` key/value but `recall` takes only `key`; `shell` `command`/`cwd`/`timeout_ms`/`background`/…; `update_plan` items `text`/`status`
 16. `stop_execution` on a background `npm run ci` → the wrapper dies, the child tree lives and holds the ci-lock, so the next run waits forever: `MSYS_NO_PATHCONV=1 taskkill /PID <top> /T /F`
 17. `npm test 2>&1 > run.log` → vitest writes failures to stderr, so they print to the terminal and the file holds only the summary: grep finds no FAIL. write `> run.log 2>&1`
@@ -50,6 +50,7 @@
 22. `node -e "import('N:/x/y.mjs')"` on Windows → `ERR_UNSUPPORTED_ESM_URL_SCHEME ... Received protocol 'n:'`. pass a file URL: `import('file:///N:/x/y.mjs')`
 23. `sed -n '140,185'` → `missing command`: the range alone prints nothing. write `sed -n '140,185p'`
 24. `npx prettier --check .forge/x.ts` → "All matched files use Prettier code style!" while nothing was checked: prettier matches no file in a dot-folder. copy it into `test/unit/`
+25. `monitor_execution` `wait_ms: 90000` → refused: must be within 0 to 60000. the cap is not in the description; the 900 s ceiling belongs to the `wait` tool
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green and the tree stood still: never run `record-ci-pass.mjs` by hand — the `ci:steps` chain writes it
