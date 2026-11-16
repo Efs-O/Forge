@@ -109,6 +109,8 @@ describe('jobs home-window scheduler gate', () => {
 
     await waitForLeaseAttempts(1);
     expect(store.watch).toHaveBeenCalledTimes(1);
+    // watch() closes any earlier watcher first; count only the reload's unwatch.
+    unwatch.mockClear();
     current.current = config(path.resolve('other-workspace'));
     result.onConfigReloaded();
 
