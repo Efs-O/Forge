@@ -184,8 +184,7 @@ export async function runToolCallingLoop(
     // Which shapes of this round's text may become a tool call at all. A round
     // that offered native tools gets no ```json interpretation, so a tool
     // example in an explanation cannot run a real mutation (audit F1).
-    let usedNativeTools = built.usesNativeTools;
-    let forms = textToolCallForms(options.model, usedNativeTools);
+    let forms = textToolCallForms(options.model, built.usesNativeTools);
     let structured = new StructuredOutputStripper(forms);
     let html = new HtmlDocumentBoilerplateStripper();
     const tokenHandler = (token: string): void => {
@@ -276,7 +275,6 @@ export async function runToolCallingLoop(
       options.onNativeFallback?.();
       // The retry carries no native tools and does send the fenced-JSON
       // instructions, so text is now the only channel whatever the model says.
-      usedNativeTools = false;
       forms = textToolCallForms(options.model, false);
       rawAssistant = '';
       rawReasoning = '';
