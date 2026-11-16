@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as vscode from 'vscode';
 import type { ForgeConfig } from '../config/types';
+import { secretKeyNameFor } from '../tools/searchTool';
 
 export function registerSecretCommands(
   context: vscode.ExtensionContext,
@@ -23,10 +24,7 @@ export function registerSecretCommands(
       });
       if (!pick) return;
       const provider = pick.value;
-      const secretKeyName =
-        provider === config.search?.provider && config.search.secret_key_name
-          ? config.search.secret_key_name
-          : `forge.${provider}.apiKey`;
+      const secretKeyName = secretKeyNameFor(provider, config.search);
       if (!config.search) {
         try {
           const existing = fs.readFileSync(configPath, 'utf8');

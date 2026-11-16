@@ -331,8 +331,11 @@ async function readApiKey(
   return apiKey;
 }
 
-function secretKeyNameFor(provider: 'tavily', cfg: SearchConfig): string {
-  return provider === cfg.provider && cfg.secret_key_name
+/** The SecretStorage name a keyed provider's key lives under: the configured
+ *  `secret_key_name` when that provider is the main one, else `forge.<provider>.apiKey`.
+ *  `Forge: Set Search API Key` stores under the same name the search reads. */
+export function secretKeyNameFor(provider: 'tavily', cfg: SearchConfig | undefined): string {
+  return provider === cfg?.provider && cfg.secret_key_name
     ? cfg.secret_key_name
     : `forge.${provider}.apiKey`;
 }
