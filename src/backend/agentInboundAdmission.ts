@@ -43,6 +43,10 @@ export async function admitInboundMessage(options: {
       throw error;
     }
     target = { ok: true, conversationId: routed.conversationId, title: routed.title };
+    // A `--new` from a linked session opened its chat through `resolveInboundAgent`,
+    // which never passes `openBusChat`, so this is where it gets Clanker. Read
+    // `newChat` here: the next block is what clears it.
+    if (messageOptions.newChat) deps.armBusChat?.(routed.conversationId, from);
     const queuedBehindRunningTurn = deps.isChatBusy?.(target.conversationId) ?? false;
     messageOptions = {
       ...messageOptions,

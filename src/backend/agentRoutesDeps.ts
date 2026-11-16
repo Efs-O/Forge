@@ -212,4 +212,8 @@ export interface AgentRoutesDeps {
     model?: string;
     title?: string;
   }) => Promise<{ ok: true; id: string; title: string } | { ok: false; id: string; error: string }>;
+  /** Arm Clanker and announce it for a chat a `--new` opened through the
+   *  agent-link path, which opens the chat in the sidebar and so skips
+   *  `openBusChat` above. */
+  armBusChat?: (conversationId: string, sender: string) => void;
 }

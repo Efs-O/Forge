@@ -40,6 +40,7 @@ import {
   exchangeConversationFromLedger,
   interruptForgeForSender,
   openBusChat,
+  armBusChat,
   resolveBusMessageTarget,
   steerBlockReason,
   stopForgeForSender,
@@ -267,6 +268,9 @@ export function buildAgentRouteDeps(hosts: AgentRouteDepsHosts): AgentRoutesDeps
     // can be answered 409 with that id. Same `openBusChat` the drain calls, so
     // a bus `--new` and a `message_chat new` cannot race each other's pin.
     openBusChat: (options) => openBusChat(getFacade(), options),
+    // A sender's `--new` opens its chat through the agent-link path, not through
+    // `openBusChat` above, so it arms Clanker here.
+    armBusChat: (conversationId, sender) => armBusChat(getFacade(), conversationId, sender),
     who: () => {
       const facade = getFacade();
       const status = facade.status();

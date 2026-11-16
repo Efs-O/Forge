@@ -17,7 +17,7 @@ import type { ForgeHostFacade, ForgeConversationSummary } from '../../src/sideba
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 import { ToolApprovalService } from '../../src/sidebar/ToolApprovalService';
 import { chatClankerRecords } from '../../src/sidebar/chatClanker';
-import { openBusChat, submitBusMessage } from '../../src/vscode/agentBusSubmission';
+import { armBusChat, openBusChat, submitBusMessage } from '../../src/vscode/agentBusSubmission';
 
 function summary(id: string, clanker = false): ForgeConversationSummary {
   return {
@@ -166,5 +166,24 @@ describe('bus-opened Clanker chats', () => {
     expect(state.chats.get('bus-1')?.clanker).toBeUndefined();
     expect(state.facade.setClankerMode).not.toHaveBeenCalled();
     expect(state.notices).toEqual([]);
+  });
+
+  it('arms Clanker and announces it when armBusChat runs on its own', async () => {
+    // A `--new` from a linked session opens its chat through the agent-link path
+    // and calls nothing but this, so the arm and the notice must come from here.
+    const state = fixture();
+    const created = await state.facade.createConversation({ activate: true });
+
+    armBusChat(state.facade, created.id, 'codex');
+
+    expect(state.chats.get(created.id)?.clanker).toBe(true);
+    expect(state.facade.setClankerMode).toHaveBeenCalledWith(created.id, true);
+    expect(state.notices[0]?.id).toBe(created.id);
+    expect(state.notices[0]?.message).toBe(notice('codex'));
+    expect(state.posted).toContainEqual({
+      type: 'clankerChanged',
+      enabled: true,
+      conversationId: created.id,
+    });
   });
 });

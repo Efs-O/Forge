@@ -264,6 +264,17 @@ export function busMessageActivityText(
  * changes the configured default for this new chat.
  */
 
+/** Turn Clanker on for a bus chat and tell that chat why. Its own function so
+ *  the agent-link `--new` path, which opens its chat in the sidebar instead of
+ *  here, arms the same way instead of silently starting with Clanker off. */
+export function armBusChat(facade: ForgeHostFacade, conversationId: string, sender: string): void {
+  facade.setClankerMode(conversationId, true);
+  facade.showConversationNotice(
+    conversationId,
+    `Clanker is on: ${sender} started this chat over the agent bus. Clanker still asks you before destructive actions, Forge guard files, skill writes, and a secret read followed by egress. Turn it off with /clanker.`,
+  );
+}
+
 /** Open, pin, arm, announce and name the chat a bus `--new` runs in, under the
  *  prologue lock `message_chat action=new` shares. One owner for those sidebar calls so a
  *  route that answers a 202 naming that chat and the drain that delivers into it
@@ -286,11 +297,7 @@ export async function openBusChat(
         };
       }
     }
-    facade.setClankerMode(created.id, true);
-    facade.showConversationNotice(
-      created.id,
-      `Clanker is on: ${options.sender} started this chat over the agent bus. Clanker still asks you before destructive actions, Forge guard files, skill writes, and a secret read followed by egress. Turn it off with /clanker.`,
-    );
+    armBusChat(facade, created.id, options.sender);
     return {
       ok: true as const,
       id: created.id,
