@@ -13,6 +13,7 @@ import type { PendingToolCall } from '../pendingToolCalls';
 import type { ThinkingDisplayMode } from '../../../src/sidebar/activityViewSetting';
 import { isScrollUpIntent, nextScrolledUp } from '../scrollFollow';
 import { useTranscriptWindow } from '../useTranscriptWindow';
+import { webviewDiagnostics } from '../WebviewDiagnostics';
 
 interface Props {
   messages: AppMessage[];
@@ -67,15 +68,25 @@ export function MessageList({
   // is already hidden and the value is already gone.
   const savedScrollTop = useRef(0);
   const cancelSettling = useRef<(() => void) | undefined>(undefined);
-  const { rows, visibleMessageCount, hiddenCount, loadEarlier, holdWindow, followTail } =
-    useTranscriptWindow(
-      messages,
-      conversationId,
-      activityView,
-      containerRef,
-      userScrolledUp,
-      cancelSettling,
-    );
+  const {
+    rows,
+    visibleMessageCount,
+    newerCount,
+    hiddenCount,
+    loadEarlier,
+    holdWindow,
+    followTail,
+  } = useTranscriptWindow(
+    messages,
+    conversationId,
+    activityView,
+    containerRef,
+    userScrolledUp,
+    cancelSettling,
+  );
+  const newerCountRef = useRef(newerCount);
+  newerCountRef.current = newerCount;
+  if (active) webviewDiagnostics.recordRendered(visibleMessageCount - newerCount);
 
   // The MutationObserver is installed once; a ref is how its closure reads the
   // current `active` without re-subscribing on every switch.
@@ -169,9 +180,10 @@ export function MessageList({
     const onScroll = () => {
       if (!activeRef.current) return;
       const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-      userScrolledUp.current = nextScrolledUp(userScrolledUp.current, {
-        distFromBottom,
-      });
+      userScrolledUp.current =
+        newerCountRef.current > 0 && distFromBottom <= 1
+          ? true
+          : nextScrolledUp(userScrolledUp.current, { distFromBottom });
       if (
         scrollbarPointer &&
         isScrollUpIntent({ kind: 'scrollbar', delta: el.scrollTop - lastScrollTop }) &&
@@ -183,7 +195,7 @@ export function MessageList({
       lastScrollTop = el.scrollTop;
       savedScrollTop.current = el.scrollTop;
       if (userScrolledUp.current) holdWindow();
-      else if (distFromBottom <= 1) followTail();
+      else if (distFromBottom <= 1 && newerCountRef.current === 0) followTail();
     };
     // An image finishing its load changes the height without a DOM mutation, so
     // the MutationObserver below never sees it. `load` does not bubble; capture.
@@ -373,7 +385,7 @@ export function MessageList({
       tabIndex={0}
     >
       {hiddenCount > 0 && (
-        <button type="button" onClick={loadEarlier}>
+        <button className="transcript-earlier" type="button" onClick={loadEarlier}>
           Load earlier messages ({hiddenCount} earlier)
         </button>
       )}
@@ -420,13 +432,26 @@ export function MessageList({
               {...row.message}
               streaming={
                 streaming &&
-                row.index === visibleMessageCount - 1 &&
+                row.index === visibleMessageCount - newerCount - 1 &&
                 row.message.role === 'assistant'
               }
             />
           )}
         </div>
       ))}
+      {newerCount > 0 && (
+        <button
+          className="transcript-newer"
+          type="button"
+          onClick={() => {
+            followTail();
+            userScrolledUp.current = false;
+            settleToBottom();
+          }}
+        >
+          Show latest messages ({newerCount} newer)
+        </button>
+      )}
       {groupedPending && !pendingInLastGroup && (
         <ActivityGroup items={[]} live pendingCalls={pendingToolCalls} />
       )}

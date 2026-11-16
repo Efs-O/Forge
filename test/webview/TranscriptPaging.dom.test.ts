@@ -23,7 +23,7 @@ const messages = (count: number): AppMessage[] =>
     content: `Reply ${index}`,
   }));
 const rows = () => Array.from(container.querySelectorAll<HTMLElement>('[data-transcript-row]'));
-const earlier = () => container.querySelector<HTMLButtonElement>('.messages-pane > button')!;
+const earlier = () => container.querySelector<HTMLButtonElement>('.transcript-earlier');
 function render(items: AppMessage[], mode: ActivityViewMode = 'full'): void {
   act(() =>
     root.render(
@@ -58,7 +58,7 @@ describe('transcript paging', () => {
     render(items);
     expect(rows()).toHaveLength(100);
     expect(rows()[0]!.dataset.transcriptRow).toBe('m9900');
-    expect(earlier().textContent).toContain('9900 earlier');
+    expect(earlier()!.textContent).toContain('9900 earlier');
     render([...items, { id: 'new', role: 'assistant', content: 'Streaming tail' }]);
     expect(rows()).toHaveLength(100);
     expect(rows()[0]!.dataset.transcriptRow).toBe('m9901');
@@ -68,10 +68,10 @@ describe('transcript paging', () => {
 
   it('reveals every earlier batch in order, including a partial final page', () => {
     render(messages(250));
-    act(() => earlier().click());
+    act(() => earlier()!.click());
     expect(rows()).toHaveLength(200);
     expect(rows()[0]!.dataset.transcriptRow).toBe('m50');
-    act(() => earlier().click());
+    act(() => earlier()!.click());
     expect(rows().map((row) => row.dataset.transcriptRow)).toEqual(messages(250).map((m) => m.id));
     expect(earlier()).toBeNull();
   });
@@ -100,7 +100,7 @@ describe('transcript paging', () => {
     });
     const anchor = rows()[1]!;
     const previous = anchor.getBoundingClientRect().top;
-    act(() => earlier().click());
+    act(() => earlier()!.click());
     expect(anchor.isConnected).toBe(true);
     expect(anchor.getBoundingClientRect().top).toBe(previous);
     const readingTop = top;
@@ -111,6 +111,56 @@ describe('transcript paging', () => {
     act(() => pane.dispatchEvent(new Event('scroll')));
     expect(rows()).toHaveLength(100);
     expect(top).toBe(height()); // jsdom doesn't clamp scrollTop; the browser does.
+  });
+
+  it('caps a held window, reports newer messages, and jumps to the latest tail on request', () => {
+    render(messages(150));
+    const pane = container.querySelector<HTMLElement>('.messages-pane')!;
+    Object.defineProperties(pane, {
+      scrollHeight: { configurable: true, get: () => rows().length * 40 },
+      clientHeight: { configurable: true, get: () => 300 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    });
+    act(() => pane.dispatchEvent(new WheelEvent('wheel', { deltaY: -1 })));
+    const holdCount = rows().length;
+    render(messages(600));
+    expect(rows().length).toBeLessThanOrEqual(300 + holdCount);
+    const newer = container.querySelector<HTMLButtonElement>('.transcript-newer')!;
+    expect(newer.textContent).toBe('Show latest messages (250 newer)');
+    act(() => newer.click());
+    expect(rows()).toHaveLength(100);
+    expect(rows().at(-1)!.dataset.transcriptRow).toBe('m599');
+  });
+
+  it('follows the tail when held without newer messages, but keeps the cap at its bottom', () => {
+    const items = messages(150);
+    render(items);
+    const pane = container.querySelector<HTMLElement>('.messages-pane')!;
+    let top = 0;
+    Object.defineProperties(pane, {
+      scrollTop: { configurable: true, get: () => top, set: (value: number) => { top = value; } },
+      scrollHeight: { configurable: true, get: () => rows().length * 40 },
+      clientHeight: { configurable: true, get: () => 300 },
+    });
+    act(() => pane.dispatchEvent(new WheelEvent('wheel', { deltaY: -1 })));
+    render([...items, { id: 'm150', role: 'assistant', content: 'New tail' }]);
+    expect(container.querySelector('.transcript-newer')).toBeNull();
+    top = pane.scrollHeight - pane.clientHeight;
+    act(() => pane.dispatchEvent(new Event('scroll')));
+    expect(rows()).toHaveLength(100);
+    expect(rows().at(-1)!.dataset.transcriptRow).toBe('m150');
+
+    render(messages(150));
+    act(() => pane.dispatchEvent(new WheelEvent('wheel', { deltaY: -1 })));
+    render(messages(600));
+    const cappedCount = rows().length;
+    expect(container.querySelector('.transcript-newer')?.textContent).toBe(
+      'Show latest messages (250 newer)',
+    );
+    top = pane.scrollHeight - pane.clientHeight;
+    act(() => pane.dispatchEvent(new Event('scroll')));
+    expect(rows()).toHaveLength(cappedCount);
+    expect(container.querySelector('.transcript-newer')).not.toBeNull();
   });
 
   it.each(['full', 'compact', 'grouped'] as const)(
@@ -129,10 +179,10 @@ describe('transcript paging', () => {
       const old = rows()[0]!;
       expect(old.dataset.transcriptRow).toBe('t200');
       expect(earlier().textContent).toContain('200 earlier');
-      act(() => earlier().click());
+      act(() => earlier()!.click());
       expect(old.isConnected).toBe(true);
       expect(earlier().textContent).toContain('100 earlier');
-      act(() => earlier().click());
+      act(() => earlier()!.click());
       expect(earlier()).toBeNull();
       expect(rows().some((row) => row.dataset.transcriptRow === 't0')).toBe(true);
     },
@@ -140,7 +190,7 @@ describe('transcript paging', () => {
 
   it('falls back to the bounded tail when a host reset removes the pinned message', () => {
     render(messages(500));
-    act(() => earlier().click());
+    act(() => earlier()!.click());
     render([{ id: 'reset', role: 'user', content: 'New conversation state' }]);
     expect(rows()).toHaveLength(1);
     expect(rows()[0]!.dataset.transcriptRow).toBe('reset');
@@ -202,7 +252,7 @@ describe('transcript paging', () => {
         ),
       );
     renderTab('a');
-    act(() => earlier().click());
+    act(() => earlier()!.click());
     const old = rows()[0]!;
     expect(rows()).toHaveLength(200);
     renderTab('b');

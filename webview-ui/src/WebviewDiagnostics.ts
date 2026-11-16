@@ -10,6 +10,7 @@ const STREAM_TYPES = new Set<HostToWebview['type']>(['token', 'reasoningToken'])
 interface ViewStateSnapshot {
   activeConversationId: string;
   displayedMessages: number;
+  renderedMessages: number;
   queuedPrompts: number;
   streaming: boolean;
   prefillPending: boolean;
@@ -30,6 +31,7 @@ export class WebviewDiagnostics {
   private state: ViewStateSnapshot = {
     activeConversationId: '',
     displayedMessages: 0,
+    renderedMessages: 0,
     queuedPrompts: 0,
     streaming: false,
     prefillPending: false,
@@ -62,6 +64,10 @@ export class WebviewDiagnostics {
     this.renders += 1;
   }
 
+  recordRendered(count: number): void {
+    this.state.renderedMessages = count;
+  }
+
   recordHostMessage(message: HostToWebview): void {
     this.hostMessages += 1;
     this.messageTypes[message.type] = (this.messageTypes[message.type] ?? 0) + 1;
@@ -77,9 +83,9 @@ export class WebviewDiagnostics {
     this.addBreadcrumb('input:change', undefined, `length=${length}`);
   }
 
-  recordState(state: ViewStateSnapshot): void {
+  recordState(state: Omit<ViewStateSnapshot, 'renderedMessages'>): void {
     if (sameState(this.state, state)) return;
-    this.state = { ...state };
+    this.state = { ...state, renderedMessages: this.state.renderedMessages };
     this.addBreadcrumb(
       'react:state',
       state.activeConversationId,
@@ -120,6 +126,7 @@ export class WebviewDiagnostics {
     > = {},
   ): void {
     try {
+      const usedHeapBytes = heapUsedBytes();
       this.post({
         type: 'webviewDiagnostic',
         instanceId: this.instanceId,
@@ -132,6 +139,7 @@ export class WebviewDiagnostics {
           renders: this.renders,
           inputChanges: this.inputChanges,
           ...this.state,
+          ...(usedHeapBytes === undefined ? {} : { heapUsedBytes: usedHeapBytes }),
         },
         ...extra,
       });
@@ -183,7 +191,7 @@ function messageDetail(message: HostToWebview): string | undefined {
   }
 }
 
-function sameState(a: ViewStateSnapshot, b: ViewStateSnapshot): boolean {
+function sameState(a: ViewStateSnapshot, b: Omit<ViewStateSnapshot, 'renderedMessages'>): boolean {
   return (
     a.activeConversationId === b.activeConversationId &&
     a.displayedMessages === b.displayedMessages &&
@@ -191,6 +199,15 @@ function sameState(a: ViewStateSnapshot, b: ViewStateSnapshot): boolean {
     a.streaming === b.streaming &&
     a.prefillPending === b.prefillPending
   );
+}
+
+interface PerformanceWithMemory extends Performance {
+  memory?: { usedJSHeapSize?: unknown };
+}
+
+function heapUsedBytes(): number | undefined {
+  const used = (performance as PerformanceWithMemory).memory?.usedJSHeapSize;
+  return typeof used === 'number' ? used : undefined;
 }
 
 export const webviewDiagnostics = new WebviewDiagnostics();

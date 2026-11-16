@@ -31,6 +31,8 @@ export interface WebviewDiagnosticSummary {
   inputChanges: number;
   activeConversationId: string;
   displayedMessages: number;
+  renderedMessages: number;
+  heapUsedBytes?: number;
   queuedPrompts: number;
   streaming: boolean;
   prefillPending: boolean;

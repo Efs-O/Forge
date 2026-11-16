@@ -3,6 +3,7 @@ import type { AppMessage } from './messageOps';
 import { toRows, type ActivityViewMode } from './activityRows';
 
 export const TRANSCRIPT_PAGE_SIZE = 100;
+export const TRANSCRIPT_MAX_HELD = 300;
 
 interface Anchor {
   key: string;
@@ -18,21 +19,41 @@ export function useTranscriptWindow(
   userScrolledUp: React.MutableRefObject<boolean>,
   cancelSettling: React.MutableRefObject<(() => void) | undefined>,
 ) {
-  const [windowStart, setWindowStart] = useState<{ conversationId: string; starts: string[] }>();
+  const [windowStart, setWindowStart] = useState<{
+    conversationId: string;
+    starts: string[];
+    ends: string[];
+  }>();
   const pinnedId =
     windowStart?.conversationId === conversationId ? windowStart.starts[0] : undefined;
   const pinnedIndex = pinnedId ? messages.findIndex((message) => message.id === pinnedId) : -1;
   const start =
     pinnedIndex >= 0 ? pinnedIndex : Math.max(0, messages.length - TRANSCRIPT_PAGE_SIZE);
-  const current = useRef({ messages, start, conversationId, pinnedId, windowStart });
-  current.current = { messages, start, conversationId, pinnedId, windowStart };
+  const pinnedEndId =
+    windowStart?.conversationId === conversationId ? windowStart.ends.at(-1) : undefined;
+  const pinnedEndIndex = pinnedEndId
+    ? messages.findIndex((message) => message.id === pinnedEndId)
+    : -1;
+  const heldLimitIndex = Math.min(messages.length - 1, start + TRANSCRIPT_MAX_HELD - 1);
+  const end =
+    pinnedIndex >= 0
+      ? Math.max(pinnedEndIndex >= start ? pinnedEndIndex : start - 1, heldLimitIndex)
+      : messages.length - 1;
+  const renderedEnd = Math.min(messages.length, end + 1);
+  const newerCount = messages.length - renderedEnd;
+  const current = useRef({ messages, start, renderedEnd, conversationId, pinnedId, windowStart });
+  current.current = { messages, start, renderedEnd, conversationId, pinnedId, windowStart };
   const anchor = useRef<Anchor | undefined>(undefined);
   const rows = useMemo(() => {
     // Fold each loaded page separately: prepending must not merge its first
     // group into an existing card and change that card's key/disclosure state.
     const boundaries = pinnedIndex >= 0 ? windowStart!.starts : [];
     const indexes = boundaries.map((id) => messages.findIndex((message) => message.id === id));
-    const starts = [start, ...indexes.filter((index) => index > start), messages.length];
+    const starts = [
+      start,
+      ...indexes.filter((index) => index > start && index < renderedEnd),
+      renderedEnd,
+    ];
     return starts
       .slice(0, -1)
       .flatMap((pageStart, index) =>
@@ -40,14 +61,19 @@ export function useTranscriptWindow(
           row.kind === 'message' ? { ...row, index: row.index + pageStart - start } : row,
         ),
       );
-  }, [messages, start, pinnedIndex, windowStart, activityView]);
+  }, [messages, start, renderedEnd, pinnedIndex, windowStart, activityView]);
 
   // Stable callbacks are used by MessageList's once-installed native listeners.
   const holdWindow = useCallback(() => {
     const view = current.current;
     const firstId = view.messages[view.start]?.id;
     if (firstId && firstId !== view.pinnedId) {
-      setWindowStart({ conversationId: view.conversationId, starts: [firstId] });
+      const lastId = view.messages[view.renderedEnd - 1]?.id;
+      setWindowStart({
+        conversationId: view.conversationId,
+        starts: [firstId],
+        ends: lastId ? [lastId] : [],
+      });
     }
   }, []);
 
@@ -71,7 +97,11 @@ export function useTranscriptWindow(
     const firstId = view.messages[Math.max(0, view.start - TRANSCRIPT_PAGE_SIZE)]!.id;
     const starts =
       view.pinnedId && view.windowStart ? view.windowStart.starts : [view.messages[view.start]!.id];
-    setWindowStart({ conversationId: view.conversationId, starts: [firstId, ...starts] });
+    const ends =
+      view.pinnedId && view.windowStart
+        ? view.windowStart.ends
+        : [view.messages[view.renderedEnd - 1]!.id];
+    setWindowStart({ conversationId: view.conversationId, starts: [firstId, ...starts], ends });
   }, [container, userScrolledUp, cancelSettling]);
 
   useLayoutEffect(() => {
@@ -117,6 +147,7 @@ export function useTranscriptWindow(
   return {
     rows,
     visibleMessageCount: messages.length - start,
+    newerCount,
     hiddenCount: start,
     loadEarlier,
     holdWindow,
