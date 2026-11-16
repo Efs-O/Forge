@@ -2,9 +2,18 @@
 
 ## Unreleased
 
-**The background-job watch tool now says its own 60-second cap.**
+## 0.17.186
 
-- `monitor_execution` told you "Max wait in ms (default 10000)" and left the 60,000 bound in the schema alone, where the reader had already stopped. An agent that asked for a longer wait was refused and lost a round finding out. The range is now in the sentence you read.
+**A desktop click says what it actually did, Office files can be read and printed without opening the app, and a scroll up no longer redraws the whole transcript.**
+
+- `desktop_click` answered `Clicked (left, 1×)` even when the click landed on a label or a control's border and changed nothing. It now reads which control holds keyboard focus before and after, and where the cursor really landed, and reports it: `Keyboard focus did not move (still Edit) — a click on a label or a control's border does not focus a field.`, or `Keyboard focus moved: Edit → ComboBox.`, or `Keyboard focus moved to another control of the same kind`. Two fields in one dialog share a window class, so the tool decides on the focused window handle and only calls the control by its class.
+- `desktop_focus_window` accepts a numeric `window_id`, which is the form its own `desktop_windows` prints. A parameter that allows both a string and a number is now validated against both types instead of neither, so a boolean or an object is still refused.
+- `desktop_capture` now says it approved the window WITHOUT bringing it forward, which is why the next click or keystroke was refused with `target lost focus`.
+- New shipped skill `office-files`: dump a `.docx`/`.xlsx`/`.pptx` showing each paragraph's run count and every look-alike character's codepoint, patch text without breaking the file's XML namespaces, and check what a print queue really proves — plus the rules for driving a window that cost the most to learn.
+- A broken tool-call block no longer ends a run silently: the loop nudges the model once to re-issue the call instead of returning the markup as the answer.
+- Scrolling up in a long chat no longer redraws the entire transcript. The sidebar kept every message of the open chat and re-rendered all of them, which is how a chat of 1h54m reached 1210 full-transcript syncs and a grey screen. It now renders at most 300 messages and offers a `Show latest messages (N newer)` button to jump back to the live end; the webview heartbeat reports how many messages it is holding.
+- Storing a memory no longer re-reads every other memory file three times. `remember` scanned the memory folder to choose filenames, scanned it again to rewrite `MEMORY.md`, and scanned it a third time to fetch the entry back: 32 stores read 1936 files and cost 624 ms, and the cost grows with the memories already stored, not with the ones being written. A store or a forget now scans once.
+- The background-job watch tool says its own 60-second cap. `monitor_execution` told you "Max wait in ms (default 10000)" and left the 60,000 bound in the schema alone, where the reader had already stopped. An agent that asked for a longer wait was refused and lost a round finding out. The range is now in the sentence you read.
 
 ## 0.17.185
 
