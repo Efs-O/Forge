@@ -100,7 +100,7 @@ const ScheduleSchema = z.discriminatedUnion(
 );
 export type Schedule = z.infer<typeof ScheduleSchema>;
 
-/** What a job watches. Exactly one of the five (B.2). */
+/** What a job watches. Exactly one of the six (B.2). */
 export const CheckSchema = z.discriminatedUnion(
   'kind',
   [

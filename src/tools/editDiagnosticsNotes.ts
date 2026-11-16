@@ -14,7 +14,7 @@ import * as vscode from 'vscode';
 import { formatDiagnosticLine } from './lspTools';
 import type { ReportedProblem } from './editDiagnostics';
 
-/** Errors and warnings only: `severity` below this is info or hint. */
+/** Errors and warnings only: a `severity` above this is info or hint (Error 0, Warning 1, Information 2, Hint 3). */
 const REPORTABLE_SEVERITY = 1;
 
 /** The path as the rest of the result names it: workspace-relative when it can be. */

@@ -283,8 +283,6 @@ export function closedChatRefs(status: ForgeHostStatus): ChatRef[] {
     }));
 }
 
-/** How to name one chat: its tab number when it has one, its title alone when it
- *  does not. */
 /** Which chat `view` reads. An open chat always wins: only a reference that
  *  named one chat and matched nothing among the open tabs is tried again
  *  against the closed chats, so a supervisor can read back a worker that closed
@@ -317,6 +315,8 @@ export function resolveViewTarget(
   return { ok: false, refusal: withTabList(`Error: ${open.reason}`) };
 }
 
+/** How to name one chat: its tab number when it has one, its title alone when it
+ *  does not. */
 export function formatChatName(chat: ChatRef): string {
   // A closed chat has no tab number to name it by, so `view`'s header quotes its
   // title alone and `renderChatView` marks the read `closed`.

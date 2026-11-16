@@ -47,10 +47,12 @@ const PermissionsShape = z.object({
       new_chat: z.boolean().default(false),
       steer: z.boolean().default(false),
       /** How many chats one chat may open with `message_chat action=new` in an
-       *  hour. The default is the 2 the tool had while it was hard-coded; raise
-       *  it for a supervisor that dispatches several workers at once. Six is the
-       *  ceiling, because a new chat also counts as an idle wake and six wakes
-       *  an hour is the cap that binds first — a dial above six changes nothing.
+       *  hour: default 100, range 1-100. The counter actually measures a
+       *  30-minute window, not an hour (`MESSAGE_CHAT_WINDOW_MS` in
+       *  `src/tools/messageChatShared.ts`). A lower cap binds first in
+       *  practice: a new chat also counts as an idle wake, and that cap is 20
+       *  per the same window, so a dial above 20 is reachable only while the
+       *  sender's other messages are leaving its wake budget free.
        */
       new_chats_per_hour: z.number().int().min(1).max(100).default(100),
     })

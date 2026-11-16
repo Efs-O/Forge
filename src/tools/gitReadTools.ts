@@ -247,5 +247,3 @@ export function makeGitShowTool(): RegisteredTool {
     },
   };
 }
-
-// ── create_branch ──────────────────────────────────────────────────────────────

@@ -31,7 +31,6 @@ export interface MediaStillDeps {
   /** The other configured backends, named in every refusal. */
   alternatives: readonly string[];
   /** Injectable: the sd-server call itself, so a unit test needs no port or GPU. */
-  /** Injectable: the sd-server call itself, so a unit test needs no port or GPU. */
   renderLocal?: typeof renderLocalVariation;
   signal?: AbortSignal;
 }

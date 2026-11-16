@@ -41,8 +41,6 @@ export interface ApprovedWindow {
 
 export type GateResult = { ok: true } | { ok: false; reason: string };
 
-/** Process names that are never a valid control target (VS Code forks + editors). */
-
 /**
  * The live desktop policy the gate is evaluated under (plan Phase 3 item 2).
  * Supplied by the caller as a getter, never captured once, so revoking the
