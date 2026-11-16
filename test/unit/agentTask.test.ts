@@ -21,6 +21,7 @@ import {
   schedulePeriodMs,
   type AgentTaskDeps,
 } from '../../src/jobs/agentTask';
+import { reportMessage } from '../../src/jobs/agentTaskReport';
 import {
   restartAfterTurn,
   RESTART_CAP_MS,
@@ -229,7 +230,16 @@ describe('canStartNow', () => {
       reason: 'cannot verify shared serving capacity for "strata" while a turn is active',
     });
     expect(
-      canStartNow('strata', null, pool, ['live-chat'], { capacity: 2, inFlight: 1 }, [], ['live-chat'], true),
+      canStartNow(
+        'strata',
+        null,
+        pool,
+        ['live-chat'],
+        { capacity: 2, inFlight: 1 },
+        [],
+        ['live-chat'],
+        true,
+      ),
     ).toMatchObject({ start: true });
   });
 
@@ -256,9 +266,9 @@ describe('canStartNow', () => {
     // about to use is not a reason to wait.
     expect(canStartNow('strata', null, pool, [], undefined, [hold])).toMatchObject({ start: true });
     // A verified shared Strata slot means step 3 unloads nothing at all.
-    expect(
-      canStartNow('qwen', null, pool, [], { capacity: 2, inFlight: 0 }, [hold]),
-    ).toMatchObject({ start: true });
+    expect(canStartNow('qwen', null, pool, [], { capacity: 2, inFlight: 0 }, [hold])).toMatchObject(
+      { start: true },
+    );
   });
 });
 
@@ -339,6 +349,28 @@ describe('parseResult', () => {
   });
 });
 
+// ── reportMessage ────────────────────────────────────────────────────────────
+
+describe('reportMessage', () => {
+  const outcome = (finalText: string) =>
+    ({ kind: 'ok', sentence: 'done', restart: false, finalText }) as AgentTaskOutcome;
+
+  it('carries the whole final text, not a tail that starts mid-word', () => {
+    const body = `Today's build is installed and verified.\n
+${'Detail for the record: digests checked. '.repeat(40)}RESULT: ok — installed`;
+    expect(body.length).toBeGreaterThan(800);
+    const message = reportMessage(outcome(body), 0, 1_500, null);
+    expect(message).toContain("Today's build is installed and verified.");
+    expect(message).toContain('RESULT: ok — installed');
+  });
+
+  it('clips a runaway final text at the head, with a marker', () => {
+    const message = reportMessage(outcome('x'.repeat(6_000)), 0, 1_000, null);
+    expect(message).toContain('…(report clipped)');
+    expect(message.length).toBeLessThan(4_200);
+  });
+});
+
 // ── schedulePeriodMs ─────────────────────────────────────────────────────────
 
 describe('schedulePeriodMs', () => {
@@ -354,10 +386,7 @@ describe('schedulePeriodMs', () => {
   });
 
   it('weekly: gap to next due (at least 60s)', () => {
-    const ms = schedulePeriodMs(
-      { kind: 'weekly', days: ['Mon'], at: '03:00' },
-      now,
-    );
+    const ms = schedulePeriodMs({ kind: 'weekly', days: ['Mon'], at: '03:00' }, now);
     expect(ms).toBeGreaterThanOrEqual(60_000);
   });
 });
@@ -387,7 +416,12 @@ describe('crash recovery (AC7)', () => {
   });
 
   afterEach(async () => {
-    await fs.promises.rm(jobsRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await fs.promises.rm(jobsRoot, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 50,
+    });
   });
 
   it('leftover task_run on start → interrupted outbox item, failed run row, task_run cleared', async () => {
@@ -459,7 +493,7 @@ describe('crash recovery (AC7)', () => {
     }
   });
 
-  it('a non-owner window does not recover the owner window\'s live task', async () => {
+  it("a non-owner window does not recover the owner window's live task", async () => {
     const job = baseJob();
     await store.saveJob(job);
     store.patchState('agent-task', {
@@ -506,7 +540,12 @@ describe('lease takeover while the old window is alive', () => {
   });
 
   afterEach(async () => {
-    await fs.promises.rm(jobsRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await fs.promises.rm(jobsRoot, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 50,
+    });
   });
 
   it('leaves a heartbeating run alone and recovers it once the beats stop', async () => {
@@ -591,7 +630,12 @@ describe('AgentTaskRunner', () => {
   });
 
   afterEach(async () => {
-    await fs.promises.rm(jobsRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await fs.promises.rm(jobsRoot, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 50,
+    });
   });
 
   it('runs a turn, records an ok run row, clears task_run, and delivers the report', async () => {
@@ -659,10 +703,11 @@ describe('AgentTaskRunner', () => {
    * names it first, and an ok run does not mention it.
    */
   it('names the stale window before the symptom in a failed run', async () => {
-    const job = baseJob({ action: { kind: 'agent_task', task: 'switch the binary', report: 'always' } });
+    const job = baseJob({
+      action: { kind: 'agent_task', task: 'switch the binary', report: 'always' },
+    });
     await store.saveJob(job);
-    const notice =
-      'Forge 0.17.87 is installed; this window still runs 0.17.86. Reload the window.';
+    const notice = 'Forge 0.17.87 is installed; this window still runs 0.17.86. Reload the window.';
     host = fakeHost([], { kind: 'failed', error: 'config.yaml validation failed' });
 
     await new AgentTaskRunner(makeDeps({ staleWindow: () => notice })).run(
@@ -681,8 +726,7 @@ describe('AgentTaskRunner', () => {
   it('leaves a successful run alone when the window is stale', async () => {
     const job = baseJob({ action: { kind: 'agent_task', task: 't', report: 'always' } });
     await store.saveJob(job);
-    const notice =
-      'Forge 0.17.87 is installed; this window still runs 0.17.86. Reload the window.';
+    const notice = 'Forge 0.17.87 is installed; this window still runs 0.17.86. Reload the window.';
 
     await new AgentTaskRunner(makeDeps({ staleWindow: () => notice })).run(
       { job, state: JobStateSchema.parse({}) },
@@ -829,27 +873,54 @@ describe('AgentTaskRunner', () => {
     Object.assign(host, {
       status: () => ({
         ...originalStatus(),
-        conversations: [{
-          ...fakeConversation('active-user'),
-          updatedAt: Date.parse('2026-01-01T02:59:59'),
-        }],
+        conversations: [
+          {
+            ...fakeConversation('active-user'),
+            updatedAt: Date.parse('2026-01-01T02:59:59'),
+          },
+        ],
       }),
     });
-    const probe = vi.fn(async () => [{
-      index: 0, name: 'GPU', memoryUsedMb: 14742, memoryTotalMb: 16000,
-      utilizationPercent: 95, temperatureC: 40,
-    }]);
-    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
-      service: 'strata', model: 'iq2_xs', loaded: true,
-      concurrency: { serving: 2 }, activity: { in_flight: 1 },
-    }), { status: 200 })));
+    const probe = vi.fn(async () => [
+      {
+        index: 0,
+        name: 'GPU',
+        memoryUsedMb: 14742,
+        memoryTotalMb: 16000,
+        utilizationPercent: 95,
+        temperatureC: 40,
+      },
+    ]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            service: 'strata',
+            model: 'iq2_xs',
+            loaded: true,
+            concurrency: { serving: 2 },
+            activity: { in_flight: 1 },
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
     try {
       const deps = makeDeps({
         gpuGate: {
-          config: () => ({ gpus: [0], max_util_percent: 25, max_idle_vram_mb: 2048, sample_seconds: 15 }),
+          config: () => ({
+            gpus: [0],
+            max_util_percent: 25,
+            max_idle_vram_mb: 2048,
+            sample_seconds: 15,
+          }),
           model: () => ({
-            name: 'strata', provider: 'openai-compatible', endpoint: 'http://127.0.0.1:8092',
-            model: 'iq2_xs', unload_path: '/unload',
+            name: 'strata',
+            provider: 'openai-compatible',
+            endpoint: 'http://127.0.0.1:8092',
+            model: 'iq2_xs',
+            unload_path: '/unload',
           }),
           loadedModels: () => [],
           probe,
@@ -1145,9 +1216,11 @@ describe('AgentTaskRunner', () => {
       let resolveSend: (o: ForgeRequestOutcome) => void = () => undefined;
       host = {
         ...fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — retried' }),
-        send: vi.fn().mockImplementation(
-          () => new Promise<ForgeRequestOutcome>((resolve) => (resolveSend = resolve)),
-        ),
+        send: vi
+          .fn()
+          .mockImplementation(
+            () => new Promise<ForgeRequestOutcome>((resolve) => (resolveSend = resolve)),
+          ),
       } as unknown as ForgeHostFacade;
       nowMs += 1_000;
       await scheduler.tick();
@@ -1183,9 +1256,11 @@ describe('AgentTaskRunner', () => {
     let resolveSend: (o: ForgeRequestOutcome) => void = () => undefined;
     host = {
       ...fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — done' }),
-      send: vi.fn().mockImplementation(
-        () => new Promise<ForgeRequestOutcome>((resolve) => (resolveSend = resolve)),
-      ),
+      send: vi
+        .fn()
+        .mockImplementation(
+          () => new Promise<ForgeRequestOutcome>((resolve) => (resolveSend = resolve)),
+        ),
     } as unknown as ForgeHostFacade;
     const scheduler = new JobScheduler({
       store,
@@ -1343,7 +1418,12 @@ describe('AgentTaskRunner', () => {
 
   it('max_minutes cap cancels the turn and records a timeout', async () => {
     const job = baseJob({
-      action: { kind: 'agent_task', task: 'install', max_minutes: 1, report: 'failures_and_changes' },
+      action: {
+        kind: 'agent_task',
+        task: 'install',
+        max_minutes: 1,
+        report: 'failures_and_changes',
+      },
     });
     await store.saveJob(job);
     // The send stays pending until the cap fires and cancels it; cancel
@@ -1376,7 +1456,14 @@ describe('AgentTaskRunner', () => {
   });
 
   it('normal completion cancels the cap without waiting for its sleep', async () => {
-    const job = baseJob({ action: { kind: 'agent_task', task: 'install', max_minutes: 1, report: 'failures_and_changes' } });
+    const job = baseJob({
+      action: {
+        kind: 'agent_task',
+        task: 'install',
+        max_minutes: 1,
+        report: 'failures_and_changes',
+      },
+    });
     await store.saveJob(job);
     let aborted = false;
     host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — done' });
@@ -1401,7 +1488,14 @@ describe('AgentTaskRunner', () => {
   });
 
   it('waits for an already-fired cap cancellation to settle', async () => {
-    const job = baseJob({ action: { kind: 'agent_task', task: 'install', max_minutes: 1, report: 'failures_and_changes' } });
+    const job = baseJob({
+      action: {
+        kind: 'agent_task',
+        task: 'install',
+        max_minutes: 1,
+        report: 'failures_and_changes',
+      },
+    });
     await store.saveJob(job);
     let resolveSend: (o: ForgeRequestOutcome) => void = () => undefined;
     let resolveCancel: () => void = () => undefined;
@@ -1448,7 +1542,12 @@ describe('openDiscussChat refusal (AC12)', () => {
   });
 
   afterEach(async () => {
-    await fs.promises.rm(jobsRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await fs.promises.rm(jobsRoot, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 50,
+    });
   });
 
   it('refuses while task_run is set and sends nothing', async () => {
@@ -1498,7 +1597,10 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
   }
   it('restarts on RESTART: yes AND RESULT: ok and keeps the ok outcome', async () => {
     const ok = outcomeOf('RESULT: ok — installed b1234\nRESTART: yes');
-    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
+    const host = fakeHost([], {
+      kind: 'completed',
+      finalText: 'RESULT: ok — installed b1234\nRESTART: yes',
+    });
     const out = await restartAfterTurn({ ...restartDeps(), host }, 'qwen', ok);
     expect(out.kind).toBe('ok');
     expect(host.restartModel).toHaveBeenCalledWith('qwen');
@@ -1522,8 +1624,15 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
 
   it('notes the new binary takes effect on next load when no model is loaded', async () => {
     const ok = outcomeOf('RESULT: ok — installed b1234\nRESTART: yes');
-    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
-    const out = await restartAfterTurn({ ...restartDeps(), host, pool: fakePool([], 1) }, 'qwen', ok);
+    const host = fakeHost([], {
+      kind: 'completed',
+      finalText: 'RESULT: ok — installed b1234\nRESTART: yes',
+    });
+    const out = await restartAfterTurn(
+      { ...restartDeps(), host, pool: fakePool([], 1) },
+      'qwen',
+      ok,
+    );
     expect(out.kind).toBe('ok');
     expect(out.sentence).toContain('no model loaded');
     expect(host.restartModel).not.toHaveBeenCalled();
@@ -1535,7 +1644,10 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
     const configPath = path.join(dir, 'config.yaml');
     await fs.promises.writeFile(backupPath, 'llama_server:\n  binary: /old/binary\n');
     await fs.promises.writeFile(configPath, 'llama_server:\n  binary: /new/binary\n');
-    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
+    const host = fakeHost([], {
+      kind: 'completed',
+      finalText: 'RESULT: ok — installed b1234\nRESTART: yes',
+    });
     let calls = 0;
     host.restartModel = vi.fn().mockImplementation(async () => {
       calls++;
@@ -1562,7 +1674,10 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
     const configPath = path.join(dir, 'config.yaml');
     await fs.promises.writeFile(backupPath, 'llama_server:\n  binary: /old/binary\n');
     await fs.promises.writeFile(configPath, 'llama_server:\n  binary: /new/binary\n');
-    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
+    const host = fakeHost([], {
+      kind: 'completed',
+      finalText: 'RESULT: ok — installed b1234\nRESTART: yes',
+    });
     host.restartModel = vi.fn().mockRejectedValue(new Error('no binary works'));
     const out = await restartAfterTurn(
       { ...restartDeps(), host, backupPath, configPath },
@@ -1584,7 +1699,10 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
     const configPath = path.join(dir, 'config.yaml');
     await fs.promises.writeFile(backupPath, 'llama_server:\n  binary: /old/binary\n');
     await fs.promises.writeFile(configPath, 'llama_server:\n  binary: /new/binary\n');
-    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
+    const host = fakeHost([], {
+      kind: 'completed',
+      finalText: 'RESULT: ok — installed b1234\nRESTART: yes',
+    });
     let calls = 0;
     host.restartModel = vi.fn().mockImplementation(() => {
       calls++;
@@ -1597,10 +1715,14 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
       new Promise<void>((resolve, reject) => {
         if (signal?.aborted) return reject(new Error('aborted'));
         const t = setTimeout(resolve, 50);
-        signal?.addEventListener('abort', () => {
-          clearTimeout(t);
-          reject(new Error('aborted'));
-        }, { once: true });
+        signal?.addEventListener(
+          'abort',
+          () => {
+            clearTimeout(t);
+            reject(new Error('aborted'));
+          },
+          { once: true },
+        );
       });
     const out = await restartAfterTurn(
       { ...restartDeps(), host, backupPath, configPath, sleep },
@@ -1623,7 +1745,10 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
     const configPath = path.join(dir, 'config.yaml');
     await fs.promises.writeFile(backupPath, 'llama_server:\n  binary: /old/binary\n');
     await fs.promises.writeFile(configPath, 'llama_server:\n  binary: /new/binary\n');
-    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
+    const host = fakeHost([], {
+      kind: 'completed',
+      finalText: 'RESULT: ok — installed b1234\nRESTART: yes',
+    });
     const order: string[] = [];
     let calls = 0;
     host.restartModel = vi.fn().mockImplementation(async () => {
@@ -1639,10 +1764,14 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
     const sleep = (ms: number, signal?: AbortSignal) =>
       new Promise<void>((resolve, reject) => {
         const t = setTimeout(resolve, ms === RESTART_CAP_MS ? 50 : 500);
-        signal?.addEventListener('abort', () => {
-          clearTimeout(t);
-          reject(new Error('aborted'));
-        }, { once: true });
+        signal?.addEventListener(
+          'abort',
+          () => {
+            clearTimeout(t);
+            reject(new Error('aborted'));
+          },
+          { once: true },
+        );
       });
     const out = await restartAfterTurn(
       { ...restartDeps(), host, backupPath, configPath, sleep },
@@ -1659,7 +1788,10 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
     const configPath = path.join(dir, 'config.yaml');
     await fs.promises.writeFile(backupPath, 'llama_server:\n  binary: /old/binary\n');
     await fs.promises.writeFile(configPath, 'llama_server:\n  binary: /new/binary\n');
-    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
+    const host = fakeHost([], {
+      kind: 'completed',
+      finalText: 'RESULT: ok — installed b1234\nRESTART: yes',
+    });
     // Synchronous throw (not a rejected promise) on the first restart: the
     // "never throws" contract must still hold, and the rollback still runs.
     // Call 2 returns a real promise (a conforming restartModel is async).
@@ -1685,13 +1817,20 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
     const sleep = (ms: number, signal?: AbortSignal) =>
       new Promise<void>((resolve, reject) => {
         const t = setTimeout(resolve, ms);
-        signal?.addEventListener('abort', () => {
-          aborted = true;
-          clearTimeout(t);
-          reject(new Error('aborted'));
-        }, { once: true });
+        signal?.addEventListener(
+          'abort',
+          () => {
+            aborted = true;
+            clearTimeout(t);
+            reject(new Error('aborted'));
+          },
+          { once: true },
+        );
       });
-    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
+    const host = fakeHost([], {
+      kind: 'completed',
+      finalText: 'RESULT: ok — installed b1234\nRESTART: yes',
+    });
     await restartAfterTurn({ ...restartDeps(), host, sleep }, 'qwen', ok);
     expect(host.restartModel).toHaveBeenCalledTimes(1);
     expect(aborted).toBe(true);
@@ -1701,7 +1840,10 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
     const ok = outcomeOf('RESULT: ok — installed b1234\nRESTART: yes');
     const configPath = path.join(dir, 'config.yaml');
     await fs.promises.writeFile(configPath, 'llama_server:\n  binary: /new/binary\n');
-    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
+    const host = fakeHost([], {
+      kind: 'completed',
+      finalText: 'RESULT: ok — installed b1234\nRESTART: yes',
+    });
     let calls = 0;
     host.restartModel = vi.fn().mockImplementation(async () => {
       calls++;
@@ -1724,7 +1866,10 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
     const ok = outcomeOf('RESULT: ok — installed b1234\nRESTART: yes');
     const backupPath = path.join(dir, 'config.bak');
     await fs.promises.writeFile(backupPath, 'llama_server:\n  binary: /old/binary\n');
-    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
+    const host = fakeHost([], {
+      kind: 'completed',
+      finalText: 'RESULT: ok — installed b1234\nRESTART: yes',
+    });
     let calls = 0;
     host.restartModel = vi.fn().mockImplementation(async () => {
       calls++;
@@ -1744,7 +1889,10 @@ describe('restartAfterTurn (step 7, phase 4)', () => {
     const ok = outcomeOf('RESULT: ok — installed b1234\nRESTART: yes');
     const configPath = path.join(dir, 'config.yaml');
     await fs.promises.writeFile(configPath, 'llama_server:\n  binary: /new/binary\n');
-    const host = fakeHost([], { kind: 'completed', finalText: 'RESULT: ok — installed b1234\nRESTART: yes' });
+    const host = fakeHost([], {
+      kind: 'completed',
+      finalText: 'RESULT: ok — installed b1234\nRESTART: yes',
+    });
     host.restartModel = vi.fn().mockRejectedValue(new Error('no binary works'));
     const out = await restartAfterTurn(
       { ...restartDeps(), host, backupPath: undefined, configPath },

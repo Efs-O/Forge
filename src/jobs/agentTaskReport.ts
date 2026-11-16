@@ -62,6 +62,17 @@ export function outcomeOf(
   };
 }
 
+/**
+ * How much of the turn's final text the report carries. The whole text, not a
+ * tail: the model writes the findings first and the `RESULT:` boilerplate
+ * last, so a tail cut dropped the body and started the message mid-word
+ * (seen 2026-11-16 on llama-updates and strata-engine update, both ~1.3k).
+ * The ceiling is generous because the Telegram transport splits what it
+ * cannot fit into follow-on messages; the old 800-char tail was protecting
+ * nothing.
+ */
+const REPORT_BODY_CHARS = 4_000;
+
 /** Build the human report for a finished agent-task run. */
 export function reportMessage(
   outcome: AgentTaskOutcome,
@@ -69,13 +80,16 @@ export function reportMessage(
   durationMs: number,
   conversationId: string | null,
 ): string {
-  const tail = outcome.finalText.slice(-800);
+  const body =
+    outcome.finalText.length > REPORT_BODY_CHARS
+      ? `${outcome.finalText.slice(0, REPORT_BODY_CHARS).trimEnd()}\n…(report clipped)`
+      : outcome.finalText;
   return (
     `Date/time (Europe/Athens, 24-hour): ${formatAthensDateTime(startedAt)}\n` +
     `${outcome.kind}: ${outcome.sentence} ` +
     `(${formatDuration(durationMs)})` +
     (conversationId ? ` — conversation ${conversationId}` : '') +
-    (tail ? `\n\n${tail}` : '')
+    (body ? `\n\n${body}` : '')
   );
 }
 
