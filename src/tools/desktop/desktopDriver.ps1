@@ -524,7 +524,7 @@ function Test-KeyboardFocus([IntPtr]$target) {
   if (($gi.flags -band 0x4) -ne 0) { return @{ ok = $false; reason = 'target is in menu mode: press Escape, then retry' } }
   $sb = New-Object System.Text.StringBuilder 128
   [void][Forge.Win32]::GetClassName($gi.hwndFocus, $sb, 128)
-  return @{ ok = $true; focusClass = $sb.ToString() }
+  return @{ ok = $true; focusClass = $sb.ToString(); focusHwnd = "$($gi.hwndFocus.ToInt64())" }
 }
 function Get-Exp($req) {
   return @{ hwnd = "$($req.expected_hwnd)"; pid = [int]$req.expected_pid; start_time = [long]$req.expected_start_time }
@@ -615,6 +615,11 @@ function Invoke-Op($req) {
           $clicks = if ($req.clicks) { [int]$req.clicks } else { 1 }
           $chk2 = Test-Target $exp.hwnd $exp.pid $exp.start_time @{ x = $req.x; y = $req.y }
           if (-not $chk2.ok) { return $chk2 }
+          # A click that lands on a label, a border or stale coordinates changes
+          # nothing, and this op used to report ok either way. Read the focused
+          # control before and after, and where the cursor really landed, so the
+          # tool can say what the click did instead of claiming it did something.
+          $focusBefore = Test-KeyboardFocus ([IntPtr]$exp.hwnd)
           Send-AbsoluteMove $req.x $req.y
           for ($i = 0; $i -lt $clicks; $i++) {
             Send-Button $true $btn
@@ -622,7 +627,26 @@ function Invoke-Op($req) {
             Send-Button $false $btn
             if ($i -lt ($clicks - 1)) { Start-Sleep -Milliseconds 40 }
           }
-          return @{ ok = $true } + $fg
+          # The app applies focus asynchronously; without this the reply can
+          # report the pre-click control as the post-click one.
+          Start-Sleep -Milliseconds 50
+          $focusAfter = Test-KeyboardFocus ([IntPtr]$exp.hwnd)
+          $cursor = New-Object Forge.POINT
+          # The HWND is the identity; the class is only what to call it. Word's
+          # "Find what" and "Replace with" are both Edit controls, so class alone
+          # cannot tell a moved caret from a click that did nothing.
+          $reply = @{ ok = $true
+            focus_before = $focusBefore.focusClass
+            focus_after = $focusAfter.focusClass
+            focus_before_hwnd = $focusBefore.focusHwnd
+            focus_after_hwnd = $focusAfter.focusHwnd
+            focus_reason = $focusAfter.reason }
+          # A failed read must stay absent, not become (0,0): a zero would tell the
+          # model its capture is stale when the truth is that nothing could be read.
+          if ([Forge.Win32]::GetCursorPos([ref]$cursor)) {
+            $reply.cursor_x = [int]$cursor.x; $reply.cursor_y = [int]$cursor.y
+          }
+          $reply + $fg
         }
         'drag' {
           $chkFrom = Test-Target $exp.hwnd $exp.pid $exp.start_time @{ x = $req.from_x; y = $req.from_y }

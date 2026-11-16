@@ -13,8 +13,8 @@
  * So each reader here returns a validated value or throws a named error, and the
  * caller never has to know which field was missing.
  */
-import type { CaptureFrame } from './coordinateTransform';
-import type { DesktopWindow } from './DesktopDriver';
+import type { CaptureFrame, PhysicalPoint } from './coordinateTransform';
+import type { DesktopClickResult, DesktopFocusTarget, DesktopWindow } from './DesktopDriver';
 
 /** Optional/absent-tolerant reads for fields that genuinely may be missing. */
 export const num = (v: unknown): number => (typeof v === 'number' ? v : 0);
@@ -138,4 +138,59 @@ export function readMonitorMetadata(
   }
   if (device === '') throw bad('monitor_device is empty');
   return { index, count, device };
+}
+
+/**
+ * The identity block every input op carries: the approved window's HWND, pid and
+ * process start time. The driver re-checks all three at SendInput time, so a
+ * pid that was reused while the model was deciding gets refused rather than hit.
+ */
+export function identityFields(approved: {
+  hwnd: string;
+  pid: number;
+  processStartTime?: number;
+}): Record<string, unknown> {
+  return {
+    expected_hwnd: approved.hwnd,
+    expected_pid: approved.pid,
+    expected_start_time: approved.processStartTime ?? 0,
+  };
+}
+
+/** How a focus target is named on the wire: by title, or by HWND. */
+export function targetFieldsFor(target: DesktopFocusTarget): Record<string, string> {
+  return target.kind === 'window' ? { title: target.title } : { window_id: target.id };
+}
+
+/**
+ * Read the click op's reply: what keyboard focus did, and where the cursor
+ * really landed. Both are reported, never assumed — a click that lands on a
+ * label or a control's border changes nothing, and the tool used to say
+ * `Clicked` as if it had. Absent fields stay absent rather than becoming a
+ * confident `''`: the tool text says it could not read focus.
+ */
+export function readClickResult(
+  r: Record<string, unknown>,
+  aimed: PhysicalPoint,
+): DesktopClickResult {
+  const cursorX = optNum(r['cursor_x']);
+  const cursorY = optNum(r['cursor_y']);
+  const reason = r['focus_reason'];
+  const beforeHwnd = str(r['focus_before_hwnd']);
+  const afterHwnd = str(r['focus_after_hwnd']);
+  const cursor =
+    cursorX !== undefined && cursorY !== undefined ? { x: cursorX, y: cursorY } : undefined;
+  return {
+    focusBefore: str(r['focus_before']),
+    focusAfter: str(r['focus_after']),
+    ...(beforeHwnd ? { focusBeforeHwnd: beforeHwnd } : {}),
+    ...(afterHwnd ? { focusAfterHwnd: afterHwnd } : {}),
+    ...(typeof reason === 'string' && reason ? { focusReason: reason } : {}),
+    ...(cursor ? { cursor } : {}),
+    // ±2 px: the driver normalises the aim to 65535ths of the virtual desktop,
+    // which rounds, so a correct click can land a pixel off its aim.
+    ...(cursor
+      ? { cursorOk: Math.abs(cursor.x - aimed.x) <= 2 && Math.abs(cursor.y - aimed.y) <= 2 }
+      : {}),
+  };
 }

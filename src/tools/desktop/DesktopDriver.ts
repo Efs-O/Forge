@@ -165,6 +165,34 @@ export interface DesktopClickOptions {
   clicks?: number;
 }
 
+/**
+ * What a click actually did. A click is only honest when the tool can say what
+ * it changed: a click on a label, a border or a stale coordinate lands inside
+ * the window and moves nothing, and the tool used to report `Clicked` anyway
+ * (measured 2026-11-16 on Word 2010's Find and Replace: the caret stayed in the
+ * field above, so the next `desktop_type` appended there). Keyboard focus before
+ * and after, plus where the cursor really landed, are the only proof available.
+ */
+export interface DesktopClickResult {
+  /** The focused control's window class before the click ('' when unreadable). */
+  focusBefore: string;
+  /** The focused control's window class after the click ('' when unreadable). */
+  focusAfter: string;
+  /**
+   * Which control held focus, by HWND — the only reliable identity, because two
+   * fields in one dialog share a class (Word's "Find what" and "Replace with"
+   * are both `Edit`). Absent when the driver could not read it.
+   */
+  focusBeforeHwnd?: string;
+  focusAfterHwnd?: string;
+  /** Why focus could not be read after the click, when it could not. */
+  focusReason?: string;
+  /** Where the cursor really is, in physical pixels (absent when unreadable). */
+  cursor?: DesktopPoint;
+  /** False when the cursor is more than 2 px from the point the click aimed at. */
+  cursorOk?: boolean;
+}
+
 export interface DesktopDriver {
   /**
    * List top-level windows, plus any the driver reported but this layer refused
@@ -203,7 +231,7 @@ export interface DesktopDriver {
     opts: DesktopClickOptions,
     captureId: string,
     coordSpace?: CoordSpace,
-  ): Promise<void>;
+  ): Promise<DesktopClickResult>;
   drag(
     from: DesktopPoint,
     to: DesktopPoint,

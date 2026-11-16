@@ -336,6 +336,18 @@ export class ToolRegistry {
           return `Error: ${name}: "${key}" must be within ${numericRangeText(schema)}. Resend it in that range.`;
         }
       }
+      // A union type (e.g. ["string","number"] for an HWND the model may send
+      // either way): every listed type is checked, so a boolean or an object
+      // cannot slip through a hole in the schema the way an unread type would.
+      if (Array.isArray(expected)) {
+        const list = expected.filter((t): t is string => typeof t === 'string');
+        if (list.length === 0 || list.some((t) => matchesJsonType(present[key], t))) continue;
+        return (
+          `Error: ${name}: "${key}" must be a JSON ${list.join(' or ')}, not ` +
+          `${jsonTypeName(present[key])}. Resend the call with ${key} as ` +
+          `${jsonTypeExample(list[0], schema) ?? 'a value of one of those types'}.`
+        );
+      }
       if (typeof expected !== 'string' || matchesJsonType(present[key], expected)) continue;
       const example = jsonTypeExample(expected, schema);
       if (example) {

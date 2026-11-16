@@ -173,6 +173,63 @@ describe('PowerShellDesktopDriver B2 gate', () => {
   });
 });
 
+describe('PowerShellDesktopDriver click result', () => {
+  it('carries what the click did to keyboard focus and where the cursor landed', async () => {
+    const transport = new FakeTransport();
+    const driver = makeDriver(transport);
+    await driver.capture({ kind: 'window', title: 'Test Window' }, { allowNewApproval: true });
+    // image (10,10) on a 1:1 frame with origin (100,100) aims at physical (110,110).
+    transport.on('click', {
+      ok: true,
+      focus_before: 'Edit',
+      focus_after: 'Edit',
+      focus_before_hwnd: '262154',
+      focus_after_hwnd: '262402',
+      cursor_x: 110,
+      cursor_y: 110,
+    });
+    const result = await driver.click(10, 10, {}, 'cap-1');
+    expect(result).toEqual({
+      focusBefore: 'Edit',
+      focusAfter: 'Edit',
+      // The HWNDs are the identity; two fields in one dialog share one class.
+      focusBeforeHwnd: '262154',
+      focusAfterHwnd: '262402',
+      cursor: { x: 110, y: 110 },
+      cursorOk: true,
+    });
+  });
+
+  it('does not invent a focus answer the driver never gave', async () => {
+    const transport = new FakeTransport();
+    const driver = makeDriver(transport);
+    await driver.capture({ kind: 'window', title: 'Test Window' }, { allowNewApproval: true });
+    transport.on('click', { ok: true, focus_reason: 'target is not foreground' });
+    // No focus fields, no cursor fields: nothing is invented for the model to read.
+    expect(await driver.click(10, 10, {}, 'cap-1')).toEqual({
+      focusBefore: '',
+      focusAfter: '',
+      focusReason: 'target is not foreground',
+    });
+  });
+
+  it('flags a cursor that did not land where the click aimed', async () => {
+    const transport = new FakeTransport();
+    const driver = makeDriver(transport);
+    await driver.capture({ kind: 'window', title: 'Test Window' }, { allowNewApproval: true });
+    transport.on('click', {
+      ok: true,
+      focus_before: 'Edit',
+      focus_after: 'Button',
+      cursor_x: 400,
+      cursor_y: 400,
+    });
+    const result = await driver.click(10, 10, {}, 'cap-1');
+    expect(result.cursorOk).toBe(false);
+    expect(result.cursor).toEqual({ x: 400, y: 400 });
+  });
+});
+
 describe('PowerShellDesktopDriver B3 abort/release', () => {
   it('dispose() sends the release-all (dispose) op to the transport (B3)', async () => {
     const transport = new FakeTransport();

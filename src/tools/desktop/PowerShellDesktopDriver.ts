@@ -35,6 +35,7 @@ import {
 import type {
   DesktopCapture,
   DesktopClickOptions,
+  DesktopClickResult,
   DesktopDriver,
   DesktopFocusTarget,
   DesktopPoint,
@@ -44,18 +45,18 @@ import type {
 } from './DesktopDriver';
 import { assertMonitorIndex } from './DesktopDriver';
 import {
+  identityFields,
   num,
   optNum,
   readCaptureFrame,
+  readClickResult,
   readMonitorMetadata,
   readWindowRect,
   requireTargetRect,
   str,
+  targetFieldsFor,
 } from './driverProtocol';
 import { PowerShellTransport, type DesktopTransport } from './PowerShellTransport';
-
-const targetFields = (target: DesktopFocusTarget): Record<string, string> =>
-  target.kind === 'window' ? { title: target.title } : { window_id: target.id };
 
 /** A capture the driver has bound: its pixel frame + (for windows) its approval. */
 interface CaptureRecord {
@@ -282,14 +283,14 @@ export class PowerShellDesktopDriver implements DesktopDriver {
   }
 
   async findWindow(target: DesktopFocusTarget): Promise<FoundWindow> {
-    const r = await this.transport.send({ op: 'find_window', ...targetFields(target) });
+    const r = await this.transport.send({ op: 'find_window', ...targetFieldsFor(target) });
     const w = (r['window'] ?? {}) as Record<string, unknown>;
     const found = { id: str(w['id']), title: str(w['title']), pid: num(w['pid']) };
     return { ...found, processName: str(w['process_name']) };
   }
 
   async focusWindow(target: DesktopFocusTarget): Promise<DesktopWindow> {
-    const r = await this.transport.send({ op: 'focus_window', ...targetFields(target) });
+    const r = await this.transport.send({ op: 'focus_window', ...targetFieldsFor(target) });
     const w = (r['window'] ?? r) as Record<string, unknown>;
     if (r['focus'] === 'moved') {
       this.approved = undefined;
@@ -357,23 +358,13 @@ export class PowerShellDesktopDriver implements DesktopDriver {
     return { physical, approved: record.approved };
   }
 
-  private identity(approved: ApprovedWindow): Record<string, unknown> {
-    return {
-      expected_hwnd: approved.hwnd,
-      expected_pid: approved.pid,
-      // The process start time is recorded at approve time (the capture/focus
-      // response carries it); the driver re-checks it to close the pid-reuse gap.
-      expected_start_time: approved.processStartTime ?? 0,
-    };
-  }
-
   async moveMouse(x: number, y: number, captureId: string, coordSpace?: CoordSpace): Promise<void> {
     const { physical, approved } = await this.resolvePoint(captureId, coordSpace, x, y);
     await this.transport.send({
       op: 'move',
       x: physical.x,
       y: physical.y,
-      ...this.identity(approved),
+      ...identityFields(approved),
     });
   }
 
@@ -383,16 +374,17 @@ export class PowerShellDesktopDriver implements DesktopDriver {
     opts: DesktopClickOptions,
     captureId: string,
     coordSpace?: CoordSpace,
-  ): Promise<void> {
+  ): Promise<DesktopClickResult> {
     const { physical, approved } = await this.resolvePoint(captureId, coordSpace, x, y);
-    await this.transport.send({
+    const r = await this.transport.send({
       op: 'click',
       x: physical.x,
       y: physical.y,
       button: opts.button ?? 'left',
       clicks: opts.clicks ?? 1,
-      ...this.identity(approved),
+      ...identityFields(approved),
     });
+    return readClickResult(r, physical);
   }
 
   async drag(
@@ -409,7 +401,7 @@ export class PowerShellDesktopDriver implements DesktopDriver {
       from_y: a.physical.y,
       to_x: b.physical.x,
       to_y: b.physical.y,
-      ...this.identity(a.approved),
+      ...identityFields(a.approved),
     });
   }
 
@@ -427,18 +419,18 @@ export class PowerShellDesktopDriver implements DesktopDriver {
       y: physical.y,
       delta_x: delta.x,
       delta_y: delta.y,
-      ...this.identity(approved),
+      ...identityFields(approved),
     });
   }
 
   async typeText(text: string): Promise<void> {
     const approved = this.requireApproved();
-    await this.transport.send({ op: 'type', text, ...this.identity(approved) });
+    await this.transport.send({ op: 'type', text, ...identityFields(approved) });
   }
 
   async press(keys: readonly string[]): Promise<void> {
     const approved = this.requireApproved();
-    await this.transport.send({ op: 'press', keys: [...keys], ...this.identity(approved) });
+    await this.transport.send({ op: 'press', keys: [...keys], ...identityFields(approved) });
   }
 
   private requireApproved(): ApprovedWindow {

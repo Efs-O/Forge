@@ -135,6 +135,41 @@ describe('ToolRegistry.invalidArgs missing-argument refusal', () => {
   });
 });
 
+describe('ToolRegistry.invalidArgs union argument types', () => {
+  const registry = new ToolRegistry();
+  // `desktop_focus_window` takes an HWND, and `desktop_windows` prints ids
+  // unquoted, so the model sends a number as often as a string. Both must pass,
+  // and a type in NEITHER arm must still be refused — an array `type` that the
+  // validator skipped would let `true` through to the handler.
+  const focusLike: RegisteredTool = {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'desktop_focus_window',
+        description: 'test tool',
+        parameters: {
+          type: 'object',
+          properties: { window_id: { type: ['string', 'number'] as unknown as string } },
+          required: [],
+        },
+      },
+    },
+    permission: 'read',
+    handler: async () => 'should not run',
+  };
+
+  it('accepts either listed type and refuses what is in neither', () => {
+    expect(registry.invalidArgs(focusLike, { window_id: '1312420' })).toBeUndefined();
+    expect(registry.invalidArgs(focusLike, { window_id: 1312420 })).toBeUndefined();
+    expect(registry.invalidArgs(focusLike, { window_id: true })).toContain(
+      'must be a JSON string or number, not a boolean',
+    );
+    expect(registry.invalidArgs(focusLike, { window_id: {} })).toContain(
+      'must be a JSON string or number',
+    );
+  });
+});
+
 describe('ToolRegistry.invalidArgs unknown-argument refusal', () => {
   const registry = new ToolRegistry();
   const fullSearchCode: RegisteredTool = {

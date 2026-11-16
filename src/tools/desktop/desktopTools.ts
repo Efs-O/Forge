@@ -23,20 +23,12 @@ import {
   focusApproval,
   systemChordApproval,
 } from './desktopApprovals';
-import type { CoordSpace } from './coordinateTransform';
+import { clickResultLines } from './clickResultText';
+import { coordSpace, num, pointArgs, str, windowIdArg } from './desktopToolArgs';
 
 type GetConfig = () => ForgeConfig;
 
 const isWin = () => process.platform === 'win32';
-
-const num = (args: Record<string, unknown>, key: string): number | undefined =>
-  typeof args[key] === 'number' ? (args[key] as number) : undefined;
-const str = (args: Record<string, unknown>, key: string): string | undefined =>
-  typeof args[key] === 'string' && (args[key] as string) !== '' ? (args[key] as string) : undefined;
-const coordSpace = (args: Record<string, unknown>): CoordSpace | undefined => {
-  const v = args.coord_space;
-  return v === 'norm_1000' ? 'norm_1000' : v === 'image_px' ? 'image_px' : undefined;
-};
 
 /**
  * Factory for the whole desktop tool family (plan §4.2). One
@@ -143,10 +135,15 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
           cap.kind === 'window'
             ? `window "${cap.title}" approved (HWND ${cap.approvedHwnd}, pid ${cap.approvedPid})`
             : `monitor ${cap.monitorIndex} of ${cap.monitorCount} (${cap.monitorDevice}; read-only — coordinate actions require a window capture)`;
+        const focusNote =
+          cap.kind === 'window'
+            ? ' Captured without bringing the window forward: call desktop_focus_window before ' +
+              'any input action.'
+            : '';
         const text =
           `Desktop capture: ${kindNote}, image ${cap.width}×${cap.height} px, ` +
           `${regionNote}, dpi_scale=${cap.dpiScale}, ${originNote}, coord_space=image_px. ` +
-          `capture_id=${cap.captureId}. Saved to ${saved}.`;
+          `capture_id=${cap.captureId}. Saved to ${saved}.${focusNote}`;
         const content: ContentPart[] = [
           { type: 'text', text },
           {
@@ -214,8 +211,8 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
                   'Title of the window to focus: an exact title, or text it contains (case-insensitive, literal). Several matches are refused; pass window_id then.',
               },
               window_id: {
-                type: 'string',
-                description: 'The HWND (from desktop_windows) to focus.',
+                type: ['string', 'number'],
+                description: 'The HWND (from desktop_windows) to focus; a number is accepted too.',
               },
             },
             additionalProperties: false,
@@ -226,7 +223,7 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
       advertise: isWin,
       approval: focus.approval,
       handler: async (args) => {
-        if (!str(args, 'window_title') && !str(args, 'window_id'))
+        if (!str(args, 'window_title') && !windowIdArg(args))
           throw new Error('desktop_focus_window: window_title or window_id is required');
         const found = await focus.resolved(args);
         const w = await driver.focusWindow({ kind: 'windowId', id: found.id });
@@ -265,15 +262,13 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
       advertise: isWin,
       approval: codeMove,
       handler: async (args, toolContext) => {
-        const x = num(args, 'x')!;
-        const y = num(args, 'y')!;
-        if (toolContext?.isVisionModel === false)
-          throw new Error(
-            'desktop_move_mouse requires a vision model because its capture_id comes from desktop_capture.',
-          );
-        const capId = str(args, 'capture_id')!;
-        await driver.moveMouse(x, y, capId, coordSpace(args));
-        return `Moved cursor to (${x},${y}) in ${coordSpace(args) ?? 'image_px'}.`;
+        const { x, y, capId, space } = pointArgs(
+          args,
+          'desktop_move_mouse',
+          toolContext?.isVisionModel,
+        );
+        await driver.moveMouse(x, y, capId, space);
+        return `Moved cursor to (${x},${y}) in ${space}.`;
       },
     },
 
@@ -318,25 +313,19 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
       advertise: isWin,
       approval: composeApprovals(clickApproval, codeClick),
       handler: async (args, toolContext) => {
-        const x = num(args, 'x')!;
-        const y = num(args, 'y')!;
-        if (toolContext?.isVisionModel === false)
-          throw new Error(
-            'desktop_click requires a vision model because its capture_id comes from desktop_capture.',
-          );
-        const capId = str(args, 'capture_id')!;
+        const { x, y, capId, space } = pointArgs(args, 'desktop_click', toolContext?.isVisionModel);
         const button = (args.button as string) ?? 'left';
         const clicks = num(args, 'clicks') ?? 1;
         if (clicks !== 1 && clicks !== 2)
           throw new Error(`desktop_click: clicks must be 1 or 2, got ${clicks}`);
-        await driver.click(
+        const result = await driver.click(
           x,
           y,
           { button: button as 'left' | 'right' | 'middle', clicks },
           capId,
-          coordSpace(args),
+          space,
         );
-        return `Clicked (${button}, ${clicks}×) at (${x},${y}) in ${coordSpace(args) ?? 'image_px'}.`;
+        return clickResultLines({ result, button, clicks, x, y, space }).join('\n');
       },
     },
 
@@ -409,16 +398,14 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
       advertise: isWin,
       approval: codeScroll,
       handler: async (args, toolContext) => {
-        const x = num(args, 'x')!;
-        const y = num(args, 'y')!;
+        const { x, y, capId, space } = pointArgs(
+          args,
+          'desktop_scroll',
+          toolContext?.isVisionModel,
+        );
         const delta = { x: num(args, 'delta_x') ?? 0, y: num(args, 'delta_y') ?? 0 };
-        if (toolContext?.isVisionModel === false)
-          throw new Error(
-            'desktop_scroll requires a vision model because its capture_id comes from desktop_capture.',
-          );
-        const capId = str(args, 'capture_id')!;
-        await driver.scroll(x, y, delta, capId, coordSpace(args));
-        return `Scrolled (${delta.x},${delta.y}) at (${x},${y}) in ${coordSpace(args) ?? 'image_px'}.`;
+        await driver.scroll(x, y, delta, capId, space);
+        return `Scrolled (${delta.x},${delta.y}) at (${x},${y}) in ${space}.`;
       },
     },
 
