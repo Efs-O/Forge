@@ -16,6 +16,7 @@ import {
   ToolLoopDetectedError,
   ToolLoopGuard,
 } from './ToolLoopGuard';
+import { nudgeBrokenToolCall } from './brokenToolCallMarkup';
 import { StreamedAssistantTurn } from './StreamedAssistantTurn';
 import { buildRoundRequest } from './buildRoundRequest';
 import { sanitizeText, streamOnce } from './toolCallingStream';
@@ -460,7 +461,11 @@ export async function runToolCallingLoop(
     }
     if (assistantContent || assistantReasoning) {
       streamedAssistant.completeAnswer(assistantContent, assistantReasoning);
+      // Markup that never parsed would come back as the answer and leave the
+      // lane idle mid-task (session 86b15ced). One nudge per run of such rounds.
+      const nudged = nudgeBrokenToolCall(options.messages, assistantContent);
       options.onMessagesChanged?.();
+      if (nudged) continue;
       finalText = assistantContent;
     }
     options.onDone?.(streamed.finishReason);

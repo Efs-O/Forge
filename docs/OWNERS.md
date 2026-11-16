@@ -79,6 +79,7 @@ overlaps with an existing owner, extend the owner instead.
 | Per-round chat request assembly (native vs fallback tools, thinking kwargs, sampling, output cap) | `src/agent/buildRoundRequest.ts` |
 | Tool-calling loop input and result contracts | `src/agent/toolCallingLoopTypes.ts` |
 | Reasoning runaway detection (repetition loop and character cap, per request) | `src/agent/reasoningRunawayGuard.ts` |
+| Once-per-run nudge when a round's answer is unparsed tool-call markup | `src/agent/brokenToolCallMarkup.ts` |
 | Cloud target / local backend startup                 | `src/sidebar/ProviderTurn.ts`            |
 | Turn served by a local CLI agent                     | `src/sidebar/CliTurn.ts`                 |
 | One-shot prompt (compaction, /review)                | `src/sidebar/PromptRun.ts`               |
