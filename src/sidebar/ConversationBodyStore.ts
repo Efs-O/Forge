@@ -166,14 +166,44 @@ export class ConversationBodyStore {
     return undefined;
   }
 
+  /** The id part of an aside name; every aside builder and the duplicate check use it. */
+  private safeIdFor(target: string, id: string): string {
+    return isSafeId(id) ? id : path.basename(target, '.json');
+  }
+
   /** The aside name for a damaged body; both handlers below build it the same way. */
   private asidePath(target: string, id: string): string {
-    const safeId = isSafeId(id) ? id : path.basename(target, '.json');
+    const safeId = this.safeIdFor(target, id);
     return path.join(this.directory, `${safeId}.corrupt-${Date.now()}.json.bad`);
   }
 
-  /** Copy a body that still loaded, so the original stays the live one. */
+  /**
+   * An aside already written for this body, oldest first. `asidePath` stamps a
+   * fresh timestamp on every call, so without this a body that stays damaged
+   * on disk (an untouched chat is never rewritten) gained one copy per load.
+   * A directory that cannot be listed simply means no known copy.
+   */
+  private existingAside(target: string, id: string): string | undefined {
+    const prefix = `${this.safeIdFor(target, id)}.corrupt-`;
+    try {
+      const [oldest] = fs
+        .readdirSync(this.directory)
+        .filter((name) => name.startsWith(prefix) && name.endsWith('.json.bad'))
+        .sort();
+      return oldest === undefined ? undefined : path.join(this.directory, oldest);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Copy a body that still loaded, so the original stays the live one — and
+   * only the first time. The quarantine path below never asks: a body it
+   * cannot load at all is renamed away, copy or no copy.
+   */
   private copyAside(target: string, id: string): string {
+    const existing = this.existingAside(target, id);
+    if (existing !== undefined) return existing;
     const aside = this.asidePath(target, id);
     try {
       fs.copyFileSync(target, aside);

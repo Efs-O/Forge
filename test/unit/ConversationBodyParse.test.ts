@@ -117,6 +117,34 @@ describe('loading a damaged body from disk', () => {
     expect(error).toHaveBeenCalledWith(expect.stringContaining('userMessages'));
   });
 
+  it('ConversationBodyStore copies a damaged body aside once, not on every load', () => {
+    directory = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-body-parse-'));
+    fs.writeFileSync(
+      path.join(directory, 'chat-keep-me.json'),
+      JSON.stringify(body({ compaction: BAD_COMPACTION })),
+    );
+    const error = vi.spyOn(getLogger(), 'error').mockImplementation(() => undefined);
+    const store = new ConversationBodyStore(directory, 'History');
+
+    const first = store.load(() => 'sig');
+    const second = store.load(() => 'sig');
+
+    expect(first?.map((conversation) => conversation.id)).toEqual(['chat-keep-me']);
+    expect(second?.[0]?.messages).toEqual(MESSAGES);
+    expect(second?.[0]?.compaction).toBeUndefined();
+    expect(fs.readdirSync(directory).filter((name) => name.endsWith('.json.bad'))).toHaveLength(1);
+    expect(fs.readdirSync(directory).filter((name) => name.endsWith('.json.bad'))[0]).toMatch(
+      /^chat-keep-me\.corrupt-\d+\.json\.bad$/,
+    );
+    // Both loads logged, and both named the one file that exists.
+    expect(error).toHaveBeenCalledTimes(2);
+    const named = error.mock.calls.map((call) =>
+      String(call[0]).match(/chat-keep-me\.corrupt-\d+\.json\.bad/)?.[0],
+    );
+    expect(named[0]).toBeDefined();
+    expect(named[1]).toBe(named[0]);
+  });
+
   it('ConversationBodyStore still quarantines a body whose messages are invalid', () => {
     directory = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-body-parse-'));
     const target = path.join(directory, 'chat-keep-me.json');
