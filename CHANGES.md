@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.17.189
+
+**A fresh install sets itself up properly: the setup agent offers Telegram, another computer, a daily retitle and your git identity, Claude Code gets the agent note too, and any agent can message you on Telegram.**
+
+- `AI_SETUP.md`'s one setup question now also offers optional items, each answered yes or no in the same reply: Telegram, models from another computer over Tailscale, a daily chat retitle, the agent note in your own user files, and your git name and email when git has none. Before, a setup agent could set up only what your first message happened to name. The guide ends by asking you to run **Forge: Move security settings to policy.yaml**, after every config edit, and closes by telling you where skills, memories, `FORGE.md` and the coding tips live.
+- Claude Code now gets Forge's agent note in a fresh workspace. Forge used to write only `AGENTS.md`, which Claude Code skips once any `CLAUDE.md` is in scope. A missing `CLAUDE.md` is now created holding only `@AGENTS.md`, which imports the note rather than putting a second 9 KB copy into Claude's context. A `CLAUDE.md` that already has that line is left alone.
+- New command **Forge: Add Agent Note to My User Files** puts the same note, worded for no particular workspace, in `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`, so a Claude Code or Codex session started in any folder learns how to reach Forge. Only the command creates those files; each Forge start refreshes a note already there and never adds one.
+- `forge.sh notify <your-name> [file]` sends you a Telegram message through Forge's notify outbox, with no chat and no model turn: for a long or unattended task that finished or failed. A newer notify from the same name replaces one not yet sent. When Telegram or `jobs.enabled` is off, Forge refuses it with the reason rather than queueing a message nothing would deliver.
+- A model that hits git's "Author identity unknown" error is now told to ask you for the name and email, or in a scheduled job to stop and report it, and never to invent one. On a fresh laptop it had set `user.name "Forge"` itself and committed.
+- After an Undo or a Stop, the model is now told in one line: Undo rolled its files back, or you stopped the turn. Before, it re-applied work you had just thrown away, or read the Stop as a new instruction. A chat that an agent opens no longer takes over your screen, and `git clean -n` (a dry run) no longer raises an approval card.
+- A Claude Code session on another machine is no longer promised what this one cannot give. A chat started from a desktop Claude session over remote access no longer opens an empty Claude panel on the laptop or claims the answer will reach the sender: the sender is told to read the verdict with `forge.sh read-verdict` instead. The Claude CLI's failed-resume reason is now reported instead of a generic error.
+- New installs get every general coding tip this repo has recorded (90), and the starter `FORGE.md` carries the general working rules.
+
 ## 0.17.188
 
 **A Clanker lane undoes its own edits without stalling on a card, `restore_file` says what it replaced, and the llama.cpp updater leaves a Strata model alone.**
