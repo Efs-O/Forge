@@ -483,17 +483,17 @@ async function setEnabled(
   return `${enabled ? 'Resumed' : 'Paused'} job "${jobFile.job.name}" [${jobFile.job.id}].`;
 }
 
-/** Open (or reuse) the job's discuss chat and seed it (B.6). */
+/** Open (or reuse) the job's discuss chat; a new one is seeded (B.6). */
 async function discussJob(deps: ManageJobsDeps, jobFile: JobFile): Promise<string> {
   const host = deps.hostFacade?.();
-  if (!host) {
+  if (!host)
     throw new Error('manage_jobs: `discuss` is not available in this window (no host facade).');
-  }
-  // The tool runs in a window where the user is present, so the chat is brought
-  // to the foreground (activate: true). The Telegram entry point does not.
-  await openDiscussChat(host, deps.store, jobFile, true);
+  // The tool runs where the user is, so the chat is activated; the phone entry point is not.
+  const { created } = await openDiscussChat(host, deps.store, jobFile, true);
   return appendHomeNote(
-    `Opened the discuss chat for "${jobFile.job.name}" [${jobFile.job.id}] and seeded it with the job, its recent runs, and the last observation. It is now an ordinary chat where manage_jobs is available.`,
+    created
+      ? `Opened the discuss chat for "${jobFile.job.name}" [${jobFile.job.id}] and seeded it with the job, its recent runs, and the last observation. It is now an ordinary chat where manage_jobs is available.`
+      : `Opened the existing discuss chat for "${jobFile.job.name}" [${jobFile.job.id}]; nothing was sent to it. It is an ordinary chat where manage_jobs is available.`,
     deps.getConfig(),
     vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
   );

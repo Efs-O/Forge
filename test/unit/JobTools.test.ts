@@ -916,6 +916,46 @@ describe('manage_jobs — discuss', () => {
     expect((await store.load('disk'))?.state.conversation_id).toBe('conv-existing');
   });
 
+  /** The result must claim a seed only when one was sent: `openDiscussChat`
+   *  seeds a chat it has just created and leaves a reused chat alone, so the
+   *  wording is picked from the `created` it returns. */
+  it('says the chat was seeded, in full, when it was just created', async () => {
+    await store.saveJob(job());
+    const hostFacade = {
+      restoreConversation: async () => {
+        throw new Error('no such conversation');
+      },
+      createConversation: async () => ({ id: 'conv-1' }),
+      send: async () => undefined,
+    };
+
+    const out = await call({ action: 'discuss', job: 'disk' }, { hostFacade: () => hostFacade });
+
+    expect(out).toBe(
+      'Opened the discuss chat for "Disk" [disk] and seeded it with the job, its recent runs, and the last observation. It is now an ordinary chat where manage_jobs is available.',
+    );
+  });
+
+  it('says nothing was sent, in full, when the chat was reused', async () => {
+    await store.saveJob(job());
+    store.patchState('disk', { conversation_id: 'conv-existing' });
+    const sent: string[] = [];
+    const hostFacade = {
+      restoreConversation: async () => undefined,
+      createConversation: async () => ({ id: 'should-not-be-created' }),
+      send: async (conversationId: string) => {
+        sent.push(conversationId);
+      },
+    };
+
+    const out = await call({ action: 'discuss', job: 'disk' }, { hostFacade: () => hostFacade });
+
+    expect(sent).toEqual([]);
+    expect(out).toBe(
+      'Opened the existing discuss chat for "Disk" [disk]; nothing was sent to it. It is an ordinary chat where manage_jobs is available.',
+    );
+  });
+
   it('persists a newly created conversation even when its seed turn fails', async () => {
     await store.saveJob(job());
     const hostFacade = {

@@ -20,7 +20,7 @@ import type { JobFile } from '../jobs/jobSchema';
 import { resolveJobRef, type JobMatch } from '../jobs/jobRefResolver';
 import { describeJob, describeSchedule, formatWhen } from '../jobs/jobDescribe';
 import { USER_QUIET_MS } from '../jobs/agentTaskAdmission';
-import { openDiscussChat } from '../jobs/jobDiscuss';
+import { openDiscussChat, type DiscussResult } from '../jobs/jobDiscuss';
 import { approveStaged } from '../jobs/actions/llamacppUpdate';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { RemoteChannel, RemoteInboundDisposition, RemoteInboundEvent } from './types';
@@ -264,17 +264,18 @@ async function handleJob(
       );
       return { kind: 'handled' };
     case 'chat': {
-      // Open (or reuse) the job's discuss chat and seed it. Not activated: a
-      // chat opened from the phone should not steal the foreground from
-      // whatever the user is doing in the window.
+      // Open (or reuse) the job's discuss chat, seeding only a new one. Not
+      // activated: a chat opened from the phone should not steal the foreground
+      // from whatever the user is doing in the window.
       //
       // Caught here, not left to propagate: a failed open (chat limit reached,
       // a send error, a store error) would otherwise surface as a transport
       // failure and be redelivered up to three times, each attempt re-running
       // the open. A clear rejection is the right outcome for a non-transient
       // failure; the user can retry the command.
+      let opened: DiscussResult;
       try {
-        await openDiscussChat(context.host, context.store, jobFile, false);
+        opened = await openDiscussChat(context.host, context.store, jobFile, false);
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
         await reply(
@@ -284,10 +285,14 @@ async function handleJob(
         );
         return { kind: 'rejected', reason: `could not open discuss chat: ${detail}` };
       }
+      // Only a chat that was just created was seeded; claiming otherwise on a
+      // reused one tells the phone a turn is running that never started.
       await reply(
         context,
         event.chatId,
-        `Forge: opened the discuss chat for "${jobFile.job.name}" [${jobFile.job.id}]. It is seeded with the job, its recent runs, and the last observation — send a message there to discuss it.`,
+        opened.created
+          ? `Forge: opened the discuss chat for "${jobFile.job.name}" [${jobFile.job.id}]. It is seeded with the job, its recent runs, and the last observation — send a message there to discuss it.`
+          : `Forge: opened the discuss chat for "${jobFile.job.name}" [${jobFile.job.id}]. It already holds this job's discussion, so nothing new was sent — send a message there to continue it.`,
       );
       return { kind: 'handled' };
     }

@@ -351,6 +351,50 @@ describe('/job — chat', () => {
     expect((await store.load('disk'))?.state.conversation_id).toBe('conv-existing');
   });
 
+  /** The reply must claim a seed only when one was sent: `openDiscussChat`
+   *  seeds a chat it has just created and leaves a reused chat alone, so the
+   *  wording is picked from the `created` it returns. */
+  it('says the chat was seeded, in full, when it was just created', async () => {
+    await store.saveJob(job());
+    const host = {
+      restoreConversation: async () => {
+        throw new Error('no such conversation');
+      },
+      createConversation: async () => ({ id: 'conv-1' }),
+      send: async () => undefined,
+    } as unknown as ForgeHostFacade;
+    const ctxWithHost = { ...ctx, host };
+
+    const result = await run('/job disk chat', ctxWithHost);
+
+    expect(result).toEqual({ kind: 'handled' });
+    expect(channel.sent.at(-1)!.text).toBe(
+      'Forge: opened the discuss chat for "Disk" [disk]. It is seeded with the job, its recent runs, and the last observation — send a message there to discuss it.',
+    );
+  });
+
+  it('does not claim a seed, in full, when the chat was reused', async () => {
+    await store.saveJob(job());
+    store.patchState('disk', { conversation_id: 'conv-existing' });
+    const sent: string[] = [];
+    const host = {
+      restoreConversation: async () => undefined,
+      createConversation: async () => ({ id: 'should-not-be-created' }),
+      send: async (conversationId: string) => {
+        sent.push(conversationId);
+      },
+    } as unknown as ForgeHostFacade;
+    const ctxWithHost = { ...ctx, host };
+
+    const result = await run('/job disk chat', ctxWithHost);
+
+    expect(result).toEqual({ kind: 'handled' });
+    expect(sent).toEqual([]);
+    expect(channel.sent.at(-1)!.text).toBe(
+      'Forge: opened the discuss chat for "Disk" [disk]. It already holds this job\'s discussion, so nothing new was sent — send a message there to continue it.',
+    );
+  });
+
   it('returns a clear rejection when opening the chat fails', async () => {
     await store.saveJob(job());
     const host = {
