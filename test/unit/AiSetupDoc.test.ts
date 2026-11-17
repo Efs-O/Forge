@@ -95,6 +95,16 @@ describe('AI_SETUP.md', () => {
     expect(text).toContain(
       'Web search — not requested or declined; name it to follow Step 9 (DuckDuckGo, no key).',
     );
+    // Added after the policy move, `search` in config.yaml stopped Forge
+    // loading at all (laptop, 0.17.192).
+    expect(text).toContain(
+      '`search` and `permissions` are policy keys. Before Step 14 they go in the config, ' +
+        'and the move carries them over. When `~/.forge/policy.yaml` already exists (a ' +
+        'later run of this step), Forge refuses to load a config that holds them, and ' +
+        "that file is the user's to edit: show the user the block and the " +
+        '`net: { search: true, … }` line to add to `policy.yaml` themselves, then have ' +
+        'them run **Developer: Reload Window**.',
+    );
     expect(text).toContain(
       "User files: put Forge's agent note in your own `~/.claude/CLAUDE.md` and " +
         '`~/.codex/AGENTS.md` too, so Claude Code and Codex reach Forge from any folder.',

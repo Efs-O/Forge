@@ -463,6 +463,13 @@ stored, tell the user to run **Forge: Set Search API Key**
 (`forge.setSearchApiKey`) in VS Code, enter the key there, and wait; then add
 `fallback: tavily` to the block. Never request, read, or repeat the key.
 
+`search` and `permissions` are policy keys. Before Step 14 they go in the config,
+and the move carries them over. When `~/.forge/policy.yaml` already exists (a
+later run of this step), Forge refuses to load a config that holds them, and
+that file is the user's to edit: show the user the block and the
+`net: { search: true, … }` line to add to `policy.yaml` themselves, then have
+them run **Developer: Reload Window**.
+
 ## Step 10 — Optional: image generation
 
 Run this section only when the user's setup request names image generation. Do
