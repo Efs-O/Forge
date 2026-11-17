@@ -37,6 +37,7 @@ const todaysFiles = [
   'resources/skills/video-clip/SKILL.md',
   'resources/skills/music-track/SKILL.md',
   'resources/tips/CODING_TIPS.md',
+  'resources/instructions/FORGE.starter.md',
 ];
 
 describe('VSIX contents allow-list', () => {
@@ -51,6 +52,7 @@ describe('VSIX contents allow-list', () => {
         'resources/media/video_ltx25_api_skeleton.json',
         'resources/skills/video-clip/SKILL.md',
         'resources/skills/music-track/SKILL.md',
+        'resources/instructions/FORGE.starter.md',
       ]),
     );
   });

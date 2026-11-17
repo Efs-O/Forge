@@ -63,6 +63,9 @@ skills-lab/**
 # it, and an agent that cannot see the table re-makes the mistakes it lists. The VSIX
 # contents are checked by `test/unit/CodingTipsInjection.test.ts`.
 !resources/tips/CODING_TIPS.md
+# The starter FORGE.md: Forge bundles its text, but AI_SETUP.md Step 1 tells the
+# setup agent to copy this file, so it has to exist in the installed extension.
+!resources/instructions/FORGE.starter.md
 # Runtime Python adapters and the LTX graph skeleton are loaded from the
 # extension folder; exclude only their tests from the shipped package.
 !resources/media/media_job.py

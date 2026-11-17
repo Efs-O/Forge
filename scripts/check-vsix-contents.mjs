@@ -52,6 +52,7 @@ const REQUIRED_VSIX_FILES = [
   'resources/skills/video-clip/SKILL.md',
   'resources/skills/music-track/SKILL.md',
   'resources/tips/CODING_TIPS.md',
+  'resources/instructions/FORGE.starter.md',
 ];
 
 /** Return VSIX entries that are not explicitly approved for shipping. */
