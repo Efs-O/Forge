@@ -22,8 +22,9 @@ export interface SlotStartContext {
   config: ForgeConfig;
   slots: Map<string, PoolSlot>;
   registry: SharedRuntimeRegistry;
-  /** Identity this model's server publishes for other windows to borrow. */
-  runtimeKey: (modelName: string) => string;
+  /** Identity this model's server publishes for other windows to borrow, or
+   *  `undefined` when the model spawns no llama-server and so publishes nothing. */
+  runtimeKey: (modelName: string) => string | undefined;
   /** The backend died without Forge stopping it. */
   onUnexpectedExit: (modelName: string) => void;
   freeSlot: (modelName: string, slot: PoolSlot) => void;
@@ -69,9 +70,10 @@ export function startSlot(
       slot.starting = null;
       slot.lastUsed = Date.now();
       ctx.onAcquired(modelName);
-      if (ctx.config.shared_runtime?.enabled) {
+      const sharedKey = ctx.runtimeKey(modelName);
+      if (ctx.config.shared_runtime?.enabled && sharedKey !== undefined) {
         ctx.registry.publish({
-          key: ctx.runtimeKey(modelName),
+          key: sharedKey,
           model: modelName,
           endpoint: backend.baseUrl(),
           ownerPid: process.pid,

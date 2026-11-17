@@ -102,7 +102,7 @@ export interface StopAllContext {
   sharedSlots: Map<string, SharedSlotRecord>;
   registry: SharedRuntimeRegistry;
   sharedRuntimeEnabled: boolean;
-  runtimeKey: (modelName: string) => string;
+  runtimeKey: (modelName: string) => string | undefined;
   /**
    * Drops the slot AND returns its port to the free list. Deleting the map
    * entry directly here leaked a port per stop: `freePorts` is built once in
@@ -130,8 +130,10 @@ export async function stopAllSlots(ctx: StopAllContext): Promise<void> {
       ctx.sharedSlots.delete(model);
     }
   }
-  const retained = (model: string): boolean =>
-    ctx.sharedRuntimeEnabled && ctx.registry.hasBorrowers(ctx.runtimeKey(model));
+  const retained = (model: string): boolean => {
+    const key = ctx.runtimeKey(model);
+    return ctx.sharedRuntimeEnabled && key !== undefined && ctx.registry.hasBorrowers(key);
+  };
 
   const slotStops = [...ctx.slots.entries()].map(async ([model, slot]) => {
     if (retained(model)) {
@@ -156,7 +158,8 @@ export async function stopAllSlots(ctx: StopAllContext): Promise<void> {
     // nobody owns is still live.
     for (const [model, slot] of [...ctx.slots.entries()]) {
       if (retained(model)) continue;
-      ctx.registry.removeOwner(ctx.runtimeKey(model));
+      const key = ctx.runtimeKey(model);
+      if (key !== undefined) ctx.registry.removeOwner(key);
       ctx.freeSlot(model, slot);
     }
     ctx.ollamaSlots.clear();

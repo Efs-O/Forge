@@ -43,7 +43,7 @@ export interface ExternalCoordinationContext {
   sharedSlots: Map<string, SharedSlotRecord>;
   registry: SharedRuntimeRegistry;
   sharedRuntimeEnabled: boolean;
-  runtimeKey(modelName: string): string;
+  runtimeKey(modelName: string): string | undefined;
   /** Drops the slot AND returns its port to the free list — see `stopAllSlots`. */
   freeSlot(modelName: string, slot: PoolSlot): void;
   /** A sidebar turn, a delegation hold or a remote lease is using this model. */
@@ -302,10 +302,12 @@ export async function releaseModelBackend(
     const slot = ctx.slots.get(key);
     if (slot) {
       const runtimeKey = ctx.runtimeKey(key);
-      const shared = ctx.sharedRuntimeEnabled;
-      const draining = shared && ctx.registry.beginDraining(runtimeKey);
-      if (shared && ctx.registry.hasBorrowers(runtimeKey)) {
-        if (draining) ctx.registry.resumeBorrowing(runtimeKey);
+      // A model whose server is not a llama-server has no shared runtime to drain,
+      // count borrowers for, or unown (see BackendPool.runtimeKey).
+      const shared = ctx.sharedRuntimeEnabled && runtimeKey !== undefined;
+      const draining = shared && runtimeKey ? ctx.registry.beginDraining(runtimeKey) : false;
+      if (shared && runtimeKey && ctx.registry.hasBorrowers(runtimeKey)) {
+        if (draining && runtimeKey) ctx.registry.resumeBorrowing(runtimeKey);
         throw new Error(
           `Cannot unload "${key}": another Forge workspace is using this shared runtime.`,
         );
@@ -314,9 +316,9 @@ export async function releaseModelBackend(
         if (slot.starting) await slot.starting.catch(() => {});
         await slot.backend.stop();
         ctx.freeSlot(key, slot);
-        if (shared) ctx.registry.removeOwner(runtimeKey);
+        if (shared && runtimeKey) ctx.registry.removeOwner(runtimeKey);
       } catch (error) {
-        if (draining) ctx.registry.resumeBorrowing(runtimeKey);
+        if (draining && runtimeKey) ctx.registry.resumeBorrowing(runtimeKey);
         throw error;
       }
     }

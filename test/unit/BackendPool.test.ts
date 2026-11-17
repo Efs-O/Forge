@@ -1,6 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { BackendPool } from '../../src/backend/BackendPool';
 import { ModelStarterLeases } from '../../src/backend/ModelStarterLeases';
+import { SharedRuntimeRegistry, sharedRuntimeKey } from '../../src/backend/SharedRuntimeRegistry';
+import { resolveSpawnModel } from '../../src/config/ConfigResolver';
 import type { RemoteLeaseReleaser } from '../../src/backend/poolTypes';
 import type { ForgeConfig } from '../../src/config/types';
 
@@ -886,5 +891,59 @@ describe('BackendPool remote pins and leases', () => {
     await pool.stopAll();
     expect(leases.size).toBe(0);
     expect(pool.isBusy('A')).toBe(false);
+  });
+});
+
+describe('BackendPool shared runtime and models it does not spawn llama-server for', () => {
+  beforeEach(resetHarness);
+
+  /** Rooted in a temp folder: `publish` writes owner records to disk. Every
+   *  folder is removed again — the repo's temp guard fails a test that leaks one. */
+  const tempRoots: string[] = [];
+  afterEach(() => {
+    for (const dir of tempRoots.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const tempRegistry = (): SharedRuntimeRegistry => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-pool-registry-'));
+    tempRoots.push(root);
+    return new SharedRuntimeRegistry(root);
+  };
+
+  it('acquires an openai-compatible model while shared_runtime is on', async () => {
+    // The llama-updates post-check of 2026-11-17: restartModel() released the
+    // Strata chat model and re-acquired it. The shared-runtime borrow asked for
+    // that model's llama-server identity, which is composed from llama.cpp argv,
+    // and a Strata entry carries no gguf_path — so the acquire threw with
+    // "missing gguf_path for llama.cpp" before it could adopt the server that
+    // was already answering, and the updater rolled the binary back.
+    const cfg = makeConfig(1);
+    cfg.shared_runtime = { enabled: true };
+    cfg.models.push({
+      name: 'strata-multi',
+      provider: 'openai-compatible',
+      endpoint: 'http://127.0.0.1:8091',
+    });
+    const pool = new BackendPool(cfg, tempRegistry());
+
+    const acquire = pool.acquire('strata-multi');
+    await flush(); // the borrow is awaited, so the boot starts one microtask later
+    harness.pending[0].resolve();
+    await expect(acquire).resolves.toBeDefined();
+    expect(pool.loadedModelNames()).toEqual(['strata-multi']);
+  });
+
+  it('still publishes the llama-server it spawns while shared_runtime is on', async () => {
+    const cfg = makeConfig(1);
+    cfg.shared_runtime = { enabled: true };
+    const registry = tempRegistry();
+    const pool = new BackendPool(cfg, registry);
+
+    const acquire = pool.acquire('A');
+    await flush(); // the borrow is awaited, so the boot starts one microtask later
+    harness.pending[0].resolve();
+    await acquire;
+
+    const key = sharedRuntimeKey(resolveSpawnModel(cfg, 'A'), cfg.llama_server);
+    expect(registry.find(key)?.model).toBe('A');
   });
 });

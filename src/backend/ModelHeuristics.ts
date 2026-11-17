@@ -26,6 +26,18 @@ export function isLocalModel(model: ModelConfig | undefined): boolean {
   return false;
 }
 
+/**
+ * True only when Forge spawns `llama-server` for this model — the question that
+ * decides whether it can own or borrow a shared runtime, since a shared runtime
+ * IS a llama-server. An `openai-compatible` (Strata) or `ollama` model has a
+ * server of its own or none at all, and its entry carries no `gguf_path`, so
+ * building a llama-server identity for it throws before the acquire that asked
+ * can do anything. Provider unset means llama.cpp, which is why `!provider` wins.
+ */
+export function spawnsLlamaServer(model: ModelConfig | undefined): boolean {
+  return !!model && (!model.provider || model.provider === 'llama.cpp');
+}
+
 /** Returns true for models whose endpoint runs on this machine's GPUs. */
 export function usesLocalGpu(model: ModelConfig | undefined): boolean {
   if (isLocalModel(model)) return true;

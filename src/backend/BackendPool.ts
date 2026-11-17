@@ -7,6 +7,7 @@ import {
   resolveSpawnModel,
   splitModelProfile,
 } from '../config/ConfigResolver';
+import { spawnsLlamaServer } from './ModelHeuristics';
 import { DelegationGate } from './DelegationGate';
 import type { DelegationCheck, DelegationHold } from './DelegationGate';
 import {
@@ -455,16 +456,21 @@ export class BackendPool implements IBackendPool {
     return raw ? mergeGroupsIntoModel(this.config, raw).provider === 'ollama' : false;
   }
 
-  /** Identity of the llama-server this model would spawn. Uses the SPAWN model:
-   *  request-time profile fields do not change the server, so they must not
-   *  fork its identity and block an otherwise compatible share. */
-  private runtimeKey(modelName: string): string {
+  /** Identity of the llama-server this model would spawn, or `undefined` for a model
+   *  whose server is not one (Strata, Ollama, cloud): it owns no shared runtime, and
+   *  the key cannot be built at all — it is llama.cpp argv and such a model has no
+   *  `gguf_path`. Group-resolved like `isOllamaModel`; SPAWN model, never profiles. */
+  private runtimeKey(modelName: string): string | undefined {
+    const raw = this.config.models.find((m) => m.name === modelName);
+    if (raw && !spawnsLlamaServer(mergeGroupsIntoModel(this.config, raw))) return undefined;
     return sharedRuntimeKey(resolveSpawnModel(this.config, modelName), this.config.llama_server);
   }
 
   private borrowSharedRuntime(modelName: string): Promise<BackendController | undefined> {
+    const key = this.runtimeKey(modelName);
+    if (key === undefined) return Promise.resolve(undefined);
     return borrowSharedRuntime(
-      { config: this.config, registry: this.sharedRegistry, key: this.runtimeKey(modelName) },
+      { config: this.config, registry: this.sharedRegistry, key },
       modelName,
       (record) => {
         // Re-borrowing replaces the slot record, so any lease the previous
