@@ -55,6 +55,8 @@ an empty `who` is normal before any session is linked.
   read a retained answer, then remove its retained copy.
 - `remote-notify <claude|codex|copilot> <exchangeId>` and `remote-ask` for the same:
   message the Telegram chat that opened this exchange; `remote-ask` waits for an answer.
+- `notify <your-name> [file]`: send the owner a Telegram message (no chat, no model
+  turn), when a long or unattended task finishes or fails; never secrets.
 
 **Accepted is not answered.** A `202` only means the message was queued or the exchange
 started. Read the outcome back with `view`, `wait` or `read-verdict` before telling

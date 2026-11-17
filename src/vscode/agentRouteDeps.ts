@@ -28,6 +28,8 @@ import { agentKindSchema, type AgentSender } from '../agentLinks/chatAgentLinks'
 import { findSessionChatIn } from '../agentLinks/chatAgentLinks';
 import { PendingAgentReplies } from '../agentLinks/pendingAgentReplies';
 import type { AgentRoutesDeps } from '../backend/agentRoutesDeps';
+import { makeNotifyOwner } from '../backend/agentNotifyRoute';
+import { defaultOutboxDir } from '../jobs/JobOutbox';
 import type { ChatsReport } from '../backend/agentChatReadRoute';
 import { chatRefs, closedChatRefs } from '../tools/chatMessageResolver';
 import { validateBusSenderName } from '../backend/agentSenderParsing';
@@ -440,5 +442,6 @@ export function buildAgentRouteDeps(hosts: AgentRouteDepsHosts): AgentRoutesDeps
         ? runtime.remoteSessionAction(from, sessionId, id, action, text)
         : { kind: 'refused', error: 'the remote runtime is unavailable' };
     },
+    notifyOwner: makeNotifyOwner(getConfig, defaultOutboxDir(home)),
   };
 }

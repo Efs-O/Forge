@@ -43,8 +43,8 @@ export interface OutboxItem {
 export const OUTBOX_STALE_MS = 24 * 60 * 60_000;
 
 /** The default outbox directory: `~/.forge/jobs/outbox`. */
-export function defaultOutboxDir(): string {
-  return path.join(os.homedir(), '.forge', 'jobs', 'outbox');
+export function defaultOutboxDir(home: string = os.homedir()): string {
+  return path.join(home, '.forge', 'jobs', 'outbox');
 }
 
 function itemPath(dir: string, jobId: string): string {
@@ -108,9 +108,11 @@ export async function writeOutboxItem(
  * `changed_at` that was delivered, the delete is skipped and the next drain
  * sends the newer text.
  *
- * The compare and the unlink are not atomic. That is safe only because the
- * outbox writer and this deleter are both the lease holder; if a second window
- * can ever write outbox items without the lease, revisit (claim by rename).
+ * The compare and the unlink are not atomic. Writers other than the lease
+ * holder exist (`forge.sh notify` through any window, `~/.forge/notify.ps1`),
+ * so a newer item landing between the compare and the unlink is lost. The
+ * window is a few milliseconds per delivery; if that ever matters, claim by
+ * rename.
  *
  * Omitting `expectedChangedAt` deletes unconditionally: that is for a caller
  * discarding an item outright (a deleted job), not for a delivery.

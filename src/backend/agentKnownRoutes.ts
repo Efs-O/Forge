@@ -27,6 +27,7 @@ export interface AgentRouteAvailability {
   sendFile?: unknown;
   validateAgentSender?: unknown;
   remoteSession?: unknown;
+  notifyOwner?: unknown;
 }
 
 /** True when `route` is a path this window is wired to answer. */
@@ -45,6 +46,7 @@ export function isKnownAgentRoute(route: string, deps: AgentRouteAvailability): 
     (route === '/agent/peer-view' && !!deps.peerView) ||
     (route === '/agent/send-file' && !!deps.sendFile && !!deps.validateAgentSender) ||
     ((route === '/agent/remote-ask' || route === '/agent/remote-notify') && !!deps.remoteSession) ||
+    (route === '/agent/notify' && !!deps.notifyOwner) ||
     // The verdict routes depend on nothing but the bus folder: `readVerdictArtifact`
     // and `acknowledgeVerdict` authorize the reader against the exchange's own
     // sender (and its session id, when the caller supplied one), so a stranger

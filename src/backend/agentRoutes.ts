@@ -26,6 +26,7 @@ import { getLogger } from '../util/logger';
 import { dispatchAgentRelay } from './agentRelayDispatch';
 import { isClaudeSessionId } from '../agentBus/claudeReopen';
 import { handleAgentRemoteSessionRoute } from './agentRemoteSessionRoute';
+import { handleAgentNotifyRoute } from './agentNotifyRoute';
 import { isPathInside } from '../util/pathContainment';
 import { AgentWindowEndpointRegistry } from './agentWindowEndpointRegistry';
 import { admitInboundMessage } from './agentInboundAdmission';
@@ -207,6 +208,11 @@ export class AgentRoutes {
       // M6/§4: an unknown or forged sender is rejected with the live list.
       const sender = declaredSender ? undefined : await this.deps.validateFrom?.(from);
       if (sender && !sender.ok) throw new HttpError(400, sender.error);
+      if (route === '/agent/notify') {
+        const result = await handleAgentNotifyRoute(from, fields, this.deps.notifyOwner!);
+        return sendText(res, result.status, result.text);
+      }
+
       if (route === '/agent/cancel') {
         const id = (typeof fields['id'] === 'string' ? fields['id'] : '').trim();
         if (!id) throw new HttpError(400, 'id is required: a queued message id, or all');

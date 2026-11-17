@@ -5,6 +5,7 @@
 #   forge.sh send-file <your-name> --to <conversationId> <workspace-relative-path> [--caption-file <file>]  send a file directly to its Telegram chat (no Forge model turn); --to is required, --caption-file holds the caption (1,024 code points)
 #   forge.sh remote-notify <claude|codex|copilot> <exchangeId> [file]  notify the Telegram chat that opened this exchange
 #   forge.sh remote-ask <claude|codex|copilot> <exchangeId> [file]  ask that chat and wait up to 20 minutes for /answer
+#   forge.sh notify <your-name> [file]  send the owner a Telegram message through Forge's notify outbox (no chat, no model turn); one pending per name, a newer one replaces it
 #   forge.sh read-verdict <your-name> <exchangeId>  read the full retained verdict without consuming it
 #   forge.sh ack-verdict <your-name> <exchangeId>   acknowledge a read verdict and remove its retained copy
 #   forge.sh steer <your-name> <to> [--to <conversationId>] [file] forge: interrupt the running turn and run this next (--to only here); claude/codex/copilot: withdraw this chat's earlier ask to that agent and ask this instead
@@ -153,6 +154,23 @@ if [ "$VERB" = "who" ]; then
     if (!seen[row]++) print row
   }' "$WHO_TMP"
   exit 0
+fi
+if [ "$VERB" = "notify" ]; then
+  [ $# -ge 2 ] && [ $# -le 3 ] || usage
+  NAME="$2"; SRC="${3:--}"
+  case "$NAME" in ""|*[!A-Za-z0-9._-]*) echo "forge.sh: a name is letters, digits, . _ - only" >&2; exit 2;; esac
+  set_optional_sender_identity "$NAME"
+  TMP="$(mktemp)"; trap 'rm -f "$TMP"' EXIT
+  if [ "$SRC" = "-" ]; then cat > "$TMP"; else cp "$SRC" "$TMP" || exit 2; fi
+  resolve_endpoint
+  [ -f "$EP" ] || { echo "forge.sh: not reachable: open Forge with control_server and agent_bus enabled" >&2; exit 1; }
+  URL="$(grep '"url"' "$EP" | cut -d'"' -f4)"
+  TOKEN="$(grep '"token"' "$EP" | cut -d'"' -f4)"
+  curl -sS --fail-with-body -X POST -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: text/plain; charset=utf-8" --data-binary "@$TMP" \
+    "$URL/agent/notify?from=$NAME$SENDER_QUERY" \
+    || { echo; echo "forge.sh: Forge's endpoint did not accept it (see above)." >&2; exit 1; }
+  echo; exit 0
 fi
 if [ "$VERB" = "remote-notify" ] || [ "$VERB" = "remote-ask" ]; then
   [ $# -ge 3 ] && [ $# -le 4 ] || usage

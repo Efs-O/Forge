@@ -102,6 +102,7 @@ const ROUTE_FOR_VERB: Record<
     )}`,
     body: 'a note',
   },
+  notify: { method: 'POST', path: '/agent/notify', query: '?from=codex', body: 'a note' },
   reply: { method: 'POST', path: '/agent/reply', query: '?id=q7', body: 'the answer' },
   say: { method: 'POST', path: '/agent/message', query: '?from=codex', body: 'hello forge' },
   send: {

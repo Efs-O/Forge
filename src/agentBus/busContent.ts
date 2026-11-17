@@ -236,6 +236,15 @@ originating remote chat is no longer authorized\`) and nothing is queued, so an
 unanswered note never waits silently. An exchange carries at most 20 outbound
 messages.
 
+## Telling the owner on Telegram
+
+\`forge.sh notify <your-name> [file]\` sends the owner a Telegram message
+through Forge's notify outbox: no chat, no model turn. The Forge window holding
+the Telegram lease delivers it; with none open it waits, and a newer notify
+from the same name replaces one not yet sent. Forge refuses it, and queues
+nothing, when Telegram or \`jobs.enabled\` is off. Use it when a long or
+unattended task finishes or fails, never for secrets.
+
 ## Messaging Forge first
 
     bash ~/.forge/agent-bus/forge.sh say claude <<'FORGE_MSG'

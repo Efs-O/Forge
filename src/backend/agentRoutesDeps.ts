@@ -25,6 +25,7 @@ import type { AgentSender, AgentSenderMetadata } from '../agentLinks/chatAgentLi
 import type { InboundAgentSelection, InboundAgentTarget } from '../agentLinks/inboundAgentRouting';
 import { PendingAgentReplies, type PendingAgentReply } from '../agentLinks/pendingAgentReplies';
 import type { RemoteSessionActionResult } from '../remote/RemoteSessionBridge';
+import type { AgentNotifyResult } from './agentNotifyRoute';
 
 /** What a relay, an agent relay and a steer all report: an exchange accepted,
  *  how it was delivered, and `note` for a steer that withdrew an earlier
@@ -191,6 +192,8 @@ export interface AgentRoutesDeps {
     action: 'ask' | 'notify',
     text: string,
   ) => Promise<RemoteSessionActionResult>;
+  /** Queues a Telegram message to the owner through the job outbox (`forge.sh notify`). */
+  notifyOwner?: (from: string, text: string) => Promise<AgentNotifyResult>;
   /** Valid model ids for an inbound message, `model@profile` forms included. */
   configuredModels?: () => readonly string[];
   /**
