@@ -70,6 +70,7 @@ import { makeWaitTool } from './waitTool';
 import { makeViewVideoTool } from './videoTool';
 import { makeGenerateImageTool } from './imageGeneration/generateImageTool';
 import { makeUpscaleImageTool, upscaleConfigFor } from './imageGeneration/upscaleImageTool';
+import { makeRemoteMediaTools, remoteMediaActiveFor } from './remoteMedia/remoteMediaTools';
 import { makeSetCheckinTool } from './setCheckinTool';
 import { makeRenderHtmlToImageTool } from './renderHtmlToImageTool';
 import { makeGenerateMusicTool } from './media/generateMusicTool';
@@ -319,14 +320,24 @@ export function registerAllTools(
   let sdServers: SdServerRegistry | undefined;
   if (getConfig) {
     sdServers = new SdServerRegistry(getConfig());
-    registry.register(
-      makeGenerateImageTool({
-        getConfig,
-        secrets,
-        notifications,
-        sdServers: () => sdServers?.handles() ?? new Map(),
-      }),
-    );
+    // A laptop whose images are rendered on its desktop takes these two tool
+    // names from the local ones: the registry refuses a duplicate name, so the
+    // remote variants are registered INSTEAD. They stay out of the model's list
+    // until the desktop answers its media capabilities — their `advertise`
+    // predicate — which is why the fetch below is not awaited.
+    const remoteMedia = remoteMediaActiveFor(getConfig())
+      ? makeRemoteMediaTools({ getConfig })
+      : undefined;
+    if (!remoteMedia) {
+      registry.register(
+        makeGenerateImageTool({
+          getConfig,
+          secrets,
+          notifications,
+          sdServers: () => sdServers?.handles() ?? new Map(),
+        }),
+      );
+    }
     // Same self-suppression, keyed on an image_search block.
     registry.register(
       makeImageSearchTool({
@@ -343,8 +354,12 @@ export function registerAllTools(
     // `advertise` predicate: `registerAllTools` runs once per activation, so
     // that is what suppresses it after the owner deletes the block and reloads
     // config.yaml without reloading the window.
-    if (upscaleConfigFor(getConfig())) {
+    if (upscaleConfigFor(getConfig()) && !remoteMedia) {
       registry.register(makeUpscaleImageTool({ getConfig, notifications }));
+    }
+    if (remoteMedia) {
+      for (const tool of remoteMedia.tools) registry.register(tool);
+      void remoteMedia.refresh();
     }
   }
 

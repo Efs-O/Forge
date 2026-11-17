@@ -196,22 +196,29 @@ async function startFakeDesktop(
     : await listen((req, res) => {
         const route = `${req.method} ${(req.url ?? '/').split('?')[0]}`;
         relayRequests.push(route);
-        if (route !== 'GET /v1/models') {
-          res.writeHead(404, { 'content-type': 'application/json' });
-          res.end(JSON.stringify({ error: { message: `no route for ${route}` } }));
+        if (route === 'GET /v1/models') {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              object: 'list',
+              data: relayIds.map((row) => ({
+                id: row.id,
+                owned_by: 'forge-relay',
+                kind: row.kind,
+              })),
+            }),
+          );
           return;
         }
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            object: 'list',
-            data: relayIds.map((row) => ({
-              id: row.id,
-              owned_by: 'forge-relay',
-              kind: row.kind,
-            })),
-          }),
-        );
+        if (route === 'GET /v1/media/capabilities') {
+          // The desktop's own answer for a relay with no `cloud_relay.media` block,
+          // which is what every test here runs against unless it says otherwise.
+          res.writeHead(404, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: 'media relay is off' }));
+          return;
+        }
+        res.writeHead(404, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: { message: `no route for ${route}` } }));
       });
   return {
     starterUrl: `http://127.0.0.1:${starter.port}`,
@@ -355,9 +362,15 @@ describe('Connect to my desktop', () => {
     // `tokenize` is not copied: the shared port does not carry /tokenize.
     expect(text).not.toMatch(/token_count: tokenize/);
 
-    // It writes and never runs: the desktop saw two reads and no POST.
+    // It writes and never runs: the desktop saw two reads and no POST. The media
+    // read is one of them — it is how the laptop learns whether to write
+    // `remote_media`, and a desktop with the block off is the common answer.
     expect(desktop.starterRequests).toEqual(['GET /models']);
-    expect(desktop.relayRequests).toEqual(['GET /v1/models']);
+    expect(desktop.relayRequests).toEqual(['GET /v1/models', 'GET /v1/media/capabilities']);
+    expect(message).toContain(
+      'Image generation stays on the desktop only: its policy.yaml has no cloud_relay.media block.',
+    );
+    expect(fs.readFileSync(configPath, 'utf8')).not.toMatch(/remote_media/);
 
     // One write: the writer's own backup, and no temp file left behind.
     expect(fs.readdirSync(directory).sort()).toEqual(['config.yaml', 'config.yaml.bak']);

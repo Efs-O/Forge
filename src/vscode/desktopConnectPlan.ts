@@ -111,6 +111,13 @@ export interface ConnectPlan {
   notAdded: Array<{ name: string; why: string }>;
   /** What could not be written, in the owner's words, for the result message. */
   notes: string[];
+  /**
+   * The laptop's own media switch, when the desktop's media relay answered and
+   *   serves something (`desktopConnectMedia.ts`). It carries no address: the
+   *   relay is `groups['desktop-relay'].endpoint`, which this run creates when
+   *   the config has no such group yet.
+   */
+  remoteMedia?: { enabled: true };
 }
 
 /** The whole run's writes, from the two desktop lists plus the config as it
@@ -460,6 +467,9 @@ export function describeConnectResult(
     parts.push(`added ${added} to config.yaml`);
     const created = Object.keys(plan.groups);
     if (created.length) parts.push(`created the ${created.join(' and ')} group(s)`);
+  }
+  if (plan.remoteMedia) {
+    parts.push('turned on remote_media, so this laptop asks the desktop to render images');
   }
   if (plan.alreadyThere.length) {
     parts.push(

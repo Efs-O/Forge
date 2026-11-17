@@ -147,6 +147,9 @@ function makeRegistry(
     agentBus?: boolean;
     /** Only meaningful with `images`: adds the optional `image_generation.upscale` block. */
     upscale?: boolean;
+    /** A laptop: `remote_media.enabled`, and no `image_generation` block of its own. */
+    remoteMedia?: boolean;
+    relay?: string;
   } = {},
 ): ToolRegistry {
   const registry = new ToolRegistry();
@@ -164,6 +167,17 @@ function makeRegistry(
       { name: 'worker', gguf_path: '/worker.gguf' },
     ],
     ...(options.agentBus ? { agent_bus: { enabled: true } } : {}),
+    ...(options.remoteMedia
+      ? {
+          remote_media: { enabled: true },
+          groups: {
+            'desktop-relay': {
+              provider: 'openai-compatible',
+              endpoint: options.relay ?? 'http://100.64.0.10:8797',
+            },
+          },
+        }
+      : {}),
     ...(options.images
       ? {
           image_generation: {
@@ -320,6 +334,35 @@ describe('registerAllTools canonical coordinator catalog', () => {
     // And it belongs to the media group, so a config that has it costs nothing
     // extra to a coding conversation.
     expect(lazyGroupForTool('upscale_image')).toBe('media');
+  });
+
+  // The laptop case (docs/plans/LAPTOP_REMOTE_MEDIA_PLAN.md phase 2): the remote
+  // variants take the two names the local ones would have, and the registry
+  // refuses a duplicate name — so "which one is registered" is decided here, and
+  // a laptop that renders nothing of its own must not end up with both.
+  it('hands generate_image and upscale_image to the desktop only for a laptop that asked', () => {
+    const laptop = makeRegistry({ delegation: true, remoteMedia: true });
+    expect(laptop.names()).toContain('generate_image');
+    expect(laptop.names()).toContain('upscale_image');
+    // Nothing is advertised until the desktop answers its capabilities, so a
+    // laptop with its desktop asleep is not offered a tool that cannot run.
+    expect(
+      laptop
+        .definitions(ALL_PERMISSIONS)
+        .map((tool) => tool.function.name)
+        .filter((name) => name === 'generate_image' || name === 'upscale_image'),
+    ).toEqual([]);
+    // A config that renders its own images keeps the local tools and gains
+    // nothing: the same two names, one owner each.
+    const both = makeRegistry({ delegation: true, remoteMedia: true, images: true });
+    expect(both.names()).toContain('generate_image');
+    expect(both.names()).not.toContain('upscale_image');
+    expect(
+      both
+        .definitions(ALL_PERMISSIONS)
+        .map((tool) => tool.function.name)
+        .filter((name) => name === 'generate_image'),
+    ).toEqual(['generate_image']);
   });
 
   it('offers ask_agent and omits the retired ask and tell tools when the bus is enabled', () => {

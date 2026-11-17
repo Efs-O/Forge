@@ -43,6 +43,9 @@ const NON_MODEL_REF_FIELDS = [
   'voice',
   'image_generation',
   'media',
+  // `remote_media:` carries one boolean and names no model: the desktop to ask
+  // is `groups['desktop-relay'].endpoint`, and `groups` is judged above.
+  'remote_media',
   'model_starter',
   'agent_bus',
   'agent_links',

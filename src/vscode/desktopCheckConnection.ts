@@ -47,6 +47,7 @@ import type { ForgeConfig } from '../config/types';
 import { getLogger } from '../util/logger';
 import { DESKTOP_CHECK_COMMAND, errText, firstAnsweringRelay } from './desktopConnect';
 import { starterCandidatesFromConfig } from './desktopConnectPlan';
+import { mediaCheckLine } from './desktopConnectMedia';
 import { tailscaleStatusPeers } from './tailscalePeers';
 import { TAILSCALE_READ_TIMEOUT_MS, runTailscaleCli } from './tailscaleCli';
 
@@ -247,7 +248,10 @@ export async function runCheck(deps: DesktopCheckDeps, signal: AbortSignal): Pro
     const cloudEntries = config.models.filter(
       (model) => !model.remote_start && model.provider === 'openai-compatible' && model.endpoint,
     );
-    if (!cloudEntries.length) {
+    // A laptop that asked for desktop-rendered images needs the relay even with no cloud model.
+    const wantsMedia = config.remote_media?.enabled === true;
+    let mediaRelayUrl: string | null = null;
+    if (!cloudEntries.length && !wantsMedia) {
       add(
         'Cloud relay',
         true,
@@ -267,6 +271,7 @@ export async function runCheck(deps: DesktopCheckDeps, signal: AbortSignal): Pro
         signal,
       );
       if (relay.ok) {
+        mediaRelayUrl = relay.url;
         add(
           'Cloud relay',
           true,
@@ -290,6 +295,12 @@ export async function runCheck(deps: DesktopCheckDeps, signal: AbortSignal): Pro
             'models are not affected, so this is the first link broken for cloud models only.',
         );
       }
+    }
+
+    // ── link 4b: what can that desktop render? (`cloud_relay.media` on it.) ──
+    if (mediaRelayUrl) {
+      const media = await mediaCheckLine(fetchImpl, mediaRelayUrl, wantsMedia, signal);
+      add(media.label, media.ok, media.text);
     }
 
     // ── link 5: does the desktop serve the models this laptop dials? ─────────

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { isAbsolute } from 'path';
-import { CacheTypeSchema, GroupSchema } from './schemaShared';
+import { CacheTypeSchema, GroupSchema, ToolGroupsSchema } from './schemaShared';
 import { VoiceConfigSchema, validateVoiceConfig } from './voiceSchema';
 import { ImageGenerationConfigSchema } from './imageGenerationSchema';
 import { MediaConfigSchema } from './mediaSchema';
@@ -8,6 +8,7 @@ import { JobsConfigSchema } from './jobsSchema';
 import { ModelStarterConfigSchema, validateModelStarterConfig } from './modelStarterSchema';
 import { EnginesSchema, ModelHostsSchema } from './engineSchema';
 import { CloudRelayConfigSchema, validateCloudRelayConfig } from './cloudRelaySchema';
+import { RemoteMediaConfigSchema, validateRemoteMediaConfig } from './remoteMediaSchema';
 import type { ForgeConfig } from './types';
 import { AgentBusConfigSchema, AgentLinksConfigSchema } from './agentBusSchema';
 import { ImageSearchConfigSchema } from './imageSearchSchema';
@@ -24,9 +25,6 @@ import {
 import { RemoteConfigSchema } from './remoteSchema';
 import { ToolsConfigSchema, SkillsConfigSchema } from './toolsSchema';
 import { NATIVE_LAZY_GROUP_NAMES } from './toolGroupNames';
-import { ToolGroupsSchema } from './schemaShared';
-
-export { CloudRelayConfigSchema } from './cloudRelaySchema';
 
 const ToolPermissionSchema = z.enum(
   [
@@ -195,6 +193,7 @@ export const ForgeConfigShape = {
   jobs: JobsConfigSchema,
   model_starter: ModelStarterConfigSchema,
   cloud_relay: CloudRelayConfigSchema,
+  remote_media: RemoteMediaConfigSchema, // absent = off; the relay is groups['desktop-relay'].endpoint
   agent_bus: AgentBusConfigSchema,
   agent_links: AgentLinksConfigSchema.default({
     open_panel: 'every_ask',
@@ -231,8 +230,7 @@ export const ForgeConfigShape = {
       resume: z.boolean().optional(),
     })
     .optional(),
-  // Absent block = off: no hidden default, the note only matters for long tasks.
-  // The floor of 5 keeps a "nag every minute" setting impossible.
+  // Absent block = off; the floor of 5 keeps a "nag every minute" setting impossible.
   elapsed_time_note: z
     .object({
       after_minutes: z.number().int().min(5).max(240),
@@ -497,4 +495,5 @@ export const ForgeConfigSchema = z.object(ForgeConfigShape).superRefine((cfg, ct
     ctx,
   );
   validateCloudRelayConfig(cfg as unknown as ForgeConfig, DEFAULT_CONTROL_SERVER_PORT, ctx);
+  validateRemoteMediaConfig(cfg as unknown as ForgeConfig, ctx);
 });

@@ -56,6 +56,7 @@ import {
   type TailnetPeer,
 } from './desktopConnectPlan';
 import { runTailscaleCli, TAILSCALE_READ_TIMEOUT_MS } from './tailscaleCli';
+import { mediaConnectAdditions, probeRemoteMedia } from './desktopConnectMedia';
 
 const log = getLogger();
 
@@ -165,6 +166,10 @@ export async function runConnect(
     return error instanceof Error ? error.message : String(error);
   }
   const relay = await firstAnsweringRelay(deps, fetchImpl, config, choice.starter, candidates);
+  // One more read of the relay this run just reached, for the media switch
+  // (`desktopConnectMedia.ts`): a desktop that renders nothing for laptops is
+  // the common answer, and it is a sentence, not a failure.
+  const media = relay.ok ? await probeRemoteMedia(fetchImpl, relay.url) : undefined;
   const targets: ConnectTargets = {
     starters: candidates.slice(0, 4),
     // The desktop's own shared port, exactly as it reported it. `null` is not
@@ -180,14 +185,18 @@ export async function runConnect(
     .filter((row): row is DesktopModelRow => row !== null)
     .filter((row) => !options.onlyNames || options.onlyNames.has(row.name));
   const plan = planConnect(rows, relay.ok ? relay.rows : [], config, targets);
+  if (relay.ok && media) mediaConnectAdditions(plan, media, relay.url, config);
+  // What the owner reads when the desktop renders nothing: the desktop's own
+  // sentence. Nothing when it does render — that is in the added-clause above.
+  const mediaNote = media && !plan.remoteMedia ? ` ${media.note}` : '';
   const counts = {
     desktopModels: plan.entries.filter((entry) => !entry.group).length,
     cloudModels: plan.entries.filter((entry) => entry.group !== undefined).length,
   };
-  if (!plan.entries.length && !Object.keys(plan.groups).length) {
+  if (!plan.entries.length && !Object.keys(plan.groups).length && !plan.remoteMedia) {
     const message = describeConnectResult(plan, counts);
     if (plan.notes.length) log.info(`[Connect] ${plan.notes.join(' ')}`);
-    return message;
+    return `${message}${mediaNote}`;
   }
   const wrote = applyConnectPlan(deps.getConfigPath(), plan);
   if (!wrote) {
@@ -202,7 +211,7 @@ export async function runConnect(
     `[Connect] ${hostLabel(choice.starter)} -> ${message} ` +
       `${plan.notes.length ? `Notes: ${plan.notes.join(' ')}` : ''}`,
   );
-  return `${message}${plan.notes.length ? ` Notes: ${plan.notes.join(' ')}` : ''}`;
+  return `${message}${plan.notes.length ? ` Notes: ${plan.notes.join(' ')}` : ''}${mediaNote}`;
 }
 
 /** One `GET /models` row, kept as the shape the desktop sent: the plan module
@@ -363,6 +372,11 @@ export function applyConnectPlan(configPath: string, plan: ConnectPlan): boolean
         // the one it just created.
         if (doc.getIn(['groups', name], true)) continue;
         setNestedField(doc, ['groups', name], shape);
+      }
+      // The media switch, and only when this config does not already carry one:
+      // an owner who turned `remote_media` off by hand stays off until they ask.
+      if (plan.remoteMedia && !doc.getIn(['remote_media'], true)) {
+        setNestedField(doc, ['remote_media'], plan.remoteMedia);
       }
       for (const entry of plan.entries) addModel(doc, entry);
     },

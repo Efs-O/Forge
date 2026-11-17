@@ -22,6 +22,7 @@ import type { AgentBusConfig, AgentLinksConfig } from './agentBusSchema';
 import type { ModelStarterConfig } from './modelStarterSchema';
 import type { CloudRelayConfig } from './cloudRelaySchema';
 export type { CloudRelayConfig } from './cloudRelaySchema';
+import type { RemoteMediaConfig } from './remoteMediaSchema';
 import type { RemoteContactsConfig } from './RemoteContactsConfig';
 import type { DefaultsConfig, GroupConfig, ModelConfig, ProfileConfig } from './modelTypes';
 import type { EngineConfig } from './engineSchema';
@@ -188,6 +189,13 @@ export interface ForgeConfig {
   model_starter?: ModelStarterConfig;
   /** Desktop cloud relay allowlist; absent or disabled means no listener. */
   cloud_relay?: CloudRelayConfig;
+  /**
+   * The laptop half of the desktop media relay (`remoteMediaSchema.ts`): ask the
+   * desktop that already serves this laptop's models to render images. Absent
+   * means off, and the block carries no address — the relay is
+   * `groups['desktop-relay'].endpoint`'s origin.
+   */
+  remote_media?: RemoteMediaConfig;
   agent_bus?: AgentBusConfig;
   agent_links: AgentLinksConfig;
   /** Reverse image search. Absent means `image_search` is not advertised. */

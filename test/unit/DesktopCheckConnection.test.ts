@@ -263,6 +263,13 @@ describe('Forge: Check connection', () => {
     );
     expect(message).toMatch(new RegExp(`the earlier address did not answer|http://127\\.0\\.0\\.1:${dead}`));
     expect(message).toMatch(/Cloud relay: .* answered — cloud_relay is on there and allows 1 model/);
+    // The media line is read from the same relay, and a desktop whose server
+    // answers every path with its model list is reported as what it is: a desktop
+    // this laptop cannot ask to render. Not the broken link — this laptop never
+    // asked for media, so `remote_media` is off here.
+    expect(message).toMatch(
+      /Media on the desktop: The desktop answered its model list but not its media capabilities/,
+    );
     expect(message).toMatch(/Models: all 2 models this laptop dials are servable/);
     // Nothing was started, loaded, pinned or released: the pool's own counters
     // are the proof, because a `POST /ensure` would move every one of them.
@@ -275,9 +282,11 @@ describe('Forge: Check connection', () => {
     expect(desktop.slot.requests).toEqual([]);
     expect(desktop.external.requests).toEqual([]);
     expect(desktop.decoy.requests).toEqual([]);
-    // The relay was asked for its allowlist and nothing else.
+    // The relay was asked for its allowlist and its media answer, and nothing
+    // else: a media read that started a render would move the counters above.
     expect(relay.requests.map((request) => `${request.method} ${request.path}`)).toEqual([
       'GET /v1/models',
+      'GET /v1/media/capabilities',
     ]);
     // Nothing was changed on the tailnet: the only CLI call is the read.
     expect(tailscaleCalls).toEqual([['status', '--json']]);
@@ -308,9 +317,92 @@ describe('Forge: Check connection', () => {
     const message = await runCheck(deps, new AbortController().signal);
     expect(message).toMatch(/Every link answered/);
     expect(message).toMatch(/Desktop in Tailscale: desktop \(100.64.0.10\) is online/);
-    // The address dialled is the one the config lists, and only the two read-only
-    // paths: a check that POSTed `/ensure` would show up here.
-    expect(asked).toEqual([`${starterUrl}/models`, `${relayUrl}/v1/models`]);
+    // The address dialled is the one the config lists, and only the three
+    // read-only paths: a check that POSTed `/ensure` would show up here.
+    expect(asked).toEqual([
+      `${starterUrl}/models`,
+      `${relayUrl}/v1/models`,
+      `${relayUrl}/v1/media/capabilities`,
+    ]);
+  });
+
+  it('a laptop that asked for desktop images hears what the desktop can render', async () => {
+    const asked: string[] = [];
+    const starterUrl = 'http://100.64.0.10:8798';
+    const relayUrl = 'http://100.64.0.10:8797';
+    const caps = {
+      tools: [
+        {
+          type: 'function',
+          function: { name: 'generate_image', description: 'x', parameters: { type: 'object' } },
+        },
+      ],
+      upscale: true,
+      refused: [{ name: 'ltx25', reason: 'its configured path is relative' }],
+      max_body_bytes: 33554432,
+    };
+    const deps: DesktopCheckDeps = {
+      getConfig: () =>
+        ({
+          ...laptopConfig(starterUrl, relayUrl, 8798),
+          remote_media: { enabled: true },
+        }) as never,
+      runTailscale: fakeTailscale(
+        async () =>
+          statusJson({
+            peers: [
+              { name: 'desktop.example-tailnet.ts.net.', ips: ['100.64.0.10'], online: true },
+            ],
+          }),
+      ),
+      fetchImpl: fakeFetch(
+        {
+          [`${starterUrl}/models`]: starterRows,
+          [`${relayUrl}/v1/models`]: () => json({ object: 'list', data: [{ id: 'grok-code-fast' }] }),
+          [`${relayUrl}/v1/media/capabilities`]: () => json(caps),
+        },
+        asked,
+      ),
+    };
+    const message = await runCheck(deps, new AbortController().signal);
+    expect(message).toMatch(/Every link answered/);
+    expect(message).toMatch(
+      /Media on the desktop: The desktop renders generate_image for this laptop; it refuses ltx25 \(its configured path is relative\)\./,
+    );
+  });
+
+  it('a laptop that wants media and cannot read its answer names the media link as broken', async () => {
+    const asked: string[] = [];
+    const starterUrl = 'http://100.64.0.10:8798';
+    const relayUrl = 'http://100.64.0.10:8797';
+    const deps: DesktopCheckDeps = {
+      getConfig: () =>
+        ({
+          ...laptopConfig(starterUrl, relayUrl, 8798),
+          remote_media: { enabled: true },
+        }) as never,
+      runTailscale: fakeTailscale(
+        async () =>
+          statusJson({
+            peers: [
+              { name: 'desktop.example-tailnet.ts.net.', ips: ['100.64.0.10'], online: true },
+            ],
+          }),
+      ),
+      // The relay answers its model list and nothing else: an older desktop.
+      fetchImpl: fakeFetch(
+        {
+          [`${starterUrl}/models`]: starterRows,
+          [`${relayUrl}/v1/models`]: () => json({ object: 'list', data: [{ id: 'grok-code-fast' }] }),
+        },
+        asked,
+      ),
+    };
+    const message = await runCheck(deps, new AbortController().signal);
+    expect(message).toMatch(/first link that is broken is: Media on the desktop/);
+    expect(message).toMatch(
+      /Media on the desktop: The desktop answered its model list but not its media capabilities/,
+    );
   });
 
   it('Tailscale not running here is the first broken link, and nothing is dialled after it', async () => {

@@ -1277,6 +1277,13 @@ agent_links:
 #   max_body_mb: 32
 #   models: [my-model]
 
+# The laptop half of that same relay: ask the desktop this laptop already dials
+# (`groups.desktop-relay.endpoint`) to render images, and save them here. The
+# block carries no address of its own, so turning it on with no such group is a
+# config error naming both keys. Absent means off: the tool list stays as it was.
+# remote_media:
+#   enabled: false
+
 # ── The two keys that came with the policy split ────────────────────────────
 # `Forge: Move security settings to policy.yaml` moves these, plus permissions,
 # llama_server, jobs, remote, mcp_servers and the rest of the policy keys, into
