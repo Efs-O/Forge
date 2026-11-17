@@ -71,12 +71,23 @@ Collect and show the user in a short table:
 - Is `FORGE.md` already present at the repository root?
 - On Windows, is Git for Windows' `bash.exe` available? If Claude Code is
   installed, is it configured to run in bypass-permissions mode?
-- Read `git config --global user.name` and `git config --global user.email`;
-  note whether either is empty.
+- Check whether `git config --global user.name` and
+  `git config --global user.email` are set, from their exit status only; never
+  print either value.
+- Does another of the user's computers serve Forge models? When Tailscale is
+  installed, run `tailscale status` (it reads and changes nothing). For each
+  other machine it lists, read `GET http://<its Tailscale IP>:8798/models`
+  (read-only; use the IP, because Forge refuses a host name). Note every model
+  whose `remote` is `true`, by `name`.
 
-Then choose **one** backend from the survey and state why. Apply that choice;
-do not ask the user to choose:
+Then choose the backend from the survey and state why; do not ask the user to
+choose the backend. The one thing you ask is which model is the default, in the
+Step 0 question:
 
+- **Other computer** — the survey found models another of the user's computers
+  serves: this machine uses them through **Forge: Connect to my desktop**
+  (Step 12), so a small GPU here does not matter. CLI models are added beside
+  them when `claude` or `codex` is installed.
 - **llama.cpp** — fastest and the most control; needs a GGUF that fits.
 - **Ollama** — simplest if it is already installed and has models.
 - **Cloud / CLI only** — no suitable GPU: an OpenAI-compatible provider, or
@@ -108,6 +119,9 @@ After the survey and backend choice, show one concise summary containing:
 - the exact config file path to write, plus which optional sections were named
   in the user's request; and whether it will create `FORGE.md` because the
   workspace has no project instruction file.
+- the default model (`active_model`): your recommendation and up to three
+  alternatives, chosen from the models the survey found here and on the other
+  computer;
 - these optional items, each answered yes or no in the same reply (an item the
   user's request already named is part of the plan, not an offer):
   - Telegram: control Forge from your phone over Telegram (needs your own bot
@@ -121,19 +135,21 @@ After the survey and backend choice, show one concise summary containing:
   - Git identity, only when the survey found `user.name` or `user.email` empty:
     the name and email to put on your commits (leave it blank to skip).
 
-Ask **“Proceed with this setup plan? Answer yes/no, and yes/no for each
-optional item.”** and wait. A no means stop without changing files, installing
-software, or downloading models. After yes, do not ask again about a listed
-download, install, switch, config path, optional section, or optional item.
-If an unlisted dependency becomes necessary, skip that part
-and explain why in **Finish** instead of asking for another plan confirmation.
+Ask **“Proceed with this setup plan? Answer yes/no, name the default model, and
+yes/no for each optional item.”** and wait. A no means stop without changing
+files, installing software, or downloading models. After yes, do not ask again
+about a listed download, install, switch, config path, optional section, or
+optional item. If an unlisted dependency becomes necessary, skip that part and
+explain why in **Finish** instead of asking for another plan confirmation.
 
 Write the plan summary in your reply first. Then, if your harness has a
 multiple-choice question tool (Claude Code: `AskUserQuestion`), ask the question
-with it in one call: the plan as yes or no, the optional items as one
-multi-select, and the git identity as a skip choice the user can answer with
-`Name <email>` instead (only when the survey found it empty). Without such a
-tool, ask it in text as written above.
+with it in one call: the plan as yes or no, the default model as one choice
+(your recommendation first; the user can type any other listed name), the
+optional items as one multi-select, and the git identity as a skip choice the
+user can answer with `Name <email>` instead (only when the survey found it
+empty). Without such a tool, ask it in text as written above. A default model
+from the other computer means yes to "Other computer".
 
 ## Step 1 — Choose the config location
 
@@ -265,6 +281,10 @@ GET  http://127.0.0.1:<control_server.port>/models         → lists the configu
 POST http://127.0.0.1:<control_server.port>/ensure  {"model":"<active_model>"}   → 200 once loaded
 POST http://127.0.0.1:<control_server.port>/chat    {"model":"<active_model>","messages":[{"role":"user","content":"Reply with the word ready."}]}
 ```
+
+Run `/ensure` and `/chat` only when `/models` lists the active model with
+`"servable": true`. Otherwise skip both and say so: a `provider: cli` model
+runs only inside a Forge chat, and Step 7's chat is its live test.
 
 `/ensure` can take minutes for a large model. The `/chat` request is the first
 prompt; do not ask the user to send one. If a backend fails and its details are
@@ -574,6 +594,12 @@ user's Tailscale network is theirs to change. You may run only
 `tailscale status`, which reads and changes nothing. Never run `tailscale up`,
 `login`, `serve` or `set`, and never edit the access rules yourself.
 
+Run it right after Step 5, before Step 6's reload, so the other computer's
+models are already in the config when Step 6 checks it.
+
+When the survey already read the other computer's list, skip items 1-3: that
+computer is shared and its access rule already lets this one in.
+
 1. Tell the user to install Tailscale on both computers and sign in to the same
    account. Wait, then run `tailscale status` and report both machines' names.
 2. On the computer that has the models (the main computer), tell the user to
@@ -586,6 +612,9 @@ user's Tailscale network is theirs to change. You may run only
 4. On this computer, tell the user to run **Forge: Connect to my desktop**
    (`forge.connectDesktop`), then **Forge: Check connection**
    (`forge.checkConnection`), and paste its result to you.
+5. When the user chose a model from the other computer as the default, set
+   `active_model` to its name exactly as `GET /models` listed it, after
+   Connect's message says it was added. Until then leave `active_model` empty.
 
 **Check:** read the pasted result. Every link it lists passes, or name the
 first broken link and the step above that fixes it.
@@ -593,13 +622,17 @@ first broken link and the step above that fixes it.
 ## Step 13 — Optional: daily chat retitle
 
 Run this section only when the user said yes to "Daily chat retitle" in Step 0,
-after Step 7's check passed. Send this to the chat Step 7 opened, with
-`forge.sh say <name> --to <conversationId>` and the message on stdin:
+after Step 7's check passed. A `provider: cli` model in a Forge chat has no
+`manage_jobs`, so open a new chat on a model that is not `provider: cli` with
+`forge.sh say <name> --new --model <that model>` and the message on stdin.
+When every configured model is `provider: cli`, skip this step and say so in
+**Finish**.
 
     Create this job with manage_jobs: {"name":"Daily chat retitle","enabled":true,"wake":false,"after":"stay_awake","schedule":{"kind":"daily","at":"06:00"},"check":{"kind":"none"},"on_change":{"kind":"notify"},"action":{"kind":"retitle","max_chats":20,"min_idle_minutes":60,"dry_run":false,"report":"always"}}
 
-**Check:** read the answer with `forge.sh view <name> --to <conversationId>`;
-it names the created job and its id.
+**Check:** read the answer with
+`forge.sh view <name> --to <the new chat's conversationId>`; it names the
+created job and its id.
 
 ## Step 14 — Move the security settings into policy.yaml
 
@@ -648,5 +681,7 @@ extension (hf-download, music-track, office-files, video-clip), updated with
 Forge; their own skills go in `~/.forge/skills/<name>/`. Memories start empty
 and fill as agents save them. `FORGE.md` is theirs to edit.
 `docs/CODING_TIPS.md` appears when an agent records its first lesson. The
-browser tool stays off until they turn on `permissions.browser.enabled`
-themselves.
+browser tool and desktop control start on (each new website is approved once
+per session, and VS Code's own window stays off limits); set
+`permissions.browser.enabled` or `permissions.desktop.enabled` to `false` to
+turn either off.

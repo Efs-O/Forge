@@ -54,17 +54,20 @@ describe('AI_SETUP.md', () => {
     expect(text).toContain(
       'Write the plan summary in your reply first. Then, if your harness has a ' +
         'multiple-choice question tool (Claude Code: `AskUserQuestion`), ask the question ' +
-        'with it in one call: the plan as yes or no, the optional items as one ' +
-        'multi-select, and the git identity as a skip choice the user can answer with ' +
-        '`Name <email>` instead (only when the survey found it empty). Without such a ' +
-        'tool, ask it in text as written above.',
+        'with it in one call: the plan as yes or no, the default model as one choice ' +
+        '(your recommendation first; the user can type any other listed name), the ' +
+        'optional items as one multi-select, and the git identity as a skip choice the ' +
+        'user can answer with `Name <email>` instead (only when the survey found it ' +
+        'empty). Without such a tool, ask it in text as written above. A default model ' +
+        'from the other computer means yes to "Other computer".',
     );
   });
 
   it('offers the five optional items in the one Step 0 question', () => {
     const text = doc.replace(/\s+/gu, ' ');
     expect(text).toContain(
-      'Proceed with this setup plan? Answer yes/no, and yes/no for each optional item.',
+      'Proceed with this setup plan? Answer yes/no, name the default model, and ' +
+        'yes/no for each optional item.',
     );
     expect(text).toContain(
       'Telegram: control Forge from your phone over Telegram (needs your own bot ' +
@@ -91,6 +94,114 @@ describe('AI_SETUP.md', () => {
       'Git identity, only when the survey found `user.name` or `user.email` empty: ' +
         'the name and email to put on your commits (leave it blank to skip).',
     );
+  });
+
+  // The audited 4 GB laptop had no reason to pick a local backend: its desktop
+  // already served 28 models over one read-only GET, and the guide never looked.
+  // A host name is refused by the model starter, so the bullet has to say IP.
+  it('surveys the other computer\u2019s model list and never prints the git identity', () => {
+    const text = doc.replace(/\s+/gu, ' ');
+    expect(text).toContain(
+      'Does another of the user\'s computers serve Forge models? When Tailscale is ' +
+        'installed, run `tailscale status` (it reads and changes nothing). For each ' +
+        'other machine it lists, read `GET http://<its Tailscale IP>:8798/models` ' +
+        '(read-only; use the IP, because Forge refuses a host name). Note every model ' +
+        'whose `remote` is `true`, by `name`.',
+    );
+    // A privacy hook refused the printed value, so the survey reads exit status.
+    expect(text).toContain(
+      'Check whether `git config --global user.name` and ' +
+        '`git config --global user.email` are set, from their exit status only; never ' +
+        'print either value.',
+    );
+    expect(text).not.toContain('note whether either is empty');
+  });
+
+  // "Do not ask the user to choose" is what cost the laptop its default model:
+  // the backend was still not the user's call, but the default model is.
+  it('offers the other computer as a backend and asks only for the default model', () => {
+    const text = doc.replace(/\s+/gu, ' ');
+    expect(text).toContain(
+      'Then choose the backend from the survey and state why; do not ask the user to ' +
+        'choose the backend. The one thing you ask is which model is the default, in the ' +
+        'Step 0 question:',
+    );
+    expect(text).toContain(
+      `- **Other computer** \u2014 the survey found models another of the user's ` +
+        'computers serves: this machine uses them through **Forge: Connect to my ' +
+        'desktop** (Step 12), so a small GPU here does not matter. CLI models are added ' +
+        'beside them when `claude` or `codex` is installed.',
+    );
+    expect(text).not.toContain('do not ask the user to choose:');
+    expect(text).not.toContain('**one** backend');
+  });
+
+  it('recommends a default model in the plan summary, from either computer', () => {
+    const text = doc.replace(/\s+/gu, ' ');
+    expect(text).toContain(
+      'the default model (`active_model`): your recommendation and up to three ' +
+        'alternatives, chosen from the models the survey found here and on the other ' +
+        'computer;',
+    );
+  });
+
+  // `servable: false` is what GET /models reports for a `provider: cli` or cloud
+  // model (src/backend/ControlModelCatalog.ts), and /ensure and /chat refuse it.
+  it('keeps the control-server model checks away from a model they cannot serve', () => {
+    const text = doc.replace(/\s+/gu, ' ');
+    expect(text).toContain(
+      'Run `/ensure` and `/chat` only when `/models` lists the active model with ' +
+        '`"servable": true`. Otherwise skip both and say so: a `provider: cli` model ' +
+        "runs only inside a Forge chat, and Step 7's chat is its live test.",
+    );
+  });
+
+  // Connect has to run before the first reload for the chosen default to exist
+  // when Step 6 checks it, and a survey that already read the list means the
+  // user should not be walked through setup they already did.
+  it('connects to the other computer before the first check and reuses the survey', () => {
+    const text = doc.replace(/\s+/gu, ' ');
+    expect(text).toContain(
+      "Run it right after Step 5, before Step 6's reload, so the other computer's " +
+        'models are already in the config when Step 6 checks it.',
+    );
+    expect(text).toContain(
+      'When the survey already read the other computer\'s list, skip items 1-3: that ' +
+        'computer is shared and its access rule already lets this one in.',
+    );
+    expect(text).toContain(
+      '5. When the user chose a model from the other computer as the default, set ' +
+        '`active_model` to its name exactly as `GET /models` listed it, after ' +
+        "Connect's message says it was added. Until then leave `active_model` empty.",
+    );
+  });
+
+  // A `provider: cli` chat has no Forge tools, so the manage_jobs request that
+  // went there had nobody to answer it.
+  it('sends the retitle job request to a chat whose model has Forge tools', () => {
+    const text = doc.replace(/\s+/gu, ' ');
+    expect(text).toContain(
+      'A `provider: cli` model in a Forge chat has no `manage_jobs`, so open a new ' +
+        'chat on a model that is not `provider: cli` with ' +
+        '`forge.sh say <name> --new --model <that model>` and the message on stdin. ' +
+        'When every configured model is `provider: cli`, skip this step and say so in ' +
+        '**Finish**.',
+    );
+    expect(text).toContain("`forge.sh view <name> --to <the new chat's conversationId>`");
+    expect(text).not.toContain('Send this to the chat Step 7 opened');
+  });
+
+  // The starter config turns both switches on, so "stays off until they turn it
+  // on" told the user to go looking for a setting that was already on.
+  it('tells the truth about the browser and desktop tools in Finish', () => {
+    const text = doc.replace(/\s+/gu, ' ');
+    expect(text).toContain(
+      'The browser tool and desktop control start on (each new website is approved once ' +
+        "per session, and VS Code's own window stays off limits); set " +
+        '`permissions.browser.enabled` or `permissions.desktop.enabled` to `false` to ' +
+        'turn either off.',
+    );
+    expect(text).not.toContain('browser tool stays off');
   });
 
   it('gates each optional step on the Step 0 answer and keeps the agent out of the user\u2019s network', () => {
