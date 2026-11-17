@@ -30,9 +30,27 @@ import { normalizeOpenAiCompatibleBaseUrl } from './CloudProviders';
  *  it may not be able to reach. `endpoint`'s scheme, port and any proxy path are
  *  kept, because they are what this window's own OpenAIClient needs; only the
  *  port is replaced, which is the whole point of `/ensure`.
+ *
+ *  A pass-through entry (`sharedEndpoint`: `<starter>/<desktop model name>`)
+ *  keeps the port of the starter that answered instead: its traffic goes
+ *  through the starter's own port, and the port `/ensure` reports is the
+ *  model's loopback port on the desktop. Swapping it in sent the laptop's chat
+ *  to `<desktop>:8091/<model>/v1/chat/completions`, which 404s (third laptop
+ *  run, 0.17.191).
  */
-export function baseUrlWithPort(endpoint: string, port: number, starter?: string): string {
+export function baseUrlWithPort(
+  endpoint: string,
+  port: number,
+  starter?: string,
+  remoteModel?: string,
+): string {
   const url = new URL(endpoint);
+  if (starter && remoteModel && url.pathname === `/${remoteModel}`) {
+    const answered = new URL(starter);
+    url.hostname = answered.hostname;
+    url.port = answered.port;
+    return url.toString().replace(/\/$/, '');
+  }
   if (starter) url.hostname = new URL(starter).hostname;
   url.port = String(port);
   return normalizeOpenAiCompatibleBaseUrl(url.toString());

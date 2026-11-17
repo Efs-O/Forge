@@ -126,25 +126,25 @@ describe('RemoteStarterClient', () => {
     expect(seen[0]!.payload).toEqual({ client: os.hostname(), model: 'strata-iq3s' });
   });
 
-  it('an entry whose endpoint is the shared port keeps its model prefix', async () => {
+  it('an entry whose endpoint is the shared port keeps its model prefix and port', async () => {
     // The shape a laptop gets once model traffic comes through the starter's one
     // shared port: that port, plus the desktop's model name as a path prefix.
-    // `/ensure` reports the same port back, so the prefix survives the rebuild
-    // and OpenAIClient's `/v1/chat/completions` lands on the pass-through route
-    // instead of on a model port that was never shared.
-    let reportedPort = 0;
+    // `/ensure` reports the model's own loopback port on the desktop (8091 here,
+    // as the real desktop does), which a pass-through entry must NOT take: the
+    // 0.17.191 laptop run swapped it in and every chat 404'd at
+    // `<desktop>:8091/<model>/v1/chat/completions`.
     const starter = await startFakeStarter(() => ({
       status: 200,
       body: {
         model: 'strata-iq3s',
-        port: reportedPort,
+        port: 8091,
         leaseId: 'lease-1',
         expiresAt: Date.now() + 600_000,
         kind: 'managed-external',
       },
     }));
     running = starter;
-    reportedPort = Number(new URL(starter.url).port);
+    const reportedPort = Number(new URL(starter.url).port);
     const config = laptopConfig(starter.url, { endpoint: `${starter.url}/strata-iq3s` });
     const { baseUrl } = await clientFor(config).ensure(modelOf(config));
     expect(baseUrl).toBe(`http://127.0.0.1:${reportedPort}/strata-iq3s`);

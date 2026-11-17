@@ -171,7 +171,7 @@ export class RemoteStarterClient {
     }
     const expiresAt = Number(answer.body.expiresAt);
     this.cache.set(model.name, {
-      baseUrl: baseUrlWithPort(model.endpoint, port, answer.starter),
+      baseUrl: baseUrlWithPort(model.endpoint, port, answer.starter, remote.model),
       expiresAt: Number.isFinite(expiresAt) ? expiresAt : this.now() + 60_000,
       leaseId: typeof answer.body.leaseId === 'string' ? answer.body.leaseId : '',
       starter: answer.starter,
@@ -358,7 +358,7 @@ export class RemoteStarterClient {
     if (!entry) return; // released while this renew was in flight
     const port = Number(answer.body.port);
     if (model.endpoint && Number.isInteger(port) && port > 0) {
-      entry.baseUrl = baseUrlWithPort(model.endpoint, port, answer.starter);
+      entry.baseUrl = baseUrlWithPort(model.endpoint, port, answer.starter, remote.model);
       // The address that renewed it is the one its `/release` and `/unload` go
       // to, so the lease follows the route instead of staying on the old host.
       entry.starter = answer.starter;
