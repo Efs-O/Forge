@@ -20,7 +20,7 @@
  * its own test children read them. Run it on purpose with `npm run canary`.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,6 +37,8 @@ const REMOVE_TIMEOUT_MS = 20 * 60_000;
 const ADD_TIMEOUT_MS = 10 * 60_000;
 const INSTALL_TIMEOUT_MS = 20 * 60_000;
 const TEST_TIMEOUT_MS = 15 * 60_000;
+/** A handle that names an empty folder usually lets go within a moment of the run ending. */
+const EMPTY_SHELL_RETRY_MS = 500;
 
 const log = (line) => process.stdout.write(`${line}\n`);
 
@@ -108,20 +110,48 @@ function removeWorktree(path) {
   return res.status === 0;
 }
 
+/** `main` is synchronous, so this is how a wait is done: `Atomics.wait` parks this thread. */
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 /**
  * CLAUDE.md step 4: on Windows `git worktree remove` often deletes the contents, prunes
- * its own record, and leaves an empty folder behind because a handle still names it.
- * Retry the delete once, then name the path rather than leaving it silent.
+ * its own record, and leaves an empty folder behind because a handle still names it. That
+ * empty shell is the only thing here that is ours to delete, so only an empty folder is
+ * deleted — one `rmdirSync`, tried twice, because the handle that names it usually lets go.
+ *
+ * A folder that still holds files is a worktree git refused to remove, and the usual reason
+ * is a planted mutation left uncommitted by a run killed mid-suite. Deleting it anyway is
+ * what `--force` would do, and `--force` is exactly what this script refuses to pass: the
+ * uncommitted bytes are somebody's, so the path is named instead.
  */
 function ensureFolderGone(path) {
   if (!existsSync(path)) return true;
+  let entries;
   try {
-    rmSync(path, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    entries = readdirSync(path);
   } catch (err) {
-    log(`canary: retrying the delete of ${path} failed (${err.message})`);
+    log(`canary: could not list ${path} (${err.code ?? err.message}); left in place`);
+    return false;
   }
-  if (existsSync(path)) return false;
-  return true;
+  if (entries.length !== 0) {
+    log(`canary: ${path} still holds files; git refused to remove it, left in place`);
+    return false;
+  }
+  for (const attempt of [0, 1]) {
+    if (attempt > 0) sleepSync(EMPTY_SHELL_RETRY_MS);
+    try {
+      rmdirSync(path);
+    } catch (err) {
+      // ENOENT means something else deleted it between the listing and the rmdir: done.
+      if (err.code !== 'ENOENT') {
+        log(`canary: could not delete the empty folder ${path} (${err.code ?? err.message})`);
+      }
+    }
+    if (!existsSync(path)) return true;
+  }
+  return false;
 }
 
 /** One `git worktree prune`, after every removal, so git forgets what is already gone. */
