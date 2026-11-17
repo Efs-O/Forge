@@ -9,6 +9,7 @@ import * as path from 'path';
 import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
 import { ForgeConfigSchema } from '../../src/config/schema';
+import { JobSchema } from '../../src/jobs/jobSchema';
 import { agentSetupPrompt } from '../../src/vscode/agentSetupCommand';
 import { isPartialExample, validateConfigExample, yamlBlocks } from '../support/docConfigExamples';
 
@@ -22,7 +23,7 @@ describe('AI_SETUP.md', () => {
   it('requests one plan confirmation and automates the rest of the chosen setup', () => {
     const text = doc.replace(/\s+/gu, ' ');
     expect(doc.match(/Proceed with this setup plan/g)).toHaveLength(1);
-    expect(text).toContain('never ask which sections to add');
+    expect(text).toContain('offer only the optional items listed in Step 0, in that one question');
     expect(text).toContain('do not ask the user to choose');
     expect(text).toContain('every model file and release archive');
     expect(text).toContain('the selected llama.cpp build');
@@ -40,6 +41,86 @@ describe('AI_SETUP.md', () => {
     expect(text).toContain('do not ask the user to send one');
     expect(text).toContain('ControlServerRecord.url');
     expect(text).toContain('If `LOCALAPPDATA` is unset');
+  });
+
+  // Step 0 is the only place the user can say yes to an optional section, so
+  // the offers have to be in that one question: an agent that cannot ask a
+  // second question would otherwise set up only what the user happened to name
+  // in their first message.
+  it('offers the four optional items in the one Step 0 question', () => {
+    const text = doc.replace(/\s+/gu, ' ');
+    expect(text).toContain(
+      'Proceed with this setup plan? Answer yes/no, and yes/no for each optional item.',
+    );
+    expect(text).toContain(
+      'Telegram: control Forge from your phone over Telegram (needs your own bot ' +
+        'from @BotFather; a second computer needs its own bot).',
+    );
+    expect(text).toContain(
+      "Other computer: use models from another computer of yours, or share this one's (Tailscale).",
+    );
+    expect(text).toContain(
+      'Daily chat retitle: rename idle chats each morning to titles that say what they were about.',
+    );
+    expect(text).toContain(
+      'Git identity, only when the survey found `user.name` or `user.email` empty: ' +
+        'the name and email to put on your commits (leave it blank to skip).',
+    );
+  });
+
+  it('gates each optional step on the Step 0 answer and keeps the agent out of the user\u2019s network', () => {
+    const text = doc.replace(/\s+/gu, ' ');
+    expect(text).toContain(
+      'Run this section only when the user\'s setup request names Telegram or the user ' +
+        'said yes to Telegram in Step 0. Do not ask about it again.',
+    );
+    expect(text).toContain(
+      'You may run only `tailscale status`, which reads and changes nothing.',
+    );
+    expect(text).toContain(
+      '{"action": "accept", "src": ["<this computer or your user>"], "dst": ["<main computer>:8797,8798"]}',
+    );
+    // The policy move must be the last step: once policy.yaml exists, a
+    // config.yaml still holding a security key is refused, so any later config
+    // edit would break the setup it just checked.
+    expect(text).toContain('Move the security settings into policy.yaml');
+    expect(text).toContain('(`forge.movePolicy`)');
+  });
+
+  it('runs the policy move as the last step, before Finish', () => {
+    const headings = [...doc.matchAll(/^## (Step \d+|Finish)\b/gm)].map((m) => ({
+      title: m[1],
+      at: m.index ?? -1,
+    }));
+    const step14 = headings.find((h) => h.title === 'Step 14');
+    const finish = headings.find((h) => h.title === 'Finish');
+    expect(step14).toBeDefined();
+    expect(finish).toBeDefined();
+    const others = headings.filter((h) => h.title.startsWith('Step') && h.title !== 'Step 14');
+    expect(others.length).toBeGreaterThan(0);
+    expect(others.every((h) => h.at < step14!.at)).toBe(true);
+    expect(step14!.at).toBeLessThan(finish!.at);
+  });
+
+  it('sends manage_jobs a definition it can create, with no id of its own', () => {
+    const marker = 'Create this job with manage_jobs: ';
+    const at = doc.indexOf(marker);
+    expect(at).toBeGreaterThan(-1);
+    const rest = doc.slice(at + marker.length);
+    const definition = JSON.parse(rest.slice(0, rest.indexOf('\n'))) as Record<string, unknown>;
+    // `manage_jobs create` derives the id from the name and adds version and
+    // the timestamps (src/tools/jobTools.ts): a doc that sends them would be
+    // pinning values the tool owns.
+    expect(Object.keys(definition)).not.toContain('id');
+    expect(
+      JobSchema.safeParse({
+        version: 1,
+        id: 'daily-chat-retitle',
+        created_at: 0,
+        updated_at: 0,
+        ...definition,
+      }).success,
+    ).toBe(true);
   });
 
   it('names only commands the extension contributes', () => {

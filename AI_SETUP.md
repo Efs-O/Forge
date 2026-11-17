@@ -7,7 +7,8 @@ and the two places Forge looks for its config.
 
 Work through the steps in order, run each **Check**, and continue without asking
 between steps. Set up an optional section only when the user's setup request
-named it; never ask which sections to add. The agent mesh is part of the core
+named it or the user said yes to it in Step 0; offer only the optional items
+listed in Step 0, in that one question. The agent mesh is part of the core
 setup.
 
 ## Ground rules
@@ -16,8 +17,9 @@ setup.
    `config.yaml`, in git, or in your reply. Forge keeps them in VS Code
    SecretStorage; the user enters them with the Forge command this file names.
 2. **One confirmation, then proceed.** After Step 0, show the one-time plan
-   summary described there and wait for one yes/no answer. After yes, do not ask
-   again about anything in that summary.
+   summary described there, with its optional items, and wait for one answer:
+   yes or no to the plan, and yes or no to each optional item. After yes, do
+   not ask again about anything in that summary.
 3. **Human-only stops:** required logins (`claude`, `codex login`,
    `ollama auth login`); API keys and bot tokens entered through Forge's own
    commands; Windows UAC or SmartScreen prompts; and the first VS Code window
@@ -34,8 +36,10 @@ setup.
    record VRAM measurements in them.
 6. **Stay in scope.** Write the Forge config, the llama.cpp install folder,
    `~/.claude/settings.json` only for the stated mesh setting, and `FORGE.md`
-   only when the workspace has none. Forge writes the workspace agent note;
-   leave `AGENTS.md` and `CLAUDE.md` alone and verify the marked section. Kill
+   only when the workspace has none, and the global git `user.name` and
+   `user.email` only with the values the user gave in Step 0. Forge writes the
+   workspace agent note; leave `AGENTS.md` and `CLAUDE.md` alone and verify the
+   marked section. Kill
    no process you did not start.
 7. **Trust Forge, not yourself.** A step is done when its Check passes, not
    when the file looks right.
@@ -67,6 +71,8 @@ Collect and show the user in a short table:
 - Is `FORGE.md` already present at the repository root?
 - On Windows, is Git for Windows' `bash.exe` available? If Claude Code is
   installed, is it configured to run in bypass-permissions mode?
+- Read `git config --global user.name` and `git config --global user.email`;
+  note whether either is empty.
 
 Then choose **one** backend from the survey and state why. Apply that choice;
 do not ask the user to choose:
@@ -102,11 +108,22 @@ After the survey and backend choice, show one concise summary containing:
 - the exact config file path to write, plus which optional sections were named
   in the user's request; and whether it will create `FORGE.md` because the
   workspace has no project instruction file.
+- these optional items, each answered yes or no in the same reply (an item the
+  user's request already named is part of the plan, not an offer):
+  - Telegram: control Forge from your phone over Telegram (needs your own bot
+    from @BotFather; a second computer needs its own bot).
+  - Other computer: use models from another computer of yours, or share this
+    one's (Tailscale).
+  - Daily chat retitle: rename idle chats each morning to titles that say what
+    they were about.
+  - Git identity, only when the survey found `user.name` or `user.email` empty:
+    the name and email to put on your commits (leave it blank to skip).
 
-Ask **“Proceed with this setup plan? (yes/no)”** and wait. A no means stop
-without changing files, installing software, or downloading models. After yes,
-do not ask again about a listed download, install, switch, config path, or
-optional section. If an unlisted dependency becomes necessary, skip that part
+Ask **“Proceed with this setup plan? Answer yes/no, and yes/no for each
+optional item.”** and wait. A no means stop without changing files, installing
+software, or downloading models. After yes, do not ask again about a listed
+download, install, switch, config path, or optional section, or optional item.
+If an unlisted dependency becomes necessary, skip that part
 and explain why in **Finish** instead of asking for another plan confirmation.
 
 ## Step 1 — Choose the config location
@@ -126,6 +143,11 @@ root. Fill **Project facts** and **Commands** from that repository's README,
 build and test files; leave every other starter section unchanged. Existing
 `FORGE.md` files are left untouched. If no repository root is open, skip this
 and explain why in **Finish**.
+
+**Git identity.** When the user gave a name and email in Step 0, run
+`git config --global user.name "<name>"` and
+`git config --global user.email "<email>"` with exactly those values. Without
+an answer, set nothing and say so in **Finish**. Never invent either value.
 
 ## Step 2 — llama.cpp backend (skip for Ollama / cloud)
 
@@ -352,9 +374,10 @@ chat opened by `say --new`.
 
 ## Step 8 — Optional: Telegram remote control
 
-Run this section only when the user's setup request names Telegram. Do not ask
-whether to add it. The bot token, pairing code, and authenticator QR stay with
-the user; the agent handles the config and checks.
+Run this section only when the user's setup request names Telegram or the user
+said yes to Telegram in Step 0. Do not ask about it again. The bot token,
+pairing code, and authenticator QR stay with the user; the agent handles the
+config and checks.
 
 1. If the user has no bot token, tell them to open **@BotFather**, send
    `/newbot`, and keep the token private. Then tell them to run **Forge: Set
@@ -527,6 +550,56 @@ When requested:
 **Check:** confirm the setup report matches the requested engines and files.
 For full setup instructions, see [docs/MEDIA.md](docs/MEDIA.md).
 
+## Step 12 — Optional: models from another computer (Tailscale)
+
+Run this section only when the user's setup request names it or the user said
+yes to "Other computer" in Step 0. These are instructions for the user: the
+user's Tailscale network is theirs to change. You may run only
+`tailscale status`, which reads and changes nothing. Never run `tailscale up`,
+`login`, `serve` or `set`, and never edit the access rules yourself.
+
+1. Tell the user to install Tailscale on both computers and sign in to the same
+   account. Wait, then run `tailscale status` and report both machines' names.
+2. On the computer that has the models (the main computer), tell the user to
+   run **Forge: Share this computer** (`forge.shareComputer`). Its message names
+   the ports it shares (by default 8798 for the model starter and 8797 for the
+   cloud relay).
+3. Tell the user to open the Tailscale admin page, **Access controls**, and add
+   this rule with their own names filled in:
+   `{"action": "accept", "src": ["<this computer or your user>"], "dst": ["<main computer>:8797,8798"]}`
+4. On this computer, tell the user to run **Forge: Connect to my desktop**
+   (`forge.connectDesktop`), then **Forge: Check connection**
+   (`forge.checkConnection`), and paste its result to you.
+
+**Check:** read the pasted result. Every link it lists passes, or name the
+first broken link and the step above that fixes it.
+
+## Step 13 — Optional: daily chat retitle
+
+Run this section only when the user said yes to "Daily chat retitle" in Step 0,
+after Step 7's check passed. Send this to the chat Step 7 opened, with
+`forge.sh say <name> --to <conversationId>` and the message on stdin:
+
+    Create this job with manage_jobs: {"name":"Daily chat retitle","enabled":true,"wake":false,"after":"stay_awake","schedule":{"kind":"daily","at":"06:00"},"check":{"kind":"none"},"on_change":{"kind":"notify"},"action":{"kind":"retitle","max_chats":20,"min_idle_minutes":60,"dry_run":false,"report":"always"}}
+
+**Check:** read the answer with `forge.sh view <name> --to <conversationId>`;
+it names the created job and its id.
+
+## Step 14 — Move the security settings into policy.yaml
+
+Run this last: once `~/.forge/policy.yaml` exists, Forge refuses a
+`config.yaml` that still holds a security key, so every config edit above must
+already be done. You never write `policy.yaml`; the user runs Forge's own
+command for it.
+
+Tell the user to run **Forge: Move security settings to policy.yaml**
+(`forge.movePolicy`) and paste the message it shows. Do not edit `config.yaml`
+again after this step.
+
+**Check:** repeat `GET /healthz` from Step 6 (it answers `{"ok":true}`), and
+confirm `config.yaml` no longer holds any of the keys the pasted message says it
+moved.
+
 ## Finish
 
 Report to the user:
@@ -535,12 +608,16 @@ Report to the user:
 - the Check results, pass or fail, with the output;
 - whether the agent note is in `AGENTS.md` and/or `CLAUDE.md` (step 7), and
   that the user's own lines in those files are untouched;
-- one line per unrequested optional section, each with why it was skipped and
+- whether the git identity was set (Step 1), and if not, that no name or email
+  was given;
+- one line per optional section not set up, each with why it was skipped and
   how to add it later:
-  - Telegram — not requested; name it to follow Step 8 and enter a bot token.
-  - Web search — not requested; name it to follow Step 9 and enter a Tavily key.
-  - Image generation — not requested; name it to follow Step 10.
-  - Video or music — not requested; name it to follow Step 11.
+  - Telegram — not requested or declined; name it to follow Step 8 and enter a bot token.
+  - Web search — not requested or declined; name it to follow Step 9 and enter a Tavily key.
+  - Image generation — not requested or declined; name it to follow Step 10.
+  - Video or music — not requested or declined; name it to follow Step 11.
+  - Other computer — not requested or declined; name it to follow Step 12.
+  - Daily chat retitle — not requested or declined; name it to follow Step 13.
 - any requested section skipped because a prerequisite was missing;
 - each remaining human action and why: plan confirmation, required login or
   secret entry (including Telegram authentication), Windows prompt, first
@@ -548,3 +625,11 @@ Report to the user:
   startup error;
 - these owner-only choices, unchanged: `~/.forge/policy.yaml`, **Always in this
   project**, and Clanker for ordinary chats.
+
+Then tell the user where things live: Forge ships four skills inside the
+extension (hf-download, music-track, office-files, video-clip), updated with
+Forge; their own skills go in `~/.forge/skills/<name>/`. Memories start empty
+and fill as agents save them. `FORGE.md` is theirs to edit.
+`docs/CODING_TIPS.md` appears when an agent records its first lesson. The
+browser tool stays off until they turn on `permissions.browser.enabled`
+themselves.
