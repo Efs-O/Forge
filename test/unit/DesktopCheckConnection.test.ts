@@ -45,6 +45,7 @@ import { findFreeLoopbackPort } from '../support/listenLoopback';
 
 const ui = vi.hoisted(() => ({
   handlers: {} as Record<string, () => Promise<unknown>>,
+  shown: [] as unknown[][],
 }));
 
 vi.mock('vscode', () => ({
@@ -65,7 +66,10 @@ vi.mock('vscode', () => ({
       hide: () => {},
       dispose: () => {},
     }),
-    showInformationMessage: async () => undefined,
+    showInformationMessage: async (...args: unknown[]) => {
+      ui.shown.push(args);
+      return undefined;
+    },
     showErrorMessage: async () => undefined,
   },
   // A local window: `remoteWindowKind.ts` must not read a remote kind here.
@@ -621,5 +625,25 @@ describe('Forge: Check connection', () => {
     // a link nobody was allowed to finish asking about.
     expect(String(message)).not.toMatch(/nothing answered on any relay address/);
     expect(inFlight).toBe(0);
+  });
+
+  /** The palette drops a command's return value, so until 0.17.191 the owner ran
+   *  the check on the laptop and saw nothing. The walk must reach the screen. */
+  it('shows the walk to the owner, not only returns it', async () => {
+    ui.shown.length = 0;
+    const context = { subscriptions: [] as Array<{ dispose(): void }> };
+    registerDesktopCheckConnectionCommands(context as never, {
+      getConfig: () =>
+        ({
+          models: [{ name: 'gemma-iq3s', provider: 'llama.cpp', gguf_path: '/gemma.gguf' }],
+          active_model: 'gemma-iq3s',
+          llama_server: {},
+        }) as unknown as ForgeConfig,
+      runTailscale: fakeTailscale(async () => statusJson()),
+      fetchImpl: fakeFetch({}, []),
+    });
+    const message = await ui.handlers[DESKTOP_CHECK_COMMAND]!();
+    expect(String(message)).toMatch(/first link that is broken is: Config/);
+    expect(ui.shown).toEqual([[message, { modal: true }]]);
   });
 });

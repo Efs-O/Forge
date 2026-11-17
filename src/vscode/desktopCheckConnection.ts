@@ -82,7 +82,16 @@ export function registerDesktopCheckConnectionCommands(
   const controller = new AbortController();
   context.subscriptions.push({ dispose: () => controller.abort() });
   context.subscriptions.push(
-    vscode.commands.registerCommand(DESKTOP_CHECK_COMMAND, () => runCheck(deps, controller.signal)),
+    vscode.commands.registerCommand(DESKTOP_CHECK_COMMAND, async () => {
+      const message = await runCheck(deps, controller.signal);
+      // A palette command's return value goes nowhere, so the walk is shown here;
+      // returning it only (until 0.17.191) left the owner with no answer at all.
+      // Modal, because the message spans lines and is meant to be read and copied.
+      if (!controller.signal.aborted) {
+        void vscode.window.showInformationMessage(message, { modal: true });
+      }
+      return message;
+    }),
   );
 }
 
