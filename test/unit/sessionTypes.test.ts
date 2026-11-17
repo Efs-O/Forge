@@ -23,6 +23,7 @@ import {
   historyMetasFromSession,
 } from '../../src/sidebar/sessionProjections';
 import type { ChatMessage } from '../../src/llm/types';
+import { collectCompactionUserMessages } from '../../src/sidebar/compactionUserContext';
 
 function makeMemento(store: Record<string, unknown>): Memento {
   return {
@@ -512,6 +513,31 @@ describe('sessionTypes', () => {
       { generation: 1, fromIndex: 2, source: 'auto' },
       { generation: 2, fromIndex: 4, source: 'manual' },
     ]);
+  });
+
+  // 1fead540 gave the first request a 12k allowance and left the reader at 4k,
+  // so every compacted chat with a long first request (scheduled jobs) was
+  // quarantined as corrupt on the next reload.
+  it('loads the longest first request the compaction writer keeps', () => {
+    const userMessages = collectCompactionUserMessages(undefined, [
+      { role: 'user', content: 'x'.repeat(20_000) },
+    ]);
+    expect(userMessages[0]!.length).toBeGreaterThan(12_000);
+    const session = createDefaultSession();
+    session.conversations[0]!.messages = [{ role: 'user', content: 'hi' }];
+    session.conversations[0]!.compaction = {
+      summary: 'Goal: finish.',
+      fromIndex: 1,
+      generation: 1,
+      userMessages,
+    };
+
+    const restored = loadSidebarSession(
+      makeMemento({ [SESSION_KEY_V1]: runtimeToPersisted(session) }),
+    );
+
+    expect(restored.conversations[0]!.id).toBe(session.conversations[0]!.id);
+    expect(restored.conversations[0]!.compaction?.userMessages).toEqual(userMessages);
   });
 
   it('round-trips structured replacement context without aliasing its arrays', () => {

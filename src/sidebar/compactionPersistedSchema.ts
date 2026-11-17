@@ -18,7 +18,7 @@ import {
   RECORDED_ACTION_MAX_ITEMS,
 } from './compactionTypes';
 import { LAST_REPLY_MAX_CHARS } from './compactionLastReply';
-import { USER_CONTEXT_MAX_MESSAGES, USER_CONTEXT_MESSAGE_MAX_CHARS } from './compactionUserContext';
+import { FIRST_REQUEST_MAX_CHARS, USER_CONTEXT_MAX_MESSAGES } from './compactionUserContext';
 
 const recordedActionSchema = z
   .object({
@@ -57,12 +57,17 @@ export const compactionPersistedSchema = z
           .strict(),
       )
       .optional(),
+    // The first entry has its own 12k allowance (`FIRST_REQUEST_MAX_CHARS`), so
+    // the bound is the largest the writer can produce, not the per-message cap.
+    // A reader stricter than its writer quarantines the whole chat on reload:
+    // 1fead540 widened the writer and not this line, and four compacted
+    // scheduled-job chats were thrown aside as corrupt (2026-10-29..11-17).
     userMessages: z
       .array(
         z
           .string()
           .min(1)
-          .max(USER_CONTEXT_MESSAGE_MAX_CHARS + 40),
+          .max(FIRST_REQUEST_MAX_CHARS + 40),
       )
       .max(USER_CONTEXT_MAX_MESSAGES)
       .optional(),
