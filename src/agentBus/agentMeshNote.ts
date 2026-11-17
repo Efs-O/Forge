@@ -154,19 +154,63 @@ export function applyAgentMeshNote(
 export const AGENT_INSTRUCTION_FILE_NAMES = ['AGENTS.md', 'CLAUDE.md'] as const;
 
 /**
+ * The one line that makes a `CLAUDE.md` import the workspace's `AGENTS.md`:
+ * Claude Code expands an `@file` line into the context it is given, so the
+ * section Forge writes into `AGENTS.md` reaches a Claude Code session through
+ * it. Forge recognises only the line on its own — Claude Code also accepts a
+ * path with a directory or a glob, and `@AGENTS.md` alone is the whole of what
+ * Forge writes, so that is the whole of what Forge reads back.
+ */
+export const AGENTS_MD_IMPORT_LINE = '@AGENTS.md';
+
+/** Does this content already import `AGENTS.md` on a line of its own? A mention
+ *  inside a sentence does not count: only a line Claude Code would act on. */
+export function hasAgentsMdImportLine(content: string): boolean {
+  return content.split(/\r?\n/u).some((line) => line.trim() === AGENTS_MD_IMPORT_LINE);
+}
+
+/** The whole content of a `CLAUDE.md` Forge creates: the import line, one
+ *  newline, nothing else, no markers. Writing the section into that file as
+ *  well would put the same 9 KB into Claude Code's context twice. */
+export const AGENTS_MD_IMPORT_FILE_CONTENT = `${AGENTS_MD_IMPORT_LINE}\n`;
+
+/** One file in the install plan: which file, and what is written into it. */
+export interface AgentNoteTarget {
+  name: (typeof AGENT_INSTRUCTION_FILE_NAMES)[number];
+  /** `section`: the marked note. `import`: a created `CLAUDE.md` holding only
+   *  the `@AGENTS.md` line, which is how a file Forge creates reaches Claude. */
+  write: 'section' | 'import';
+}
+
+/**
  * Which files the note goes into, given what already exists in one root.
  *
  * Claude Code reads `CLAUDE.md`, and since v2.1.277 reads `AGENTS.md` only when
  * no `CLAUDE.md` is in scope — so a note in `AGENTS.md` alone is invisible to a
  * Claude Code session in a repository that has a `CLAUDE.md`. Codex and Copilot
- * read `AGENTS.md`. Hence: every one of the two that exists gets the section
- * (each agent then finds it in the file it actually reads); neither exists, so
- * only `AGENTS.md` is created, which serves Codex directly and Claude Code for
- * want of a `CLAUDE.md`.
+ * read `AGENTS.md`. So `AGENTS.md` always takes the section (it is created when
+ * missing, which is what Codex reads), and an existing `CLAUDE.md` takes it too,
+ * because that is the file its agent actually reads.
+ *
+ * A `CLAUDE.md` that does not exist is created holding only `@AGENTS.md`: the
+ * import reaches the section sitting in `AGENTS.md`, and a second copy of the
+ * 9 KB body in the same file would double Claude's context for nothing. An
+ * existing `CLAUDE.md` that already carries that line is left completely alone
+ * — it gets the note through its own import, and appending a section to it
+ * would duplicate the text.
+ *
+ * `claudeHasImportLine` is whether an existing `CLAUDE.md` holds that line
+ * (`hasAgentsMdImportLine`); it means nothing when there is no `CLAUDE.md`.
  */
 export function agentNoteTargetFiles(
   existingNames: readonly string[],
-): (typeof AGENT_INSTRUCTION_FILE_NAMES)[number][] {
-  const present = AGENT_INSTRUCTION_FILE_NAMES.filter((name) => existingNames.includes(name));
-  return present.length ? present : ['AGENTS.md'];
+  claudeHasImportLine: boolean,
+): AgentNoteTarget[] {
+  const plan: AgentNoteTarget[] = [{ name: 'AGENTS.md', write: 'section' }];
+  if (!existingNames.includes('CLAUDE.md')) {
+    plan.push({ name: 'CLAUDE.md', write: 'import' });
+  } else if (!claudeHasImportLine) {
+    plan.push({ name: 'CLAUDE.md', write: 'section' });
+  }
+  return plan;
 }

@@ -18,6 +18,7 @@ import {
   applyAgentMeshNote,
   buildAgentMeshNote,
   countAgentMeshSections,
+  hasAgentsMdImportLine,
   type AgentMeshNoteFacts,
 } from '../../src/agentBus/agentMeshNote';
 
@@ -161,20 +162,43 @@ describe('putting the note into a file', () => {
 });
 
 describe('which files get the section', () => {
-  it('creates AGENTS.md when neither exists', () => {
-    expect(agentNoteTargetFiles([])).toEqual(['AGENTS.md']);
+  const section = { name: 'AGENTS.md', write: 'section' } as const;
+  const importOnly = { name: 'CLAUDE.md', write: 'import' } as const;
+  const claudeSection = { name: 'CLAUDE.md', write: 'section' } as const;
+
+  it('neither file exists: AGENTS.md gets the section, CLAUDE.md is created as the import', () => {
+    expect(agentNoteTargetFiles([], false)).toEqual([section, importOnly]);
   });
 
-  it('writes into every file that already exists', () => {
-    expect(agentNoteTargetFiles(['CLAUDE.md'])).toEqual(['CLAUDE.md']);
-    expect(agentNoteTargetFiles(['AGENTS.md', 'CLAUDE.md'])).toEqual([
-      'AGENTS.md',
-      'CLAUDE.md',
+  it('only AGENTS.md: the section goes there, CLAUDE.md is created as the import', () => {
+    expect(agentNoteTargetFiles(['AGENTS.md'], false)).toEqual([section, importOnly]);
+  });
+
+  it('only CLAUDE.md, without the import line: AGENTS.md is created with the section, and so is that file', () => {
+    expect(agentNoteTargetFiles(['CLAUDE.md'], false)).toEqual([section, claudeSection]);
+  });
+
+  it('only CLAUDE.md, and it already imports AGENTS.md: that file is left out of the plan', () => {
+    expect(agentNoteTargetFiles(['CLAUDE.md'], true)).toEqual([section]);
+  });
+
+  it('both files: the same two decisions about CLAUDE.md', () => {
+    expect(agentNoteTargetFiles(['AGENTS.md', 'CLAUDE.md'], false)).toEqual([
+      section,
+      claudeSection,
     ]);
+    expect(agentNoteTargetFiles(['AGENTS.md', 'CLAUDE.md'], true)).toEqual([section]);
   });
 
   it('ignores other names', () => {
-    expect(agentNoteTargetFiles(['README.md', 'FORGE.md'])).toEqual(['AGENTS.md']);
+    expect(agentNoteTargetFiles(['README.md', 'FORGE.md'], false)).toEqual([section, importOnly]);
     expect([...AGENT_INSTRUCTION_FILE_NAMES]).toEqual(['AGENTS.md', 'CLAUDE.md']);
+  });
+
+  it('recognises the import line only as a line of its own', () => {
+    expect(hasAgentsMdImportLine('@AGENTS.md\n')).toBe(true);
+    expect(hasAgentsMdImportLine('# Mine\r\n\n@AGENTS.md\r\n')).toBe(true);
+    expect(hasAgentsMdImportLine('Rules say to read `@AGENTS.md` first.\n')).toBe(false);
+    expect(hasAgentsMdImportLine('')).toBe(false);
   });
 });

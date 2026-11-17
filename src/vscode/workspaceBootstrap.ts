@@ -1,3 +1,4 @@
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
@@ -21,6 +22,7 @@ import {
 import { registerDesktopConnectCommands } from './desktopConnect';
 import { registerDesktopShareCommands } from './desktopShare';
 import { registerDesktopCheckConnectionCommands } from './desktopCheckConnection';
+import { registerAgentUserNoteCommand, refreshUserNote, userNoteFacts } from './agentUserNote';
 import { wireDesktopKeepingUp } from './desktopKeepingUp';
 import type { ForgeConfig } from '../config/types';
 import { getLogger } from '../util/logger';
@@ -78,6 +80,15 @@ export async function bootstrapWorkspace(
   registerDesktopConnectCommands(context, desktopDeps);
   registerDesktopShareCommands(context, desktopDeps);
   registerDesktopCheckConnectionCommands(context, desktopDeps);
+  // `Forge: Add Agent Note to My User Files` writes the user-wide copy of the
+  // agent note into `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`. Registered
+  // here, above the no-folder return, for the same reason as the four desktop
+  // commands: neither the command nor the files it writes belong to a workspace,
+  // so a window with no folder open must still offer it. `agentMeshNoteFacts`
+  // owns how a path is spelled inside a note, so the bus folder comes from it.
+  registerAgentUserNoteCommand(context, {
+    getBusDir: () => agentMeshNoteFacts(getConfig(), configPath).busDir,
+  });
   if (!workspaceRoot) return;
   const meshOn = config.agent_bus?.enabled === true;
   const repositoryRoots =
@@ -114,6 +125,19 @@ export async function bootstrapWorkspace(
     context.workspaceState.get<string>(NOTE_HASH_MARKER),
     noteHash,
   );
+  // The user-wide copy of the note, refreshed where its markers already are
+  // (see `src/vscode/agentUserNote.ts` for why nothing here ever creates those
+  // files). Failures are a log line, not a toast: a machine whose owner never
+  // ran the command has no `~/.claude` to write, and that is not a problem to
+  // be told about on every start.
+  if (meshOn) {
+    const userResults = refreshUserNote(os.homedir(), userNoteFacts(noteFacts.busDir));
+    const refreshed = userResults.filter((result) => result.status === 'replaced');
+    if (refreshed.length) log.info(describeAgentMeshNoteInstall(refreshed));
+    for (const failure of userResults.filter((result) => result.status === 'error')) {
+      log.warn(`user agent note: ${failure.path} — ${failure.reason}`);
+    }
+  }
   if (meshOn && noteAction !== 'none') {
     // A first install may create a file or append a section; a refresh only
     // replaces a section that is already there, so an owner who deleted it keeps

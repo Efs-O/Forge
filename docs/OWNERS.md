@@ -904,6 +904,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Home-window match (`jobs.home_workspace`) + non-home note  | `src/jobs/jobsHome.ts`                                         |
 | Outbox write, local toast, summarize-waits-for-idle        | `src/jobs/JobDelivery.ts`                                      |
 | Coalescing outbox (one pending message per job)            | `src/jobs/JobOutbox.ts`                                        |
+| `forge.sh notify`: an agent's Telegram message to the owner, queued in the job outbox | `src/backend/agentNotifyRoute.ts` |
 | Gated jobs network fetch (release API, binary download)    | `src/jobs/jobsFetch.ts`                                        |
 | Check kinds (github_release, github_issue, hf_discussion, disk_space, none) | `src/jobs/checks/github.ts`, `src/jobs/checks/huggingface.ts`, `src/jobs/checks/diskSpace.ts`  |
 | Check kind tool_usage (writes the daily tool-usage files, never notifies) | `src/jobs/checks/toolUsage.ts` |
@@ -939,6 +940,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Agent-bus shipped text (README, message bodies)            | `src/agentBus/busContent.ts`                                   |
 | Workspace agent note (the marked `AGENTS.md` / `CLAUDE.md` section: text, markers, writer) | `src/agentBus/agentMeshNote.ts`, `src/agentBus/agentNote.md` |
 | Which file the agent note goes into, the one-time disclosure, `forge.agentMesh.installNote` | `src/vscode/agentMeshNoteSetup.ts` |
+| User-wide agent note (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`) | `src/vscode/agentUserNote.ts` |
 | Agent-bus client script (`~/.forge/agent-bus/forge.sh`)    | `src/agentBus/forge.sh` (bundled as text by busContent.ts)     |
 | Claude session registry + peer-pipe delivery, transcript existence, liveness check | `src/agentBus/claudePeer.ts` |
 | One-shot Claude Code session reopen across a VS Code window reload | `src/agentBus/claudeReopen.ts`                                  |

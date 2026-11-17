@@ -3,11 +3,13 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { createHash } from 'crypto';
 import {
+  AGENTS_MD_IMPORT_FILE_CONTENT,
   AGENT_INSTRUCTION_FILE_NAMES,
   agentNoteTargetFiles,
   applyAgentMeshNote,
   buildAgentMeshNote,
   countAgentMeshSections,
+  hasAgentsMdImportLine,
   type AgentMeshNoteFacts,
 } from '../agentBus/agentMeshNote';
 import { busPaths } from '../agentBus/agentBus';
@@ -134,8 +136,10 @@ function readInstructionFile(filePath: string): {
   }
 }
 
-/** Writes the section into one file, leaving everything outside it alone. */
-function installIntoOneFile(filePath: string, note: string): AgentMeshNoteFileResult {
+/** Writes the section into one file, leaving everything outside it alone.
+ *  Exported for `src/vscode/agentUserNote.ts`, which writes the same section
+ *  into the user's own files through the same symlink and atomic-write rules. */
+export function installIntoOneFile(filePath: string, note: string): AgentMeshNoteFileResult {
   const read = readInstructionFile(filePath);
   if (read.skipped) return { path: filePath, status: 'skipped', reason: read.skipped };
   if (read.error) return { path: filePath, status: 'error', reason: read.error };
@@ -149,18 +153,60 @@ function installIntoOneFile(filePath: string, note: string): AgentMeshNoteFileRe
   return { path: filePath, status: applied.status };
 }
 
+/** Does this root's `CLAUDE.md` already import `AGENTS.md`? An unreadable or
+ *  symlinked file answers `false`, which puts it in the plan as a section write
+ *  — where `readInstructionFile` then reports the skip it really deserves. */
+function claudeImportsAgentsMd(root: string): boolean {
+  try {
+    return hasAgentsMdImportLine(fs.readFileSync(path.join(root, 'CLAUDE.md'), 'utf8'));
+  } catch {
+    return false;
+  }
+}
+
+/** Create a `CLAUDE.md` holding only the `@AGENTS.md` import line.
+ *
+ *  It never overwrites: the plan said the file was absent, so a file that is
+ *  here now (a checkout, another agent, a race) is one Forge did not create and
+ *  will not replace. A file that already holds exactly that line is the content
+ *  Forge would have written, so it reports `unchanged`. */
+function writeAgentNoteImportFile(filePath: string): AgentMeshNoteFileResult {
+  const read = readInstructionFile(filePath);
+  if (read.skipped) return { path: filePath, status: 'skipped', reason: read.skipped };
+  if (read.error) return { path: filePath, status: 'error', reason: read.error };
+  if (read.content !== undefined) {
+    if (read.content === AGENTS_MD_IMPORT_FILE_CONTENT)
+      return { path: filePath, status: 'unchanged' };
+    return {
+      path: filePath,
+      status: 'skipped',
+      reason: 'a file appeared after the plan; Forge will not overwrite it',
+    };
+  }
+  try {
+    writeFileAtomicSync(filePath, AGENTS_MD_IMPORT_FILE_CONTENT);
+  } catch (err) {
+    return { path: filePath, status: 'error', reason: `write failed: ${(err as Error).message}` };
+  }
+  return { path: filePath, status: 'created' };
+}
+
 /**
  * Installs the note in every repository root of the workspace.
  *
  * One root, one decision about which files to touch (`agentNoteTargetFiles`):
- * each of `AGENTS.md` / `CLAUDE.md` that exists gets the section, because that
- * is the file its agent reads; neither exists, so `AGENTS.md` is created.
+ * `AGENTS.md` always takes the section, because that is the file Codex and
+ * Copilot read and it is created when missing; an existing `CLAUDE.md` takes it
+ * too, because that is the file Claude Code reads, unless it already imports
+ * `AGENTS.md`, in which case it is left alone; a missing `CLAUDE.md` is created
+ * holding only the import line, so Claude sees the section once, not twice.
  */
 export function installAgentMeshNote(
   roots: readonly string[],
   facts: AgentMeshNoteFacts,
 ): AgentMeshNoteFileResult[] {
   const results: AgentMeshNoteFileResult[] = [];
+  const note = buildAgentMeshNote(facts);
   for (const root of roots) {
     const existing = AGENT_INSTRUCTION_FILE_NAMES.filter((name) => {
       try {
@@ -169,12 +215,44 @@ export function installAgentMeshNote(
         return false;
       }
     });
-    const note = buildAgentMeshNote(facts);
-    for (const name of agentNoteTargetFiles(existing)) {
-      results.push(installIntoOneFile(path.join(root, name), note));
+    const plan = agentNoteTargetFiles(existing, claudeImportsAgentsMd(root));
+    for (const target of plan) {
+      const filePath = path.join(root, target.name);
+      results.push(
+        target.write === 'import'
+          ? writeAgentNoteImportFile(filePath)
+          : installIntoOneFile(filePath, note),
+      );
     }
   }
   return results;
+}
+
+/** Replace the section in one file that already holds one; never create, never
+ *  append. The one file-level refresh, shared by the workspace note and the
+ *  user-wide copy, so "a refresh is replace-only" is one rule and not two. */
+export function refreshIntoOneFile(filePath: string, note: string): AgentMeshNoteFileResult {
+  const read = readInstructionFile(filePath);
+  if (read.skipped) return { path: filePath, status: 'skipped', reason: read.skipped };
+  if (read.error) return { path: filePath, status: 'error', reason: read.error };
+  if (read.absent) {
+    return { path: filePath, status: 'skipped', reason: 'no file; a refresh never creates one' };
+  }
+  if (read.content === AGENTS_MD_IMPORT_FILE_CONTENT) {
+    return {
+      path: filePath,
+      status: 'skipped',
+      reason: 'only the `@AGENTS.md` import: the section lives in the file it imports',
+    };
+  }
+  if (countAgentMeshSections(read.content ?? '') === 0) {
+    return {
+      path: filePath,
+      status: 'skipped',
+      reason: 'no marked section: the owner removed it, and a refresh does not re-add it',
+    };
+  }
+  return installIntoOneFile(filePath, note);
 }
 
 /**
@@ -196,33 +274,7 @@ export function refreshAgentMeshNote(
   const results: AgentMeshNoteFileResult[] = [];
   for (const root of roots) {
     for (const name of AGENT_INSTRUCTION_FILE_NAMES) {
-      const filePath = path.join(root, name);
-      const read = readInstructionFile(filePath);
-      if (read.skipped) {
-        results.push({ path: filePath, status: 'skipped', reason: read.skipped });
-        continue;
-      }
-      if (read.error) {
-        results.push({ path: filePath, status: 'error', reason: read.error });
-        continue;
-      }
-      if (read.absent) {
-        results.push({
-          path: filePath,
-          status: 'skipped',
-          reason: 'no file; a refresh never creates one',
-        });
-        continue;
-      }
-      if (countAgentMeshSections(read.content ?? '') === 0) {
-        results.push({
-          path: filePath,
-          status: 'skipped',
-          reason: 'no marked section: the owner removed it, and a refresh does not re-add it',
-        });
-        continue;
-      }
-      results.push(installIntoOneFile(filePath, note));
+      results.push(refreshIntoOneFile(path.join(root, name), note));
     }
   }
   return results;

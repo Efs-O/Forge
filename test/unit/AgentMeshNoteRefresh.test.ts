@@ -132,28 +132,60 @@ describe('a refresh never creates or appends (criterion 8b)', () => {
 });
 
 describe('a first install behaves as it always did (criterion 8d)', () => {
-  it('creates AGENTS.md when the workspace has neither instruction file', () => {
+  const statuses = (
+    results: { path: string; status: string }[],
+  ): [string, string][] => results.map((result) => [path.basename(result.path), result.status]);
+
+  it('creates AGENTS.md with the section and CLAUDE.md as the @AGENTS.md import', () => {
     const root = makeRoot('first-install', {});
     const results = installAgentMeshNote([root], facts);
-    expect(results.map((result) => result.status)).toEqual(['created']);
+    expect(statuses(results)).toEqual([
+      ['AGENTS.md', 'created'],
+      ['CLAUDE.md', 'created'],
+    ]);
     const content = readNoteFile(root, 'AGENTS.md');
     expect(content).toContain(AGENT_NOTE_START);
     expect(content).toContain(AGENT_NOTE_END);
     expect(content).toContain(note.trimEnd());
+    // The created `CLAUDE.md` is the import and nothing else: an import plus a
+    // copy of the section would put the same text into Claude's context twice.
+    expect(readNoteFile(root, 'CLAUDE.md')).toBe('@AGENTS.md\n');
   });
 
-  it('adds the section beside existing text, in the file its agent reads', () => {
+  it('adds the section beside existing text, and creates the file that is missing', () => {
     const root = makeRoot('first-install-claude', { 'CLAUDE.md': '# Mine\n\nMy rules.\n' });
     const results = installAgentMeshNote([root], facts);
-    // `agentNoteTargetFiles` is why this writes only `CLAUDE.md`: a Claude Code
-    // session reads `CLAUDE.md` and ignores `AGENTS.md` when it exists, so the
-    // note must go where that agent will actually look.
-    expect(results.map((result) => result.status)).toEqual(['appended']);
-    expect(results[0]?.path.endsWith('CLAUDE.md')).toBe(true);
+    // Both files, because that is what each agent reads: a Claude Code session
+    // reads `CLAUDE.md` and ignores `AGENTS.md` when it exists, and Codex reads
+    // only `AGENTS.md`, so the section has to be in whichever one is opened.
+    expect(statuses(results)).toEqual([
+      ['AGENTS.md', 'created'],
+      ['CLAUDE.md', 'appended'],
+    ]);
+    expect(readNoteFile(root, 'AGENTS.md')).toContain(note.trimEnd());
     const content = readNoteFile(root, 'CLAUDE.md');
+    expect(content.startsWith('# Mine\n\nMy rules.\n')).toBe(true);
     expect(content).toContain('My rules.');
     expect(content).toContain(AGENT_NOTE_START);
     expect(content).toContain(note.trimEnd());
+  });
+
+  it('leaves a CLAUDE.md that already imports AGENTS.md exactly as the owner wrote it', () => {
+    const root = makeRoot('first-install-import', { 'CLAUDE.md': '# Mine\n\n@AGENTS.md\n' });
+    const results = installAgentMeshNote([root], facts);
+    expect(statuses(results)).toEqual([['AGENTS.md', 'created']]);
+    expect(readNoteFile(root, 'AGENTS.md')).toContain(note.trimEnd());
+    expect(readNoteFile(root, 'CLAUDE.md')).toBe('# Mine\n\n@AGENTS.md\n');
+  });
+
+  it('a refresh creates nothing, in a root that never had the install', () => {
+    const root = makeRoot('refresh-creates-nothing', { 'CLAUDE.md': '@AGENTS.md\n' });
+    const results = refreshAgentMeshNote([root], facts);
+    expect(statuses(results)).toEqual([
+      ['AGENTS.md', 'skipped'],
+      ['CLAUDE.md', 'skipped'],
+    ]);
     expect(fs.existsSync(path.join(root, 'AGENTS.md'))).toBe(false);
+    expect(readNoteFile(root, 'CLAUDE.md')).toBe('@AGENTS.md\n');
   });
 });

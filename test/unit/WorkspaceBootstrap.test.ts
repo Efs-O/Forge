@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach, afterAll } from 'vitest';
 
 /**
  * The workspace bootstrap: the session migration, the FORGE.md auto-create, and
@@ -15,6 +15,22 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
  * off writes nothing, and an existing file's own text survives.
  */
 const logged = vi.hoisted(() => ({ lines: [] as string[] }));
+
+// `bootstrapWorkspace` refreshes the user-wide agent note in `os.homedir()`
+// (see `src/vscode/agentUserNote.ts`), so the window under test gets a
+// temporary home: the `~/.claude` and `~/.codex` files it could rewrite live in
+// this folder, and the operator's own are never opened.
+const fakeHome = vi.hoisted(() => {
+  const nodeFs = require('fs') as typeof import('fs');
+  const nodePath = require('path') as typeof import('path');
+  const nodeOs = require('os') as typeof import('os');
+  return { dir: nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'forge-note-home-')) };
+});
+
+vi.mock('os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('os')>();
+  return { ...actual, default: actual, homedir: () => fakeHome.dir };
+});
 
 vi.mock('vscode', () => ({
   window: {
@@ -95,6 +111,11 @@ beforeEach(() => {
 afterEach(() => {
   fs.rmSync(scratch, { recursive: true, force: true });
 });
+// The fake home the user-wide note refreshes: the temp guard wants nothing left
+// behind in `os.tmpdir()` when this file finishes.
+afterAll(() =>
+  fs.rmSync(fakeHome.dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }),
+);
 
 function read(name: string): string {
   return fs.readFileSync(path.join(scratch, name), 'utf8');
@@ -273,6 +294,30 @@ describe('the agent note on workspace bootstrap', () => {
     await bootstrapWorkspace(context, scratch, meshOff as never, 'config.yaml', getMeshOff);
     expect(infoMock()).toHaveBeenCalledTimes(1);
     expect(countAgentMeshSections(read('AGENTS.md'))).toBe(1);
+  });
+
+  it('refreshes the user-wide note where its markers already are, and creates nothing elsewhere', async () => {
+    const claudeMd = path.join(fakeHome.dir, '.claude', 'CLAUDE.md');
+    fs.mkdirSync(path.dirname(claudeMd), { recursive: true });
+    fs.writeFileSync(
+      claudeMd,
+      `My own rules.\n\n${buildAgentMeshNote({
+        busDir: '/bus',
+        configPath: 'config.yaml',
+        meshState: 'STALE-STATE',
+      })}\n`,
+    );
+    const { context } = fakeContext();
+    await bootstrapWorkspace(context, scratch, meshOn as never, 'C:/Users/x/config.yaml', getMeshOn);
+    const content = fs.readFileSync(claudeMd, 'utf8');
+    expect(content.startsWith('My own rules.\n')).toBe(true);
+    // The user-wide copy, not the workspace note: its own fixed wording, and
+    // never the stale text the older build left between the markers.
+    expect(content).toContain("this is the user-wide copy; each workspace's own note");
+    expect(content).not.toContain('STALE-STATE');
+    // Codex's user file is not created by a start: only the command writes a
+    // home folder, so an owner who never ran it stays untouched.
+    expect(fs.existsSync(path.join(fakeHome.dir, '.codex', 'AGENTS.md'))).toBe(false);
   });
 
   it('a failed write is reported and leaves the workspace retryable', async () => {

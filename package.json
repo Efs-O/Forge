@@ -320,6 +320,10 @@
         "title": "Forge: Set Up Agent Note"
       },
       {
+        "command": "forge.agentMesh.installUserNote",
+        "title": "Forge: Add Agent Note to My User Files"
+      },
+      {
         "command": "forge.connectDesktop",
         "title": "Forge: Connect to my desktop"
       },
