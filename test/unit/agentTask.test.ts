@@ -35,10 +35,11 @@ import type { ForgeConfig } from '../../src/config/types';
 import type { PowerControl } from '../../src/system/PowerControl';
 import type { IBackendPool } from '../../src/backend/poolTypes';
 import { userQuietGate, USER_QUIET_MS } from '../../src/jobs/agentTaskAdmission';
-import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
+import { ChatCapacityError, type ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
+import { chatCapMessage } from '../../src/sidebar/sessionTypes';
 import type { ForgeRequestOutcome } from '../../src/sidebar/turnOutcome';
 import { readOutboxItem } from '../../src/jobs/JobOutbox';
-import { openDiscussChat } from '../../src/jobs/jobDiscuss';
+import { openDiscussChat, resolveJobConversation } from '../../src/jobs/jobDiscuss';
 import { nextDueWithBackoff } from '../../src/jobs/backoff';
 import { UserQuestionService } from '../../src/sidebar/UserQuestionService';
 import { unattendedConversations } from '../../src/sidebar/unattendedConversations';
@@ -714,6 +715,38 @@ describe('AgentTaskRunner', () => {
     expect(vi.mocked(host.setConversationModel)).not.toHaveBeenCalled();
     const item = await readOutboxItem(outboxDir, 'agent-task');
     expect(item!.text).toContain('jobs.default_model');
+  });
+
+  /**
+   * A full chat cap used to be read as "that chat no longer exists": the runner
+   * opened a silent second chat and rewrote `state.conversation_id`, so the run
+   * reported ok while the job's discussion chat had been replaced underneath it.
+   * The capacity refusal now fails the run with the message the user can act on,
+   * and the stored id is left alone so the next run reopens the real chat.
+   */
+  it('records a failed run with the chat-cap message when the job chat cannot be reopened', async () => {
+    const job = baseJob({ action: { kind: 'agent_task', task: 't', report: 'always' } });
+    await store.saveJob(job);
+    store.patchState('agent-task', { conversation_id: 'conv-old' });
+    host = {
+      ...fakeHost([], { kind: 'completed', finalText: 'RESULT: ok' }),
+      restoreConversation: vi
+        .fn()
+        .mockRejectedValue(new ChatCapacityError(['12 running a turn'], chatCapMessage(['12 running a turn']))),
+    } as unknown as ForgeHostFacade;
+
+    await new AgentTaskRunner(makeDeps()).run(
+      { job, state: (await store.load('agent-task'))!.state },
+      false,
+    );
+
+    const runs = await store.readRuns('agent-task');
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.outcome).toBe('failed');
+    expect(runs[0]!.summary).toContain('no open chat can be archived');
+    expect(vi.mocked(host.createConversation)).not.toHaveBeenCalled();
+    expect(vi.mocked(host.send)).not.toHaveBeenCalled();
+    expect((await store.load('agent-task'))!.state.conversation_id).toBe('conv-old');
   });
 
   /**
@@ -1584,6 +1617,128 @@ describe('openDiscussChat refusal (AC12)', () => {
     await expect(openDiscussChat(host, store, jobFile, false)).rejects.toThrow(/running/);
     // No seed was sent.
     expect(host.send).not.toHaveBeenCalled();
+  });
+});
+
+// ── a job's chat: never silently replaced, never re-seeded ──────────────────
+
+describe('job chat replacement and re-seeding', () => {
+  let jobsRoot: string;
+  let store: JobStore;
+
+  beforeEach(async () => {
+    jobsRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'forge-job-chat-'));
+    store = new JobStore(jobsRoot);
+  });
+
+  afterEach(async () => {
+    await fs.promises.rm(jobsRoot, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 50,
+    });
+  });
+
+  /** A host facade recording every restore, create and send; `restoreError` is
+   *  what `restoreConversation` throws, because the two reasons differ: a stale
+   *  id means a new chat, a full cap means the user has to free a tab. */
+  function chatHost(restoreError?: Error) {
+    const log = {
+      restored: [] as Array<{ id: string; activate: boolean }>,
+      created: 0,
+      sent: [] as Array<{ id: string; text: string }>,
+    };
+    const host = {
+      restoreConversation: vi.fn().mockImplementation(
+        async (id: string, options?: { activate?: boolean }) => {
+          log.restored.push({ id, activate: options?.activate === true });
+          if (restoreError) throw restoreError;
+          return fakeConversation(id);
+        },
+      ),
+      createConversation: vi.fn().mockImplementation(async () => {
+        log.created += 1;
+        return fakeConversation('conv-new');
+      }),
+      send: vi.fn().mockImplementation(async (id: string, text: string) => {
+        log.sent.push({ id, text });
+        return { kind: 'completed', finalText: '' };
+      }),
+    } as unknown as ForgeHostFacade;
+    return { host, log };
+  }
+
+  /** The job as it stands on disk, with `conversation_id` set to `chat`. */
+  async function jobWithChat(chat: string | null): Promise<JobFile> {
+    const job = baseJob();
+    await store.saveJob(job);
+    if (chat) store.patchState('agent-task', { conversation_id: chat });
+    return { job, state: (await store.load('agent-task'))!.state };
+  }
+
+  it('refuses a full chat cap: no new chat, no state write, no seed', async () => {
+    const jobFile = await jobWithChat('conv-old');
+    const cap = new ChatCapacityError(['12 running a turn'], chatCapMessage(['12 running a turn']));
+    const { host, log } = chatHost(cap);
+
+    await expect(resolveJobConversation(host, store, jobFile, false)).rejects.toBeInstanceOf(
+      ChatCapacityError,
+    );
+    await expect(openDiscussChat(host, store, jobFile, true)).rejects.toThrow(
+      /no open chat can be archived/,
+    );
+
+    expect(log.created).toBe(0);
+    expect(log.sent).toHaveLength(0);
+    // The stored id is untouched, so the next open reuses the real chat.
+    expect((await store.load('agent-task'))!.state.conversation_id).toBe('conv-old');
+  });
+
+  it('creates, seeds once and persists the id when the stored id no longer resolves', async () => {
+    const jobFile = await jobWithChat('conv-gone');
+    const { host, log } = chatHost(new Error('Forge: conversation could not be restored.'));
+
+    const result = await openDiscussChat(host, store, jobFile, true);
+
+    expect(result).toEqual({ conversationId: 'conv-new', created: true });
+    expect(log.created).toBe(1);
+    expect(log.sent).toHaveLength(1);
+    expect(log.sent[0]!.id).toBe('conv-new');
+    expect(log.sent[0]!.text).toContain('Job "Agent task" [agent-task]');
+    expect((await store.load('agent-task'))!.state.conversation_id).toBe('conv-new');
+  });
+
+  it('creates and seeds a chat when no id is stored', async () => {
+    const jobFile = await jobWithChat(null);
+    const { host, log } = chatHost();
+
+    const result = await openDiscussChat(host, store, jobFile, false);
+
+    expect(result).toEqual({ conversationId: 'conv-new', created: true });
+    expect(log.restored).toEqual([]);
+    expect(log.sent).toHaveLength(1);
+    expect((await store.load('agent-task'))!.state.conversation_id).toBe('conv-new');
+  });
+
+  it('reuses a restorable chat without seeding it again', async () => {
+    const jobFile = await jobWithChat('conv-live');
+    const { host, log } = chatHost();
+
+    const result = await openDiscussChat(host, store, jobFile, true);
+
+    expect(result).toEqual({ conversationId: 'conv-live', created: false });
+    expect(log.created).toBe(0);
+    expect(log.sent).toHaveLength(0);
+
+    // A second open activates the same chat and still sends nothing: every
+    // click on a job row used to start another model turn.
+    await openDiscussChat(host, store, jobFile, false);
+    expect(log.restored).toEqual([
+      { id: 'conv-live', activate: true },
+      { id: 'conv-live', activate: false },
+    ]);
+    expect(log.sent).toHaveLength(0);
   });
 });
 
