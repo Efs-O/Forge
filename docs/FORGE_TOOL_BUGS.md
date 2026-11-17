@@ -158,3 +158,18 @@ Entry shape (copy it, fill it, newest entry last):
 - Should: accept what its own `desktop_windows` prints, or normalise a number to a string
 - Workaround: pass `window_title` instead (a case-insensitive substring)
 - Status: fixed on main (commit 7e16d9f1) — the schema takes `["string","number"]` and `ToolRegistry.invalidArgs` now checks every type of a union instead of none, so a boolean or an object is still refused
+
+## A scheduled job that finished and reported is logged as "interrupted — Forge restarted during the run"
+
+- Seen: 2026-11-17, also 2026-11-16, Forge 0.17.18x, job "Basalt Windows multi-GPU watch"
+- Tool: the scheduled job runner, recorded in `~/.forge/jobs/runs/basalt-watch.jsonl`
+- Did: `{"at":1794891190572,"outcome":"failed","summary":"interrupted — Forge restarted during
+  the run"}` written about three minutes after the same turn ended with `RESULT: ok — the first
+  Windows two-GPU peer run with published numbers…`; the file holds no entry carrying that
+  summary, nor the previous day's (`…the maintainer says layer split is on main…`), and a second
+  run of the same job fires minutes later
+- Should: record the `RESULT:` line the finished turn produced, and not mark a run interrupted
+  when the restart comes after its last message
+- Workaround: the report is in the chat; the retried run re-sweeps and answers "nothing new since
+  the report minutes ago"
+- Status: open

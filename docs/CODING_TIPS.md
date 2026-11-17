@@ -25,6 +25,7 @@
 12. an `rg` pattern with a look-around (`(?=`, `(?!`, `(?<=`) → `look-around ... is not supported`. add `--pcre2`
 13. `rg -n "x" .` over the repo → `dist/`, `coverage/`, `.forge/tmp/`, `docs/local/**` corpora and one-line `test/fixtures/*.json` drown the answer (42 MB once). exclude each with `-g`
 14. `grep_search` with `path`/`glob` → refused as unknown arguments: it takes `include` only, and a folder or absolute glob goes inside `include`
+15. `grep_search` query `constructor(` → `rg: regex parse error: ... unclosed group` (escaping one paren only gives `unopened group`): the query is ripgrep regex by default. escape every paren (`constructor\(\)`) or set `literal: true`
 
 ## RUN
 1. `cd "C:/Users/…/sessions" && python -c "…"` → refused: the write is judged from the folder the command started in. pass `cwd: "C:/Users/…/sessions"` and the command alone
@@ -62,7 +63,7 @@
 ## EDIT
 1. an `edit_file` whose `old_str` is a heading → the heading disappears when `new_str` omits it, orphaning the text under it. re-include the heading in `new_str`
 2. `apply_line_edits` or `edit_file` anchored on text from before a formatter pass or earlier in the turn → refused: stale, or `old_str` not found. re-read the file, edit in the same round
-3. an `old_str` rebuilt from wrapped prose → refused: not found. the wrap is a real newline, and a sentence that starts mid-line cannot be anchored mid-sentence: copy the whole physical line
+3. an `old_str` rebuilt from wrapped prose, or retyped from an earlier read (`diver` for `diverge`) → refused: not found. the wrap is a real newline; copy the physical lines verbatim from the newest read
 4. a rename lengthens an identifier, or a new call takes several arguments on one line → the `prettier/prettier` gate fails at printWidth 100. fix: `npx prettier --write <file>`
 5. `apply_line_edits` with `expected_lines` invented rather than copied → refused: has N lines but the range is M. the refusal prints the current lines verbatim; copy them from there
 6. `apply_line_edits` on `docs/TOOL_COVERAGE.md` → `ToolHarness.test.ts` diffs it against a fresh generation and normalises only `Generated:`. restore_file it after a demo
@@ -81,6 +82,7 @@
 19. budgeting the net lines of a 500-line file → the tool warns "now 501 lines": an inserted documented method is doc+body+blank = 5 lines, not 4 → `wc -l` after the edit
 20. `SKILL.md` `description:` → the catalog carries only 240 chars (`MAX_SKILL_DESCRIPTION_CHARS`), so the trigger words must fit there; discovery also refuses a wrapped description, or a `name` that is not the folder name
 21. driving a dialog to edit a file: `desktop_click` on a field can leave the caret where it was → the text runs on behind it. move with `tab`, clear with `ctrl+a`+`delete`; a new `desktop_capture` drops the old `capture_id`
+22. a batched `edits` array refused: `arrived as a string, not an array and is not valid JSON` → one value held `\` before a raw newline. escape every newline, or send one old_str/new_str call per edit
 
 ## TEST
 1. a harness that only emits calls, or a threshold measured by a script whose pair list differs from the gate's → the number certifies neither. dispatch the calls; measure with the gate's own list
@@ -97,7 +99,7 @@
 
 ## PATHS
 1. `~/.forge/sessions/<short-id>.jsonl` → no such file: logs carry the full 8-4-4-4-12 chat id. resolve a short id with a prefix glob
-2. `ls ~/.forge/jobs/*` in `shell` → it lists them: reads under `~/.forge/` are allowed. only a change is refused — `rm -f ~/.forge/x` → "refuses to change Forge's own files"
+2. `ls ~/.forge/jobs/*` in `shell` → lists fine: file reads under `~/.forge/` are allowed; only a change is refused — `rm -f ~/.forge/x` → "refuses to change Forge's own files". Same for `Get-ItemProperty policy.yaml`: an attribute read counts as a change; read the text with grep_search
 3. `list_directory "~/.forge/jobs"` → resolves now (0.17.171), but `find_files "~/**"` still opens nothing outside the workspace. pass the absolute `C:/Users/<name>/.forge/jobs`
 4. comparing a tool's resolved path with the workspace root in a test → `fs.realpathSync` keeps the 8.3 short form `EFSOOF~1`, `fs/promises` `realpath` expands it: use the tool's resolver
 5. `zipfile.ZipFile('test/fixtures/sample.xlsx')` in a scan → FileNotFoundError: that is not where the fixture lives. read the test's `fixture()` helper for the real path first
@@ -117,6 +119,7 @@
 11. a tool-result string quoted from a rep's staging file → it is the build that rep ran, not the current one. read the source before filing it as a live defect
 12. a print job parked in `JobStatus Printing` with `PrinterStatus 4` for minutes → the driver is waiting in its own preview window (Canon IJ Preview: Start Printing). screenshot the screen; the queue proves nothing
 13. `Get-PrintQueue`/`Get-PrintJob` → not recognized here (no PrintQueue module). job state: `Get-CimInstance Win32_PrintJob`; printer state: `Win32_Printer` `PrinterStatus` (3=idle 4=processing)
+14. `gh run view <number>` → HTTP 404: view wants the `databaseId` from `gh run list --json databaseId`, not the display `number`; `elapsed`/`title` are not fields — duration is startedAt minus createdAt
 
 ## DELEGATE
 1. `notify_user` with no remote chat bound → `Shown in the VS Code window only`: a local toast, never a phone ping. do not report that the user was notified remotely
