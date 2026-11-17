@@ -36,8 +36,12 @@ export function getCloudProviderLabel(provider: CloudProvider): string {
  * Human-readable provider name for display (e.g. in a consumer's model list).
  * For `openai-compatible` the generic label says nothing useful, so derive the
  * name from the endpoint host: `https://api.cerebras.ai` → `cerebras`.
+ * A `remote_start` entry is another machine's server, usually reached by a
+ * tailnet IP, whose first label would read as `100`: name it `desktop`, as
+ * the model picker groups it.
  */
 export function getProviderDisplayName(model: ModelConfig): string {
+  if (model.remote_start) return 'desktop';
   if (model.provider === 'openai-compatible' && model.endpoint) {
     try {
       const host = new URL(model.endpoint).hostname;

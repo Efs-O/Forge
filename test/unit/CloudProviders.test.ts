@@ -27,6 +27,18 @@ describe('getProviderDisplayName', () => {
     expect(getProviderDisplayName(model({ provider: 'openrouter' }))).toBe('OpenRouter');
   });
 
+  it('names a remote_start entry desktop instead of its IP host', () => {
+    expect(
+      getProviderDisplayName(
+        model({
+          provider: 'openai-compatible',
+          endpoint: 'http://100.64.0.1:8798/strata-a',
+          remote_start: { starter: ['http://100.64.0.1:8798'], model: 'strata-a' },
+        } as Partial<ModelConfig>),
+      ),
+    ).toBe('desktop');
+  });
+
   it('names local providers directly', () => {
     expect(getProviderDisplayName(model({ provider: 'ollama' }))).toBe('ollama');
     expect(getProviderDisplayName(model({}))).toBe('llama.cpp');

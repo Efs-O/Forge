@@ -176,8 +176,11 @@ describe('AI_SETUP.md', () => {
   it('keeps the control-server model checks away from a model they cannot serve', () => {
     const text = doc.replace(/\s+/gu, ' ');
     expect(text).toContain(
-      'Run `/ensure` and `/chat` only when `/models` lists the active model with ' +
-        '`"servable": true`. Otherwise skip both and say so: a `provider: cli` model ' +
+      'Run `/ensure` only when `/models` lists the active model with `"servable": true`. ' +
+        'Run `/chat` when the row has `"servable": true`, or `"route": "chat"` with ' +
+        '`"availability": "ready"`: a cloud model or a desktop model from Step 12 is ' +
+        'served elsewhere, so there is nothing here to load and `/chat` alone is its ' +
+        'live test. Skip whichever does not apply and say so: a `provider: cli` model ' +
         "runs only inside a Forge chat, and Step 7's chat is its live test.",
     );
   });

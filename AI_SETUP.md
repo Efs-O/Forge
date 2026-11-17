@@ -287,9 +287,13 @@ POST http://127.0.0.1:<control_server.port>/ensure  {"model":"<active_model>"}  
 POST http://127.0.0.1:<control_server.port>/chat    {"model":"<active_model>","messages":[{"role":"user","content":"Reply with the word ready."}]}
 ```
 
-Run `/ensure` and `/chat` only when `/models` lists the active model with
-`"servable": true`. Otherwise skip both and say so: a `provider: cli` model
-runs only inside a Forge chat, and Step 7's chat is its live test.
+Run `/ensure` only when `/models` lists the active model with
+`"servable": true`. Run `/chat` when the row has `"servable": true`, or
+`"route": "chat"` with `"availability": "ready"`: a cloud model or a desktop
+model from Step 12 is served elsewhere, so there is nothing here to load and
+`/chat` alone is its live test. Skip whichever does not apply and say so: a
+`provider: cli` model runs only inside a Forge chat, and Step 7's chat is its
+live test.
 
 `/ensure` can take minutes for a large model. The `/chat` request is the first
 prompt; do not ask the user to send one. If a backend fails and its details are
