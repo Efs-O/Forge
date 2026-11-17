@@ -156,14 +156,20 @@ describe('AI_SETUP.md', () => {
     );
   });
 
-  // Connect has to run before the first reload for the chosen default to exist
-  // when Step 6 checks it, and a survey that already read the list means the
+  // Connect is registered only once a config is loaded, so it runs right after
+  // the first reload and before Step 6's checks, for the chosen default to exist
+  // when Step 6 checks it; and a survey that already read the list means the
   // user should not be walked through setup they already did.
   it('connects to the other computer before the first check and reuses the survey', () => {
     const text = doc.replace(/\s+/gu, ' ');
     expect(text).toContain(
-      "Run it right after Step 5, before Step 6's reload, so the other computer's " +
-        'models are already in the config when Step 6 checks it.',
+      "Run it right after Step 6's reload and before Step 6's checks: Forge registers " +
+        '**Connect to my desktop** only once it has loaded a config, and its models must ' +
+        'be in the config when Step 6 checks it.',
+    );
+    expect(text).toContain(
+      'When the user said yes to "Other computer" in Step 0, run Step 12 now, after ' +
+        'this reload and before the checks below.',
     );
     expect(text).toContain(
       'When the survey already read the other computer\'s list, skip items 1-3: that ' +

@@ -266,6 +266,9 @@ open the Command Palette and run **Developer: Reload Window**, then wait. Do
 not ask them to run **Forge: Validate Config**; the control-server checks below
 validate the active config.
 
+When the user said yes to "Other computer" in Step 0, run Step 12 now, after
+this reload and before the checks below.
+
 On Windows, read `%LOCALAPPDATA%\forge-llm\control-server.json`. Its
 `ControlServerRecord.url` field contains the selected loopback URL; parse its
 port from that URL instead of assuming the configured port or asking. If
@@ -594,8 +597,9 @@ user's Tailscale network is theirs to change. You may run only
 `tailscale status`, which reads and changes nothing. Never run `tailscale up`,
 `login`, `serve` or `set`, and never edit the access rules yourself.
 
-Run it right after Step 5, before Step 6's reload, so the other computer's
-models are already in the config when Step 6 checks it.
+Run it right after Step 6's reload and before Step 6's checks: Forge registers
+**Connect to my desktop** only once it has loaded a config, and its models must
+be in the config when Step 6 checks it.
 
 When the survey already read the other computer's list, skip items 1-3: that
 computer is shared and its access rule already lets this one in.
