@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  ClankerDenyListRedirect,
   SECRET_TAINT_REFUSAL_REASON,
   ToolApprovalPolicyDenied,
   toolApprovalResult,
@@ -150,6 +151,18 @@ describe('a decline by a human says no, and nothing else', () => {
     // declined call still counts as a call that did not run.
     expect(isFailureResult(declined)).toBe(true);
     expect(neverRanResult(declined)).toBe(true);
+  });
+
+  it('a Clanker redirect counts as a refusal that never ran', () => {
+    const redirect = new ClankerDenyListRedirect('shell', {
+      rule: 'git checkout/restore discarding work',
+      alternative: 'use restore_file.',
+    }).message;
+    expect(isFailureResult(redirect)).toBe(true);
+    expect(neverRanResult(redirect)).toBe(true);
+    // Shell output that merely mentions Clanker is not a refusal.
+    expect(isFailureResult('Clanker: on\nexit 0')).toBe(false);
+    expect(neverRanResult('Clanker: on\nexit 0')).toBe(false);
   });
 
   it('a timeout keeps its instruction and names no alternative either', () => {

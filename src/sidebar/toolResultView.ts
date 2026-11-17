@@ -16,6 +16,12 @@ const READ_ONLY_TOOLS = new Set([
   'search_code',
 ]);
 
+/** `ClankerDenyListRedirect` (`toolApprovalOutcome.ts`): a Clanker chat refused a
+ *  deny-listed call on the spot and named the tool to use instead. Written out
+ *  here rather than imported because the webview bundles this file;
+ *  `PolicyRefusalWording.test.ts` builds the real refusal and checks it matches. */
+const CLANKER_REDIRECT = /^Clanker: "[^"]+" was not run: /u;
+
 export function readPathArg(args?: Record<string, unknown>): string | null {
   if (typeof args?.['path'] === 'string') return args['path'];
   if (typeof args?.['filepath'] === 'string') return args['filepath'];
@@ -31,14 +37,15 @@ export function isFailureResult(result: string): boolean {
   return (
     result.startsWith('Error:') ||
     result.startsWith('User declined:') ||
-    result.startsWith('unattended:')
+    result.startsWith('unattended:') ||
+    CLANKER_REDIRECT.test(result)
   );
 }
 
 /**
  * True for a call that was refused before its handler ran, so it brought no
- * content in: an unattended policy denial, a card the owner declined, or a card
- * nobody answered.
+ * content in: an unattended policy denial, a card the owner declined, a card
+ * nobody answered, or a Clanker redirect.
  *
  * `Error:` is deliberately NOT in this list. A tool that ran and then failed may
  * still have read outside content into its message — a `web_fetch` that fetched
@@ -50,7 +57,8 @@ export function neverRanResult(result: string): boolean {
   return (
     result.startsWith('unattended:') ||
     result.startsWith('User declined:') ||
-    result.startsWith('Not run:')
+    result.startsWith('Not run:') ||
+    CLANKER_REDIRECT.test(result)
   );
 }
 
