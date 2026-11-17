@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { IBackendPool } from '../backend/BackendPool';
+import { restartModelBackend } from '../backend/restartBackend';
 import type { ForgeConfig } from '../config/types';
 import { expandAlias, splitModelProfile } from '../config/ConfigResolver';
 import type { HostToWebview, WebviewToHost, AttachmentData } from './messageBridge';
@@ -343,10 +344,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     return this.tabs.unloadModelOf(conversationId ?? this.getActive().id);
   }
 
-  /** Addressed lifecycle seam for owner-authenticated remote controls. */
+  /** Addressed lifecycle seam for owner-authenticated remote controls: release, then start the way a turn reaches the model — a managed external server (Strata) goes through `prepareExternal`, never the llama-server spawn. */
   async restartModel(modelName: string): Promise<void> {
     await this.pool.release(modelName);
-    await this.pool.acquire(modelName);
+    await restartModelBackend(this.pool, this.config, modelName);
   }
 
   prefillInput(text: string): void {
@@ -484,8 +485,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   }
 
   async dispose(): Promise<void> {
-    // Whatever panel is open stops here: its store listener, its three watchers,
-    // its pending publish and its transcript walk must not outlive the extension.
+    // Whatever panel is open stops here: its store listener, its three watchers, its pending publish and its transcript walk must not outlive the extension.
     this.jobsBridge?.dispose();
     this.sessionSearch.dispose();
     this.promptRouter.dispose();

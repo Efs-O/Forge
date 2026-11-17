@@ -45,6 +45,7 @@ let setBinaries: (string | undefined)[];
 let delivered: string[];
 let restartCalls: string[];
 let restartFail: boolean;
+let impact: 'llama' | 'other' | 'unknown';
 let activeModel: string | undefined;
 let currentBinary: string | undefined;
 let modelBinaries: string[] = [];
@@ -102,6 +103,7 @@ function makeEnv() {
         throw new Error('server did not become healthy');
     },
     activeModel: () => activeModel,
+    llamaBinaryImpact: () => impact,
     deliver: async (_job, text) => {
       delivered.push(text);
     },
@@ -138,6 +140,7 @@ beforeEach(() => {
   delivered = [];
   restartCalls = [];
   restartFail = false;
+  impact = 'llama';
   activeModel = 'test-model';
   currentBinary = 'llama.cpp-b10894';
   modelBinaries = [];
@@ -366,6 +369,39 @@ describe('performSwitch (stages 7-8)', () => {
     expect(readStaged(jobsRoot, 'llama')).toBeUndefined();
   });
 
+  it('an active model that spawns no llama-server switches without a restart', async () => {
+    // The 2026-11-17 b12465 case: the active model was a Strata entry, so the
+    // switched binary changes nothing it uses. The post-check restart must not
+    // run: on 0.17.186 it failed the switch outright and rolled the binary
+    // back, and after the acquire fix it would pass having proved nothing.
+    impact = 'other';
+    const staged = writeStagedFor('llama', { switch_pending: true });
+    const env = makeEnv();
+    const result = await performSwitch(jobsRoot, staged, env);
+    expect(result.ok).toBe(true);
+    expect(setBinaries).toEqual([staged.new_binary]);
+    expect(restartCalls).toEqual([]);
+    expect(readStaged(jobsRoot, 'llama')).toBeUndefined();
+    expect(delivered[0]).toBe(
+      `switched llama_server.binary to ${TAG} (active model test-model does not spawn llama-server; takes effect on next llama.cpp load)`,
+    );
+  });
+
+  it('an unresolvable active model switches without a restart and says so', async () => {
+    // Codex review 2026-11-17: an active_model that no configured model
+    // answers to must not be reported as a non-llama model; it defers like
+    // the no-selection case but names the real reason.
+    impact = 'unknown';
+    const staged = writeStagedFor('llama', { switch_pending: true });
+    const env = makeEnv();
+    const result = await performSwitch(jobsRoot, staged, env);
+    expect(result.ok).toBe(true);
+    expect(setBinaries).toEqual([staged.new_binary]);
+    expect(restartCalls).toEqual([]);
+    expect(readStaged(jobsRoot, 'llama')).toBeUndefined();
+    expect(delivered[0]).toMatch(/active model test-model is not a configured model/);
+  });
+
   it('a post-check failure restores the previous binary and restarts again', async () => {
     restartFail = true;
     const staged = writeStagedFor('llama', { switch_pending: true });
@@ -572,6 +608,7 @@ describe('LlamacppAction (scheduler-facing wrapper)', () => {
         restartCalls.push(model);
       },
       activeModel: () => activeModel,
+      llamaBinaryImpact: () => 'llama' as const,
     };
     const action = new LlamacppAction(deps, {
       store: { root: jobsRoot, load: async () => ({}) as JobFile },

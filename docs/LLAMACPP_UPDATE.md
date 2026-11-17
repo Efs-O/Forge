@@ -38,9 +38,14 @@ nightly.
    The write is routed by `forgeFileForKey` (`src/config/ConfigWriter.ts`), so it
    lands in `~/.forge/policy.yaml` once that file exists. The backend restarts
    only when no turn is streaming; otherwise the switch waits for the next idle
-   tick.
+   tick. When the active model spawns no llama-server (a Strata/Ollama/cloud
+   `active_model`), the binary changes nothing it uses, so the switch skips the
+   restart and reports that the new build takes effect on the next llama.cpp load.
 8. Post-check: the restart itself is the check — a healthy server means the new
-   binary serves. On failure the config goes back to the binary it held **at that
+   binary serves. It runs only when stage 7 restarted: when the restart was
+   skipped there is no verification, and the summary says the build takes
+   effect on the next llama.cpp load. On failure the config goes back to the
+   binary it held **at that
    moment** (not the one snapshotted at stage 6) and restarts again. A failed
    switch never prunes.
 

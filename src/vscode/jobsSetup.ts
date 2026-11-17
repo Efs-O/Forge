@@ -9,6 +9,7 @@ import { JobStore } from '../jobs/JobStore';
 import { JobScheduler } from '../jobs/JobScheduler';
 import { isHomeWindow } from '../jobs/jobsHome';
 import type { IBackendPool } from '../backend/poolTypes';
+import { llamaBinaryImpact } from '../backend/restartBackend';
 import { SharedRuntimeRegistry } from '../backend/SharedRuntimeRegistry';
 import { clearWakesIfUnowned } from '../jobs/schedulerWakes';
 import { PowerControl } from '../system/PowerControl';
@@ -220,6 +221,7 @@ export function setupJobs(
               setBinary: makeSetBinary(configPath),
               restartModel: (modelName) => sidebar.restartModel(modelName),
               activeModel: () => getConfig().active_model ?? undefined,
+              llamaBinaryImpact: (name) => llamaBinaryImpact(getConfig(), name),
             },
           }
         : {}),

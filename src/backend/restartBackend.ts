@@ -1,6 +1,12 @@
-import { expandAlias, mergeGroupsIntoModel, splitModelProfile } from '../config/ConfigResolver';
-import type { ForgeConfig } from '../config/types';
+import {
+  expandAlias,
+  mergeGroupsIntoModel,
+  resolveModelName,
+  splitModelProfile,
+} from '../config/ConfigResolver';
+import type { ForgeConfig, ModelConfig } from '../config/types';
 import { isManagedExternalModel } from './ExternalModelServers';
+import { spawnsLlamaServer } from './ModelHeuristics';
 import type { IBackendPool } from './poolTypes';
 
 /**
@@ -34,10 +40,56 @@ export async function restartBackend(
   await start();
 }
 
-function isManaged(config: ForgeConfig, modelName: string): boolean {
+/** Restart one model without touching the others: release its slot, then start
+ *  it back the way a turn reaches it — a managed external server (Strata) goes
+ *  through `prepareExternal`, never the llama-server spawn. */
+export async function restartModelBackend(
+  pool: IBackendPool,
+  config: ForgeConfig,
+  modelName: string,
+): Promise<void> {
+  await pool.release(modelName);
+  await startBackend(pool, config, modelName);
+}
+
+/** The model entry behind `modelName`, resolved the way the request path
+ *  resolves it: alias expanded, `@profile` split, then the deterministic
+ *  resolver (exact name, alias, `short_name`, case, unique prefix/substring).
+ *  Groups and engine folded in. Undefined when nothing resolves — an unknown
+ *  or ambiguous name is no entry to decide from. */
+function resolvedModel(config: ForgeConfig, modelName: string): ModelConfig | undefined {
   const base = splitModelProfile(expandAlias(config, modelName)).base;
-  const raw = config.models.find((m) => m.name === base);
-  return raw !== undefined && isManagedExternalModel(mergeGroupsIntoModel(config, raw));
+  let canonical: string;
+  try {
+    canonical = resolveModelName(config, base);
+  } catch {
+    return undefined;
+  }
+  const raw = config.models.find((m) => m.name === canonical);
+  return raw ? mergeGroupsIntoModel(config, raw) : undefined;
+}
+
+function isManaged(config: ForgeConfig, modelName: string): boolean {
+  const model = resolvedModel(config, modelName);
+  return model !== undefined && isManagedExternalModel(model);
+}
+
+/** How switching `llama_server.binary` touches `modelName`: `llama` when Forge
+ *  spawns a llama-server for it — restarting that model proves the new binary;
+ *  `other` when the model has a server Forge does not spawn (Strata, Ollama,
+ *  cloud) — the switch defers to the next llama.cpp load; `unknown` when no
+ *  configured model answers to the name. This is the question the
+ *  `llamacpp_update` switch asks before its post-check restart. Resolved like
+ *  the request path: `active_model` may be a shorthand, and a `provider` is
+ *  routinely inherited from a group — a raw exact-name lookup misclassifies
+ *  both (2026-11-17 review). */
+export function llamaBinaryImpact(
+  config: ForgeConfig,
+  modelName: string,
+): 'llama' | 'other' | 'unknown' {
+  const model = resolvedModel(config, modelName);
+  if (model === undefined) return 'unknown';
+  return spawnsLlamaServer(model) ? 'llama' : 'other';
 }
 
 function externalStarter(pool: IBackendPool, modelName: string): () => Promise<void> {

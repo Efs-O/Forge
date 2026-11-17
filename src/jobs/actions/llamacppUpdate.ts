@@ -29,8 +29,8 @@ import {
  *   6. `prepare` stops here and asks for approval (24 h expiry). `apply` skips
  *      the gate (decided 2026-09-14) and requests the switch immediately.
  *   7. Switch: write only `llama_server.binary` (comments preserved), restart
- *      the backend only when no turn is streaming, else defer to the next idle
- *      tick.
+ *      the backend only when no turn is streaming and the active model spawns
+ *      a llama-server, else defer to the next idle tick.
  *   8. Post-check the backend; on failure restore the previous binary, restart,
  *      and report.
  *
@@ -57,11 +57,21 @@ export interface LlamacppUpdateEnv extends LlamacppInstallEnv {
   /**
    * Restart the backend for the active model. This is also the post-check
    * (stage 8): `acquire` waits for the server to become healthy, so a resolve
-   * means the new binary serves and a throw means it failed to start.
+   * means the new binary serves and a throw means it failed to start. Reached
+   * only when `llamaBinaryImpact` says `llama`.
    */
   restartModel: (modelName: string) => Promise<void>;
   /** The active model name to restart, or undefined when none is loaded. */
   activeModel: () => string | undefined;
+  /**
+   * How the switched binary touches the active model: only `llama` gets the
+   * post-check restart. `other` (a Strata/Ollama/cloud model, whose server
+   * Forge does not spawn) and `unknown` (no configured model answers to the
+   * name) take the deferred path. 2026-11-17: restarting the Strata chat
+   * model instead either failed the post-check (0.17.186) or proved nothing
+   * about the binary (0.17.187).
+   */
+  llamaBinaryImpact: (modelName: string) => 'llama' | 'other' | 'unknown';
   /** Deliver a user-facing fact for a job (the scheduler prefixes the name). */
   deliver: (jobId: string, text: string) => Promise<void>;
   /** The clock. */
@@ -142,12 +152,22 @@ export async function performSwitch(
   const oldBinary = env.getConfig().currentBinary;
   env.setBinary(staged.new_binary);
   const model = env.activeModel();
-  if (!model) {
-    // No model is loaded, so there is no backend to restart or post-check. The
-    // config write is done; the next model load uses the new binary.
+  const impact = model === undefined ? undefined : env.llamaBinaryImpact(model);
+  if (model === undefined || impact !== 'llama') {
+    // Nothing to post-check: no model is selected, or the active model has a
+    // server Forge does not spawn (Strata, Ollama, cloud), or no configured
+    // model answers to the name — in every case the switched binary changes
+    // nothing it uses and restarting it would prove nothing about the new
+    // build. The config write is done; the next llama-server spawn uses it.
     clearStaged(jobsRoot, staged.job_id);
+    const reason =
+      model === undefined
+        ? 'no model loaded'
+        : impact === 'unknown'
+          ? `active model ${model} is not a configured model`
+          : `active model ${model} does not spawn llama-server`;
     const summary = withPrune(
-      `switched llama_server.binary to ${staged.tag} (no model loaded; takes effect on next load)`,
+      `switched llama_server.binary to ${staged.tag} (${reason}; takes effect on next llama.cpp load)`,
       env.localRoot,
       [staged.new_binary, oldBinary, ...env.getConfig().modelBinaries],
     );

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The llama.cpp updater no longer restarts a Strata chat model to prove a new build works. Its post-check restarted whatever `active_model` names; when that is a Strata entry the restart either failed the switch outright (0.17.186 rolled b12465 back, advising `fix llama_server.binary manually`) or passed having proved nothing about the binary. The switch now skips the post-check when the active model spawns no llama-server — or names no configured model at all — and says the new build takes effect on the next llama.cpp load. The model manager's Restart button reaches a managed Strata server through `prepareExternal` (free its GPUs, start it if down) instead of the llama-server spawn path.
+
 ## 0.17.187
 
 **A chat with long compaction notes survives a reload, a job keeps its own chat, and a Strata model no longer breaks the llama.cpp updater.**

@@ -37,6 +37,9 @@ export interface LlamacppActionDeps {
   restartModel: (modelName: string) => Promise<void>;
   /** The active model name to restart, or undefined when none is loaded. */
   activeModel: () => string | undefined;
+  /** How the switched binary touches the active model; only `llama` earns the
+   *  post-check restart (see llamacppUpdate's `llamaBinaryImpact`). */
+  llamaBinaryImpact: (modelName: string) => 'llama' | 'other' | 'unknown';
 }
 
 /**
@@ -90,6 +93,7 @@ export class LlamacppAction {
       setBinary: d.setBinary,
       restartModel: d.restartModel,
       activeModel: d.activeModel,
+      llamaBinaryImpact: d.llamaBinaryImpact,
       deliver: (jobId, text) => this.ctx.deliver(jobId, text),
       now: this.ctx.now,
     };
