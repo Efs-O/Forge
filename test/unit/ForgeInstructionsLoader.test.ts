@@ -99,7 +99,10 @@ describe('ensureForgeInstructionsFile', () => {
     // 2026-11-12: 6,377 bytes. The instruction audit found one general rule the
     // starter lacked: never swallow an error or hide bad config behind a silent
     // fallback. Cap 6,452 keeps the same 75 bytes.
-    expect(Buffer.byteLength(content, 'utf8')).toBeLessThan(6452);
+    // 2026-11-17: 9,082 bytes. Owner: a new workspace's starter carries every general
+    // rule of this repository's FORGE.md (laptop fresh-install test): recording mistakes
+    // in the tips table, refused tool arguments, gate logs, the push rule. Cap 9,157.
+    expect(Buffer.byteLength(content, 'utf8')).toBeLessThan(9157);
   });
 
   it('carries the review items that took this repo to 0.8% failed calls', () => {
