@@ -15,10 +15,13 @@
  *   tool the desktop stopped serving, and the cost of getting it wrong is a GPU
  *   render the owner did not ask for. It is filled on activation and re-read
  *   whenever the config's relay changes; `enabled: false` clears it.
- * - **Inputs are read here and uploaded by name.** The desktop never sees a
- *   laptop path: it gets bare file names in `inputs[]`, and the same bare names
- *   in the arguments, so a desktop workspace path can never be invented from the
- *   laptop side (and vice versa, which is what criterion 8 tests).
+ * - **Inputs are read on this laptop and uploaded by name**
+ *   (`remoteMediaInputs.ts`). The desktop never sees a laptop path: it gets bare
+ *   file names in `inputs[]`, and the same bare names in the arguments, so a
+ *   desktop workspace path can never be invented from the laptop side (and vice
+ *   versa, which is what criterion 8 tests). The names are made unique per job,
+ *   and an output that would overwrite one of its own references is refused
+ *   before the job is sent: those two are collisions only this laptop can see.
  * - **The saved file is the laptop's.** Every destination goes through
  *   `beforeMutate`, so Keep/Undo covers a desktop render exactly as it covers a
  *   local one.
@@ -26,13 +29,12 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import {
-  REMOTE_MEDIA_PATH_ARGS,
-  REMOTE_MEDIA_TEXT,
   type RemoteMediaCapabilities,
   type RemoteMediaJobRequest,
   type RemoteMediaTool,
 } from '../../media/remoteMediaContract';
 import { REMOTE_MEDIA_GROUP } from '../../config/remoteMediaSchema';
+import { destinationFor, isInside, prepareJobInputs } from './remoteMediaInputs';
 import type { ForgeConfig } from '../../config/types';
 import { defaultWorkspaceRoot } from '../../util/WorkspacePaths';
 import { getLogger } from '../../util/logger';
@@ -51,15 +53,9 @@ import {
 
 const log = getLogger();
 
-/** Where a `generate_image` with no `path` argument lands: the same folder the
- *  desktop's own tool uses for an omitted path. */
-const DEFAULT_IMAGE_DIR = 'generated-images';
-
 /** Re-read the desktop at most this often when it is not answering, so a asleep
  *  machine is not dialed once per model turn. */
 const RETRY_AFTER_MS = 60_000;
-/** Room for the job's own JSON (arguments, client, names) around the base64. */
-const BODY_HEADER_BUDGET_BYTES = 8 * 1024;
 
 export interface RemoteMediaToolDeps {
   getConfig: () => ForgeConfig;
@@ -232,50 +228,6 @@ function approvalForGenerate(
   };
 }
 
-/** One file argument the handler has to move across the wire. */
-interface PreparedInput {
-  arg: string;
-  /** The bare name the desktop sees; the laptop path never crosses. */
-  name: string;
-  /** The laptop path, for the destination of an upscale. */
-  sourcePath: string;
-  bytes: number;
-}
-
-/** A path argument that is not a plain relative path inside the job's `out/`. */
-function isPlainRelativePath(value: string): boolean {
-  if (!value.trim()) return false;
-  if (
-    path.isAbsolute(value) ||
-    /^[a-zA-Z]:[\\/]/.test(value) ||
-    value.startsWith('/') ||
-    value.startsWith('\\')
-  ) {
-    return false;
-  }
-  return !value.split(/[\\/]/).includes('..');
-}
-
-/** The MB a byte count is worth, the way the refusal has to say it. */
-function mb(bytes: number): string {
-  return (bytes / (1024 * 1024)).toFixed(1);
-}
-
-/** Where one rendered file lands on this laptop. */
-function destinationFor(
-  name: RemoteMediaTool,
-  fileName: string,
-  askedPath: string | undefined,
-  inputPath: string | undefined,
-): string {
-  if (name === 'upscale_image') {
-    // Beside the input, the desktop's own rule: `photos/cat.png` → `photos/cat_x4.png`.
-    return path.join(path.dirname(inputPath ?? '.'), fileName);
-  }
-  if (askedPath) return path.join(path.dirname(askedPath), fileName);
-  return path.join(DEFAULT_IMAGE_DIR, fileName);
-}
-
 async function runRemoteMediaJob(
   deps: RemoteMediaToolDeps,
   fetchImpl: typeof fetch,
@@ -300,52 +252,15 @@ async function runRemoteMediaJob(
   if (!root) {
     throw new Error(`${name}: no workspace folder open, so there is nowhere to save the result.`);
   }
-  const sent: Record<string, unknown> = { ...args };
-  const inputs: PreparedInput[] = [];
-  let askedPath: string | undefined;
-  let inputPath: string | undefined;
-
-  for (const [arg, direction] of Object.entries(REMOTE_MEDIA_PATH_ARGS[name])) {
-    const value = args[arg];
-    if (value === undefined) continue;
-    if (direction === 'output') {
-      if (typeof value !== 'string' || !isPlainRelativePath(value)) {
-        throw new Error(`${name}: ${REMOTE_MEDIA_TEXT.outputRefused(arg)}`);
-      }
-      askedPath = value;
-      continue;
-    }
-    const values =
-      direction === 'input-list'
-        ? Array.isArray(value)
-          ? value.filter((item): item is string => typeof item === 'string')
-          : []
-        : typeof value === 'string'
-          ? [value]
-          : [];
-    const uploaded: string[] = [];
-    for (const item of values) {
-      const prepared = await prepareInput(name, arg, item, root);
-      inputPath = inputPath ?? prepared.sourcePath;
-      uploaded.push(prepared.name);
-      inputs.push(prepared);
-    }
-    if (values.length && !uploaded.length) {
-      throw new Error(`${name}: ${REMOTE_MEDIA_TEXT.pathRefused(arg)}`);
-    }
-    sent[arg] = direction === 'input-list' ? uploaded : (uploaded[0] ?? value);
-  }
-
-  const budget = caps.max_body_bytes - BODY_HEADER_BUDGET_BYTES;
-  const encodedBytes = inputs.reduce((total, input) => total + Math.ceil(input.bytes / 3) * 4, 0);
-  if (encodedBytes > budget) {
-    const names = inputs.map((input) => `"${input.sourcePath}" (${mb(input.bytes)} MB)`).join(', ');
-    throw new Error(
-      `${name}: the desktop accepts a request body up to ${mb(caps.max_body_bytes)} MB, and ` +
-        `${inputs.length === 1 ? 'this input is' : `${inputs.length} inputs are`} ${mb(encodedBytes)} MB once encoded: ${names}. ` +
-        'Nothing was sent: shrink the input, or send it to the desktop another way.',
-    );
-  }
+  // Everything the laptop reads from its own workspace, before the desktop is
+  // asked: the names it sends them under, and the refusals that cost a request
+  // nothing (`remoteMediaInputs.ts`).
+  const { sent, inputs, askedPath, inputPath } = await prepareJobInputs(
+    name,
+    args,
+    root,
+    caps.max_body_bytes,
+  );
 
   const request: RemoteMediaJobRequest = {
     tool: name,
@@ -421,31 +336,6 @@ async function runRemoteMediaJob(
   }
   const text = status.result ?? `${name}: rendered on the desktop.`;
   return `${text}\nSaved on this laptop: ${saved.join(', ')}`;
-}
-
-/** The laptop file behind one input argument, and what it would cost to send. */
-async function prepareInput(
-  name: RemoteMediaTool,
-  arg: string,
-  value: string,
-  root: string,
-): Promise<PreparedInput> {
-  const absolute = path.isAbsolute(value) ? path.normalize(value) : path.resolve(root, value);
-  if (!isInside(root, absolute)) {
-    throw new Error(
-      `${name}: ${arg}="${value}" is outside this workspace, so it cannot be uploaded to the desktop.`,
-    );
-  }
-  const info = await fs.stat(absolute).catch(() => undefined);
-  if (!info?.isFile()) {
-    throw new Error(`${name}: ${arg}="${value}" is not a file in this workspace.`);
-  }
-  return { arg, name: path.basename(absolute), sourcePath: absolute, bytes: info.size };
-}
-
-function isInside(root: string, candidate: string): boolean {
-  const relative = path.relative(path.normalize(root), path.normalize(candidate));
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 /** What the model gets back for a desktop that refused or did not answer: the

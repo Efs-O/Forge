@@ -36,6 +36,15 @@ const CAPABILITIES_READ_TIMEOUT_MS = 5_000;
 export const REMOTE_MEDIA_OFF_MESSAGE =
   'Image generation stays on the desktop only: its policy.yaml has no cloud_relay.media block.';
 
+/** What to say, whole, after a Connect that turned the desktop's image tools on.
+ *  `registerAllTools` decides once per activation whether this laptop's
+ *  `generate_image` is the local one or the desktop's, so a window that was open
+ *  when the switch was written still holds the local tool: the owner has to be
+ *  told to reload, or the command looks like it did nothing. The leading space is
+ *  deliberate — this is appended to the command's result message. */
+export const REMOTE_MEDIA_RELOAD_NOTE =
+  ' Reload the window (Developer: Reload Window) to generate images on the desktop.';
+
 /** The check line's label, so `adviceFor` and the headline name the same thing. */
 export const MEDIA_CHECK_LABEL = 'Media on the desktop';
 

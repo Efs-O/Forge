@@ -149,6 +149,24 @@ interface FakeDesktop {
   close(): Promise<void>;
 }
 
+/** What a desktop with `cloud_relay.media` on answers `GET
+ *  /v1/media/capabilities` with: the definition of the one tool it serves. */
+const MEDIA_CAPABILITIES = {
+  tools: [
+    {
+      type: 'function',
+      function: {
+        name: 'generate_image',
+        description: 'Generate an image on this desktop.',
+        parameters: { type: 'object', properties: {}, additionalProperties: false },
+      },
+    },
+  ],
+  upscale: true,
+  refused: [],
+  max_body_bytes: 32 * 1024 * 1024,
+};
+
 /** A desktop that answers like one: the starter lists its models with its own
  *  shared port, and the relay lists its allowlist. `models`/`relayIds`/`sharedPort`
  *  let a test say "an old desktop", "no cloud models" or "a different list". */
@@ -158,6 +176,9 @@ async function startFakeDesktop(
     sharedPort?: number | null;
     relayIds?: Array<{ id: string; kind: string }>;
     relayDown?: boolean;
+    /** The `GET /v1/media/capabilities` body; absent answers the 404 an off
+     *  relay answers, which is what every test here runs against by default. */
+    media?: unknown;
   } = {},
 ): Promise<FakeDesktop> {
   const models = options.models ?? DESKTOP_MODELS;
@@ -211,6 +232,11 @@ async function startFakeDesktop(
           return;
         }
         if (route === 'GET /v1/media/capabilities') {
+          if (options.media !== undefined) {
+            res.writeHead(200, { 'content-type': 'application/json' });
+            res.end(JSON.stringify(options.media));
+            return;
+          }
           // The desktop's own answer for a relay with no `cloud_relay.media` block,
           // which is what every test here runs against unless it says otherwise.
           res.writeHead(404, { 'content-type': 'application/json' });
@@ -392,6 +418,30 @@ describe('Connect to my desktop', () => {
     expect(message).toMatch(/2 were already there and left untouched/);
     expect(message).toMatch(
       /2 models the desktop refuses: grok \(not_local\), llama3 \(ollama_not_shared\)/,
+    );
+  });
+
+  it('a desktop that renders images turns the switch on and says to reload', async () => {
+    desktop = await startFakeDesktop({ media: MEDIA_CAPABILITIES });
+    const starterPort = Number(new URL(desktop.starterUrl).port);
+    const relayPort = Number(new URL(desktop.relayUrl).port);
+    fs.writeFileSync(configPath, seedConfig(starterPort, relayPort));
+    ui.pick = 'desktop';
+    const message = await runConnect(depsFor(starterPort, relayPort));
+    const text = fs.readFileSync(configPath, 'utf8');
+    expect(ForgeConfigSchema.parse(YAML.parse(text)).remote_media).toEqual({ enabled: true });
+    // The whole message the owner reads, pinned: the switch is announced, and the
+    // reload is too. `registerAllTools` decides once per activation whether this
+    // laptop's `generate_image` is the local one or the desktop's, so a window
+    // that was open during the write keeps the local tool until it reloads, and a
+    // Connect that asked for nothing looks like a Connect that did nothing.
+    expect(message).toBe(
+      'Forge added 1 desktop model and 1 cloud model to config.yaml; created the ' +
+        'ollama-cloud group(s); turned on remote_media, so this laptop asks the desktop to ' +
+        'render images; 2 were already there and left untouched; 2 models the desktop refuses: ' +
+        'grok (not_local), llama3 (ollama_not_shared). The laptop will ask the desktop to load ' +
+        'a model when it needs one. Reload the window (Developer: Reload Window) to generate ' +
+        'images on the desktop.',
     );
   });
 

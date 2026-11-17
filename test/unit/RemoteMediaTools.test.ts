@@ -379,6 +379,82 @@ describe('the desktop media tools', () => {
     await fs.rm(root, { recursive: true, force: true });
   });
 
+  it('refuses an output that would overwrite the reference it reads', async () => {
+    desktop = await startFakeDesktop({ capabilities: capabilities() });
+    const root = await workspace({ 'cat.png': 'the picture' });
+    const { bundle, tools } = toolsFor(desktop.origin, root);
+    await bundle.refresh();
+    // The desktop cannot see this collision: over the wire the reference is the
+    // bare name `cat.png` in `inputs[]` and the output is a path in the laptop's
+    // workspace, so nothing on the desktop knows they are one file. Locally the
+    // desktop's own tool refuses it (A22); here the laptop has to.
+    await expect(
+      toolNamed(tools, 'generate_image').handler(
+        { prompt: 'a cat, bigger', path: 'cat.png', reference_paths: ['cat.png'] },
+        EMPTY_CONTEXT,
+      ),
+    ).rejects.toThrow(
+      'generate_image: path "cat.png" is one of the reference images; choose another output name.',
+    );
+    // Nothing was sent: no render was paid for to be thrown away...
+    expect(desktop.requests).toEqual(['GET /v1/media/capabilities']);
+    // ...and the owner's file is the file they wrote.
+    expect(await fs.readFile(path.join(root, 'cat.png'))).toEqual(Buffer.from('the picture'));
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it('allows the same reference when the output is elsewhere', async () => {
+    desktop = await startFakeDesktop({ capabilities: capabilities() });
+    const root = await workspace({ 'cat.png': 'the picture' });
+    const { bundle, tools } = toolsFor(desktop.origin, root);
+    await bundle.refresh();
+    // The ordinary edit: this must not be refused, or every desktop render from a
+    // laptop would need a name the owner has to check against every reference.
+    await toolNamed(tools, 'generate_image').handler(
+      { prompt: 'a cat, bigger', path: 'out/cat.png', reference_paths: ['cat.png'] },
+      EMPTY_CONTEXT,
+    );
+    expect(desktop.requests).toContain('POST /v1/media/jobs');
+    const job = desktop.jobs[0]!;
+    expect(job.args).toEqual({
+      prompt: 'a cat, bigger',
+      path: 'out/cat.png',
+      reference_paths: ['cat.png'],
+    });
+    expect(await fs.readFile(path.join(root, 'cat.png'))).toEqual(Buffer.from('the picture'));
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it('gives two inputs of the same base name one name each', async () => {
+    desktop = await startFakeDesktop({ capabilities: capabilities() });
+    const root = await workspace({ 'a/x.png': 'first', 'b/x.png': 'second' });
+    const { bundle, tools } = toolsFor(desktop.origin, root);
+    await bundle.refresh();
+    await toolNamed(tools, 'generate_image').handler(
+      { prompt: 'a cat', reference_paths: ['a/x.png', 'b/x.png'] },
+      EMPTY_CONTEXT,
+    );
+    const job = desktop.jobs[0]!;
+    // The desktop keys the inputs it receives by name, so two `x.png` would be one
+    // file and the model would lose a reference without anyone saying so.
+    expect((job.inputs as Array<{ name: string }>).map((input) => input.name)).toEqual([
+      'x.png',
+      'x-2.png',
+    ]);
+    // The arguments name the same two files, or the desktop would ask for a name
+    // that was never uploaded.
+    expect(job.args).toEqual({
+      prompt: 'a cat',
+      reference_paths: ['x.png', 'x-2.png'],
+    });
+    // Both files really crossed, not one of them twice.
+    expect((job.inputs as Array<{ base64: string }>).map((input) => input.base64)).toEqual([
+      Buffer.from('first').toString('base64'),
+      Buffer.from('second').toString('base64'),
+    ]);
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
   it('takes the two tool names only when the laptop renders nothing itself', () => {
     const base = laptopConfig('http://127.0.0.1:1/v1') as Record<string, unknown>;
     expect(remoteMediaActiveFor(base as unknown as ForgeConfig)).toBe(true);

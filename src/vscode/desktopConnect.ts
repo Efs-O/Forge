@@ -56,7 +56,11 @@ import {
   type TailnetPeer,
 } from './desktopConnectPlan';
 import { runTailscaleCli, TAILSCALE_READ_TIMEOUT_MS } from './tailscaleCli';
-import { mediaConnectAdditions, probeRemoteMedia } from './desktopConnectMedia';
+import {
+  REMOTE_MEDIA_RELOAD_NOTE,
+  mediaConnectAdditions,
+  probeRemoteMedia,
+} from './desktopConnectMedia';
 
 const log = getLogger();
 
@@ -211,7 +215,13 @@ export async function runConnect(
     `[Connect] ${hostLabel(choice.starter)} -> ${message} ` +
       `${plan.notes.length ? `Notes: ${plan.notes.join(' ')}` : ''}`,
   );
-  return `${message}${plan.notes.length ? ` Notes: ${plan.notes.join(' ')}` : ''}${mediaNote}`;
+  // The reload sentence, and only when this run actually turned the switch on:
+  // `registerAllTools` chooses local versus desktop image tools once per
+  // activation, so this window's `generate_image` is still the local one.
+  return (
+    `${message}${plan.notes.length ? ` Notes: ${plan.notes.join(' ')}` : ''}${mediaNote}` +
+    `${plan.remoteMedia ? REMOTE_MEDIA_RELOAD_NOTE : ''}`
+  );
 }
 
 /** One `GET /models` row, kept as the shape the desktop sent: the plan module
