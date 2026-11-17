@@ -990,6 +990,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Hermetic fake `claude` executable for tests                | `test/support/fakeCli.ts`                 |
 | Shared Telegram contact fixtures and completion signals    | `test/support/telegramContactFixture.ts`  |
 | Shared model starter fixtures: fake pool, live loopback listener, request helper | `test/support/modelStarterHarness.ts` |
+| Canary: plant one known bug per gate in a throwaway worktree and check the gate goes red (`npm run canary`) | `scripts/canary.mjs` (plant list: `test/fixtures/canary-cases.json`, kept plantable by `test/unit/CanaryCases.test.ts`) |
 
 ## Test support
 

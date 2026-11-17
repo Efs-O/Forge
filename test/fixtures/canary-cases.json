@@ -1,0 +1,66 @@
+[
+  {
+    "id": "ci-lock-release-token",
+    "file": "scripts/ci-lock.mjs",
+    "find": "if (lock && lock !== 'unreadable' && lock.token === token) {",
+    "replace": "if (lock && lock !== 'unreadable') {",
+    "test": "test/unit/CiLock.test.ts",
+    "expect": "release leaves another run"
+  },
+  {
+    "id": "record-ci-pass-marker-tree",
+    "file": "scripts/record-ci-pass.mjs",
+    "find": "return parsed && parsed.tree === treeHash ? parsed : undefined;",
+    "replace": "return parsed;",
+    "test": "test/unit/RecordCiPass.test.ts",
+    "expect": "never a pass"
+  },
+  {
+    "id": "check-push-co-author-count",
+    "file": "scripts/check-push.mjs",
+    "find": "if (trailers.length !== 1) {",
+    "replace": "if (trailers.length > 1) {",
+    "test": "test/unit/CheckPushHygiene.test.ts",
+    "expect": "refuses no Forge trailer"
+  },
+  {
+    "id": "coding-tips-cap-vs-allowance",
+    "file": "src/llm/codingTipsBudget.ts",
+    "find": "export const TIPS_TABLE_MAX_LINES = 180;",
+    "replace": "export const TIPS_TABLE_MAX_LINES = 400;",
+    "test": "test/unit/CodingTipsDoc.test.ts",
+    "expect": "fits the loader whole"
+  },
+  {
+    "id": "instruction-overlap-duplicate-tip",
+    "file": "docs/CODING_TIPS.md",
+    "find": "3. `list_directory \"~/.forge/jobs\"` → resolves now (0.17.171), but `find_files \"~/**\"` still opens nothing outside the workspace. pass the absolute `C:/Users/<name>/.forge/jobs`",
+    "replace": "3. `list_directory \"~/.forge/jobs\"` → resolves now (0.17.171), but `find_files \"~/**\"` still opens nothing outside the workspace. pass the absolute `C:/Users/<name>/.forge/jobs`\n7. `list_directory \"~/.forge/jobs\"` → resolves now (0.17.171), but `find_files \"~/**\"` still opens nothing outside the workspace. pass the absolute `C:/Users/<name>/.forge/jobs`",
+    "test": "test/unit/InstructionSourceOverlap.test.ts",
+    "expect": "has no near-duplicate rows inside the tips table"
+  },
+  {
+    "id": "tool-harness-minimum-bound",
+    "file": "scripts/tool-harness-core.mjs",
+    "find": "if (minimum !== undefined && value < minimum) errors.push(`${pathName} must be >= ${minimum}`);",
+    "replace": "if (minimum !== undefined && value <= minimum) errors.push(`${pathName} must be >= ${minimum}`);",
+    "test": "test/unit/ToolHarness.test.ts",
+    "expect": "validates minimum at the bound"
+  },
+  {
+    "id": "doc-claims-slash-table",
+    "file": "README.md",
+    "find": "| `/compact`",
+    "replace": "| `/compaction`",
+    "test": "test/unit/DocClaimsDrift.test.ts",
+    "expect": "lists every trigger the sidebar handles"
+  },
+  {
+    "id": "session-log-rows-collapse-run",
+    "file": "src/sessions/sessionLogRows.ts",
+    "find": "      if (replayLength >= 2) {",
+    "replace": "      if (replayLength >= 3) {",
+    "test": "test/unit/SessionLogRows.property.test.ts",
+    "expect": "collapses a repeated contiguous run"
+  }
+]

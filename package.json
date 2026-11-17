@@ -547,6 +547,7 @@
     "check:bundle": "node scripts/bundle-load-check.js",
     "check:changed": "node scripts/check-changed.mjs",
     "check:push": "node scripts/check-push.mjs",
+    "canary": "node scripts/canary.mjs",
     "ab:compaction": "node scripts/compaction-ab.mjs",
     "ab:tool-result-context": "node scripts/tool-result-context-ab.mjs"
   },
