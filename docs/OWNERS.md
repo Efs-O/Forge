@@ -197,6 +197,7 @@ overlaps with an existing owner, extend the owner instead.
 | Atomic per-id conversation body files (load/quarantine, signatures, deferred removal) | `src/sidebar/ConversationBodyStore.ts` |
 | History legacy-list migration + overflow wiring (bodies via `ConversationBodyStore`) | `src/sidebar/HistoryArchive.ts` |
 | Overflow archived-session bodies and index           | `src/sidebar/ArchivedSessions.ts`        |
+| Body validation that keeps a chat whose only bad field is `compaction` | `src/sidebar/conversationBodyParse.ts` |
 | Shipped helper scripts for hand or agent use (`tools/user/`) | `tools/user/README.md` lists each; downloads **Forge** itself makes stay owned by `src/jobs/jobsFetch.ts` |
 | Starter `FORGE.md` text written into a new workspace | `src/llm/ForgeInstructionsLoader.ts` (`STARTER_CONTENT`), `resources/instructions/FORGE.starter.md` |
 | Session -> webview projections (rows, metas, counts) | `src/sidebar/sessionProjections.ts`      |

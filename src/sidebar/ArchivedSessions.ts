@@ -7,6 +7,7 @@ import { writeFileAtomicSync } from '../util/atomicWrite';
 import { getLogger } from '../util/logger';
 import { parseSessionLogRows, readSessionLogRows } from '../sessions/sessionLogRows';
 import { deriveTitle, type TitleSource } from './conversationTitle';
+import { parseConversationBody } from './conversationBodyParse';
 import {
   conversationPersistedSchema,
   type ConversationPersisted,
@@ -168,7 +169,10 @@ export class ArchivedSessions {
     return indexSchema.parse(JSON.parse(fs.readFileSync(this.indexPath, 'utf8')));
   }
 
-  /** A stored body, or undefined (logged) when it is unreadable or invalid. */
+  /**
+   * A stored body, or undefined (logged) when it is unreadable or invalid. A
+   * body whose only bad field is `compaction` loads with that field dropped.
+   */
   private readBody(filename: string): ConversationPersisted | undefined {
     let json: unknown;
     try {
@@ -178,12 +182,16 @@ export class ArchivedSessions {
       log.error(`[ArchivedSessions] ignoring unreadable body ${filename}: ${String(error)}`);
       return undefined;
     }
-    const parsed = conversationPersistedSchema.safeParse(json);
-    if (!parsed.success) {
-      log.error(`[ArchivedSessions] ignoring invalid body ${filename}: ${parsed.error.message}`);
+    const parsed = parseConversationBody(json);
+    if (!parsed.ok) {
+      log.error(`[ArchivedSessions] ignoring invalid body ${filename}: ${parsed.issue}`);
       return undefined;
     }
-    return parsed.data;
+    if (parsed.dropped === 'compaction')
+      log.error(
+        `[ArchivedSessions] loaded body ${filename} with its compaction notes dropped: ${parsed.issue}`,
+      );
+    return parsed.body;
   }
 
   put(conversation: ConversationPersisted): void {

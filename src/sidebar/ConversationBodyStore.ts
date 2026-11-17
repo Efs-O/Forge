@@ -5,11 +5,8 @@ import * as path from 'path';
 import { writeFileAtomicSync } from '../util/atomicWrite';
 import { getLogger } from '../util/logger';
 import { isSafeId } from './ArchivedSessions';
-import {
-  conversationPersistedSchema,
-  type ConversationPersisted,
-  type ConversationRuntime,
-} from './sessionTypes';
+import { parseConversationBody } from './conversationBodyParse';
+import { type ConversationPersisted, type ConversationRuntime } from './sessionTypes';
 
 const log = getLogger();
 
@@ -136,19 +133,32 @@ export class ConversationBodyStore {
     }
   }
 
+  /**
+   * One body. A body that fails validation anywhere else is moved aside as
+   * before; one whose only bad field is `compaction` loads, and its file is
+   * copied (not renamed) aside, so the live file stays and the damaged bytes
+   * stay readable.
+   */
   private readBody(filename: string, expectedId: string): ConversationPersisted | undefined {
     const target = path.join(this.directory, filename);
     try {
-      const parsed = conversationPersistedSchema.safeParse(
-        JSON.parse(fs.readFileSync(target, 'utf8')),
-      );
-      if (parsed.success && isSafeId(expectedId) && parsed.data.id === expectedId)
-        return parsed.data;
-      this.quarantineBody(
-        target,
-        expectedId,
-        parsed.success ? 'body id does not match filename' : parsed.error.message,
-      );
+      const parsed = parseConversationBody(JSON.parse(fs.readFileSync(target, 'utf8')));
+      if (!parsed.ok) {
+        this.quarantineBody(target, expectedId, parsed.issue);
+        return undefined;
+      }
+      if (!isSafeId(expectedId) || parsed.body.id !== expectedId) {
+        this.quarantineBody(target, expectedId, 'body id does not match filename');
+        return undefined;
+      }
+      if (parsed.dropped === 'compaction') {
+        const aside = this.copyAside(target, expectedId);
+        log.error(
+          `[${this.name}] kept body ${expectedId} with its compaction notes dropped; ` +
+            `copy at ${aside}: ${parsed.issue}`,
+        );
+      }
+      return parsed.body;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
       this.quarantineBody(target, expectedId, detailOf(error));
@@ -156,9 +166,27 @@ export class ConversationBodyStore {
     return undefined;
   }
 
-  private quarantineBody(target: string, id: string, detail: string): void {
+  /** The aside name for a damaged body; both handlers below build it the same way. */
+  private asidePath(target: string, id: string): string {
     const safeId = isSafeId(id) ? id : path.basename(target, '.json');
-    const aside = path.join(this.directory, `${safeId}.corrupt-${Date.now()}.json.bad`);
+    return path.join(this.directory, `${safeId}.corrupt-${Date.now()}.json.bad`);
+  }
+
+  /** Copy a body that still loaded, so the original stays the live one. */
+  private copyAside(target: string, id: string): string {
+    const aside = this.asidePath(target, id);
+    try {
+      fs.copyFileSync(target, aside);
+    } catch (error) {
+      log.error(
+        `[${this.name}] could not copy loaded body ${target} to ${aside}: ${detailOf(error)}`,
+      );
+    }
+    return aside;
+  }
+
+  private quarantineBody(target: string, id: string, detail: string): void {
+    const aside = this.asidePath(target, id);
     try {
       fs.renameSync(target, aside);
       log.error(`[${this.name}] unreadable body moved to ${aside}: ${detail}`);
