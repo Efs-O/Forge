@@ -696,6 +696,7 @@ overlaps with an existing owner, extend the owner instead.
 | Media GPU lease protocol shared with private media skills | `src/media/mediaGpuLease.ts` |
 | `media:` configuration schema                  | `src/config/mediaSchema.ts`            |
 | Media setup report (sidebar and Telegram)    | `src/media/mediaSetupCheck.ts`          |
+| Laptop↔desktop remote media wire contract (routes, schemas, error texts) | `src/media/remoteMediaContract.ts` |
 | `generate_video` tool                       | `src/tools/media/generateVideoTool.ts`  |
 | `generate_music` tool                       | `src/tools/media/generateMusicTool.ts`  |
 | Media source-file copies and accepted audio extensions | `src/tools/media/mediaInputFiles.ts` |
