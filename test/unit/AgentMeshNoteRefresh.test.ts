@@ -69,12 +69,24 @@ const readNoteFile = (root: string, file: string): string =>
 describe('what a start should do about the note (criterion 8c, 8d)', () => {
   it('installs once, then refreshes only when the rendered note changed', () => {
     const hash = hashAgentMeshNote(note);
-    expect(planNoteInstall(false, undefined, hash)).toBe('install');
-    expect(planNoteInstall(true, hash, hash)).toBe('none');
-    expect(planNoteInstall(true, hashAgentMeshNote(changedNote), hash)).toBe('refresh');
+    expect(planNoteInstall(false, undefined, hash, true)).toBe('install');
+    expect(planNoteInstall(true, hash, hash, true)).toBe('none');
+    expect(planNoteInstall(true, hashAgentMeshNote(changedNote), hash, true)).toBe('refresh');
     // A workspace installed before the hash existed is treated as stale, so the
     // first start on a build that carries the hash refreshes it once.
-    expect(planNoteInstall(true, undefined, hash)).toBe('refresh');
+    expect(planNoteInstall(true, undefined, hash, true)).toBe('refresh');
+  });
+
+  it('reinstalls when the marker says installed but no note file is on disk', () => {
+    const hash = hashAgentMeshNote(note);
+    // The uninstall case from the laptop audit: VS Code keeps workspaceState, so
+    // the marker is still true after Forge and its note files were deleted.
+    // A refresh there would replace a section that is not there and write nothing.
+    expect(planNoteInstall(true, hash, hash, false)).toBe('install');
+    // Not even a stale hash may downgrade it to a refresh.
+    expect(planNoteInstall(true, hashAgentMeshNote(changedNote), hash, false)).toBe('install');
+    // A first install is an install whatever the files say.
+    expect(planNoteInstall(false, undefined, hash, false)).toBe('install');
   });
 
   it('hashes the note byte for byte, so the hash and the write cannot disagree', () => {

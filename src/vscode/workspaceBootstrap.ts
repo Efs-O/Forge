@@ -10,6 +10,7 @@ import {
   NOTE_OFF_NOTICE_MARKER,
   agentMeshNoteFacts,
   findWorkspaceAgentNotes,
+  hasAgentNoteFile,
   installAgentMeshNote,
   refreshAgentMeshNote,
   planNoteInstall,
@@ -124,6 +125,9 @@ export async function bootstrapWorkspace(
     context.workspaceState.get(NOTE_INSTALLED_MARKER) === true,
     context.workspaceState.get<string>(NOTE_HASH_MARKER),
     noteHash,
+    // The marker survives an uninstall, so it is only trusted while a note file
+    // is actually here to refresh (see `planNoteInstall`).
+    hasAgentNoteFile(repositoryRoots),
   );
   // The user-wide copy of the note, refreshed where its markers already are
   // (see `src/vscode/agentUserNote.ts` for why nothing here ever creates those

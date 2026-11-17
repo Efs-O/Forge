@@ -13,9 +13,11 @@
 3. `npx prettier --check .forge/x.ts` → "All matched files use Prettier code style!" while nothing was checked: prettier matches no file in a dot-folder. copy it into `test/unit/`
 4. `grep_search` with `output_mode:` or `glob:` → refused: unknown argument; the fields are `output` (content/files/count) and `include`. same for `remember` (key/value/description): never invent an argument name from another tool
 5. `grep -P "(^|[^-])word" f` in Git Bash → "grep: -P supports only unibyte and UTF-8 locales"; adding `-E` → "conflicting matchers specified". use `rg -n --no-unicode` with an explicit char class instead
+6. `update_plan` `items` where one entry is typed as a bare string → refused: `"items" entries must be objects, not entry 5 (string)`. every entry is `{"text":…,"status":…}`, none bare
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green and the tree stood still: never run `record-ci-pass.mjs` by hand — the `ci:steps` chain writes it
+2. `git add AI SETUP.md` → `fatal: pathspec 'AI' did not match any files` (read_file of the same typo says `nothing exists there`): the underscore became a space. the file is `AI_SETUP.md`
 
 ## EDIT
 1. a rename lengthens an identifier, or a new call takes several arguments on one line → the `prettier/prettier` gate fails at printWidth 100. fix: `npx prettier --write <file>`
@@ -31,6 +33,7 @@
 3. vitest fake timers do not patch `node:timers/promises` → that sleep waits real time, so a fake-timer test times out at 5 s. use `sleepOrThrow` from `src/util/abortableSleep`
 4. a fact value for `src/agentBus/agentNote.md` written with its own backticks → the template already wraps `__FORGE_CONFIG__` in backticks, so the line renders doubled ones (`` ``x`` ``). pass the bare value, no enclosing backticks
 5. a `vi.hoisted` `fs.mkdtempSync(os.tmpdir())` (fake home) in a test file → teardown fails: `temp leak: <file> left 1 entry in os.tmpdir()`. `tempGuard.setup.ts` narrows tmpdir per file, so rm it in an `afterAll`
+6. a `toContain` pin of AI_SETUP.md prose retyped from the brief with a `\u2019` apostrophe → fails: the doc uses ASCII `'`; only its dashes are `\u2014`. copy the sentence from the doc, not the brief
 
 ## PATHS
 1. comparing a tool's resolved path with the workspace root in a test → `fs.realpathSync` keeps the 8.3 short form `EFSOOF~1`, `fs/promises` `realpath` expands it: use the tool's resolver

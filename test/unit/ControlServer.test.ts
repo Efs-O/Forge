@@ -3,7 +3,10 @@ import type { AddressInfo } from 'net';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ControlServer, type ControlServerDeps } from '../../src/backend/ControlServer';
 import type { AgentRoutes } from '../../src/backend/agentRoutes';
-import { ProxyError } from '../../src/llm/ControlChatProxy';
+import {
+  buildControlChatProxy,
+  ProxyError,
+} from '../../src/llm/ControlChatProxy';
 import type { IBackendPool } from '../../src/backend/BackendPool';
 import type { BackendController } from '../../src/backend/BackendController';
 import type { ForgeConfig } from '../../src/config/types';
@@ -415,6 +418,27 @@ describe('ControlServer', () => {
     expect(pool.loadedModelNames()).toEqual(['A']);
   });
 
+  it('422s a CLI agent on /ensure with the reason, loading nothing', async () => {
+    const port = await findFreeLoopbackPort();
+    let base = '';
+    const pool = new FakePool();
+    const cfg = makeConfig(port, 1);
+    cfg.models.push({ name: 'claude-code', provider: 'cli', cli: 'claude' });
+    server = new ControlServer(pool, cfg, testDeps());
+    server.start();
+    base = await waitReady(server!);
+
+    // Before this, a `provider: cli` entry fell through to the llama.cpp loader
+    // and answered 502 "llama_server.binary is not configured".
+    const res = await post(base, 'claude-code');
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe(
+      '"claude-code" is a CLI agent (provider: cli). It runs only inside a Forge chat, ' +
+        'so the control server cannot load or serve it; GET /models marks it "servable": false.',
+    );
+    expect(pool.loadedModelNames()).toEqual([]);
+  });
+
   it('GET /models golden shape: every pre-existing field survives, new fields are additive-only', async () => {
     const port = await findFreeLoopbackPort();
     let base = '';
@@ -812,5 +836,29 @@ describe('ControlServer', () => {
     const res = await chat(base, { model: 'A', messages: [{ role: 'user', content: 'x' }] });
     expect(res.status).toBe(422);
     expect((await res.json()).error).toContain('/ensure');
+  });
+
+  it('POST /chat 422s a CLI agent with the reason, through the real proxy', async () => {
+    const port = await findFreeLoopbackPort();
+    let base = '';
+    const cfg = makeConfig(port, 1);
+    cfg.models.push({ name: 'claude-code', provider: 'cli', cli: 'claude' });
+    server = new ControlServer(
+      new FakePool(),
+      cfg,
+      testDeps({ chatProxy: buildControlChatProxy(() => cfg, undefined) }),
+    );
+    server.start();
+    base = await waitReady(server!);
+
+    const res = await chat(base, {
+      model: 'claude-code',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe(
+      '"claude-code" is a CLI agent (provider: cli). It runs only inside a Forge chat, ' +
+        'so /chat cannot serve it.',
+    );
   });
 });

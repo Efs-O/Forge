@@ -70,15 +70,35 @@ export function hashAgentMeshNote(note: string): string {
  * `recordedHash === undefined` means the workspace got its note before this
  * hash existed: treat that note as stale, so the first start on a build that
  * carries the hash refreshes it once and records the hash.
+ *
+ * `noteFileExists` says whether any repository root still holds an `AGENTS.md`
+ * or a `CLAUDE.md`. It is the reinstall guard: VS Code keeps `workspaceState`
+ * through an uninstall, so on a laptop where Forge was removed and its files
+ * deleted the marker still reads `true` while no note file is on disk. The
+ * marker alone does not prove a note is still in this workspace, so a plan of
+ * `refresh` there replaces a section that is not there and writes nothing.
+ * A file that exists with only its marked section deleted still answers
+ * `refresh`, which is how a deliberate deletion stays deleted.
  */
 export function planNoteInstall(
   recordedInstalled: boolean,
   recordedHash: string | undefined,
   currentHash: string,
+  noteFileExists: boolean,
 ): 'install' | 'refresh' | 'none' {
+  if (recordedInstalled && !noteFileExists) return 'install';
   if (!recordedInstalled) return 'install';
   if (recordedHash === undefined) return 'refresh';
   return recordedHash === currentHash ? 'none' : 'refresh';
+}
+
+/** Does any of these roots still hold one of the instruction files the note
+ *  goes into? A plain existence check: the writer re-reads each file for
+ *  itself, so symlinks and unreadable files are settled there, not here. */
+export function hasAgentNoteFile(roots: readonly string[]): boolean {
+  return roots.some((root) =>
+    AGENT_INSTRUCTION_FILE_NAMES.some((name) => fs.existsSync(path.join(root, name))),
+  );
 }
 
 /** What one file ended up doing. `skipped` and `error` carry the reason. */

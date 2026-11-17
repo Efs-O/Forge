@@ -76,6 +76,19 @@ export async function ensureModelLoaded(
       },
     };
   }
+  // CLI agents (Claude Code, Codex) have no server to spawn either. Without
+  // this they fell through to the llama.cpp loader and blamed a missing
+  // `llama_server.binary`, which is not what a `provider: cli` entry needs.
+  if (known.provider === 'cli') {
+    return {
+      status: 422,
+      body: {
+        error:
+          `"${model}" is a CLI agent (provider: cli). It runs only inside a Forge chat, so the ` +
+          `control server cannot load or serve it; GET /models marks it "servable": false.`,
+      },
+    };
+  }
   const isOllama = known.provider === 'ollama';
 
   // Capacity guard applies only to port-consuming (llama.cpp) models. Ollama is

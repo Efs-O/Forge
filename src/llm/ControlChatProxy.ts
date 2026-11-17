@@ -64,6 +64,15 @@ export function buildControlChatProxy(
     } catch (err) {
       throw new ProxyError(404, (err as Error).message);
     }
+    // A CLI agent is neither cloud nor local-servable: it is an external CLI
+    // Forge spawns inside a chat, so calling it a "local model" and sending
+    // the caller to /ensure would be a second wrong answer.
+    if (model.provider === 'cli') {
+      throw new ProxyError(
+        422,
+        `"${req.model}" is a CLI agent (provider: cli). It runs only inside a Forge chat, so /chat cannot serve it.`,
+      );
+    }
     if (!isCloudProvider(model.provider)) {
       throw new ProxyError(
         422,

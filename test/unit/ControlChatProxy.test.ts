@@ -20,6 +20,7 @@ function config(): ForgeConfig {
       { name: 'grok', provider: 'xai', api_key_secret: 'forge.xai' },
       { name: 'router', provider: 'openrouter', api_key_secret: 'forge.or' },
       { name: 'local', provider: 'llama.cpp', gguf_path: '/l.gguf' },
+      { name: 'claude-code', provider: 'cli', cli: 'claude' },
     ],
     active_model: 'grok',
     llama_server: {},
@@ -91,6 +92,17 @@ describe('buildControlChatProxy', () => {
     const proxy = buildControlChatProxy(config, secrets);
     await expect(proxy({ model: 'local', messages: [] })).rejects.toMatchObject({
       status: 422,
+    });
+    expect(streamMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a CLI agent with ProxyError(422) and the CLI reason', async () => {
+    const proxy = buildControlChatProxy(config, secrets);
+    await expect(proxy({ model: 'claude-code', messages: [] })).rejects.toMatchObject({
+      status: 422,
+      message:
+        '"claude-code" is a CLI agent (provider: cli). It runs only inside a Forge chat, ' +
+        'so /chat cannot serve it.',
     });
     expect(streamMock).not.toHaveBeenCalled();
   });
