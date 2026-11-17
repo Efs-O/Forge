@@ -206,9 +206,18 @@ export async function runGit(repo: GitRepoHandle, args: readonly string[]): Prom
   }
 }
 
-/** Read the actual index and working tree using Git's stable porcelain format. */
-export async function readLiveGitStatus(repo: GitRepoHandle): Promise<LiveGitStatusEntry[]> {
-  const output = await runGit(repo, ['status', '--porcelain=v1', '-z']);
+/** Read the actual index and working tree using Git's stable porcelain format.
+ *  `paths` (repository-relative) limits the read to those pathspecs. */
+export async function readLiveGitStatus(
+  repo: GitRepoHandle,
+  paths: readonly string[] = [],
+): Promise<LiveGitStatusEntry[]> {
+  const output = await runGit(repo, [
+    'status',
+    '--porcelain=v1',
+    '-z',
+    ...(paths.length ? ['--', ...paths] : []),
+  ]);
   const records = output.split('\0');
   const entries: LiveGitStatusEntry[] = [];
 

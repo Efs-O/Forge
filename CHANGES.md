@@ -3,6 +3,7 @@
 ## Unreleased
 
 - In a Clanker chat, a shell `git checkout -- <file>` or `git restore <file>` is refused at once and points the agent at `edit_file` or `restore_file`, which snapshot the file first so Undo can bring it back. Before, each one raised an owner approval card, and a lane left alone stalled until someone answered.
+- `restore_file` now says which of its paths had uncommitted changes that it replaced, and that Undo brings them back, so overwriting another agent's work in a shared folder is visible in the chat instead of silent.
 
 - The llama.cpp updater no longer restarts a Strata chat model to prove a new build works. Its post-check restarted whatever `active_model` names; when that is a Strata entry the restart either failed the switch outright (0.17.186 rolled b12465 back, advising `fix llama_server.binary manually`) or passed having proved nothing about the binary. The switch now skips the post-check when the active model spawns no llama-server — or names no configured model at all — and says the new build takes effect on the next llama.cpp load. The model manager's Restart button reaches a managed Strata server through `prepareExternal` (free its GPUs, start it if down) instead of the llama-server spawn path.
 

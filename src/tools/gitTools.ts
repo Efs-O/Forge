@@ -236,10 +236,33 @@ export function makeRestoreFileTool(): RegisteredTool {
         requestedPaths,
       );
       const relativePaths = resolvedPaths.map((filePath) => repoRelative(repo, filePath));
+      const replaced = (await readLiveGitStatus(repo, relativePaths))
+        .filter((entry) => entry.index !== '?' && entry.index !== '!')
+        .map((entry) => entry.path);
       await runGit(repo, ['checkout', ref, '--', ...relativePaths]);
-      return `Restored from ${ref}: ${relativePaths.join(', ')}`;
+      return restoreResultText(ref, relativePaths, replaced);
     },
   };
+}
+
+/**
+ * What `restore_file` reports. When a path held uncommitted changes, the result
+ * says so: they may be another agent's work in a shared worktree, and the
+ * checkpoint snapshot taken before the write is what brings them back. Saying it
+ * is the whole safeguard; there is no card for it (owner, 2026-11-17).
+ */
+export function restoreResultText(
+  ref: string,
+  paths: readonly string[],
+  replaced: readonly string[],
+): string {
+  const restored = `Restored from ${ref}: ${paths.join(', ')}`;
+  if (replaced.length === 0) return restored;
+  return (
+    `${restored}
+These had uncommitted changes, now replaced: ${replaced.join(', ')}. ` +
+    'If they were not yours, tell the user: Undo brings them back.'
+  );
 }
 
 // ── commit ─────────────────────────────────────────────────────────────────────
