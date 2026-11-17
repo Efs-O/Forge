@@ -27,6 +27,8 @@ import { AgentLoop, type SidebarProviderEvents } from './AgentLoop';
 import { makeAgentLoopTurnDependencies } from './turnServicesAssembly';
 import { SlashCommandHandler } from './SlashCommandHandler';
 import { wireTurnMirror } from './turnMirrorWiring';
+import { wireTurnEndNotes } from './turnEndNotes';
+import { isCliAgentModel } from '../jobs/cliAgentGate';
 import { runMidTurnCompaction, type CompactionDeps } from './CompactionService';
 import { runAddressedAutoCompact } from './autoCompactionPolicy';
 import { runManualCompactResume } from './compactionPolicy';
@@ -389,6 +391,14 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
       return auto?.enabled === true && auto.resume !== false && isContextExhaustionReason(message);
     },
     turnSpeeds,
+  });
+
+  // What the model is told about a turn the user stopped. Only an open chat
+  // gets the note: an archived or evicted one has no next request to read it,
+  // and a CLI agent's transcript belongs to the CLI, not to Forge.
+  wireTurnEndNotes(events, {
+    lookup: (id) => host.getSidebar().conversations.find((conv) => conv.id === id),
+    isCliModel: (name) => isCliAgentModel(host.getConfig(), name),
   });
 
   // The session timer resolves conversation ids through this lookup.

@@ -194,7 +194,24 @@ export function getBuiltinDenyList(): ShellTokenRule[] {
     dangerous('git clean -f', 'Use delete_file for specific paths.', (t) =>
       commandIndexes(t, ['git']).some((i) => {
         const rest = lower(t.slice(i + 1));
-        return rest[0] === 'clean' && rest.slice(1).some((flag) => /^-[^-]*f/u.test(flag));
+        if (rest[0] !== 'clean') return false;
+        let force = false;
+        let dry = false;
+        for (const arg of rest.slice(1)) {
+          if (arg === '--force') force = true;
+          else if (arg === '--dry-run') dry = true;
+          else if (arg.startsWith('-') && !arg.startsWith('--')) {
+            // A short cluster, read letter by letter and stopping at `e`: what
+            // follows it is `-e`'s pattern value, not more flags. `n` makes the
+            // whole call a dry run, so a later `-f` in it stays safe.
+            for (const letter of arg.slice(1)) {
+              if (letter === 'e') break;
+              if (letter === 'f') force = true;
+              else if (letter === 'n') dry = true;
+            }
+          }
+        }
+        return force && !dry;
       }),
     ),
     {

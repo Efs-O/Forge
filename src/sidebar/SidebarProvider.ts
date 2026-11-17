@@ -57,6 +57,7 @@ import { retainSessionMemoryKeys } from './memorySnapshotLifecycle';
 import { WebviewQueueState } from './evictionGate';
 import { watchActivityViewConfiguration } from './activityViewSetting';
 import { liveConversationIds } from './liveConversationIds';
+import { createCheckpointActions, type CheckpointActions } from './checkpointActions';
 
 export type { SidebarProviderEvents };
 const RESIDENCY_POLL_MS = 1500;
@@ -70,6 +71,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private readonly agentLoop: AgentLoop;
   private readonly slashHandler: SlashCommandHandler;
   private readonly review = new CheckpointReview();
+  private readonly checkpointActions: CheckpointActions;
   private readonly budget: ContextBudgetPublisher;
   private readonly tabs: ConversationTabs;
   private readonly send: SendPipeline;
@@ -115,6 +117,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     /** The store the history panel's saved size lives in; see `HistoryPanelSize.ts`. */
     private readonly globalState?: vscode.Memento,
   ) {
+    this.checkpointActions = createCheckpointActions({
+      checkpoints: this.checkpoints,
+      codeLens: this.codeLens,
+      review: this.review,
+      post: (message) => this.post(message),
+      activeConversationId: () => this.sidebar.activeConversationId,
+      findConversation: (id) => this.sidebar.conversations.find((conv) => conv.id === id),
+      persist: (id) => void this.persistSession(id),
+      ...(this.workspaceRoot ? { workspaceRoot: this.workspaceRoot } : {}),
+    });
     this.agentAsker = createSidebarAgentAsk({
       getConfig: () => this.config,
       getSidebar: () => this.sidebar,
@@ -278,28 +290,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this.post({ type: 'remoteStatus', ...this.remoteStatus });
   }
   /** Opens the active turn's changes in VS Code's native diff editor. */
-  async reviewCheckpoint(): Promise<void> {
-    await this.review.open(this.checkpoints.pendingSnapshots(this.sidebar.activeConversationId));
-  }
-
-  async undo(): Promise<string[]> {
-    const convId = this.sidebar.activeConversationId;
-    const restored = await this.checkpoints.undo(convId);
-    this.codeLens.clearPending();
-    this.post({ type: 'checkpointDismissed', conversationId: convId });
-    return restored;
-  }
-
-  async keep(): Promise<void> {
-    const convId = this.sidebar.activeConversationId;
-    await this.checkpoints.keep(convId);
-    this.codeLens.clearPending();
-    this.post({ type: 'checkpointDismissed', conversationId: convId });
-  }
-
-  canUndo(): boolean {
-    return this.checkpoints.canUndo(this.sidebar.activeConversationId);
-  }
+  reviewCheckpoint = (): Promise<void> => this.checkpointActions.reviewCheckpoint();
+  undo = (): Promise<string[]> => this.checkpointActions.undo();
+  keep = (): Promise<void> => this.checkpointActions.keep();
+  canUndo = (): boolean => this.checkpointActions.canUndo();
   async newConversation(): Promise<void> {
     this.tabs.create();
   }

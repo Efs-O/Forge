@@ -52,6 +52,8 @@ overlaps with an existing owner, extend the owner instead.
 | Chat create/switch/close/restore and capacity behavior | `src/sidebar/ConversationTabs.ts` |
 | Resetting approval rules on open or archived conversation tabs | `src/sidebar/ConversationTabApprovals.ts` |
 | Reposting a pending checkpoint affordance when a tab returns | `src/sidebar/ConversationTabCheckpoints.ts` |
+| Checkpoint actions (Review, Undo, Keep) and what Undo tells the model | `src/sidebar/checkpointActions.ts` |
+| Transcript notes for what the user did to the last turn (Undo, stop) | `src/sidebar/turnEndNotes.ts` |
 | A tab's model VRAM release (switch, close, `/unloadModel`) | `src/sidebar/TabModelRelease.ts` |
 | Chat-cap refusal wording (`chatCapMessage`) | `src/sidebar/sessionTypes.ts` |
 | Hidden conversation notifications                    | `src/sidebar/hiddenChatAlerts.ts`        |

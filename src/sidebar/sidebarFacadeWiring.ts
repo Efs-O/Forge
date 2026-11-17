@@ -120,7 +120,7 @@ export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacad
         sender,
         selection,
         ...(deps.workspaceRoot ? { workspaceRoot: deps.workspaceRoot } : {}),
-        createChat: () => tabs.create({ activate: true }),
+        createChat: () => tabs.create({ activate: false }),
         restoreChat: (id) => tabs.restore(id, { activate: true }),
         persist: deps.persistSession,
       });

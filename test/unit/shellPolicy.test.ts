@@ -110,6 +110,18 @@ const cases: Array<[string, string, 'read_only' | 'normal' | 'dangerous' | 'refu
   ['rd /s /q build', 'pwsh', 'dangerous'],
   ['rm -r build', 'bash', 'dangerous'],
   ['git clean -fdx', 'bash', 'dangerous'],
+  // A dry run is not a delete, however the flags are spelled: `n`/`--dry-run`
+  // wins over any `-f` in the same call, and `-e`'s stuck value is not flags.
+  ['git clean -f', 'bash', 'dangerous'],
+  ['git clean -fd', 'bash', 'dangerous'],
+  ['git clean -x -f', 'bash', 'dangerous'],
+  ['git clean --force', 'bash', 'dangerous'],
+  ['git clean -fdx -enode_modules', 'bash', 'dangerous'],
+  ['git clean -fen', 'bash', 'dangerous'],
+  ['git clean -fdxn', 'bash', 'normal'],
+  ['git clean -n -f', 'bash', 'normal'],
+  ['git clean -f --dry-run', 'bash', 'normal'],
+  ['git clean -nd', 'bash', 'normal'],
   ['Remove-Item -Recurse build', 'pwsh', 'dangerous'],
   ['git branch -D feature', 'bash', 'dangerous'],
   ['git reset --hard', 'bash', 'dangerous'],
