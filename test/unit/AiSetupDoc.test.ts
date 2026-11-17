@@ -178,7 +178,9 @@ describe('AI_SETUP.md', () => {
     expect(text).toContain(
       '5. When the user chose a model from the other computer as the default, set ' +
         '`active_model` to its name exactly as `GET /models` listed it, after ' +
-        "Connect's message says it was added. Until then leave `active_model` empty.",
+        "Connect's message says it was added. Until then write `active_model: null` " +
+        '(never `""`, which fails validation and leaves Forge in setup mode, where ' +
+        '**Connect to my desktop** does not exist).',
     );
   });
 

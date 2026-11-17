@@ -618,7 +618,9 @@ computer is shared and its access rule already lets this one in.
    (`forge.checkConnection`), and paste its result to you.
 5. When the user chose a model from the other computer as the default, set
    `active_model` to its name exactly as `GET /models` listed it, after
-   Connect's message says it was added. Until then leave `active_model` empty.
+   Connect's message says it was added. Until then write `active_model: null`
+   (never `""`, which fails validation and leaves Forge in setup mode, where
+   **Connect to my desktop** does not exist).
 
 **Check:** read the pasted result. Every link it lists passes, or name the
 first broken link and the step above that fixes it.
