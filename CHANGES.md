@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.17.191
+
+**The setup agent offers your other computer's models and asks which one is the default.**
+
+- On a machine with a small GPU, the setup guide used to choose CLI models from that machine alone and was told not to ask. Its survey now reads the model list of another computer of yours over Tailscale, its one question asks which model should be the default, and **Forge: Connect to my desktop** runs before the first check, so those models are in the config when it is verified.
+- The daily chat retitle job is now created in a chat whose model has Forge's own tools. A Claude Code or Codex chat has no `manage_jobs`, so on a CLI-only setup the step is skipped and the report says so.
+- The setup checks `/ensure` and `/chat` only for a model the control server can serve, and both now say plainly that a Claude Code or Codex model runs only inside a Forge chat, instead of blaming a missing llama-server binary.
+- Reinstalling Forge writes the agent note again. VS Code keeps a workspace's stored state after an uninstall, so Forge used to believe the note was still there and wrote nothing.
+- The guide's closing notes now say the browser tool and desktop control start on, and its survey only checks whether a git name and email are set, without printing them.
+
 ## 0.17.190
 
 **The setup guide's starter FORGE.md is in the extension.**
