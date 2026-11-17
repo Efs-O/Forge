@@ -79,6 +79,22 @@ describe('AI_SETUP.md', () => {
     expect(text).toContain(
       'Daily chat retitle: rename idle chats each morning to titles that say what they were about.',
     );
+    // Web search was never offered, so a fresh install had none (laptop run 3,
+    // 0.17.192), though DuckDuckGo needs no key.
+    expect(text).toContain(
+      'Web search: let Forge search the web through DuckDuckGo (no key, no account).',
+    );
+    expect(text).toContain(
+      'Run this section only when the user\'s setup request names web search or the ' +
+        'user said yes to "Web search" in Step 0. Add this block to the config and set ' +
+        '`permissions.net.search: true`; DuckDuckGo needs no key and no account:',
+    );
+    expect(text).toContain(
+      '# partial: the search block only, not a whole config search: provider: duckduckgo max_results: 20',
+    );
+    expect(text).toContain(
+      'Web search — not requested or declined; name it to follow Step 9 (DuckDuckGo, no key).',
+    );
     expect(text).toContain(
       "User files: put Forge's agent note in your own `~/.claude/CLAUDE.md` and " +
         '`~/.codex/AGENTS.md` too, so Claude Code and Codex reach Forge from any folder.',

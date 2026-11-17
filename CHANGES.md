@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The setup agent now offers web search through DuckDuckGo, which needs no key, as one of its optional items. Before, it set up search only when asked by name, and only with a Tavily key.
+
 ## 0.17.192
 
 **A laptop can chat with the desktop's models, and Check connection shows its answer.**

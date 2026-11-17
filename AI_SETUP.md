@@ -130,6 +130,8 @@ After the survey and backend choice, show one concise summary containing:
     one's (Tailscale).
   - Daily chat retitle: rename idle chats each morning to titles that say what
     they were about.
+  - Web search: let Forge search the web through DuckDuckGo (no key, no
+    account).
   - User files: put Forge's agent note in your own `~/.claude/CLAUDE.md` and
     `~/.codex/AGENTS.md` too, so Claude Code and Codex reach Forge from any folder.
   - Git identity, only when the survey found `user.name` or `user.email` empty:
@@ -445,11 +447,21 @@ of the Telegram authentication stop; do not ask for another command.
 
 ## Step 9 — Optional: web search
 
-Run this section only when the user's setup request names web search. If a
-Tavily key is not already stored, tell the user to run **Forge: Set Search API
-Key** (`forge.setSearchApiKey`) in VS Code, enter the key there, and wait. Then
-add the `search:` block (see `config.example.yaml`) and set
-`permissions.net.search: true`. Never request, read, or repeat the key.
+Run this section only when the user's setup request names web search or the
+user said yes to "Web search" in Step 0. Add this block to the config and set
+`permissions.net.search: true`; DuckDuckGo needs no key and no account:
+
+```yaml
+# partial: the search block only, not a whole config
+search:
+  provider: duckduckgo
+  max_results: 20
+```
+
+Add Tavily only when the user asks for it. If a Tavily key is not already
+stored, tell the user to run **Forge: Set Search API Key**
+(`forge.setSearchApiKey`) in VS Code, enter the key there, and wait; then add
+`fallback: tavily` to the block. Never request, read, or repeat the key.
 
 ## Step 10 — Optional: image generation
 
@@ -668,7 +680,7 @@ Report to the user:
 - one line per optional section not set up, each with why it was skipped and
   how to add it later:
   - Telegram — not requested or declined; name it to follow Step 8 and enter a bot token.
-  - Web search — not requested or declined; name it to follow Step 9 and enter a Tavily key.
+  - Web search — not requested or declined; name it to follow Step 9 (DuckDuckGo, no key).
   - Image generation — not requested or declined; name it to follow Step 10.
   - Video or music — not requested or declined; name it to follow Step 11.
   - Other computer — not requested or declined; name it to follow Step 12.

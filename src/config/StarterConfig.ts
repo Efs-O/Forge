@@ -13,7 +13,7 @@ export interface StarterLlamaCppModel {
 // such action still goes through the confirmation gate. Browser, desktop,
 // fetch and delegation are on for a new install (owner's call, 0.17.5): each
 // new browser origin is still approved per session, and desktop control of VS
-// Code itself stays off (`allow_vscode`). Search needs a key and stays off, as
+// Code itself stays off (`allow_vscode`). Search stays off until setup adds it, as
 // do the visible terminal and shell scripts. Existing configs are unchanged:
 // an absent key still means off.
 // Chat-to-chat new-chat and steer actions also stay off until opted in.

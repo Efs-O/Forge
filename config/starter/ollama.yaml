@@ -16,7 +16,7 @@ permissions:
   # A coding agent needs to run builds and tests. Every write, delete, command
   # and git action still asks for confirmation unless /clanker is on. Each new
   # browser origin is approved once per session; desktop control of VS Code
-  # itself stays off. Search needs a key, so it stays off.
+  # itself stays off. Search stays off until setup adds it.
   fs: { read: true, write: true, delete: true }
   net: { search: false, fetch: true }
   exec: { headless: true }
