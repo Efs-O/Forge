@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.17.187
+
+**A chat with long compaction notes survives a reload, a job keeps its own chat, and a Strata model no longer breaks the llama.cpp updater.**
+
+- A compacted chat whose first request was longer than 4,000 characters was thrown aside as corrupt on the next reload. The compaction writer keeps up to 12,000 characters of that first request, but the loader still checked the old 4,000-character limit, so the whole chat was renamed to `.corrupt-<time>.json.bad` and vanished from the sidebar. The loader now accepts what the writer produces.
+- One bad field no longer costs the whole chat. When only a chat's compaction notes fail to load, the chat opens with every message and without those notes; a copy of the damaged file is kept beside it (one copy, not one per reload). A chat whose messages, id or shape are broken is still set aside as before.
+- A job's chat is never silently replaced. When the open-chat limit was full, opening a job's chat counted as "the chat is gone": Forge made a new one and pointed the job at it, so a scheduled job's thread seemed to vanish. A full limit is now an error that names the limit, and a scheduled run that meets it is recorded as failed with that message.
+- Opening a job's existing chat no longer sends the job summary again. Every click on a job, every `manage_jobs` discuss and every Telegram `/job <n> chat` started a new model turn in that chat. The summary now goes only to a chat just created, and the reply says when nothing was sent.
+- Acquiring a model whose server Forge does not spawn (a Strata `openai-compatible` entry) no longer fails with `missing gguf_path for llama.cpp` while `shared_runtime` is on. The pool asked every model for the identity of the llama-server it would spawn, which is built from a GGUF path such an entry does not have. `restartModel` reaches it, so the llama.cpp updater's post-check released the chat model, could not take it back, and rolled the new binary back with the advice `fix llama_server.binary manually`, which was never what was wrong.
+- `docs/LLAMACPP_UPDATE.md` describes both ways to update llama.cpp: a job running Forge's built-in updater (install, hash check, smoke test, switch `llama_server.binary`, roll back if the build does not start, prune old builds), stage by stage, and the hand-run agent procedure kept as the fallback for a failed job or a specific build.
+
 ## 0.17.186
 
 **A desktop click says what it actually did, Office files can be read and printed without opening the app, and a scroll up no longer redraws the whole transcript.**
