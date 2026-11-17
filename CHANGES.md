@@ -1,8 +1,12 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.17.193
+
+**Web search is offered at setup, and a desktop model's live check runs.**
 
 - The setup agent now offers web search through DuckDuckGo, which needs no key, as one of its optional items. Before, it set up search only when asked by name, and only with a Tavily key.
+- The setup agent skipped its live `/chat` check for a model added by **Forge: Connect to my desktop**, because such a model is not loaded on this computer. It now runs `/chat` for any model the control API lists as ready to chat, and keeps `/ensure` for models this computer loads itself.
+- The control API's model list named a desktop model's provider `100`, the first part of the desktop's network address. It now says `desktop`.
 
 ## 0.17.192
 
