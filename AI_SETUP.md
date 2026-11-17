@@ -128,6 +128,13 @@ download, install, switch, config path, optional section, or optional item.
 If an unlisted dependency becomes necessary, skip that part
 and explain why in **Finish** instead of asking for another plan confirmation.
 
+Write the plan summary in your reply first. Then, if your harness has a
+multiple-choice question tool (Claude Code: `AskUserQuestion`), ask the question
+with it in one call: the plan as yes or no, the optional items as one
+multi-select, and the git identity as a skip choice the user can answer with
+`Name <email>` instead (only when the survey found it empty). Without such a
+tool, ask it in text as written above.
+
 ## Step 1 — Choose the config location
 
 - **Workspace**: `<workspace>/.forge/config.yaml` — for this project only.

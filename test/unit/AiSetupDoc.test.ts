@@ -47,6 +47,20 @@ describe('AI_SETUP.md', () => {
   // the offers have to be in that one question: an agent that cannot ask a
   // second question would otherwise set up only what the user happened to name
   // in their first message.
+  // A picker is easier to answer than a typed "yes, no, yes...", and it still
+  // counts as the one question: everything goes in a single call.
+  it('asks the Step 0 question with a picker when the harness has one', () => {
+    const text = doc.replace(/\s+/gu, ' ');
+    expect(text).toContain(
+      'Write the plan summary in your reply first. Then, if your harness has a ' +
+        'multiple-choice question tool (Claude Code: `AskUserQuestion`), ask the question ' +
+        'with it in one call: the plan as yes or no, the optional items as one ' +
+        'multi-select, and the git identity as a skip choice the user can answer with ' +
+        '`Name <email>` instead (only when the survey found it empty). Without such a ' +
+        'tool, ask it in text as written above.',
+    );
+  });
+
   it('offers the five optional items in the one Step 0 question', () => {
     const text = doc.replace(/\s+/gu, ' ');
     expect(text).toContain(
