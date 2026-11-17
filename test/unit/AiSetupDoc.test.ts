@@ -47,7 +47,7 @@ describe('AI_SETUP.md', () => {
   // the offers have to be in that one question: an agent that cannot ask a
   // second question would otherwise set up only what the user happened to name
   // in their first message.
-  it('offers the four optional items in the one Step 0 question', () => {
+  it('offers the five optional items in the one Step 0 question', () => {
     const text = doc.replace(/\s+/gu, ' ');
     expect(text).toContain(
       'Proceed with this setup plan? Answer yes/no, and yes/no for each optional item.',
@@ -61,6 +61,17 @@ describe('AI_SETUP.md', () => {
     );
     expect(text).toContain(
       'Daily chat retitle: rename idle chats each morning to titles that say what they were about.',
+    );
+    expect(text).toContain(
+      "User files: put Forge's agent note in your own `~/.claude/CLAUDE.md` and " +
+        '`~/.codex/AGENTS.md` too, so Claude Code and Codex reach Forge from any folder.',
+    );
+    expect(text).toContain(
+      'tell the user to run **Forge: Add Agent Note to My User Files** ' +
+        '(`forge.agentMesh.installUserNote`)',
+    );
+    expect(text).toContain(
+      'a missing `CLAUDE.md` is created holding only that import line',
     );
     expect(text).toContain(
       'Git identity, only when the survey found `user.name` or `user.email` empty: ' +

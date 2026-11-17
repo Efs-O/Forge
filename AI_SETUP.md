@@ -116,13 +116,15 @@ After the survey and backend choice, show one concise summary containing:
     one's (Tailscale).
   - Daily chat retitle: rename idle chats each morning to titles that say what
     they were about.
+  - User files: put Forge's agent note in your own `~/.claude/CLAUDE.md` and
+    `~/.codex/AGENTS.md` too, so Claude Code and Codex reach Forge from any folder.
   - Git identity, only when the survey found `user.name` or `user.email` empty:
     the name and email to put on your commits (leave it blank to skip).
 
 Ask **“Proceed with this setup plan? Answer yes/no, and yes/no for each
 optional item.”** and wait. A no means stop without changing files, installing
 software, or downloading models. After yes, do not ask again about a listed
-download, install, switch, config path, or optional section, or optional item.
+download, install, switch, config path, optional section, or optional item.
 If an unlisted dependency becomes necessary, skip that part
 and explain why in **Finish** instead of asking for another plan confirmation.
 
@@ -314,8 +316,9 @@ lets other agents act on this workspace's Forge chats. Requirements:
 Forge writes the agent note itself, so you do not have to. On the first start in
 a workspace whose mesh is on, Forge adds one marked section
 (`<!-- forge-agent-mesh:start -->` … `<!-- forge-agent-mesh:end -->`) to
-`AGENTS.md` and `CLAUDE.md` — to every one of those two files that exists, or
-creates `AGENTS.md` when neither does. It never touches text outside the
+`AGENTS.md`, creating it when missing, and to an existing `CLAUDE.md` unless that
+file already imports `AGENTS.md` with an `@AGENTS.md` line; a missing `CLAUDE.md`
+is created holding only that import line, so Claude Code reads the section once. It never touches text outside the
 markers, never adds the section twice, and never deletes anything when the mesh
 is later turned off. **Verify it instead of writing it:** read the file, confirm
 exactly one marked section is there and that the user's own lines are untouched.
@@ -324,6 +327,12 @@ window and check again. Say plainly what the section allows: local coding agents
 message, steer and stop this workspace's Forge chats; `agent_bus:
 { enabled: false }` turns that off; deleting everything between the two comment
 lines removes the note.
+
+When the user said yes to "User files" in Step 0, tell the user to run **Forge:
+Add Agent Note to My User Files** (`forge.agentMesh.installUserNote`) and paste
+the message it shows. You do not write those files yourself. **Check:** the
+message names `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`, each created,
+added, replaced or unchanged.
 
 Approval rules stay owner-controlled. Do not edit `~/.forge/policy.yaml`, do
 not use **Always in this project**, and do not enable Clanker for ordinary
@@ -618,6 +627,7 @@ Report to the user:
   - Video or music — not requested or declined; name it to follow Step 11.
   - Other computer — not requested or declined; name it to follow Step 12.
   - Daily chat retitle — not requested or declined; name it to follow Step 13.
+  - User files — not requested or declined; name it to follow Step 7.
 - any requested section skipped because a prerequisite was missing;
 - each remaining human action and why: plan confirmation, required login or
   secret entry (including Telegram authentication), Windows prompt, first
