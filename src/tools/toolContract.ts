@@ -71,11 +71,23 @@ export interface ToolApprovalMetadata {
   secretReadTaint?: boolean;
   /** A tool-owned protected stop that attended Clanker must leave to the owner. */
   clankerStop?: boolean;
+  /** True when the deny-list rule that stopped this call says a Clanker chat may
+   *  answer the stop itself: refuse at once naming `denyRule` and the
+   *  sanctioned alternative, with no card. From `ShellTokenRule.clankerRedirect`,
+   *  so which rules answer themselves is decided where the rule is written.
+   *  Every other deny-list stop stays the owner's. */
+  clankerRedirect?: boolean;
   /** What made this card exist, in one line, from the gate that knows it: a
    *  matched secret pattern, a new host, a payload size. It is the reason the
    *  gate was raised, and it travels with the refusal so the agent can act on
    *  it instead of guessing. */
   cardReason?: string;
+  /** The deny-list rule that stopped this call, named by the rule itself
+   *  (`git checkout/restore discarding work`). `cardReason` is the card's prose
+   *  around that name; this is the typed identity a decision can be made on,
+   *  because a decision that reads the card's text back breaks the moment the
+   *  card is reworded. Set only for a rule whose `gateKind` is `denyList`. */
+  denyRule?: string;
   /**
    * Which way this call leaves the machine, if it does: `network` for a command
    * or request that sends bytes to another host, `cross_chat` for a message

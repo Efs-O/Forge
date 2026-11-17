@@ -41,7 +41,7 @@
 11. a 2nd gated call after one card expired → `... needs the approval that went unanswered earlier in this turn, so no new card was shown` → only the first card burns time
 12. a gated call batched with later gated calls → each raises its own card and waits the full `approval_timeout_minutes`; an expired card silences only that approval key
 13. a heredoc terminator with a command after it (`MSG; echo ok`) → never seen as a terminator: the command text lands in the commit message and never runs. keep it alone on its line
-14. a field name from the tool's own OUTPUT resent as an input (`next_stdout_cursor`, `suggested_next_wait_ms`; a stray `=` in `=query`) → refused: unknown arguments. one refusal names them all: re-read the list, do not patch the key you guessed
+14. a field the tool does not declare → refused: unknown arguments. `next_stdout_cursor` resent for `stdout_cursor`, a stray `=` in `=query`, every arg nested in an `arguments` object: one refusal names them all, re-read the list
 15. an undeclared field → refused as unknown: `edit_file` `edits[]` take `old_str`/`new_str`/`replace_all`; `ask_user` `header` is per-question; `remember` key/value but `recall` takes only `key`; `shell` `command`/`cwd`/`timeout_ms`/`background`/…; `update_plan` items `text`/`status`
 16. `stop_execution` on a background `npm run ci` → the wrapper dies, the child tree lives and holds the ci-lock, so the next run waits forever: `MSYS_NO_PATHCONV=1 taskkill /PID <top> /T /F`
 17. `npm test 2>&1 > run.log` → vitest writes failures to stderr, so they print to the terminal and the file holds only the summary: grep finds no FAIL. write `> run.log 2>&1`

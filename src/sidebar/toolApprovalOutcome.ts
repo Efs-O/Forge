@@ -151,6 +151,40 @@ export class ToolApprovalPolicyDenied extends ToolApprovalRefusal {
   }
 }
 
+/** A Clanker chat that answers one deny-list stop itself instead of waiting on
+ *  an owner card. Only the rules that say so (`clankerRedirect`) get this
+ *  answer, and only in a chat with a person in the tab it was armed in: the
+ *  unattended refusal above stays what a run with nobody in it gets.
+ *
+ *  The two parts the agent acts on are the rule's own name and the sanctioned
+ *  alternative it carries, so rewording the rule rewords this refusal too. The
+ *  tail says what the agent cannot infer from the refusal alone: the card it
+ *  would have expected was never coming, and the file it is about to overwrite
+ *  is already snapshotted, so Undo can bring the content back. */
+export class ClankerDenyListRedirect extends ToolApprovalRefusal {
+  constructor(
+    toolName: string,
+    redirect: {
+      /** The rule that stopped the call, in the deny list's own words. */
+      rule: string;
+      /** The tool the agent should use instead, from that same rule. */
+      alternative?: string;
+    },
+  ) {
+    super(
+      [
+        `Clanker: "${toolName}" was not run: ${asSentence(redirect.rule)}`,
+        redirect.alternative ? `Use this instead: ${asSentence(redirect.alternative)}` : '',
+        'Forge snapshots the file first, so Undo can bring it back.',
+        'No approval card was raised.',
+      ]
+        .filter((part) => part !== '')
+        .join(' '),
+    );
+    this.name = 'ClankerDenyListRedirect';
+  }
+}
+
 /**
  * How a call asks to be judged when nobody answers it, set by the gate that
  * raised the card (`ToolDispatch` passes it straight through). It classifies
@@ -172,6 +206,16 @@ export interface ToolApprovalCallOptions {
   /** What the agent should do instead, from the same gate. It travels with the
    *  request so a refusal by policy can name the alternative, not just the no. */
   alternative?: string;
+  /** The deny-list rule that stopped this call, named by the rule itself
+   *  (`git checkout/restore discarding work`), from `ToolApprovalMetadata.denyRule`.
+   *  The typed identity a decision can be made on: `cardReason` is the card's
+   *  prose around the same name, and a decision that read the card's text back
+   *  would break the day the card is reworded. */
+  denyRule?: string;
+  /** The stopping rule's own answer for a Clanker chat: refuse and name the
+   *  alternative, no card. From `ShellTokenRule.clankerRedirect`, so which rules
+   *  answer themselves is decided where the rule is written, not here. */
+  clankerRedirect?: boolean;
   /** The card's "Allow for this chat" offer: the keys this call needs that the
    *  owner could allow, and what they say in plain words. Written by
    *  `chatApprovalRules.ts` when nothing had already answered the call, and read

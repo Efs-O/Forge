@@ -12,7 +12,10 @@
  *    other call is approved, because a run nobody is in has to be able to work.
  *  - **Clanker** answers everything in its own chat except the three owner-only
  *    stops (deny-listed destructive shell commands, Forge guard files, a secret
- *    read followed by egress), which arrive tagged on the options.
+ *    read followed by egress), which arrive tagged on the options. One deny-list
+ *    stop answers itself rather than stopping: a rule that carries
+ *    `clankerRedirect` is refused at once naming the tool it points at, because
+ *    that card only ever stalled a lane the owner was not watching.
  *
  * The queue decides nothing here. It hands over the same six inputs it was
  * handed and gets back either a settled outcome or the word that says a card is
@@ -21,7 +24,11 @@
 import type { ToolApprovalAutoApprovedEvent } from './toolApprovalEvents';
 import type { UnattendedConversationRegistry } from './unattendedConversations';
 import { unattendedFlaggedExitDetails, unattendedTaintGateDetails } from './untrustedExitPolicy';
-import { ToolApprovalPolicyDenied, type ToolApprovalCallOptions } from './toolApprovalOutcome';
+import {
+  ClankerDenyListRedirect,
+  ToolApprovalPolicyDenied,
+  type ToolApprovalCallOptions,
+} from './toolApprovalOutcome';
 import type { ToolApprovalOutcome } from './toolApprovalOutcome';
 
 /** What the queue supplies: the registry of runs nobody is in, this chat's Clanker
@@ -81,6 +88,22 @@ export function answerBeforeCard(
       );
     }
     return Promise.resolve('approved');
+  }
+  /* A deny-list rule that says so (`clankerRedirect`) is answered on the spot in
+   * a Clanker chat: refused naming the rule and the sanctioned tool, with no
+   * card. The card for this one rule was stalling a lane left alone — eight
+   * `git checkout -- <file>` calls on 2026-11-17 waited 1.3 s to 198 s each for
+   * an owner who was away — and the tool it points at does the same overwrite
+   * behind a checkpoint, so the card protected nothing. Every other deny-list
+   * stop stays the owner's, and an unattended chat never reaches this line: it
+   * refused above, whatever the rule says. */
+  if (conversationId && clankerEnabled && options?.clankerRedirect === true && options.denyRule) {
+    return Promise.reject(
+      new ClankerDenyListRedirect(toolName, {
+        rule: options.denyRule,
+        ...(options.alternative ? { alternative: options.alternative } : {}),
+      }),
+    );
   }
   /* Clanker covers every remaining call except deny-listed destructive shell
    * commands, Forge guard files, and secret reads followed by egress. Dangerous

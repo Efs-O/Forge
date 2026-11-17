@@ -43,6 +43,8 @@ export function approvalCallOptions(
   if (cardReason !== undefined) options.cardReason = cardReason;
   const alternative = metadata?.declineHint ?? exitVerdict.alternative;
   if (alternative !== undefined) options.alternative = alternative;
+  if (metadata?.denyRule !== undefined) options.denyRule = metadata.denyRule;
+  if (metadata?.clankerRedirect === true) options.clankerRedirect = true;
   if (
     metadata?.clankerStop === true ||
     gateKind === 'denyList' ||

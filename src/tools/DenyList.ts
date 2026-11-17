@@ -15,6 +15,14 @@ export interface ShellTokenRule {
    *  still get the gate's original card or refusal.
    */
   gateKind?: 'ownerGate' | 'denyList';
+  /** In a Clanker chat this stop is answered on the spot instead of waiting on
+   *  an owner card: the call is refused, naming this rule and `alternative`.
+   *  Set only where the alternative does the same job behind a checkpoint
+   *  (`restore_file` snapshots every path it overwrites, so Undo can bring the
+   *  content back), which is why it is a field on the rule and not a rule name
+   *  matched downstream. Every other deny-list stop stays the owner's to answer.
+   */
+  clankerRedirect?: boolean;
   /** Which approval key this rule is able to name, if any. `rdelete` marks the
    *  recursive-delete rules whose targets can be read straight out of the command
    *  (`rdeleteTargetsFor` below resolves them), so `approvalKey.ts` can ask for
@@ -189,12 +197,18 @@ export function getBuiltinDenyList(): ShellTokenRule[] {
         return rest[0] === 'clean' && rest.slice(1).some((flag) => /^-[^-]*f/u.test(flag));
       }),
     ),
-    dangerous(
-      'git checkout/restore discarding work',
-      'To undo edits you made yourself, use edit_file; to put a tracked path back ' +
-        'the way git has it, use restore_file.',
-      isDestructiveGitCheckout,
-    ),
+    {
+      ...dangerous(
+        'git checkout/restore discarding work',
+        'To undo edits you made yourself, use edit_file; to put a tracked path back ' +
+          'the way git has it, use restore_file.',
+        isDestructiveGitCheckout,
+      ),
+      // The eight hand-planted mutations a Clanker lane undid on 2026-11-17 each
+      // raised a card that waited up to 198 s for an owner who was away. The card
+      // protected nothing `restore_file` does not already allow under Clanker.
+      clankerRedirect: true,
+    },
     dangerous(
       'destructive git push',
       'Push without force; remote history changes need explicit user intent.',

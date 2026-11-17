@@ -39,6 +39,12 @@ import type { ToolApprovalMetadata } from '../../src/tools/ToolRegistry';
  * `permissions.approval_timeout_minutes` and held when they did not — which is
  * the honest answer to the 2026-10-27 hang: the timeout is the thing that ends
  * the wait, not a refusal that arrives before the owner could see the call.
+ * One rule is the exception, and it is the rule's own choice (`clankerRedirect`
+ * in `DenyList.ts`): a file checkout is refused at once naming `restore_file`,
+ * because that tool does the same overwrite behind a checkpoint and the card
+ * only ever stalled a lane the owner was not watching.
+ * `ClankerCheckoutRedirect.test.ts` pins that refusal; this file keeps the card
+ * for every rule that still asks, and the unattended refusal for all of them.
  *
  * The commands go through the REAL classifier (`makeShellTool().approval()`), so
  * a rule that loses its `gateKind: 'denyList'`, or its sanctioned alternative,
@@ -63,6 +69,15 @@ function metadataFor(command: string): ToolApprovalMetadata {
   return metadata;
 }
 
+/** The commands whose rule still stops for the owner in a Clanker chat. The two
+ *  checkout spellings are not among them: that rule answers itself with a
+ *  refusal naming the sanctioned tool, pinned in `ClankerCheckoutRedirect.test.ts`. */
+const CARDED_IN_CLANKER: Array<[string, string[]]> = [
+  ['git reset --hard', ['restore_file', 'edit_file']],
+  ['git clean -fd', ['delete_file']],
+  ['rm -rf build', ['delete_file']],
+];
+
 /** `ToolDispatch.ts`'s metadata-to-call-options mapping, copied so the gate the
  *  tool raises is the gate the service sees. The same shape is pinned against the
  *  real dispatcher by `ToolDispatch.test.ts` ('Safer way: Use restore_file'). */
@@ -71,6 +86,8 @@ function optionsFor(metadata: ToolApprovalMetadata): ToolApprovalCallOptions {
     ...(metadata.gateKind ? { gateKind: metadata.gateKind } : {}),
     ...(metadata.cardReason ? { cardReason: metadata.cardReason } : {}),
     ...(metadata.declineHint ? { alternative: metadata.declineHint } : {}),
+    ...(metadata.denyRule ? { denyRule: metadata.denyRule } : {}),
+    ...(metadata.clankerRedirect ? { clankerRedirect: metadata.clankerRedirect } : {}),
   };
 }
 
@@ -129,7 +146,7 @@ describe('a deny-list dangerous command in an autonomous run', () => {
    *  instead of refusing. This is the 2026-10-27 hang answered the honest way — the
    *  timeout the owner configures ends the wait, and the owner still saw the call. */
   it('gives them their card in a Clanker chat instead of refusing them', async () => {
-    for (const [command, tools] of DENIED) {
+    for (const [command, tools] of CARDED_IN_CLANKER) {
       const { service, cards, resolved } = harness();
       service.setClankerMode('chat-1', true);
       const metadata = metadataFor(command);
@@ -226,11 +243,13 @@ describe('a deny-list dangerous command in an autonomous run', () => {
    * reason ended. The rule's own description is quoted here, because that is the
    * string `shellTool.ts` puts in `cardReason`. The fix is punctuation only, so
    * the rest of the message — which the agent already acts on — is quoted whole
-   * as well. The `/clanker` half of the finding has no refusal to word any more:
-   * the card opens, and the owner reads the same rule and the same sanctioned tool
-   * in the card's own text, so the assertion moved from the refusal to the card.
+   * as well. The `/clanker` half is a refusal again for this one rule only, so
+   * both wordings are asserted here: the unattended refusal carries the rule as
+   * the card names it (`cardReason`), and the Clanker refusal carries the rule's
+   * own name, since a decision that read the card's text back would break the
+   * day the card is reworded. Every other deny-list rule still opens its card.
    */
-  it('ends the matched rule before naming the alternative, in the refusal and on the card', async () => {
+  it('ends the matched rule before naming the alternative, in both refusals it writes', async () => {
     const RULE_SENTENCE = 'Matched rule: git checkout/restore discarding work. Use this instead:';
     const metadata = metadataFor('git checkout -- src/a.ts');
 
@@ -250,24 +269,23 @@ describe('a deny-list dangerous command in an autonomous run', () => {
 
     const clanker = harness();
     clanker.service.setClankerMode('chat-12', true);
-    const pending = clanker.service.request(
-      'shell',
-      metadata.detail ?? '',
-      true,
-      'chat-12',
-      undefined,
-      optionsFor(metadata),
-    );
-    const card = clanker.cards()[0];
-    if (card?.type !== 'confirmRequest')
-      throw new Error('a Clanker chat refused `git checkout` without a card');
-    // The card carries the rule as the gate wrote it, and the tool the owner should
-    // send the agent to, so answering it gives the same information the refusal did.
-    expect(card.detail).toContain('Matched rule: git checkout/restore discarding work');
-    expect(card.detail).not.toMatch(/\w Use this instead:/);
+    const clankerMessage = await clanker.service
+      .request(
+        'shell',
+        metadata.detail ?? '',
+        true,
+        'chat-12',
+        undefined,
+        optionsFor(metadata),
+      )
+      .then(() => 'approved')
+      .catch((err: Error) => err.message);
+    // The `/clanker` half of the finding is a refusal again for this one rule, so
+    // the rule name still has to end before the alternative in the refusal too.
+    expect(clankerMessage).toContain('git checkout/restore discarding work. Use this instead:');
+    expect(clankerMessage).not.toMatch(/\w Use this instead:/);
     for (const tool of ['edit_file', 'restore_file'])
-      expect(optionsFor(metadata).alternative ?? '', tool).toContain(tool);
-    clanker.service.cancelConversation('chat-12');
-    await expect(pending).resolves.toBe('declined');
+      expect(clankerMessage, tool).toContain(tool);
+    expect(clanker.cards()).toHaveLength(0);
   });
 });

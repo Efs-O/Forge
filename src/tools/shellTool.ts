@@ -16,6 +16,7 @@ import {
   classifyShellCall,
   clankerMayRunShellRefusal,
   clankerShellRefusalApproval,
+  matchedRuleGate,
 } from './shellToolCallGate';
 import type { ShellKind } from './shellCommandTokens';
 import { ShellOutputCollector } from './shellOutput';
@@ -372,7 +373,7 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
           ...(approvalKey ? { approvalKey } : {}),
           ...(result.approvalTargets ? { approvalTargets: result.approvalTargets } : {}),
           ...(result.rule?.alternative ? { declineHint: result.rule.alternative } : {}),
-          ...(result.rule?.gateKind ? { gateKind: result.rule.gateKind } : {}),
+          ...matchedRuleGate(result.rule),
           ...(result.rule ? { cardReason: `Matched rule: ${result.rule.description}` } : {}),
         };
       return undefined;
