@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.17.192
+
+**A laptop can chat with the desktop's models, and Check connection shows its answer.**
+
+- Chats on a model added by **Forge: Connect to my desktop** failed with "HTTP 404: not found". The laptop sent them to the desktop model's own port instead of the one port the desktop shares, and that port had no such route. They now go through the shared port.
+- **Forge: Check connection** now shows its result in a message. It used to write the result only to Forge's log, so running it seemed to do nothing.
+- The setup guide connects to the other computer right after the first reload, when that command exists, and leaves `active_model` as `null` until then. An empty `active_model` failed validation and kept Forge from loading its config.
+
 ## 0.17.191
 
 **The setup agent offers your other computer's models and asks which one is the default.**
