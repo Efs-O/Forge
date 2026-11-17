@@ -3,6 +3,23 @@ import { isOllamaCloudModel } from '../llm/ModelRouteClassifier';
 import { mergeGroupsIntoModel } from './ConfigResolver';
 import type { ForgeConfig, ModelConfig } from './types';
 
+/** What this desktop will render for a laptop (docs/plans/LAPTOP_REMOTE_MEDIA_PLAN.md).
+ *  Absent means the five media routes answer 404: a paid backend is served only
+ *  when its name is listed here, because the listing is the owner's standing consent. */
+export const CloudRelayMediaSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    image_backends: z.array(z.string().min(1)).default([]),
+    upscale: z.boolean().default(false),
+    video_engines: z.array(z.string().min(1)).default([]),
+    music_engines: z.array(z.string().min(1)).default([]),
+    queue_limit: z.number().int().min(1).default(2),
+    job_ttl_minutes: z.number().int().min(1).default(60),
+  })
+  .strict();
+
+export type CloudRelayMediaConfig = z.infer<typeof CloudRelayMediaSchema>;
+
 /** Desktop-side allowlist and loopback port for laptop cloud requests. */
 export const CloudRelayConfigSchema = z
   .object({
@@ -10,6 +27,7 @@ export const CloudRelayConfigSchema = z
     port: z.number().int().min(1).max(65535).default(8797),
     max_body_mb: z.number().int().min(1).default(32),
     models: z.array(z.string().min(1)).min(1),
+    media: CloudRelayMediaSchema.optional(),
   })
   .strict()
   .optional();

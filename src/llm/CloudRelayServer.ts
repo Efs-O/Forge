@@ -11,14 +11,30 @@ import { isCloudProvider } from './CloudProviders';
 import { resolveCloudRequestTarget } from './CloudRequestResolver';
 import { forwardCloudRequest } from './CloudRelayForward';
 import { isOllamaCloudModel } from './ModelRouteClassifier';
+import { REMOTE_MEDIA_ROUTES } from '../media/remoteMediaContract';
+import {
+  createMediaRoutes,
+  type MediaRouteHandler,
+  type RemoteMediaPort,
+} from '../media/remoteMediaRoutes';
 
-/** The cloud relay's complete HTTP surface; changes are CI-locked. */
+/** The cloud relay's complete HTTP surface; changes are CI-locked. The four
+ *  model routes and the five media routes the laptop reaches (`REMOTE_MEDIA_ROUTES`). */
 export const CLOUD_RELAY_ROUTES = Object.freeze([
   'GET /v1/models',
   'POST /v1/chat/completions',
   'POST /api/chat',
   'POST /api/generate',
+  ...REMOTE_MEDIA_ROUTES,
 ] as const);
+
+/** The media routes are the only ones this server does not answer itself. */
+type MediaRoute = (typeof REMOTE_MEDIA_ROUTES)[number];
+const MEDIA_ROUTE_SET: ReadonlySet<string> = new Set<string>(REMOTE_MEDIA_ROUTES);
+
+function asMediaRoute(route: string): MediaRoute | undefined {
+  return MEDIA_ROUTE_SET.has(route) ? (route as MediaRoute) : undefined;
+}
 
 const log = getLogger();
 
@@ -57,13 +73,24 @@ class CloudRelayServer implements CloudRelayWiring {
   private readonly inFlight = new Set<AbortController>();
   private disposed = false;
 
+  private readonly mediaRoutes: Record<MediaRoute, MediaRouteHandler>;
+
   constructor(
     private readonly extensionContext: vscode.ExtensionContext,
     private readonly getConfig: () => ForgeConfig,
-  ) {}
+    /** The window's media job runner, when this window wires one. Absent means
+     *  every media route answers 404: the kill switch, not a broken listener. */
+    private readonly media?: RemoteMediaPort,
+  ) {
+    this.mediaRoutes = createMediaRoutes(media);
+  }
 
   applyConfig(): void {
     const relay = this.getConfig().cloud_relay;
+    // Turning either switch off stops the render that is running, before the
+    // listener is even considered: a disabled media block must not leave a
+    // job holding the GPU.
+    this.media?.applyConfig();
     if (this.disposed || !relay?.enabled) {
       this.stopListener();
       return;
@@ -109,6 +136,14 @@ class CloudRelayServer implements CloudRelayWiring {
     route: string,
     body: Record<string, unknown>,
   ): Promise<void> {
+    const mediaRoute = asMediaRoute(route);
+    if (mediaRoute) {
+      // The media routes are answered by the job runner, and the jobs survive
+      // this server restarting: a port or body-cap change rebuilds the
+      // listener, never the queue.
+      await this.mediaRoutes[mediaRoute](req, res, body);
+      return;
+    }
     const startedAt = Date.now();
     const bytesIn = Buffer.byteLength(JSON.stringify(body));
     if (route === 'GET /v1/models') {
@@ -252,8 +287,9 @@ class CloudRelayServer implements CloudRelayWiring {
 export function wireCloudRelay(
   extensionContext: vscode.ExtensionContext,
   getConfig: () => ForgeConfig,
+  media?: RemoteMediaPort,
 ): CloudRelayWiring {
-  const server = new CloudRelayServer(extensionContext, getConfig);
+  const server = new CloudRelayServer(extensionContext, getConfig, media);
   server.applyConfig();
   return server;
 }

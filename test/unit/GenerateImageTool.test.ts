@@ -234,6 +234,47 @@ describe('generate_image', () => {
   });
 });
 
+describe('generate_image with a job workspaceRoot', () => {
+  it('writes the file inside it and never calls the default reveal', async () => {
+    const out = path.join(root, 'job', 'out');
+    fs.mkdirSync(out, { recursive: true });
+    const notifications = new UserNotificationService();
+    const delivered: Array<string | undefined> = [];
+    notifications.addSink(async (event) => {
+      delivered.push(event.imagePath);
+      return 1;
+    });
+    vi.mocked(vscode.commands.executeCommand).mockClear();
+    const reveal = vi.fn(async () => undefined);
+    const tool = makeGenerateImageTool({
+      getConfig: () => ({ image_generation: imageConfig() }) as unknown as ForgeConfig,
+      secrets: undefined,
+      notifications,
+      generate: async () => ({ bytes: JPEG, mime: 'image/jpeg' }),
+      // The job runner injects the reveal: what the plan requires is that the
+      // default (a desktop editor tab) is never the one a remote job uses.
+      reveal,
+      workspaceRoot: out,
+      now: () => new Date('2026-09-14T10:20:30Z'),
+    });
+    const text = await tool.handler({ prompt: 'a cat', path: 'cat.png' }, noSnapshot);
+    const written = path.join(out, 'cat.jpg');
+    expect(fs.existsSync(written)).toBe(true);
+    expect(delivered).toEqual([written]);
+    expect(text).toContain('cat.jpg');
+    expect(reveal).toHaveBeenCalledWith(written);
+    expect(vscode.commands.executeCommand).not.toHaveBeenCalled();
+    // Nothing was written to the open workspace itself, only under the root.
+    expect(fs.existsSync(path.join(root, 'cat.jpg'))).toBe(false);
+  });
+
+  it('keeps today\u2019s behaviour when workspaceRoot is absent', async () => {
+    const { tool } = rig();
+    await tool.handler({ prompt: 'a cat', path: 'cat.png' }, noSnapshot);
+    expect(fs.existsSync(path.join(root, 'cat.jpg'))).toBe(true);
+  });
+});
+
 describe('generateCloudImage', () => {
   const secrets = { get: async () => 'plain-api-key' } as unknown as vscode.SecretStorage;
   const backends = imageConfig().backends;

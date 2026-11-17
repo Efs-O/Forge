@@ -129,9 +129,12 @@ export function resolveReferencePaths(
  * undefined when it cannot be resolved — `saveImage` reports that failure
  * itself, and the guard must not turn it into a bogus collision message.
  */
-export async function resolveOutputForCollision(target: string): Promise<string | undefined> {
+export async function resolveOutputForCollision(
+  target: string,
+  workspaceRoot?: string,
+): Promise<string | undefined> {
   try {
-    return await resolveRealWorkspacePath(target, undefined, { allowMissing: true });
+    return await resolveRealWorkspacePath(target, workspaceRoot, { allowMissing: true });
   } catch {
     return undefined;
   }

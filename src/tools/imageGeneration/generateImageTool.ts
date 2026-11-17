@@ -37,6 +37,10 @@ export interface GenerateImageDeps {
   getConfig: () => ForgeConfig;
   secrets: vscode.SecretStorage | undefined;
   notifications: UserNotificationService;
+  /** Job-scoped root for a remote media job: the saved file and the reference
+   *  paths resolve inside it instead of the open workspace. Absent keeps the
+   *  ordinary behaviour (the first workspace folder), so nothing else changes. */
+  workspaceRoot?: string;
   /** The window's live `sd-server` owners, by backend name. Absent = no local backend wired. */
   sdServers?: () => ReadonlyMap<string, SdServerBackend>;
   /** Injectable for tests. */
@@ -277,7 +281,9 @@ async function saveImage(
   context: ToolHandlerContext | undefined,
   caption: string,
 ): Promise<SavedImage> {
-  const absolute = await resolveRealWorkspacePath(target, undefined, { allowMissing: true });
+  const absolute = await resolveRealWorkspacePath(target, deps.workspaceRoot, {
+    allowMissing: true,
+  });
   context?.beforeMutate([absolute]);
   await fs.mkdir(path.dirname(absolute), { recursive: true });
   await fs.writeFile(absolute, bytes);
@@ -350,6 +356,7 @@ async function runLocalVariations(
     backend,
     Array.isArray(args['reference_paths']) ? args['reference_paths'] : [],
     {
+      ...(deps.workspaceRoot ? { workspaceRoot: deps.workspaceRoot } : {}),
       deps: localDeps,
       alternatives,
       ...(context?.abortSignal ? { signal: context.abortSignal } : {}),
@@ -374,7 +381,7 @@ async function runLocalVariations(
       );
       // Resolve the output exactly as `saveImage` will (realpath-aware), so a
       // junction inside the workspace cannot slip a write onto a reference.
-      const realOutput = await resolveOutputForCollision(probe);
+      const realOutput = await resolveOutputForCollision(probe, deps.workspaceRoot);
       if (!realOutput) continue;
       const collision = outputCollidesWithReference(realOutput, references.absolutePaths);
       if (collision) {

@@ -111,6 +111,8 @@ interface RigOptions {
   config?: ImageGenerationConfig;
   job?: (request: SdcppJobRequest) => Promise<SdcppJobResult>;
   seeds?: number[];
+  /** The job-scoped root a remote media job passes; absent means the workspace. */
+  workspaceRoot?: string;
 }
 
 function rig(options: RigOptions = {}) {
@@ -142,6 +144,7 @@ function rig(options: RigOptions = {}) {
     onReferenceSpawn: (argv) => spawns.push(argv),
     ffmpegTools: TOOLS,
     runReference: ffmpeg,
+    ...(options.workspaceRoot ? { workspaceRoot: options.workspaceRoot } : {}),
     reveal: async () => undefined,
     now: () => new Date('2026-09-14T10:20:30Z'),
     seed: (() => {
@@ -186,6 +189,21 @@ describe('reference_paths at the tool layer (A2, A8, A15, A22, A26)', () => {
     expect(ffmpeg.calls).toHaveLength(0);
     expect(job).not.toHaveBeenCalled();
     expect(generateLocal).not.toHaveBeenCalled();
+  });
+
+  it('resolves a reference against a job workspaceRoot, not the open workspace', async () => {
+    const out = path.join(root, 'job', 'out');
+    const inputs = path.join(root, 'job', 'inputs');
+    fs.mkdirSync(out, { recursive: true });
+    fs.mkdirSync(inputs, { recursive: true });
+    fs.writeFileSync(path.join(inputs, 'cat.png'), PNG);
+    const { tool, ffmpeg } = rig({ workspaceRoot: out });
+    await tool.handler({ prompt: 'an edit', reference_paths: ['../inputs/cat.png'] }, noSnapshot);
+    // `../inputs/cat.png` is the name the job runner rewrites an uploaded input
+    // to, and it resolves one level above the job's `out/`, not in the workspace.
+    expect(ffmpeg.calls.some((call) => call.argv.includes(path.join(inputs, 'cat.png')))).toBe(
+      true,
+    );
   });
 
   it('sends a reference through the async job endpoint, never txt2img (A15)', async () => {

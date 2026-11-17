@@ -7,6 +7,7 @@ import { buildStatusBarTurnEvents } from './sidebar/statusBarTurnEvents';
 import { setExternalRequestHook } from './backend/ExternalModelServers';
 import { disposeServerChannel } from './backend/DirectBackend';
 import { wireTailnetServices, type TailnetServicesWiring } from './vscode/tailnetServicesSetup';
+import { RemoteMediaJobs } from './media/remoteMediaJobs';
 import { wireControlServer } from './vscode/controlServerSetup';
 import type { ControlServer } from './backend/ControlServer';
 import { wireRemoteStarter, releaseRemoteStarterLeases } from './llm/RemoteStarterClient';
@@ -198,6 +199,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     pool,
     controlServer,
     remoteLeases,
+    // The laptop media jobs, built only for the window that owns the relay
+    // (docs/plans/LAPTOP_REMOTE_MEDIA_PLAN.md). They live here, not in the
+    // relay, so a listener restart cannot touch a running render.
+    () =>
+      new RemoteMediaJobs({
+        getConfig,
+        root: path.join(storagePath, 'remote-media'),
+        secrets: context.secrets,
+        ...(sdServers ? { sdServers: () => sdServers.handles() } : {}),
+      }),
   );
   activeTailnetServices = tailnetServices;
 

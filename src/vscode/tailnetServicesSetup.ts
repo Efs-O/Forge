@@ -5,6 +5,7 @@ import type { ControlServer } from '../backend/ControlServer';
 import type { ModelStarterLeases } from '../backend/ModelStarterLeases';
 import { wireModelStarter } from '../backend/ModelStarterServer';
 import { wireCloudRelay } from '../llm/CloudRelayServer';
+import type { RemoteMediaJobs } from '../media/remoteMediaJobs';
 import { thisWindowHostedElsewhere } from './remoteWindowKind';
 import { getLogger } from '../util/logger';
 
@@ -22,6 +23,10 @@ export function wireTailnetServices(
   pool: BackendPool,
   controlServer: ControlServer,
   leases: ModelStarterLeases,
+  /** Build the laptop media jobs, for the window that owns the relay. Called
+   *  only there: a hosted window wires no media, so it never opens the job
+   *  store or starts its sweep. */
+  makeMedia?: () => RemoteMediaJobs,
 ): TailnetServicesWiring {
   if (thisWindowHostedElsewhere()) {
     // A VS Code tunnel or SSH window shares the desktop with its own Forge
@@ -45,7 +50,9 @@ export function wireTailnetServices(
     return hostedElsewhere;
   }
   const starter = wireModelStarter(getConfig, pool, controlServer, leases);
-  const relay = wireCloudRelay(context, getConfig);
+  const media = makeMedia?.();
+  if (media) context.subscriptions.push(media);
+  const relay = wireCloudRelay(context, getConfig, media);
   const wiring: TailnetServicesWiring = {
     applyConfig: () => {
       starter.applyConfig();
