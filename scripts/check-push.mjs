@@ -26,6 +26,18 @@ const TYPE_RE = new RegExp(`^(?:${TYPES.join('|')})(\\([^()]{1,24}\\))?: \\S`);
 const RELEASE_RE = /^chore\(release\): v\d+\.\d+\.\d+$/;
 const VERSION_FILE = 'package.json';
 const RELEASE_FILES = new Set(['package.json', 'package-lock.json', 'CHANGES.md']);
+/**
+ * Commits already built on that cannot be reworded without rewriting history
+ * other sessions and tags depend on. Each is named with its reason and warned
+ * about on every push, like a `Push-Hygiene-Exempt:` trailer. This list only
+ * shrinks; a new entry needs the owner's say-so.
+ */
+const HISTORICAL_EXEMPT = new Map([
+  [
+    '2f8865afb8c8f1bc57daa705f49fce3fcfb30564',
+    'plain `git revert` of the first v0.17.186 release (9a16d20c), re-released at 039a6181; 19 commits and two tags were built on it before the push check ran (owner, 2026-11-17)',
+  ],
+]);
 const BANNED = [
   [/^fixup!/i, 'fixup! subject — fold it with `git rebase --autosquash` before pushing'],
   [/^squash!/i, 'squash! subject — fold it before pushing'],
@@ -148,6 +160,10 @@ try {
 
 for (const { sha, subject, body, author } of records) {
   const short = sha.slice(0, 8);
+  if (HISTORICAL_EXEMPT.has(sha)) {
+    warnings.push(`${short}: message checks skipped by historical exemption — ${HISTORICAL_EXEMPT.get(sha)}`);
+    continue;
+  }
   const isRelease = RELEASE_RE.test(subject);
   if (!isRelease) {
     if (!TYPE_RE.test(subject)) {
@@ -199,6 +215,7 @@ const versionCommits = git('log', '--format=%H %s', `-G"version": "`, range, '--
   .filter(Boolean);
 for (const entry of versionCommits) {
   const sha = entry.split(' ')[0];
+  if (HISTORICAL_EXEMPT.has(sha)) continue;
   const subject = git('log', '-1', '--format=%s', sha).trim();
   const body = git('log', '-1', '--format=%b', sha);
   // A commit that deliberately carries a version bump says why. The exemption
