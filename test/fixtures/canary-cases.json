@@ -34,8 +34,8 @@
   {
     "id": "instruction-overlap-duplicate-tip",
     "file": "docs/CODING_TIPS.md",
-    "find": "3. `list_directory \"~/.forge/jobs\"` → resolves now (0.17.171), but `find_files \"~/**\"` still opens nothing outside the workspace. pass the absolute `C:/Users/<name>/.forge/jobs`",
-    "replace": "3. `list_directory \"~/.forge/jobs\"` → resolves now (0.17.171), but `find_files \"~/**\"` still opens nothing outside the workspace. pass the absolute `C:/Users/<name>/.forge/jobs`\n7. `list_directory \"~/.forge/jobs\"` → resolves now (0.17.171), but `find_files \"~/**\"` still opens nothing outside the workspace. pass the absolute `C:/Users/<name>/.forge/jobs`",
+    "find": "4. an edit that grows a src file past 500 lines → eslint `max-lines` errors, same limit as the tool's warning. check `wc -l <file>` first; move the code into a leaf module",
+    "replace": "4. an edit that grows a src file past 500 lines → eslint `max-lines` errors, same limit as the tool's warning. check `wc -l <file>` first; move the code into a leaf module\n5. an edit that grows a src file past 500 lines → eslint `max-lines` errors, same limit as the tool's warning. check `wc -l <file>` first; move the code into a leaf module",
     "test": "test/unit/InstructionSourceOverlap.test.ts",
     "expect": "has no near-duplicate rows inside the tips table"
   },
