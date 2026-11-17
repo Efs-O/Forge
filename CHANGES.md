@@ -1,5 +1,15 @@
 # Forge — Recent Changes
 
+## 0.17.194
+
+**A laptop can generate and upscale images on its desktop.**
+
+- A laptop set up with **Forge: Connect to my desktop** can now ask for an image or an upscale, and the desktop renders it with its own engines. Before, the laptop looked for image engines on itself and found none. The finished file is saved in the laptop's workspace, and Keep/Undo covers it like any other change.
+- The desktop serves only what its `policy.yaml` lists under `cloud_relay.media`: which image backends, and whether to upscale. A paid backend is never served unless it is listed by name, and with no `media` block, Connect says that image generation stays on the desktop.
+- Connect turns the laptop's `remote_media` switch on when the desktop serves images and asks you to reload the window. **Forge: Check connection** shows what the desktop renders, or why it renders nothing.
+- On the laptop, the image is refused before anything is sent when it would overwrite one of its own reference pictures, and two reference files with the same name are both sent.
+- Video and music still run only on the desktop.
+
 ## 0.17.193
 
 **Web search is offered at setup, and a desktop model's live check runs.**
