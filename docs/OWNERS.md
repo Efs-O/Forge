@@ -621,6 +621,7 @@ overlaps with an existing owner, extend the owner instead.
 | `shell` tool (spawn, approval, background)  | `src/tools/shellTool.ts`              |
 | Shell call classification cache and attended Clanker refusal release | `src/tools/shellToolCallGate.ts` |
 | Shell `timeout_ms` hint text and argument check | `src/tools/shellToolTimeout.ts` |
+| Hints appended to a command's result (PowerShell vs POSIX syntax, missing git identity) | `src/tools/commandHints.ts` |
 | Background-execution registry (~/.forge/background-execs/, reaped after a killed host) | `src/tools/backgroundRegistry.ts` |
 | Shell command classification (read-only/normal/dangerous/refused) | `src/tools/shellPolicy.ts` |
 | Shell scripts read and added to command classification | `src/tools/shellScriptFiles.ts` |

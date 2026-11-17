@@ -27,6 +27,7 @@ import {
   resolveFilePath,
   workspaceRoot,
 } from './gitDiscovery';
+import { gitIdentityHint } from './commandHints';
 
 const execFileAsync = promisify(execFile);
 
@@ -202,7 +203,9 @@ export async function runGit(repo: GitRepoHandle, args: readonly string[]): Prom
       error.code === 'ENOENT' && !output
         ? 'the git executable was not found on PATH. Install Git and make it available on PATH.'
         : output || error.message || String(err);
-    throw new Error(`git ${args[0] ?? 'command'} failed in repository "${repo.root}": ${detail}`);
+    throw new Error(
+      `git ${args[0] ?? 'command'} failed in repository "${repo.root}": ${detail}${gitIdentityHint(detail)}`,
+    );
   }
 }
 

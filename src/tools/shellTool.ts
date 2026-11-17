@@ -25,6 +25,9 @@ import type { RegisteredTool } from './ToolRegistry';
 import { markConversationReadSecret } from './exfilTaint';
 import { shellTimeoutError, TIMEOUT_HINT } from './shellToolTimeout';
 import { appendElevationResultNote } from './shellScriptFiles';
+import { gitIdentityHint, pwshHint } from './commandHints';
+
+export { posixIdioms } from './commandHints';
 
 export interface ShellToolOptions {
   getConfig?: () => ForgeConfig;
@@ -210,43 +213,6 @@ function formatResult(
   text: string,
 ): string {
   return `exit ${code ?? 'null'} · ${seconds.toFixed(1)} s${timedOut ? ' · timed out' : ''}\n${text}`;
-}
-
-const POSIX_ONLY = new Set([
-  'head',
-  'tail',
-  'wc',
-  'sed',
-  'awk',
-  'uniq',
-  'xargs',
-  'cut',
-  'tr',
-  'grep',
-]);
-const GLOB_TAKERS = new Set(['rg', 'grep', 'cat', 'wc', 'head', 'tail']);
-/** Names POSIX idioms that fail under PowerShell, such as `sort -rn`; whole
- * tokens only and quoted arguments are ignored. */
-export function posixIdioms(command: string): string[] {
-  const found = new Set<string>();
-  for (const segment of command.split(/\||&&|;/u)) {
-    const tokens = segment.trim().split(/\s+/u).filter(Boolean);
-    const [head, flag] = tokens;
-    if (!head) continue;
-    if (POSIX_ONLY.has(head)) found.add(head);
-    if (head === 'sort' && flag?.startsWith('-')) found.add(`sort ${flag}`);
-    if (head === 'for' && tokens[2] === 'in') found.add('a for … in loop');
-    if (GLOB_TAKERS.has(head) && tokens.slice(1).some((t) => t.includes('*') && !/^['"-]/u.test(t)))
-      found.add(`${head} with a bare glob`);
-  }
-  return [...found];
-}
-
-function pwshHint(shell: ShellKind, code: number | null, command: string): string {
-  if ((shell !== 'pwsh' && shell !== 'powershell') || code === 0) return '';
-  const idioms = posixIdioms(command);
-  if (!idioms.length) return '';
-  return `\nThis ran in PowerShell, but the command uses POSIX syntax (${idioms.join(', ')}). Rerun it with shell: "bash".`;
 }
 
 export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
@@ -483,7 +449,8 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
           );
         return appendElevationResultNote(
           formatResult(result.code, result.seconds, result.timedOut, capped.text) +
-            pwshHint(shell, result.code, command),
+            pwshHint(shell, result.code, command) +
+            gitIdentityHint(capped.text),
           classified.elevatedProcess,
         );
       } catch (error) {
