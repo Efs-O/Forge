@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.17.190
+
+**The setup guide's starter FORGE.md is in the extension.**
+
+- `AI_SETUP.md` tells the setup agent to copy `resources/instructions/FORGE.starter.md` into a repository that has no `FORGE.md`, but the package left that file out, so on 0.17.189 the agent found nothing to copy and skipped the step. The file now ships, and the package check fails if it goes missing again.
+- In Claude Code, the setup agent now asks its one setup question with a picker: yes or no to the plan, a checklist of the optional items, and the git identity. Other agents still ask it in text.
+
 ## 0.17.189
 
 **A fresh install sets itself up properly: the setup agent offers Telegram, another computer, a daily retitle and your git identity, Claude Code gets the agent note too, and any agent can message you on Telegram.**
