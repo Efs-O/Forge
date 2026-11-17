@@ -21,7 +21,7 @@ import type {
   ForgeSteerResult,
 } from '../agentBus/agentInbox';
 import type { BusReadResult, ChatsReport, PeerViewResult } from './agentChatReadRoute';
-import type { AgentSender } from '../agentLinks/chatAgentLinks';
+import type { AgentSender, AgentSenderMetadata } from '../agentLinks/chatAgentLinks';
 import type { InboundAgentSelection, InboundAgentTarget } from '../agentLinks/inboundAgentRouting';
 import { PendingAgentReplies, type PendingAgentReply } from '../agentLinks/pendingAgentReplies';
 import type { RemoteSessionActionResult } from '../remote/RemoteSessionBridge';
@@ -216,4 +216,13 @@ export interface AgentRoutesDeps {
    *  agent-link path, which opens the chat in the sidebar and so skips
    *  `openBusChat` above. */
   armBusChat?: (conversationId: string, sender: string) => void;
+  /**
+   * Can this sender's own session be handed Forge's answer the moment the turn
+   * ends? It decides the footer of an inbound prompt: a sender whose session
+   * lives on another machine is told to read the verdict instead of being
+   * promised a delivery nothing will make (fresh-install finding 7). Absent or
+   * unanswered means deliverable, so a window that does not check keeps today's
+   * promise.
+   */
+  senderIsLive?: (sender: AgentSenderMetadata) => boolean;
 }

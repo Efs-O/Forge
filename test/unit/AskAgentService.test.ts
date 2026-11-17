@@ -738,6 +738,83 @@ describe('ask_agent session resolution', () => {
     expect(state.runtime.runHeadless).toHaveBeenCalledTimes(2);
   });
 
+  // 2026-11-17 laptop fresh-install test (findings 11 and 12): a chat opened by
+  // `forge.sh say --new` from a desktop Claude session over WinRM carries the
+  // desktop's session id, so the laptop has neither the live session nor any
+  // transcript of it. The ask used to open an empty Claude panel in the owner's
+  // editor and then fail a headless resume of a session never on this machine.
+  it('a Claude session this machine never had: no panel, no resume, a fresh session', async () => {
+    const foreign = '4f6d2a1c-9b3e-4b57-9e1f-6b8c0d2a4e5f';
+    const state = setup({
+      hasLocalTranscript: vi.fn(() => false),
+      runHeadless: vi.fn(async (options) => {
+        options.onSessionId(otherId);
+        return { status: 'completed', finalText: 'new reply' };
+      }),
+    });
+    state.conv.agentLinks = { claude: linked('claude', foreign) };
+    rebuildIndex([state.conv]);
+    const result = await state.handler(
+      { agent: 'claude', message: 'Review' },
+      {
+        conversation: state.conv,
+        checkpoint: state.checkpoint,
+        signal: new AbortController().signal,
+        workspaceRoot: 'C:/repo',
+        persistConversation: state.persistConversation,
+      },
+    );
+    expect(state.runtime.hasLocalTranscript).toHaveBeenCalledWith(
+      'claude',
+      expect.objectContaining({ sessionId: foreign }),
+    );
+    expect(state.runtime.openPanel).not.toHaveBeenCalled();
+    expect(state.runtime.sendLive).not.toHaveBeenCalled();
+    // The one headless run starts a session of this machine's own; nothing
+    // tries to resume the id the other machine owns.
+    expect(state.runtime.runHeadless).toHaveBeenCalledOnce();
+    const run = vi.mocked(state.runtime.runHeadless).mock.calls[0]?.[0];
+    expect(run).toMatchObject({ agent: 'claude', createSessionId: otherId });
+    expect(run).not.toHaveProperty('sessionId');
+    expect(result.notice).toBe(
+      'Claude session "Forge · Design chat" is not on this machine; started a new one. ',
+    );
+    expect(renderAskAgentResult(result)).toContain('is not on this machine; started a new one.');
+    expect(result).toMatchObject({ status: 'completed', finalText: 'new reply', live: false });
+    // The other machine's link is gone from the index; the new session owns the
+    // chat, so a later ask does not fail the same way.
+    expect(state.conv.agentLinks?.claude?.sessionId).toBe(otherId);
+    expect(findBySession(foreign)).toBeUndefined();
+    expect(findBySession(otherId)).toBe(id);
+  });
+
+  it('a Claude transcript this machine does have keeps the panel and the resume', async () => {
+    const state = setup({
+      hasLocalTranscript: vi.fn(() => true),
+      runHeadless: vi.fn(async () => ({ status: 'completed', finalText: 'resumed' })),
+    });
+    state.conv.agentLinks = { claude: linked('claude') };
+    rebuildIndex([state.conv]);
+    const result = await state.handler(
+      { agent: 'claude', message: 'Review' },
+      {
+        conversation: state.conv,
+        checkpoint: state.checkpoint,
+        signal: new AbortController().signal,
+        workspaceRoot: 'C:/repo',
+        persistConversation: state.persistConversation,
+      },
+    );
+    expect(state.runtime.openPanel).toHaveBeenCalledWith('claude', otherId);
+    expect(state.runtime.runHeadless).toHaveBeenCalledOnce();
+    expect(renderAskAgentResult(result)).toContain(
+      'Claude panel did not come up for session "Forge · Design chat"; resumed headlessly.',
+    );
+    expect(renderAskAgentResult(result)).not.toContain('is not on this machine');
+    // The link is what the resume ran on, so it stays exactly where it was.
+    expect(state.conv.agentLinks?.claude?.sessionId).toBe(otherId);
+  });
+
   it('passes stop through to the live session and reports that Claude may still work', async () => {
     const state = setup({
       isLive: vi.fn(async () => true),

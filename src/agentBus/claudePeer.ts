@@ -104,6 +104,39 @@ export function readClaudeSessions(
   return sessions.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
 }
 
+/** Is this Claude session live right now: a pid in the registry still holds it?
+ *  Every caller that wants to reach a session by id asks this first — the linked
+ *  session before its panel or peer pipe is used, and the reply path before it
+ *  promises a sender an answer. The answer lives here, beside the registry it
+ *  reads, instead of in one caller's `isLive`. */
+export function claudeSessionIsLive(sessionId: string): boolean {
+  return readClaudeSessions().some((session) => session.sessionId === sessionId);
+}
+
+/** Does this machine have a transcript for this session at all? Claude Code
+ *  writes `<home>/.claude/projects/<cwd>/<sessionId>.jsonl` for every session it
+ *  runs, so no transcript means this machine never ran it: the id came from a
+ *  session on another machine (a chat opened by `forge.sh say --new` from a
+ *  desktop Claude session over WinRM), where neither opening its panel nor
+ *  resuming it headlessly can work. False when the `projects` folder is missing
+ *  — Claude Code has never run under this home. */
+export function claudeTranscriptExists(sessionId: string, home: string = os.homedir()): boolean {
+  // A session id is a UUID; anything with a separator or a dot in it is refused
+  // rather than joined into a path that could point outside `projects`.
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/u.test(sessionId)) return false;
+  const projects = path.join(home, '.claude', 'projects');
+  let folders: string[];
+  try {
+    folders = fs.readdirSync(projects);
+  } catch {
+    return false; // no `projects` folder at all
+  }
+  const file = `${sessionId}.jsonl`;
+  // The session's folder is named after its working directory, which the id
+  // does not tell us, so every folder gets the one cheap existence check.
+  return folders.some((folder) => fs.existsSync(path.join(projects, folder, file)));
+}
+
 /** Claude Code names the key file after the SHA-256 of the pipe path, which it
  *  lower-cases on Windows (pipe names are case-insensitive there). */
 export function peerKeyFile(dir: string, pid: number, pipe: string): string {

@@ -22,6 +22,23 @@ function summarizeToolInput(name: string, input: unknown): string {
 }
 
 /**
+ * The text to report for a failed `result` line. Claude Code puts the reason for
+ * a failure in `errors`, not in `result`: resuming a session this machine never
+ * had answers
+ * `{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["No conversation found with session ID: …"]}`
+ * with no `result` key at all. Reading only `result` reported the generic
+ * sentence, which `isGoneMessage` cannot match, so the unlink-and-start-a-new-
+ * session path never ran and every later ask failed the same way.
+ */
+function errorTextFor(obj: Record<string, unknown>): string {
+  const result = typeof obj['result'] === 'string' ? obj['result'] : '';
+  if (result.trim()) return result;
+  const errors = Array.isArray(obj['errors']) ? obj['errors'] : [];
+  const joined = errors.filter((entry): entry is string => typeof entry === 'string').join('; ');
+  return joined.trim() ? joined : 'claude CLI reported an error result.';
+}
+
+/**
  * Parses `claude -p <task> --output-format stream-json --verbose` NDJSON:
  * - {"type":"assistant","message":{"content":[{"type":"text","text":...}]}}
  * - {"type":"assistant","message":{"content":[{"type":"tool_use","name":...,"input":...}]}}
@@ -79,7 +96,7 @@ export const claudeAdapter: CliAdapter = {
 
     if (obj['type'] === 'result') {
       const result = typeof obj['result'] === 'string' ? obj['result'] : '';
-      if (obj['is_error'] === true) ctx.setError(result || 'claude CLI reported an error result.');
+      if (obj['is_error'] === true) ctx.setError(errorTextFor(obj));
       else ctx.setFinal(result);
     }
   },

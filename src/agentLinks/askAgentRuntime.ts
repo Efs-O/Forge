@@ -2,7 +2,12 @@ import * as vscode from 'vscode';
 import { resolveCliExecutable } from '../agents/resolveCliExecutable';
 import { CliAgentDriver } from '../agents/CliAgentDriver';
 import { codexThreadIsLive } from './codexThreadLiveness';
-import { readClaudeSessions, sendPeerMessage } from '../agentBus/claudePeer';
+import {
+  readClaudeSessions,
+  claudeSessionIsLive,
+  claudeTranscriptExists,
+  sendPeerMessage,
+} from '../agentBus/claudePeer';
 import { queueToCodex } from '../agentBus/codexDelivery';
 import {
   busPaths,
@@ -161,8 +166,7 @@ export function makeAskAgentRuntime(options: {
   return {
     openPanel: open,
     isLive: async (agent, link) => {
-      if (agent === 'claude')
-        return readClaudeSessions().some((session) => session.sessionId === link.sessionId);
+      if (agent === 'claude') return claudeSessionIsLive(link.sessionId);
       if (agent === 'codex') {
         const codexCli = busConfig(options.getConfig()).codex_cli;
         return codexThreadIsLive(link.sessionId, {
@@ -173,6 +177,11 @@ export function makeAskAgentRuntime(options: {
       }
       return false;
     },
+    hasLocalTranscript: (agent, link) =>
+      // Only Claude keeps a transcript Forge can look for. Codex threads and
+      // Copilot chats are not read from a per-machine folder here, so the
+      // honest answer for them is "unknown, assume present": never absent.
+      agent === 'claude' ? claudeTranscriptExists(link.sessionId) : true,
     sendLive: async (agent, link, prompt, signal, purpose = 'ask', onAccepted, origin) => {
       if (agent === 'codex') {
         if (purpose === 'reply') return queueCodexReply(options.getConfig, link, prompt, signal);

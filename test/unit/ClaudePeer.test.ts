@@ -5,6 +5,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  claudeTranscriptExists,
   peerKeyFile,
   readClaudeSessions,
   sendPeerMessage,
@@ -90,6 +91,45 @@ describe('readClaudeSessions', () => {
 
   it('is empty when Claude Code never ran', () => {
     expect(readClaudeSessions(path.join(dir, 'missing'))).toEqual([]);
+  });
+});
+
+// 2026-11-17 laptop fresh-install test (finding 12): a chat opened by
+// `forge.sh say --new` from a desktop Claude session carries that session's id,
+// and the laptop has no transcript of it. This is the check that tells "not
+// live, and never will be" from "not live right now".
+describe('claudeTranscriptExists', () => {
+  const session = '00000000-0000-4000-8000-000000000001';
+
+  it('finds the transcript in whichever project folder Claude Code wrote it to', () => {
+    const home = path.join(dir, 'home');
+    const projects = path.join(home, '.claude', 'projects');
+    fs.mkdirSync(path.join(projects, 'N--vs-code-apps-Forge'), { recursive: true });
+    fs.writeFileSync(path.join(projects, 'N--vs-code-apps-Forge', `${session}.jsonl`), '{}\n');
+    expect(claudeTranscriptExists(session, home)).toBe(true);
+    // Another session of the same project is not this one.
+    expect(claudeTranscriptExists('00000000-0000-4000-8000-000000000002', home)).toBe(false);
+  });
+
+  it('is false when Claude Code has never run under this home', () => {
+    expect(claudeTranscriptExists(session, path.join(dir, 'never-looked'))).toBe(false);
+    // An existing `projects` folder with nothing in it is the same answer.
+    const home = path.join(dir, 'empty-home');
+    fs.mkdirSync(path.join(home, '.claude', 'projects'), { recursive: true });
+    expect(claudeTranscriptExists(session, home)).toBe(false);
+  });
+
+  it('refuses an id that cannot be a file name instead of searching outside projects', () => {
+    const home = path.join(dir, 'home');
+    const projects = path.join(home, '.claude', 'projects');
+    fs.mkdirSync(path.join(projects, 'a'), { recursive: true });
+    // The decoy is what a missing guard would match for the empty id: its
+    // transcript name is just `.jsonl`, one folder deep, so without the check
+    // this call would answer true for "every session exists here".
+    fs.writeFileSync(path.join(projects, 'a', '.jsonl'), '');
+    expect(claudeTranscriptExists('', home)).toBe(false);
+    expect(claudeTranscriptExists('a/b', home)).toBe(false);
+    expect(claudeTranscriptExists('../..', home)).toBe(false);
   });
 });
 

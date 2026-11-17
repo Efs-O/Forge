@@ -100,6 +100,39 @@ describe('claudeAdapter', () => {
     expect(state.sessionId()).toBe('claude-session');
   });
 
+  // 2026-11-17 laptop fresh-install test (finding 11): a `claude --resume` of a
+  // session id that only exists on another machine failed with the generic
+  // "reported an error result", because Claude Code answers that with `errors`,
+  // not `result`. The real reason has to reach `isGoneMessage`, or the link is
+  // never unlinked and every later ask fails the same way.
+  it('reports the CLI\'s own reason for a failed result, from errors[]', () => {
+    const state = fakeContext();
+    claudeAdapter.handleLine(
+      '{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["No conversation found with session ID: 00000000-0000-4000-8000-000000000001"]}',
+      state.ctx,
+    );
+    expect(state.error()).toBe('No conversation found with session ID: 00000000-0000-4000-8000-000000000001');
+    expect(state.final()).toBeUndefined();
+    const two = fakeContext();
+    claudeAdapter.handleLine(
+      JSON.stringify({ type: 'result', is_error: true, errors: ['first reason', 'second reason'] }),
+      two.ctx,
+    );
+    expect(two.error()).toBe('first reason; second reason');
+    const none = fakeContext();
+    claudeAdapter.handleLine(
+      JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true }),
+      none.ctx,
+    );
+    expect(none.error()).toBe('claude CLI reported an error result.');
+    const resultWins = fakeContext();
+    claudeAdapter.handleLine(
+      JSON.stringify({ type: 'result', is_error: true, result: 'it failed here', errors: ['ignored'] }),
+      resultWins.ctx,
+    );
+    expect(resultWins.error()).toBe('it failed here');
+  });
+
   it('ignores non-JSON and unknown-type lines without throwing', () => {
     const { ctx, text } = fakeContext();
     expect(() => claudeAdapter.handleLine('not json', ctx)).not.toThrow();

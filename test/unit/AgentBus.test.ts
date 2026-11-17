@@ -338,6 +338,28 @@ describe('messages', () => {
     expect(linked).toContain('From Codex session "Build review". Your final answer is delivered to it automatically.');
   });
 
+  // Finding 7 (2026-11-17 laptop fresh-install test): a sender whose session is
+  // on another machine cannot be handed Forge's answer, and the footer used to
+  // promise that it would be. The whole text is pinned because it is what the
+  // agent reads and decides what to do with.
+  it('a sender that cannot receive the answer is pointed at read-verdict instead', () => {
+    const sender = {
+      kind: 'claude' as const,
+      sessionId: '00000000-0000-4000-8000-000000000001',
+      title: 'Lane "A" comms',
+    };
+    expect(forgeInboundPrompt('claude', 'Review the patch.', sender, false)).toBe(
+      '**Claude says:**\n\nReview the patch.\n\n' +
+        'From Claude session "Lane \\"A\\" comms". That session is not running on this machine, ' +
+        'so your final answer is kept for it to read later (forge.sh read-verdict).',
+    );
+    // Same title, same escaping, on the promise the live sender does get.
+    expect(forgeInboundPrompt('claude', 'Review the patch.', sender)).toBe(
+      '**Claude says:**\n\nReview the patch.\n\n' +
+        'From Claude session "Lane \\"A\\" comms". Your final answer is delivered to it automatically.',
+    );
+  });
+
   it('a Codex question carries the reply contract with a forward-slash path', () => {
     const msg = codexMessage('C:\\bus\\outbox\\fg1-a-reply.md', 'fg1-a', 'subj', 'body');
     expect(msg).toContain('C:/bus/outbox/fg1-a-reply.md.tmp');

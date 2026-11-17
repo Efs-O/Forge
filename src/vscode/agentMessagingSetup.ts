@@ -2,6 +2,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { busPaths, removeLegacyAliasFiles } from '../agentBus/agentBus';
 import { rememberClaudeReopen } from '../agentBus/claudeReopen';
+import { claudeSessionIsLive } from '../agentBus/claudePeer';
 import { clearSelfWindow, setSelfWindow } from '../agentBus/selfWindow';
 import { EXCHANGES_LOG_NAME } from '../agentMesh/exchangeLog';
 import { setBoardContext } from '../agentMesh/meshContext';
@@ -266,8 +267,8 @@ export function setupAgentMessaging(
     );
     tellSourceRegistered = true;
   };
-  const routes = new AgentRoutes(
-    buildAgentRouteDeps({
+  const routes = new AgentRoutes({
+    ...buildAgentRouteDeps({
       getFacade: () => getSidebar().getHostFacade(),
       getConfig,
       workspaceRoot,
@@ -279,7 +280,15 @@ export function setupAgentMessaging(
       rememberClaudeReopen: (sessionId) => rememberClaudeReopen(context.workspaceState, sessionId),
       isFocused: () => vscode.window.state.focused,
     }),
-  );
+    // Whether an inbound sender can be handed Forge's answer the moment its
+    // turn ends, which is what the prompt's footer promises (finding 7).
+    // Claude: only a session in this machine's registry — a chat opened by
+    // `say --new` from another machine links a session id nothing here can
+    // reach. Codex: yes, its reply is queued into the running thread. Copilot:
+    // never, because Forge has no live transport to it at all.
+    senderIsLive: (sender) =>
+      sender.kind === 'claude' ? claudeSessionIsLive(sender.sessionId) : sender.kind === 'codex',
+  });
   // This window's own address on the bus, for a chat that talks to a peer
   // window: the bus folder, this window's id, and the folder it is open on. The
   // id exists nowhere else, and the tool layer cannot reach this file.

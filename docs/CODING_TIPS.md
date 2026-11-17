@@ -11,6 +11,7 @@
 1. `stop_execution` on a background `npm run ci` → the wrapper dies, the child tree lives and holds the ci-lock, so the next run waits forever: `MSYS_NO_PATHCONV=1 taskkill /PID <top> /T /F`
 2. `npx eslint test/unit/x.test.ts` → "none of those TSConfigs include this file": the lint script is `eslint src webview-ui`, so tests have no typed-lint config. lint `src` only
 3. `npx prettier --check .forge/x.ts` → "All matched files use Prettier code style!" while nothing was checked: prettier matches no file in a dot-folder. copy it into `test/unit/`
+4. `grep_search` with `output_mode: "content"` → refused: unknown argument, the field is `output` (content/files/count). never invent an argument name from another tool
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green and the tree stood still: never run `record-ci-pass.mjs` by hand — the `ci:steps` chain writes it
@@ -20,6 +21,8 @@
 2. `apply_line_edits` on `docs/TOOL_COVERAGE.md` → `ToolHarness.test.ts` diffs it against a fresh generation and normalises only `Generated:`. restore_file it after a demo
 3. `npx prettier --write` on a test file → it rewrites lines nobody touched: `test/` is not prettier-clean (lint is `eslint src webview-ui`). --write only the src files the gate lints
 4. an edit that grows a src file past 500 lines → eslint `max-lines` errors, same limit as the tool's warning. check `wc -l <file>` first; move the code into a leaf module
+5. an `edit_file` batch carrying a no-op edit (`old_str` already equals `new_str`) → refused: not found, an earlier edit in that same batch moved the anchor. drop the no-op edit
+6. a delegate method written to fit one line under a `max-lines` cap → prettier expands `{ return x; }` into three lines. keep it one line as an arrow class property: `undo = (): Promise<string[]> => this.actions.undo();`
 
 ## TEST
 1. `fs.rmSync` on a killed child's cwd → EPERM is not in `maxRetries`' retried set, so the retries do nothing. use `removeTreeWhenFree` (test/support/removeTempTree.ts): polls until removable
@@ -30,6 +33,7 @@
 1. comparing a tool's resolved path with the workspace root in a test → `fs.realpathSync` keeps the 8.3 short form `EFSOOF~1`, `fs/promises` `realpath` expands it: use the tool's resolver
 2. `zipfile.ZipFile('test/fixtures/sample.xlsx')` in a scan → FileNotFoundError: that is not where the fixture lives. read the test's `fixture()` helper for the real path first
 3. `npx tsc --noEmit` → checks `src` only: the root tsconfig excludes `webview-ui` and `test`. a webview-ui change needs `npx tsc --noEmit -p webview-ui/tsconfig.json`
+4. `wc -l test/unit/BusContent.test.ts` → no such file: busContent's tests live in `test/unit/AgentBus.test.ts`. `ls test/unit | grep -i <topic>` before naming a test file
 
 ## FORENSICS
 1. a print job parked in `JobStatus Printing` with `PrinterStatus 4` for minutes → the driver is waiting in its own preview window (Canon IJ Preview: Start Printing). screenshot the screen; the queue proves nothing

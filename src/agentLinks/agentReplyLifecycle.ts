@@ -10,6 +10,9 @@ import type { PendingAgentReply, PendingAgentReplies } from './pendingAgentRepli
 import type { AskAgentRuntime } from './askAgentService';
 import { deliverAgentReply } from './askAgentService';
 import { agentDisplayName } from './chatAgentLinks';
+import { getLogger } from '../util/logger';
+
+const log = getLogger();
 
 /** The exchange log and its lock, beside the bus folder `root` names. */
 function busLogPaths(root: string): ExchangeLogPaths {
@@ -105,6 +108,13 @@ export function makeAgentReplyLifecycle(options: {
         }
       }
       if (!delivered) {
+        // The prompt this chat answered promised the sender an automatic
+        // delivery, and for a sender on another machine nothing will make one.
+        // `forgeInboundPrompt` now refuses that promise in the prompt itself;
+        // this is the other half — the log line that says where the answer went.
+        log.warn(
+          `[agent-bus] reply ${record.exchangeId} not delivered live to ${record.sender.kind} session ${record.sender.sessionId}; kept for read-verdict`,
+        );
         const source = path.join(options.root, 'outbox', `${record.exchangeId}-reply.md.tmp`);
         fs.mkdirSync(path.dirname(source), { recursive: true });
         writeFileAtomicSync(source, `${text}\n`);

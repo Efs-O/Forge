@@ -276,6 +276,22 @@ describe('agent bus conversation targeting', () => {
       'Codex (Codex review) says: Review the diff.',
     );
   });
+
+  // The footer that replaces it for a sender this window cannot reach has to be
+  // cut off the same way, or the owner's Telegram line ends with a promise about
+  // another machine.
+  it('cuts the not-on-this-machine footer off the activity line too', () => {
+    const sender = {
+      kind: 'claude' as const,
+      sessionId: '00000000-0000-4000-8000-000000000001',
+      title: 'Lane A',
+    };
+    const prompt = forgeInboundPrompt('claude', 'Review the diff.', sender, false);
+    expect(prompt).toContain('\n\nFrom Claude session "Lane A". That session is not running');
+    expect(busMessageActivityText(prompt, sender)).toBe(
+      'Claude (Lane A) says: Review the diff.',
+    );
+  });
 });
 
 describe('a --new without --model uses the configured default', () => {

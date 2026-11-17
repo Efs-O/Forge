@@ -335,19 +335,28 @@ export function claudeQuestion(
 }
 
 /** The prompt an inbound message becomes in Forge's chat. */
-/** Sender attribution and automatic-reply footer for a linked session. */
+/** Sender attribution and automatic-reply footer for a linked session.
+ *
+ *  `deliverable` is whether this window can hand the answer to that session the
+ *  moment the turn ends. It is false for a sender whose session lives on another
+ *  machine (or is a Copilot session, which Forge never delivers to live), and
+ *  then the footer must not promise a delivery nothing will make: the sender is
+ *  pointed at `forge.sh read-verdict` instead. The `From <Label> session "`
+ *  prefix is load-bearing — `busMessageActivityText` cuts the footer off the
+ *  Telegram activity line at it. */
 export function forgeInboundPrompt(
   from: string,
   text: string,
   sender?: AgentSenderMetadata,
+  deliverable = true,
 ): string {
   if (!sender) return `**${from} says:**\n\n${text.trim()}`;
   const label = agentDisplayName(sender.kind);
   const title = sender.title.replaceAll('"', '\\"');
-  return (
-    `**${label} says:**\n\n${text.trim()}\n\n` +
-    `From ${label} session "${title}". Your final answer is delivered to it automatically.`
-  );
+  const footer = deliverable
+    ? `From ${label} session "${title}". Your final answer is delivered to it automatically.`
+    : `From ${label} session "${title}". That session is not running on this machine, so your final answer is kept for it to read later (forge.sh read-verdict).`;
+  return `**${label} says:**\n\n${text.trim()}\n\n${footer}`;
 }
 
 /**

@@ -394,7 +394,14 @@ export class AgentRoutes {
       let accepted: ReturnType<AgentInbox['accept']>;
       try {
         accepted = this.deps.inbox.accept(
-          forgeInboundPrompt(from, text, options.sender),
+          forgeInboundPrompt(
+            from,
+            text,
+            options.sender,
+            // Only a sender whose session this window can reach live is promised
+            // an automatic answer; the rest are pointed at `read-verdict`.
+            options.sender ? (this.deps.senderIsLive?.(options.sender) ?? true) : true,
+          ),
           from,
           steerForge,
           steerForge ? { ...options, hold: true } : options,

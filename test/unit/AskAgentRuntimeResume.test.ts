@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { makeAskAgentRuntime } from '../../src/agentLinks/askAgentRuntime';
 import type { AgentKind, AgentLink } from '../../src/agentLinks/chatAgentLinks';
@@ -182,5 +183,24 @@ describe('ask_agent headless resume failure classification', () => {
       const result = await resume(agent, WRITER_CONFLICT);
       expect(result.sessionLocked).toBeUndefined();
     }
+  });
+});
+
+// 2026-11-17 laptop fresh-install test (findings 11 and 12): the ask asks this
+// of every linked session before it opens a panel or resumes, so only Claude —
+// whose transcripts are per-machine files — may answer "never here".
+describe('ask_agent hasLocalTranscript', () => {
+  it('is true for Codex and Copilot, whose sessions are not read from a local folder', () => {
+    const runtime = runtimeWith(vi.fn());
+    expect(runtime.hasLocalTranscript?.('codex', link('codex'))).toBe(true);
+    expect(runtime.hasLocalTranscript?.('copilot', link('copilot'))).toBe(true);
+  });
+
+  it('is false for a Claude session this machine never ran', () => {
+    // Reads `~/.claude/projects`, never writes it; an id minted now cannot have
+    // a transcript here, which is the answer that skips the panel and resume.
+    const runtime = runtimeWith(vi.fn());
+    const never = { ...link('claude'), sessionId: randomUUID() };
+    expect(runtime.hasLocalTranscript?.('claude', never)).toBe(false);
   });
 });

@@ -633,6 +633,47 @@ describe('routes', () => {
     expect(accepted[1]).toContain('**codex says:**\n\nyo');
   });
 
+  // Finding 7 (2026-11-17): the sender's own prompt used to promise an automatic
+  // answer even when this window has no way to reach that session — a Claude
+  // session on another machine, or a Copilot session at all. The route asks the
+  // window and writes the honest footer.
+  it('tells a sender whose session is not live here to read the verdict instead', async () => {
+    const sender = { kind: 'claude' as const, sessionId: '00000000-0000-4000-8000-000000000001' };
+    const target = {
+      conversationId: 'open-chat',
+      title: 'Open chat',
+      sender: { ...sender, title: 'Claude session' },
+      link: {
+        ...sender,
+        cwd: '/workspace',
+        title: 'Claude session',
+        linkedAt: 1,
+        lastUsedAt: 1,
+        origin: 'first-inbound' as const,
+      },
+    };
+    const senderIsLive = vi.fn(() => false);
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      workspaceRoot: '/workspace',
+      pendingReplies: new PendingAgentReplies(paths.root),
+      resolveInboundAgent: async () => target,
+      senderIsLive,
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+    const identity = encodeURIComponent(JSON.stringify(sender));
+    const response = await post(`/agent/message?from=claude&sender=${identity}`, 'review this');
+    expect(response.status).toBe(202);
+    expect(senderIsLive).toHaveBeenCalledWith(expect.objectContaining({ title: 'Claude session' }));
+    expect(accepted[0]).toContain(
+      'From Claude session "Claude session". That session is not running on this machine, so your final answer is kept for it to read later (forge.sh read-verdict).',
+    );
+    expect(accepted[0]).not.toContain('delivered to it automatically');
+  });
+
   it('accepts a configured model and a fresh-chat target', async () => {
     const response = await post(
       '/agent/message',

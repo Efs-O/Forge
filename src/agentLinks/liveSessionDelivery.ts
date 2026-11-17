@@ -42,6 +42,16 @@ export interface AskAgentRunResult {
 export interface AskAgentRuntime {
   openPanel(agent: AgentKind, sessionId: string): Promise<'opened' | 'unavailable'>;
   isLive(agent: AgentKind, link: AgentLink): Promise<boolean>;
+  /**
+   * Has this machine ever run this session? A link can carry a session id that
+   * exists only on another machine — a chat opened by `forge.sh say --new` from
+   * a desktop Claude session over WinRM — and then `isLive` is false forever:
+   * no panel to open and no transcript to resume here. Answering false lets the
+   * ask skip both the panel and the headless resume and unlink at once.
+   * Optional: a runtime that does not answer it is treated as present, so an
+   * existing test runtime keeps today's behaviour.
+   */
+  hasLocalTranscript?(agent: AgentKind, link: AgentLink): boolean;
   sendLive(
     agent: AgentKind,
     link: AgentLink,

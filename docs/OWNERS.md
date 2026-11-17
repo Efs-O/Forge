@@ -158,6 +158,7 @@ overlaps with an existing owner, extend the owner instead.
 | Slim persisted message form (tool turns kept) and its ChatMessage conversion | `src/sidebar/slimPersist.ts` |
 | Agent links: one session may hold several chats, current = newest `lastUsedAt` (sole `agentLinks` writer) | `src/agentLinks/chatAgentLinks.ts` |
 | Linked-agent ask lifecycle and delivery policy | `src/agentLinks/askAgentService.ts` |
+| Linked-agent ask request shape and its validation (subject/message limits) | `src/agentLinks/askAgentRequest.ts` |
 | Live linked-session transport contract, the panel-came-up wait, and delivery through a live session | `src/agentLinks/liveSessionDelivery.ts` |
 | Structured linked-agent outcomes + tool rendering | `src/agentLinks/askAgentResult.ts` |
 | Agent-to-agent send through linked chats, the steer that withdraws one, and the in-flight relay registry | `src/agentLinks/agentToAgentRelay.ts` |
@@ -938,7 +939,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Workspace agent note (the marked `AGENTS.md` / `CLAUDE.md` section: text, markers, writer) | `src/agentBus/agentMeshNote.ts`, `src/agentBus/agentNote.md` |
 | Which file the agent note goes into, the one-time disclosure, `forge.agentMesh.installNote` | `src/vscode/agentMeshNoteSetup.ts` |
 | Agent-bus client script (`~/.forge/agent-bus/forge.sh`)    | `src/agentBus/forge.sh` (bundled as text by busContent.ts)     |
-| Claude session registry + peer-pipe delivery               | `src/agentBus/claudePeer.ts`                                   |
+| Claude session registry + peer-pipe delivery, transcript existence, liveness check | `src/agentBus/claudePeer.ts` |
 | One-shot Claude Code session reopen across a VS Code window reload | `src/agentBus/claudeReopen.ts`                                  |
 | Claude delivery via a `claude -p` relay (opt-in)           | `src/agentBus/claudeRelay.ts`                                  |
 | Inbound agent messages → Forge turns (queue)               | `src/agentBus/agentInbox.ts`                                   |

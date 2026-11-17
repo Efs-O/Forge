@@ -6,7 +6,7 @@ import type { CheckpointSession } from '../checkpoint/CheckpointStack';
 import { snapshotWorkspaceBefore } from '../agents/WorkspaceCheckpoint';
 import { DEFAULT_MAX_CLI_AGENTS } from '../agents/CliSessionRegistry';
 import { unattendedCliRefusal } from '../jobs/cliAgentGate';
-import { MAX_QUESTION_CHARS, questionSizeRefusal } from '../agentBus/liveSessionLimit';
+import { MAX_SUBJECT_CHARS, validateRequest, type AskAgentRequest } from './askAgentRequest';
 import {
   agentDisplayName,
   get,
@@ -19,11 +19,11 @@ import {
 import type { AskAgentResult } from './askAgentResult';
 export { renderAskAgentResult } from './askAgentResult';
 export type { AskAgentResult } from './askAgentResult';
-import type { AskAgentOrigin } from './liveSessionDelivery';
 import { waitForLive, type AskAgentRunResult, type AskAgentRuntime } from './liveSessionDelivery';
 // Shared transport contract, also used by relay and inbound reply delivery.
 export { deliverAgentReply } from './liveSessionDelivery';
 export type { AskAgentRunResult, AskAgentRuntime } from './liveSessionDelivery';
+export type { AskAgentRequest } from './askAgentRequest';
 import type { ConversationRuntime } from '../sidebar/sessionTypes';
 
 export interface AskAgentContext {
@@ -38,14 +38,6 @@ export interface AskAgentContext {
   onStarted?(): void;
 }
 
-export interface AskAgentRequest {
-  agent: AgentKind;
-  message: string;
-  subject?: string;
-  origin?: AskAgentOrigin;
-  targetId?: string;
-}
-
 export interface AskAgentServiceOptions {
   getConfig: () => ForgeConfig;
   runtime: AskAgentRuntime;
@@ -54,7 +46,6 @@ export interface AskAgentServiceOptions {
   maxConcurrent?: number;
 }
 
-const MAX_SUBJECT_CHARS = 160;
 let activeAsks = 0;
 const activeConversations = new Map<string, number>();
 
@@ -97,19 +88,6 @@ function promptFor(
       ? 'Return your answer to the owner; Forge sends it to their Telegram chat.'
       : 'Return a concise answer for the Forge chat.';
   return `${titleLine}${askHeader(request, conversation)}\n\n${body}\n\n${closing}`;
-}
-
-function validateRequest(value: AskAgentRequest): AskAgentRequest {
-  if (!value.message.trim()) throw new Error('ask_agent: "message" is required.');
-  if (value.message.length > MAX_QUESTION_CHARS)
-    throw new Error(questionSizeRefusal(`"message" exceeds ${MAX_QUESTION_CHARS} characters.`));
-  if (value.subject !== undefined && !value.subject.trim())
-    throw new Error('ask_agent: "subject" must not be empty.');
-  if (value.subject && (value.subject.length > MAX_SUBJECT_CHARS || /[\r\n]/u.test(value.subject)))
-    throw new Error(
-      `ask_agent: "subject" must be one line of at most ${MAX_SUBJECT_CHARS} characters.`,
-    );
-  return value;
 }
 
 function structuredResult(
@@ -298,6 +276,12 @@ async function ask(
         lead = `${label} session could not be checked (${errorMessage(error)}); resumed headlessly. `;
       }
     }
+    // A link can name a session this machine never had: `forge.sh say --new`
+    // run from a desktop Claude session over WinRM writes the new chat's link
+    // with the desktop's session id, so no transcript of it exists here. Such a
+    // session is not live and never will be — neither the panel nor the headless
+    // resume below can reach it, so the ask unlinks and starts a fresh session.
+    const absent = !live && options.runtime.hasLocalTranscript?.(agent, linked) === false;
     let liveResult: AskAgentRunResult | undefined;
     if (live) {
       if (panel) {
@@ -314,7 +298,7 @@ async function ask(
         () => markAccepted(linked!),
         ...(request.origin ? [request.origin] : []),
       );
-    } else if (panel) {
+    } else if (panel && !absent) {
       const opened = await options.runtime.openPanel(agent, linked.sessionId);
       if (opened === 'opened') {
         // Opening a `vscode://` link is not a promise anyone can keep: the
@@ -355,13 +339,18 @@ async function ask(
 
     if (liveResult && !liveResult.sessionGone)
       return structuredResult(agent, title, linked.title, liveResult, true, lead || undefined);
-    if (liveResult?.sessionGone) {
+    if (liveResult?.sessionGone || absent) {
       const goneTitle = linked.title;
       sessionCwd = linked.cwd;
       unlink(context.conversation, agent);
       context.persistConversation();
       linked = undefined;
-      lead += `${label} session "${goneTitle}" no longer exists; started a new one. `;
+      // A session this machine never had did not "no longer exist": the honest
+      // notice says where it is, so the owner stops looking for a session that
+      // was only ever running on the machine that opened the chat.
+      lead += absent
+        ? `${label} session "${goneTitle}" is not on this machine; started a new one. `
+        : `${label} session "${goneTitle}" no longer exists; started a new one. `;
     }
 
     if (linked) {
