@@ -697,6 +697,14 @@ overlaps with an existing owner, extend the owner instead.
 | `media:` configuration schema                  | `src/config/mediaSchema.ts`            |
 | Media setup report (sidebar and Telegram)    | `src/media/mediaSetupCheck.ts`          |
 | Laptop↔desktop remote media wire contract (routes, schemas, error texts) | `src/media/remoteMediaContract.ts` |
+| Desktop media jobs: FIFO queue, TTL sweep, approval gate with `cloud_relay.media` as standing consent, path-argument rewrite, job-scoped tool instances | `src/media/remoteMediaJobs.ts` |
+| Desktop media job folder: `job.json` record, owner pid, inputs/out layout | `src/media/remoteMediaJobStore.ts` |
+| Served-backend media capabilities payload (backends, tools[], refused[], body cap) | `src/media/remoteMediaCapabilities.ts` |
+| The five `/v1/media/*` relay route handlers | `src/media/remoteMediaRoutes.ts` |
+| `remote_media`: laptop switch + group-name rule | `src/config/remoteMediaSchema.ts` |
+| Laptop→desktop media HTTP calls (capabilities, job submit/poll/cancel, file download) | `src/tools/remoteMedia/remoteMediaClient.ts` |
+| Laptop `generate_image` / `upscale_image` aimed at the desktop (cache, approval, path moves, saves) | `src/tools/remoteMedia/remoteMediaTools.ts` |
+| Media half of Connect to my desktop and Check connection (probe, config additions, check line) | `src/vscode/desktopConnectMedia.ts` |
 | `generate_video` tool                       | `src/tools/media/generateVideoTool.ts`  |
 | `generate_music` tool                       | `src/tools/media/generateMusicTool.ts`  |
 | Media source-file copies and accepted audio extensions | `src/tools/media/mediaInputFiles.ts` |

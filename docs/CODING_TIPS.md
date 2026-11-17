@@ -34,6 +34,9 @@
 4. a fact value for `src/agentBus/agentNote.md` written with its own backticks → the template already wraps `__FORGE_CONFIG__` in backticks, so the line renders doubled ones (`` ``x`` ``). pass the bare value, no enclosing backticks
 5. a `vi.hoisted` `fs.mkdtempSync(os.tmpdir())` (fake home) in a test file → teardown fails: `temp leak: <file> left 1 entry in os.tmpdir()`. `tempGuard.setup.ts` narrows tmpdir per file, so rm it in an `afterAll`
 6. a `toContain` pin of AI_SETUP.md prose retyped from the brief with a `\u2019` apostrophe → fails: the doc uses ASCII `'`; only its dashes are `\u2014`. copy the sentence from the doc, not the brief
+7. a `vi.fn()` stand-in for an async dependency → returns `undefined`, so the caller's `.catch()` throws `Cannot read properties of undefined (reading 'catch')`. use `vi.fn(async () => undefined)` for a dep the code chains on
+8. a fake loopback `http` server closed with `server.close()` alone → the test hangs to its timeout: fetch keeps the connection alive. call `server.closeAllConnections()` first
+9. a new top-level `config.yaml` key → `ModelReferences.test.ts` fails until it is in `NON_MODEL_REF_FIELDS`, and `config.example.yaml` needs a commented block for it
 
 ## PATHS
 1. comparing a tool's resolved path with the workspace root in a test → `fs.realpathSync` keeps the 8.3 short form `EFSOOF~1`, `fs/promises` `realpath` expands it: use the tool's resolver
