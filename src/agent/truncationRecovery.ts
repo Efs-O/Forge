@@ -82,7 +82,10 @@ export function asTruncation(err: unknown): ToolCallTruncatedError | undefined {
 /**
  * What the model is told after a truncated call. It must convey three things
  * the old "malformed tool arguments" result did not: nothing was written, the
- * concrete way to succeed on retry, and (when known) the cause.
+ * concrete way to succeed on retry, and (when known) the cause. The
+ * write-chunking advice applies only to `write_file` (and to a cut-off call
+ * whose tool name never arrived): any other tool is told to re-send its own
+ * call within the ceiling, because it has no `content` argument to append to.
  */
 export function truncationGuidance(
   err: ToolCallTruncatedError,
@@ -112,6 +115,17 @@ export function truncationGuidance(
       `HARD LIMIT for your next call: the total characters in the next edit_file call must be at ` +
       `most ${ceiling}. This overrides any earlier instruction to apply every edit at once. ` +
       `Split the edit set across several calls, with fewer edits in each.`
+    );
+  }
+  if (err.toolName && err.toolName !== 'write_file') {
+    // A live laptop test cut a `render_html_to_image` call off after 47 bytes and
+    // told the model to write_file its "content" in chunks with mode "append" —
+    // advice for a tool that was not named, on a tool that has no such argument.
+    return (
+      `${target} was cut off after ${err.approxBytes} bytes of arguments and was NOT executed — ` +
+      `nothing ran. ${cutoff}\n` +
+      `HARD LIMIT for your next call: its arguments must total at most ${ceiling} characters. ` +
+      `Send the ${err.toolName} call again, complete and within that limit.`
     );
   }
   return (
