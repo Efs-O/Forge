@@ -289,6 +289,8 @@ describe('remote media jobs: the standing-consent gate', () => {
     expect(await errorOf(reply)).toBe(
       REMOTE_MEDIA_TEXT.notListed(detail, 'grok-imagine', 'image_backends'),
     );
+    // The refusal quotes the card's headline, never the prompt it was built from.
+    expect(await errorOf(reply)).not.toContain('a cat');
     expect(generate).not.toHaveBeenCalled();
     expect(generateLocal).not.toHaveBeenCalled();
     expect(fs.existsSync(directory)).toBe(false);
@@ -305,11 +307,7 @@ describe('remote media jobs: the standing-consent gate', () => {
     );
     expect(reply.status).toBe(403);
     expect(await errorOf(reply)).toBe(
-      REMOTE_MEDIA_TEXT.notListed(
-        'The configured local ESRGAN upscale',
-        'upscale_image',
-        'upscale',
-      ),
+      "Not run: The configured local ESRGAN upscale is not allowed from the laptop. Add upscale_image to cloud_relay.media.upscale in the desktop's policy.yaml to allow it.",
     );
     expect(run).not.toHaveBeenCalled();
   });

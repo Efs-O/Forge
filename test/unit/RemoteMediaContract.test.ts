@@ -42,8 +42,25 @@ describe('remote media contract', () => {
       'The desktop (http://100.64.0.1:8797) did not answer. Image, video and music generation run there: ' +
         'start Forge on the desktop, or run "Forge: Check connection to my desktop".',
     );
-    expect(REMOTE_MEDIA_TEXT.notListed('Billed per image.', 'grok-imagine', 'image_backends')).toBe(
-      "Billed per image. Add grok-imagine to cloud_relay.media.image_backends in the desktop's policy.yaml to allow it from the laptop.",
+    expect(
+      REMOTE_MEDIA_TEXT.notListed(
+        'grok-imagine (cloud · billed per image)',
+        'grok-imagine',
+        'image_backends',
+      ),
+    ).toBe(
+      "Not run: grok-imagine (cloud · billed per image) is not allowed from the laptop. Add grok-imagine to cloud_relay.media.image_backends in the desktop's policy.yaml to allow it.",
+    );
+    // The card's detail carries the model's prompt after a blank line; the
+    // refusal quotes only the headline, so the prompt never reaches the laptop.
+    expect(
+      REMOTE_MEDIA_TEXT.notListed(
+        'grok-imagine (cloud · billed per image · xai · m)\n\na fox',
+        'grok-imagine',
+        'image_backends',
+      ),
+    ).toBe(
+      "Not run: grok-imagine (cloud · billed per image · xai · m) is not allowed from the laptop. Add grok-imagine to cloud_relay.media.image_backends in the desktop's policy.yaml to allow it.",
     );
   });
 

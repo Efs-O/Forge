@@ -151,8 +151,12 @@ export type RemoteMediaCapabilities = z.infer<typeof RemoteMediaCapabilitiesSche
 /** The error texts both sides pin with whole-text tests. */
 export const REMOTE_MEDIA_TEXT = Object.freeze({
   off: 'media relay is off',
+  /** Only the first line of `detail`: that is the approval card's headline, and
+   *  the rest is the model's own prompt, which used to read as part of the
+   *  refusal. The sentence also says the job was not run, which it never did. */
   notListed: (detail: string, name: string, list: string): string =>
-    `${detail} Add ${name} to cloud_relay.media.${list} in the desktop's policy.yaml to allow it from the laptop.`,
+    `Not run: ${detail.split('\n')[0].trim()} is not allowed from the laptop. ` +
+    `Add ${name} to cloud_relay.media.${list} in the desktop's policy.yaml to allow it.`,
   unreachable: (origin: string): string =>
     `The desktop (${origin}) did not answer. Image, video and music generation run there: ` +
     'start Forge on the desktop, or run "Forge: Check connection to my desktop".',
