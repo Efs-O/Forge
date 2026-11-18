@@ -20,6 +20,9 @@
 9. `wc -l src/x.ts` in a `shell: pwsh` call → "The term 'wc' is not recognized"; the refusal says rerun with `shell: "bash"`. POSIX text tools (`wc`, `sed`, `grep -o`) exist only in the bash shell
 10. a pwsh log name with a space (`> .forge/jcn- flakes-1.log`) → the later `Select-String -Path ".forge/jcn- flakes-1.log"` says the path does not exist. no spaces in log file names
 11. `git log … 2>/dev/null` in a `shell: pwsh` call → `Out-File: Could not find a part of the path 'N:\dev\null'`. in pwsh write `2>$null`; `/dev/null` only means something in bash
+12. `find_files` with `path:"."` or `path:"src"` → refused: unknown argument "path" on older builds; an absolute or `..` path is always refused. put the folder in the pattern: `{"pattern":"src/**/*.ts"}`
+13. `image_search` with `query:"red fox"` → refused: unknown argument "query"; it takes `image_url`/`attachment_index`. it is a reverse search of an image you have, not a text search; for pictures by words use `web_search`
+14. `render_html_to_image` with `html` plus `path:"out/x.png"` → refused: exactly one of html or path. `path` is an HTML file to render, not the output; send html alone, then `move_file` the PNG the result names
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green and the tree stood still: never run `record-ci-pass.mjs` by hand — the `ci:steps` chain writes it
