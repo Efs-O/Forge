@@ -58,7 +58,8 @@ describe('agent task phase 1 schema', () => {
   });
 
   it('rejects invalid agent task values', () => {
-    expect(() => ActionSchema.parse({ kind: 'agent_task', task: 'x'.repeat(4001) })).toThrow();
+    expect(() => ActionSchema.parse({ kind: 'agent_task', task: 'x'.repeat(8000) })).not.toThrow();
+    expect(() => ActionSchema.parse({ kind: 'agent_task', task: 'x'.repeat(8001) })).toThrow();
     expect(() => ActionSchema.parse({ kind: 'agent_task', task: '' })).toThrow();
     expect(() =>
       ActionSchema.parse({ kind: 'agent_task', task: 'do it', max_minutes: 0 }),

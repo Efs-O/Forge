@@ -192,15 +192,15 @@ export const ActionSchema = z.discriminatedUnion(
     }),
     /**
      * An agent task: when the job fires, an agent reads the task, thinks,
-     * runs commands and finishes. The task is capped at 4000 characters.
+     * runs commands and finishes. The task is capped at 8000 characters.
      */
     z.object({
       kind: z.literal('agent_task'),
-      /** The plain-language task for the agent. Capped at 4000 characters. */
+      /** The plain-language task for the agent. Capped at 8000 characters. */
       task: z
         .string()
         .min(1)
-        .refine((task) => task.length <= 4000, 'task must be at most 4000 characters'),
+        .refine((task) => task.length <= 8000, 'task must be at most 8000 characters'),
       /** Optional model override; default: the default chat model. */
       model: z.string().min(1).optional(),
       /** Optional wall-clock cap in minutes; omitted = no clock cap. */

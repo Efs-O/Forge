@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## Unreleased
+
+**Job and delegation task caps raised to 8000 characters.** A scheduled job's task text and an `ask_local_agent` task were both capped at 4000 characters; a job instruction that grew past the cap (like the daily scan's step list) could no longer be saved. The prompt each one carries per run roughly doubles at worst; no other 4000-sized limit in the tree is touched.
+
 ## 0.17.194
 
 **A laptop can generate and upscale images on its desktop.**
