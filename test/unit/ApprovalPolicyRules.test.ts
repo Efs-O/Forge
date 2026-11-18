@@ -19,8 +19,16 @@ import type { HostToWebview } from '../../src/sidebar/messageBridge';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 
 const HOME = 'C:/Users/someone';
-const WORKSPACE = 'N:/ws/project';
-const OTHER_WORKSPACE = 'N:/ws/other';
+/** A project folder, in the spelling every runner calls absolute: `policy.yaml` checks
+ *  `approvals.always[].workspace` with `path.isAbsolute` (the runner's OS), and the
+ *  matcher compares it through `keyPathOf`, so a `N:/...` literal — absolute only on
+ *  Windows — makes the owner's own rule unreadable on a Linux or macOS runner. */
+const WORKSPACE = path
+  .resolve('/ws/project')
+  .replace(/\\/gu, '/');
+const OTHER_WORKSPACE = path
+  .resolve('/ws/other')
+  .replace(/\\/gu, '/');
 const configFor = (approvals?: ForgeConfig['approvals']): ForgeConfig => ({
   models: [],
   active_model: null,
@@ -298,7 +306,11 @@ describe('owner-clicked Always in this project writes', () => {
     expect(writeApprovalAlways('config.yaml', ['cross_chat'], undefined).kind).toBe('failed');
   });
 
-  it('rejects policy approval keys that try to cover a drive root', () => {
+  // A drive root is a Windows folder: on Linux `rdelete:C:/` is refused one step
+  // earlier, as a path that is not absolute here at all, so this pins Windows only.
+  it.skipIf(process.platform !== 'win32')(
+    'rejects policy approval keys that try to cover a drive root',
+    () => {
     directory = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-approval-policy-invalid-'));
     const configPath = path.join(directory, 'config.yaml');
     const policyPath = path.join(directory, 'policy.yaml');

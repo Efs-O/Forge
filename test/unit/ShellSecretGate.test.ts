@@ -235,18 +235,23 @@ describe('what the gate must not ask about', () => {
   // 3 of the 2026-10-28 live security test: the card asked anyway, because only
   // the spelling inside the token was compared with the list.
   it('honours an allow entry naming the file the command reaches from its cwd', () => {
+    // The drive letter is lower-case because the two sides of that comparison
+    // are folded differently off Windows: `secretPathAllowListFor` folds the
+    // owner's entry with the runner's rules (it takes no platform), while the
+    // candidate is folded with the injected `win32` ones, which lower-case it.
+    // A lower-case entry is the one spelling both folds agree on.
     const config = {
-      permissions: { secret_paths_allow: ['N:/ws/.env'] },
+      permissions: { secret_paths_allow: ['n:/ws/.env'] },
     } as unknown as ForgeConfig;
-    const at = { ...win, getConfig: () => config, cwd: 'N:/ws' };
-    for (const command of ['cat .env', 'cat ./.env', 'cat N:/ws/.env'] as const) {
+    const at = { ...win, getConfig: () => config, cwd: 'n:/ws' };
+    for (const command of ['cat .env', 'cat ./.env', 'cat n:/ws/.env'] as const) {
       expect(ask(command, 'bash', at).classification, `${command} should run`).toBe('read_only');
     }
     expect(ask('cat other/.env', 'bash', at).classification).toBe('dangerous');
     expect(ask('cat .env.local', 'bash', at).classification).toBe('dangerous');
     // The same relative token in a different folder is a different file, so it
     // still asks: the fix recognises one file, not every file with that name.
-    expect(ask('cat .env', 'bash', { ...at, cwd: 'N:/ws/other' }).classification).toBe('dangerous');
+    expect(ask('cat .env', 'bash', { ...at, cwd: 'n:/ws/other' }).classification).toBe('dangerous');
     // And the read still costs this chat its next fetch — the hatch skips the
     // card, never the taint (case 5 of the same report).
     expect(ask('cat .env', 'bash', at).readSecretIgnoringAllowList).toBe('**/.env');
@@ -325,16 +330,24 @@ describe('the shell tool carries the gate to the card', () => {
     expect(card?.declineHint).toContain('permissions.secret_paths_allow');
   });
 
-  it('carries a no-gate dangerous shell rule reason into approval metadata', () => {
-    const metadata = tool.approval?.({
-      command: 'pwsh -NoProfile -ExecutionPolicy Bypass -File V:\\Maya\\local\\update-maya.ps1',
-      shell: 'bash',
-    });
-    expect(metadata?.cardReason).toBe(
-      'Matched rule: runs a script Forge could not read (V:\\Mayalocalupdate-maya.ps1: does not exist; bash removed the backslashes in V:\\Maya\\local\\update-maya.ps1: pass shell "pwsh", or write the path with forward slashes)',
-    );
-    expect(metadata?.gateKind).toBeUndefined();
-  });
+  // Windows-only, and not only because of the drive path: the mangled token is
+  // drive-relative (`V:file`), so `path.win32.resolve` names the folder the
+  // product falls back to — the runner's own `process.cwd()` — inside the
+  // message, which is `/home/runner/work/…` off Windows. The same message is
+  // pinned on every OS by `shellScriptFiles.test.ts`, with a cwd on that drive.
+  it.skipIf(process.platform !== 'win32')(
+    'carries a no-gate dangerous shell rule reason into approval metadata',
+    () => {
+      const metadata = tool.approval?.({
+        command: 'pwsh -NoProfile -ExecutionPolicy Bypass -File V:\\Maya\\local\\update-maya.ps1',
+        shell: 'bash',
+      });
+      expect(metadata?.cardReason).toBe(
+        'Matched rule: runs a script Forge could not read (V:\\Mayalocalupdate-maya.ps1: does not exist; bash removed the backslashes in V:\\Maya\\local\\update-maya.ps1: pass shell "pwsh", or write the path with forward slashes)',
+      );
+      expect(metadata?.gateKind).toBeUndefined();
+    },
+  );
 
   it('does not auto-approve a secret read, and still auto-approves a safe one', () => {
     expect(tool.autoApproveIf?.({ command: 'Get-Content .env', shell: 'pwsh' })).toBe(false);

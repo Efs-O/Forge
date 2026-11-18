@@ -11,6 +11,8 @@
  * phase that let a key, Clanker or a policy rule reach past a wall has to change
  * this file to stay green, which is the point of putting the row in the ledger.
  */
+import * as os from 'os';
+import * as path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 import { getBuiltinDenyList } from '../../src/tools/DenyList';
@@ -44,6 +46,15 @@ const CTX: ApprovalKeyContext = {
   ownerOnly: [FORGE_DIR],
   extraFileRoots: [],
 };
+
+/** The dispatch harness below runs the wall for real, so its fixture home has to be
+ *  one the runner's own OS calls absolute: `ownerOnlySetFor` is handed no platform and
+ *  resolves `~/.forge/` with the process's, where `C:/Users/someone` is a folder name,
+ *  not a home. The `C:/Users/someone` literals above stay: the key-level fixtures hand
+ *  the matcher a faked `win32` context and never resolve anything for real. */
+const REAL_HOME = path.join(os.tmpdir(), 'forge-walls-home');
+const REAL_WORKSPACE = path.join(os.tmpdir(), 'forge-walls-ws');
+const REAL_FORGE_DIR = path.join(REAL_HOME, '.forge');
 
 /** Every rule the deny list refuses outright, with a command that triggers it. */
 const REFUSED_ROWS = [
@@ -92,23 +103,23 @@ function buildDispatch(rules: string[]) {
     permissions: { exec: { shell: 'bash' } },
     approvals: {
       always: [
-        { key: 'tool:shell', workspace: WORKSPACE },
-        { key: `write:${FORGE_DIR}`, workspace: WORKSPACE },
-        { key: `rdelete:${FORGE_DIR}`, workspace: WORKSPACE },
+        { key: 'tool:shell', workspace: REAL_WORKSPACE },
+        { key: `write:${REAL_FORGE_DIR}`, workspace: REAL_WORKSPACE },
+        { key: `rdelete:${REAL_FORGE_DIR}`, workspace: REAL_WORKSPACE },
       ],
-      jobs: { 'wall-test': { allow: ['tool:shell', `write:${FORGE_DIR}`] } },
-      unattended_bus: { allow: ['tool:shell', `write:${FORGE_DIR}`] },
+      jobs: { 'wall-test': { allow: ['tool:shell', `write:${REAL_FORGE_DIR}`] } },
+      unattended_bus: { allow: ['tool:shell', `write:${REAL_FORGE_DIR}`] },
     },
   };
   registry.register(
     makeShellTool({
-      home: HOME,
+      home: REAL_HOME,
       platform: 'win32',
       getConfig: () => config,
-      ownerOnly: () => ownerOnlySetFor({ home: HOME, workspaceRoot: WORKSPACE }).roots,
+      ownerOnly: () => ownerOnlySetFor({ home: REAL_HOME, workspaceRoot: REAL_WORKSPACE }).roots,
     }),
   );
-  const writeGuard = ownerOnlySetFor({ home: HOME, workspaceRoot: WORKSPACE });
+  const writeGuard = ownerOnlySetFor({ home: REAL_HOME, workspaceRoot: REAL_WORKSPACE });
   const syntheticWrite: RegisteredTool = {
     definition: {
       type: 'function',
@@ -128,7 +139,7 @@ function buildDispatch(rules: string[]) {
   const gateLog = new GateEventLog({ write: (row) => rows.push(row), now: () => Date.now() });
   const chatRuleApproval: ChatRuleApproval = createChatRuleApproval({
     getConfig: () => config,
-    workspaceRoot: WORKSPACE,
+    workspaceRoot: REAL_WORKSPACE,
     // Every wall case runs with Clanker manually enabled for this chat, so these
     // checks prove the three stops still hold when the shortcut is armed.
     clankerMode: (conversationId) => conversationId === 'chat-1',
@@ -326,7 +337,7 @@ describe('the owner-only wall', () => {
 
   it('refuses both calls in the dispatch, with rules present and the queue saying yes', async () => {
     const harness = buildDispatch(['cross_chat', 'tool:shell', 'tool:write_file']);
-    const write = await harness.run('write_file', { path: `${FORGE_DIR}/config.yaml` });
+    const write = await harness.run('write_file', { path: `${REAL_FORGE_DIR}/config.yaml` });
     expect(write).toContain("part of Forge's own files");
     // The shell's own wording for the same wall differs from the file tool's, and
     // both name the folder: `refuses to change Forge's own files`.
@@ -346,9 +357,9 @@ describe('the owner-only wall', () => {
     const harness = buildDispatch([
       'cross_chat',
       'tool:write_file',
-      `write:${FORGE_DIR}`,
+      `write:${REAL_FORGE_DIR}`,
     ]);
-    const result = await harness.run('write_file', { path: `${FORGE_DIR}/policy.yaml` });
+    const result = await harness.run('write_file', { path: `${REAL_FORGE_DIR}/policy.yaml` });
     expect(result).toContain("part of Forge's own files");
     expect(harness.requestApproval).not.toHaveBeenCalled();
     expect(harness.rows).toHaveLength(0);

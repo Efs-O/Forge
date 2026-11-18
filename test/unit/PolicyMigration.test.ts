@@ -34,6 +34,14 @@ function policyIn(home: string): string {
 
 const NOW = new Date(2026, 10, 2, 6, 35, 12); // 20261102-063512
 
+/** `jobs.home_workspace` is schema-checked with `path.isAbsolute`, which answers for
+ *  the runner's OS: the `N:/...` form is absolute on Windows and a folder called
+ *  `N:` on Linux, where the migration then refuses the whole split. This is absolute
+ *  on all three runners, in the spelling the runner reads it with. */
+const HOME_WORKSPACE = path
+  .resolve('/vs code apps/Forge')
+  .replace(/\\/gu, '/');
+
 /** The owner's shape: comments that explain themselves, a Strata entry that owns
  *  its launcher, three llama.cpp models in one group (two of them sharing a
  *  binary, one on a patched fork), and a tailnet model that is not loopback. */
@@ -56,7 +64,7 @@ llama_server:
 
 jobs:
   enabled: true
-  home_workspace: 'N:/vs code apps/Forge'
+  home_workspace: '${HOME_WORKSPACE}'
 
 # Which browser the browser tools drive, and what it may reach.
 browser:

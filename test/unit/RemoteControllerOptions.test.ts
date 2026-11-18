@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as path from 'path';
 import { ForgeConfigSchema } from '../../src/config/schema';
 import { RemoteConfigSchema } from '../../src/config/remoteSchema';
 import { buildRemoteControllerOptions } from '../../src/remote/remoteControllerOptions';
@@ -36,19 +37,24 @@ describe('remote.unlock_backlog_max', () => {
   });
 
   it('carries project-scoped approval policy lines to remote /approvals', () => {
+    // The project folder has to be one every runner calls absolute: the remote
+    // options ask `approvalPolicyLinesForWorkspace`, which drops a rule whose
+    // workspace it cannot resolve — and `N:/ws/project` resolves only on Windows.
+    const project = path.resolve('/ws/project').replace(/\\/gu, '/');
+    const other = path.resolve('/ws/other').replace(/\\/gu, '/');
     const active = ForgeConfigSchema.parse({
       models: [{ name: 'm', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' }],
       remote: { enabled: true },
       approvals: {
         always: [
-          { key: 'cross_chat', workspace: 'N:/ws/project' },
-          { key: 'tool:browser', workspace: 'N:/ws/other' },
+          { key: 'cross_chat', workspace: project },
+          { key: 'tool:browser', workspace: other },
         ],
       },
     });
     const options = buildRemoteControllerOptions(active, {
       ...deps,
-      workspaceRoot: 'N:/ws/project',
+      workspaceRoot: project,
     });
 
     expect(options.getApprovalPolicyLines?.()).toEqual([

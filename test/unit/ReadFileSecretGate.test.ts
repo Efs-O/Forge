@@ -33,6 +33,24 @@ function tool(config?: ForgeConfig) {
   return makeReadFileTool(deps);
 }
 
+/**
+ * A tool judged by the runner's own OS, for the two allow-list tests below.
+ *
+ * Those two name the mocked workspace root, a real folder on the runner, and
+ * `secretPathAllowListFor` folds the owner's entry with the runner's rules (it
+ * takes no platform) while the candidate is folded with the injected `win32`
+ * ones. Off Windows that fold lower-cases the path, so an allow entry whose
+ * temp folder has an upper-case letter in its random suffix stopped matching the
+ * file it names. On Windows both sides fold the same way, which is why this only
+ * ever failed on the Linux and macOS runners.
+ */
+function toolOnThisOs(config?: ForgeConfig) {
+  const deps = config
+    ? { home: HOME, platform: process.platform, getConfig: () => config }
+    : { home: HOME, platform: process.platform };
+  return makeReadFileTool(deps);
+}
+
 beforeAll(() => {
   fs.writeFileSync(path.join(root, '.env'), 'API_KEY=secret-value\n');
   fs.writeFileSync(path.join(root, '.env.example'), 'API_KEY=\n');
@@ -165,12 +183,14 @@ describe('read_file asks for a secret path', () => {
     } as unknown as ForgeConfig;
     for (const spelling of ['.env', './.env', 'x/../.env', `${root}/.env`]) {
       expect(
-        tool(allowed).approval?.({ path: spelling }),
+        toolOnThisOs(allowed).approval?.({ path: spelling }),
         `${spelling} should run`,
       ).toBeUndefined();
     }
-    expect(tool(allowed).approval?.({ path: 'src/.env' })?.cardReason).toContain('**/.env');
-    expect(tool(allowed).approval?.({ path: '.env.local' })?.cardReason).toContain('**/.env.*');
+    expect(toolOnThisOs(allowed).approval?.({ path: 'src/.env' })?.cardReason).toContain('**/.env');
+    expect(toolOnThisOs(allowed).approval?.({ path: '.env.local' })?.cardReason).toContain(
+      '**/.env.*',
+    );
   });
 
   it('gates what this PC added to the list', () => {
@@ -254,8 +274,8 @@ describe('the chat that read a secret is marked for its next fetch', () => {
     const allowed = {
       permissions: { secret_paths_allow: [`${root}/.env`] },
     } as unknown as ForgeConfig;
-    expect(tool(allowed).approval?.({ path: '.env' })).toBeUndefined();
-    const result = await tool(allowed).handler?.({ path: '.env' }, {
+    expect(toolOnThisOs(allowed).approval?.({ path: '.env' })).toBeUndefined();
+    const result = await toolOnThisOs(allowed).handler?.({ path: '.env' }, {
       conversationId: 'chat-abs-allow',
       signal,
     } as never);

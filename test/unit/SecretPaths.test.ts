@@ -1,3 +1,4 @@
+import * as path from 'path';
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_SECRET_PATTERNS,
@@ -22,6 +23,21 @@ import type { ForgeConfig } from '../../src/config/types';
 const HOME = 'C:/Users/someone';
 const win = { home: HOME, platform: 'win32' as const };
 const nix = { home: '/home/someone', platform: 'linux' as const };
+
+/** Every allow-list case has to be judged with the runner's own OS in mind, not with
+ *  the faked `win32` above: `secretPathAllowListFor` normalises the owner's entries
+ *  with `process.platform` (it is handed no platform), so a faked `win32` on a Linux
+ *  runner folds the case of the candidate while the entry keeps its own, and the two
+ *  spellings of one file stop matching. On Windows this is `win` itself. */
+const runner = { home: HOME, platform: process.platform };
+/** The workspace the owner names in the allow list, in a form every runner calls
+ *  absolute — `N:/ws` is a folder called `N:` on Linux and macOS. */
+const WORKSPACE = path
+  .resolve('/ws')
+  .replace(/\\/gu, '/');
+/** The same folder upper-cased and backslash-spelled, which only a case-insensitive
+ *  file system reads as the one file, so it is added on Windows only. */
+const WORKSPACE_FOLDED = WORKSPACE.toUpperCase().replace(/\//gu, '\\');
 
 /**
  * The matcher, not the list, is what these tests pin. A gate that approves the
@@ -204,13 +220,19 @@ describe('permissions.secret_paths_allow is the escape hatch', () => {
 
   // A deploy job that needs one `.env.production` gets it by naming the exact
   // path, in whatever spelling the owner typed.
-  it('normalises the allow list the same way it normalises candidates', () => {
-    expect(gate('~/.ssh/id_rsa', allow(['$env:USERPROFILE\\.ssh\\id_rsa']))).toBeUndefined();
-    expect(secretPathAllowListFor(allow(['C:\\Users\\someone\\.ssh\\id_rsa']), HOME)).toEqual([
-      'c:/users/someone/.ssh/id_rsa',
-    ]);
-    expect(secretPathAllowListFor(undefined, HOME)).toEqual([]);
-  });
+  // The escape hatch pinning a Windows allow list: `$env:USERPROFILE\`, a `C:\` path,
+  // and the lower-cased form that comes back are Windows spellings and a Windows fold,
+  // so this one runs where a drive letter and a case-insensitive file system exist.
+  it.skipIf(process.platform !== 'win32')(
+    'normalises the allow list the same way it normalises candidates',
+    () => {
+      expect(gate('~/.ssh/id_rsa', allow(['$env:USERPROFILE\\.ssh\\id_rsa']))).toBeUndefined();
+      expect(secretPathAllowListFor(allow(['C:\\Users\\someone\\.ssh\\id_rsa']), HOME)).toEqual([
+        'c:/users/someone/.ssh/id_rsa',
+      ]);
+      expect(secretPathAllowListFor(undefined, HOME)).toEqual([]);
+    },
+  );
 
   // The case the escape hatch would have broken without this rule: `.env` is
   // allowed, the resolver hands the tool `/work/project/.env`, which the allow
@@ -249,21 +271,23 @@ describe('permissions.secret_paths_allow is the escape hatch', () => {
   // for a card on a file the owner had already allowed (the live security test of
   // 2026-10-28, re-run finding 3). `N:/ws` stands for the workspace the owner put
   // in the list, and `atWorkspace` is the resolver a file tool hands in.
-  const WS = 'N:/ws';
+  const WS = WORKSPACE;
   const atWorkspace = (value: string): string | undefined =>
-    resolvePathForMatch(value, HOME, 'win32', WS);
+    resolvePathForMatch(value, HOME, process.platform, WS);
 
   it('excuses the allowed file however the agent spells it, and nothing else', () => {
     const allowed = allow([`${WS}/.env`]);
-    const gateAt = (raw: string) => secretPatternForArgument(raw, allowed, atWorkspace, win);
-    for (const spelling of ['.env', './.env', 'x/../.env', `${WS}/.env`, 'N:\\WS\\.ENV']) {
+    const gateAt = (raw: string) => secretPatternForArgument(raw, allowed, atWorkspace, runner);
+    const spellings = ['.env', './.env', 'x/../.env', `${WS}/.env`];
+    if (process.platform === 'win32') spellings.push(`${WORKSPACE_FOLDED}\\.ENV`);
+    for (const spelling of spellings) {
       expect(gateAt(spelling), `${spelling} should be allowed`).toBeUndefined();
     }
     for (const [spelling, pattern] of [
       ['other/.env', '**/.env'],
-      ['N:/ws/other/.env', '**/.env'],
+      [`${WS}/other/.env`, '**/.env'],
       ['.env.local', '**/.env.*'],
-      ['N:/ws/.env.local', '**/.env.*'],
+      [`${WS}/.env.local`, '**/.env.*'],
     ] as const) {
       expect(gateAt(spelling), `${spelling} should still ask`).toBe(pattern);
     }
@@ -288,8 +312,14 @@ describe('permissions.secret_paths_allow is the escape hatch', () => {
   it('reads the allow list against the folder the command runs in', () => {
     const entries = secretPathAllowListFor(allow([`${WS}/.env`]), HOME);
     const read = (tokens: string[], cwd: string) =>
-      shellStatementReadsSecret(tokens, DEFAULT_SECRET_PATTERNS, { ...win, allow: entries, cwd });
-    for (const spelling of ['.env', './.env', `${WS}/.env`, 'N:\\WS\\.ENV']) {
+      shellStatementReadsSecret(tokens, DEFAULT_SECRET_PATTERNS, {
+        ...runner,
+        allow: entries,
+        cwd,
+      });
+    const spellings = ['.env', './.env', `${WS}/.env`];
+    if (process.platform === 'win32') spellings.push(`${WORKSPACE_FOLDED}\\.ENV`);
+    for (const spelling of spellings) {
       expect(read(['cat', spelling], WS), `${spelling} should read freely`).toBeUndefined();
     }
     expect(read(['cat', 'other/.env'], WS)).toBe('**/.env');
@@ -299,7 +329,7 @@ describe('permissions.secret_paths_allow is the escape hatch', () => {
     // has always given, pinned so this fix cannot have quietly widened it.
     expect(
       shellStatementReadsSecret(['cat', '.env'], DEFAULT_SECRET_PATTERNS, {
-        ...win,
+        ...runner,
         allow: entries,
       }),
     ).toBe('**/.env');
@@ -316,9 +346,9 @@ describe('the taint question ignores the allow list', () => {
   const allow = (paths: string[]): ForgeConfig =>
     ({ permissions: { secret_paths_allow: paths } }) as ForgeConfig;
   const card = (raw: string, config: ForgeConfig) =>
-    secretPatternForArgument(raw, config, (value) => value, win);
+    secretPatternForArgument(raw, config, (value) => value, runner);
   const taint = (raw: string, config: ForgeConfig) =>
-    secretPatternForTaint(raw, config, (value) => value, win);
+    secretPatternForTaint(raw, config, (value) => value, runner);
 
   it('still names the pattern for the exact path the owner allowed', () => {
     expect(card('.env', allow(['.env']))).toBeUndefined();
@@ -372,12 +402,12 @@ describe('the taint question ignores the allow list', () => {
   // widen the hatch: the card goes away and the chat is still marked, because the
   // escape hatch is one prompt's exemption, not the exfil rule's.
   it('marks the file the owner allowed, in the spelling the agent typed', () => {
-    const WS = 'N:/ws';
+    const WS = WORKSPACE;
     const allowed = allow([`${WS}/.env`]);
     const atWorkspace = (value: string): string | undefined =>
-      resolvePathForMatch(value, HOME, 'win32', WS);
-    expect(secretPatternForArgument('.env', allowed, atWorkspace, win)).toBeUndefined();
-    expect(secretPatternForTaint('.env', allowed, atWorkspace, win)).toBe('**/.env');
+      resolvePathForMatch(value, HOME, process.platform, WS);
+    expect(secretPatternForArgument('.env', allowed, atWorkspace, runner)).toBeUndefined();
+    expect(secretPatternForTaint('.env', allowed, atWorkspace, runner)).toBe('**/.env');
   });
 });
 

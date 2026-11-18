@@ -98,13 +98,22 @@ describe('Forge own configuration is refused by the file tools', () => {
 
   it('refuses the same file however the call spells it', async () => {
     const tool = writeFile();
-    for (const spelling of [
+    // The last two spellings are the same file only where the file system folds case
+    // and reads a backslash as a separator; on Linux `.FORGE\Config.yaml` is one odd
+    // file name at the workspace root, and writing it is the right answer, so they
+    // run on Windows and the four spellings every OS agrees on run everywhere.
+    const spellings = [
       '.forge/config.yaml',
       './.forge/config.yaml',
-      '.FORGE\\Config.yaml',
       './x/../.forge/config.yaml',
-      path.join(workspace, '.FORGE', 'CONFIG.YAML'),
-    ]) {
+    ];
+    if (process.platform === 'win32') {
+      spellings.push(
+        '.FORGE\\Config.yaml',
+        path.join(workspace, '.FORGE', 'CONFIG.YAML'),
+      );
+    }
+    for (const spelling of spellings) {
       await expect(
         tool.handler({ path: spelling, content: 'x\n' }, context),
       ).rejects.toThrow(/owner only|only the owner/);

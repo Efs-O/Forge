@@ -187,7 +187,11 @@ describe('resolveShimNodeExecutable', () => {
 
   it('prefers a node.exe beside the shim, the rule npm writes into the shim itself', () => {
     const dir = 'C:\\npm';
-    const beside = path.win32.join(dir, 'node.exe');
+    // `path.join`, the same call the product makes, which says why in its own
+    // comment: off Windows it joins with `/`, and this fake `exists` has to
+    // recognise the spelling the product actually asks about. On Windows
+    // `path.join('C:\\npm', 'node.exe')` is the same string as before.
+    const beside = path.join(dir, 'node.exe');
     const exists = vi.fn((candidate: string) => candidate === beside);
     const which = vi.fn(() => 'C:\\Program Files\\nodejs\\node.exe');
     expect(

@@ -168,13 +168,18 @@ describe('shell scripts are classified from their file contents', () => {
   });
 
   it('names the bash drive-path backslash trap only for an unquoted token', () => {
+    // The mangled token is drive-relative (`V:file`), and `path.win32.resolve`
+    // only knows a folder on drive V when the cwd it is handed lives on that
+    // drive: otherwise it falls back to the runner's own `process.cwd()`, which
+    // is `/home/runner/work/…` on the Linux and macOS runners. A cwd on V keeps
+    // the message the same on all three OSes.
     const bashDrive = classifyShellCommand(
       'pwsh -NoProfile -ExecutionPolicy Bypass -File V:\\Maya\\local\\update-maya.ps1',
       'bash',
-      check({}),
+      check({}, { cwd: 'V:\\work' }),
     );
     expect(bashDrive.rule?.description).toBe(
-      'runs a script Forge could not read (V:\\Mayalocalupdate-maya.ps1: does not exist; bash removed the backslashes in V:\\Maya\\local\\update-maya.ps1: pass shell "pwsh", or write the path with forward slashes)',
+      'runs a script Forge could not read (V:\\work\\Mayalocalupdate-maya.ps1: does not exist; bash removed the backslashes in V:\\Maya\\local\\update-maya.ps1: pass shell "pwsh", or write the path with forward slashes)',
     );
 
     const pwshDrive = classifyShellCommand('pwsh -File V:\\Maya\\x.ps1', 'pwsh', check({}));
@@ -214,8 +219,13 @@ describe('shell scripts are classified from their file contents', () => {
   });
 
   it('refuses script writes to owner-only roots exactly as inline writes', () => {
+    // The form the guard is handed in production: `ownerOnlySetFor` folds the
+    // roots with the platform it was given, and `matchOwnerOnlyRoot` is a text
+    // prefix test. A raw `C:\Users\owner\.forge` matched only through
+    // `matchOwnerOnlyRootOnDisk`, which stands down when the set describes a
+    // different OS than the runner.
     const settings = {
-      ownerOnly: ['C:\\Users\\owner\\.forge'],
+      ownerOnly: ['c:/users/owner/.forge'],
     };
     const inline = classifyShellCommand(
       'Set-Content ~/.forge/policy.yaml x',
