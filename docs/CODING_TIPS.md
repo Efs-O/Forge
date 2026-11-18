@@ -15,7 +15,7 @@
 3. `npx prettier --check .forge/x.ts` → "All matched files use Prettier code style!" while nothing was checked: prettier matches no file in a dot-folder. copy it into `test/unit/`
 4. `grep_search` with `output_mode:`/`glob:`, `shell` with `query:`/`include:`, `remember` with `title:` → refused: unknown argument; real fields are `output`/`include`, `command`, `key`/`value`/`description`. never send one tool's field to another
 5. `grep -P "(^|[^-])word" f` in Git Bash → "grep: -P supports only unibyte and UTF-8 locales"; adding `-E` → "conflicting matchers specified". use `rg -n --no-unicode` with an explicit char class instead
-6. `update_plan` `items` where one entry is typed as a bare string → refused: `"items" entries must be objects, not entry 5 (string)`. every entry is `{"text":…, "status":…}`, none bare
+6. `update_plan` `items` → refused: `"items" must be a JSON array, not a string`, twice — once for a bare-string entry, or one whose `"text"` key I dropped. every entry is exactly `{"text":…,"status":…}`; resend the whole array
 7. a PowerShell double-quoted string holding `$Config:` → `ParserError: ':' was not followed by a valid variable name character` — a colon after a variable starts a drive-qualified name. write `${Config}:`, or no colon straight after a variable
 8. `python -c "…c['exe'].split('\\\\')…"` under bash → bash eats the backslashes first, so Python sees `'\'` → `SyntaxError: unterminated string literal`. keep backslashes out of a double-quoted `-c` body; print the value whole
 9. `wc -l src/x.ts` in a `shell: pwsh` call → "The term 'wc' is not recognized"; the refusal says rerun with `shell: "bash"`. POSIX text tools (`wc`, `sed`, `grep -o`) exist only in the bash shell
@@ -37,6 +37,7 @@
 5. an `edit_file` batch carrying a no-op edit (`old_str` already equals `new_str`) → refused: not found, an earlier edit in that same batch moved the anchor. drop the no-op edit
 6. a delegate method written to fit one line under a `max-lines` cap → prettier expands `{ return x; }` into three lines. keep it one line as an arrow class property: `undo = (): Promise<string[]> => this.actions.undo();`
 7. threading a maybe-undefined value into an optional interface field (`postToJobChat: deps.postToJobChat`) → TS2379 with `exactOptionalPropertyTypes`. declare the field `?: T | undefined` (as `JobDeliveryDeps.summarize`), not just `?: T`
+8. `apply_line_edits` with a line range counted from an unnumbered `read_file` → refused: `operation 1 is stale ... they DO match lines 276-279`. the refusal prints the real range; read with `numbered: true` before you count lines
 
 ## TEST
 1. `fs.rmSync` on a killed child's cwd → EPERM is not in `maxRetries`' retried set, so the retries do nothing. use `removeTreeWhenFree` (test/support/removeTempTree.ts): polls until removable
