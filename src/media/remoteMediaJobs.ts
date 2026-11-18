@@ -49,12 +49,12 @@ import {
   type JobState,
   type StoredFile,
 } from './remoteMediaJobStore';
+import { desktopPathsToNames, toolResultText } from './remoteMediaResultText';
 import { jsonReply, type MediaReply, type RemoteMediaPort } from './remoteMediaRoutes';
 
 const log = getLogger();
 
-/** How often to sweep: a finished job's files stay fetchable until
- *  `job_ttl_minutes` after it ended, then its folder goes. */
+/** How often to sweep; a finished job's files stay fetchable until `job_ttl_minutes` expires. */
 const SWEEP_INTERVAL_MS = 10 * 60_000;
 
 /** Phase 1: the other two tools answer 400 with the reason. */
@@ -274,7 +274,7 @@ export class RemoteMediaJobs implements RemoteMediaPort {
       const result = await tool.handler(job.args, context);
       // A cancel or a disable already settled this job; its files stay listed.
       if (job.terminal) return;
-      job.result = (typeof result === 'string' ? result : result.text).slice(0, MAX_RESULT_CHARS);
+      job.result = desktopPathsToNames(toolResultText(result), job.dir).slice(0, MAX_RESULT_CHARS);
       job.files = await this.listFiles(job);
       this.finish(job, 'done');
     } catch (error) {

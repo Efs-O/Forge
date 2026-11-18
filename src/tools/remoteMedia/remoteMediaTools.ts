@@ -34,6 +34,7 @@ import {
   type RemoteMediaTool,
 } from '../../media/remoteMediaContract';
 import { REMOTE_MEDIA_GROUP } from '../../config/remoteMediaSchema';
+import { namesToLaptopPaths } from '../../media/remoteMediaResultText';
 import { destinationFor, isInside, prepareJobInputs } from './remoteMediaInputs';
 import type { ForgeConfig } from '../../config/types';
 import { defaultWorkspaceRoot } from '../../util/WorkspacePaths';
@@ -228,6 +229,16 @@ function approvalForGenerate(
   };
 }
 
+/**
+ * Where one of this job's files is on this laptop, spelled the way prose reads:
+ * relative to the workspace, with forward slashes. A `\` in a model-facing
+ * string reads like an escape, and the path the model passes back has to be one
+ * the laptop's own tools accept.
+ */
+function laptopPath(root: string, absolute: string): string {
+  return path.relative(root, absolute).split(path.sep).join('/');
+}
+
 async function runRemoteMediaJob(
   deps: RemoteMediaToolDeps,
   fetchImpl: typeof fetch,
@@ -308,8 +319,17 @@ async function runRemoteMediaJob(
   }
 
   const files = status.files ?? [];
+  // The names the desktop uses for this job's files, mapped to where they are
+  // here. The desktop's own text says `cat.png`; the model on this laptop can
+  // only open a file it can find. Inputs go in first and the rendered files
+  // over them, so a name that is both points at what the job just wrote.
+  const laptopNames: Record<string, string> = {};
+  for (const input of inputs) laptopNames[input.name] = laptopPath(root, input.sourcePath);
   if (!files.length) {
-    return status.result ?? `${name}: the desktop reported the job done and listed no files.`;
+    return namesToLaptopPaths(
+      status.result ?? `${name}: the desktop reported the job done and listed no files.`,
+      laptopNames,
+    );
   }
   const saved: string[] = [];
   for (const file of files) {
@@ -332,9 +352,14 @@ async function runRemoteMediaJob(
       }
       return surface(error);
     }
-    saved.push(path.relative(root, absolute));
+    const here = laptopPath(root, absolute);
+    saved.push(here);
+    laptopNames[file.name] = here;
   }
-  const text = status.result ?? `${name}: rendered on the desktop.`;
+  const text = namesToLaptopPaths(
+    status.result ?? `${name}: rendered on the desktop.`,
+    laptopNames,
+  );
   return `${text}\nSaved on this laptop: ${saved.join(', ')}`;
 }
 

@@ -14,6 +14,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { REMOTE_MEDIA_TEXT } from '../../src/media/remoteMediaContract';
+import { desktopPathsToNames } from '../../src/media/remoteMediaResultText';
 import type { RegisteredTool } from '../../src/tools/ToolRegistry';
 import type { ForgeConfig } from '../../src/config/types';
 import {
@@ -250,7 +251,9 @@ describe('the desktop media tools', () => {
     expect(beforeMutate).toHaveBeenCalledWith([saved]);
     expect(await fs.readFile(saved)).toEqual(Buffer.from('png-bytes'));
     expect(String(text)).toContain('Generated image saved to generated-images/cat.png');
-    expect(String(text)).toContain(path.join('generated-images', 'cat.png'));
+    // Forward slashes: the result text is model-facing prose, and the path in it
+    // has to be one this laptop's own tools accept on any operating system.
+    expect(String(text)).toContain('Saved on this laptop: generated-images/cat.png');
     // The desktop was asked once for the job, once for its status, once for the file.
     expect(desktop.requests).toEqual([
       'GET /v1/media/capabilities',
@@ -278,6 +281,54 @@ describe('the desktop media tools', () => {
     expect(job.args).toEqual({ prompt: 'a cat', path: 'renders/cat.png' });
     expect(JSON.stringify(job)).not.toContain(root);
     expect(job.client).toBe('forge-laptop');
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it('a desktop path in the result never reaches the model: the whole round trip', async () => {
+    // Both halves at once. The desktop rewrites the paths in its own result text
+    // to bare names on the way out (`remoteMediaJobs.ts` does this to the real
+    // tool's text); the laptop rewrites those names back to its own paths on the
+    // way in. The fake desktop answers with what the real one would send, so the
+    // string asserted here is the string a laptop model would read.
+    const jobDir =
+      'C:/Users/desk/AppData/Roaming/Code/User/globalStorage/efsoo.forge-llm/remote-media/cafe0001';
+    const desktopText = desktopPathsToNames(
+      `Generated image saved to ${jobDir}/out/pics/cat.png (image/png, 9 bytes) ` +
+        'with backend qwen-image-turbo. The reference ' +
+        `"${jobDir}\\inputs\\fox.png" is the copy this laptop uploaded. ` +
+        'To inspect it, call view_image on that path.',
+      jobDir,
+    );
+    desktop = await startFakeDesktop({
+      capabilities: capabilities(),
+      states: [
+        {
+          state: 'done',
+          result: desktopText,
+          files: [{ name: 'cat.png', bytes: 9, kind: 'image' }],
+        },
+      ],
+    });
+    const root = await workspace({ 'pics/fox.png': 'the picture' });
+    const { bundle, tools } = toolsFor(desktop.origin, root);
+    await bundle.refresh();
+    const text = String(
+      await toolNamed(tools, 'generate_image').handler(
+        { prompt: 'a cat', path: 'pics/cat.png', reference_paths: ['pics/fox.png'] },
+        EMPTY_CONTEXT,
+      ),
+    );
+    expect(text).toBe(
+      'Generated image saved to pics/cat.png (image/png, 9 bytes) with backend qwen-image-turbo. ' +
+        'The reference "pics/fox.png" is the copy this laptop uploaded. ' +
+        'To inspect it, call view_image on that path.\n' +
+        'Saved on this laptop: pics/cat.png',
+    );
+    // Nothing of the desktop's folder survives: not the path, not the user name,
+    // not the job id the file is still fetched by.
+    expect(text).not.toContain('cafe0001');
+    expect(text).not.toContain('AppData');
+    expect(text).not.toContain('remote-media');
     await fs.rm(root, { recursive: true, force: true });
   });
 

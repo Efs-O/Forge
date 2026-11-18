@@ -333,6 +333,42 @@ describe('remote media jobs: the standing-consent gate', () => {
   });
 });
 
+describe('remote media jobs: the result text', () => {
+  it('names the file, not the desktop folder, in the text the laptop is sent', async () => {
+    const { jobs: runner, directory } = rig({ image_backends: ['grok-imagine'] });
+    const accepted = await runner.create(
+      request({ tool: 'generate_image', args: { prompt: 'a cat', path: 'cat.png' } }),
+    );
+    const id = (await bodyOf(accepted)).id as string;
+    await until(async () => (await stateOf(runner, id)).state === 'done', 'the render to finish');
+    // The path the desktop tool wrote its own text with: proof the job really did
+    // name a folder the laptop cannot read, and this test is not vacuous.
+    const desktopPath = path.join(directory, id, 'out', 'cat.png').split(path.sep).join('/');
+    expect(desktopPath).toContain('out/cat.png');
+    const status = await stateOf(runner, id);
+    // The desktop tool's own words, kept whole — the size, the backend, the
+    // delivery, the billing — with its path reduced to the bare name the laptop
+    // fetches the file by.
+    expect(String(status.result)).toBe(
+      'Generated image saved to cat.png (image/png, 8 bytes) with backend grok-imagine.\n' +
+        'No remote chat is watching this turn, so nothing was sent to a phone.\n' +
+        'This was a paid xai API call, billed per image.\n' +
+        'To inspect it, call view_image on that path.',
+    );
+    expect(String(status.result)).not.toContain(desktopPath);
+    // The same text is what the job's folder carries for any other window. The
+    // terminal write is not awaited (`finish` fires it), so poll until it lands.
+    let written: { result?: string } = {};
+    await until(async () => {
+      written = JSON.parse(
+        (await fs.promises.readFile(path.join(directory, id, 'job.json'), 'utf8')) as string,
+      ) as { result?: string };
+      return typeof written.result === 'string';
+    }, 'the finished record to reach disk');
+    expect(String(status.result)).toBe(String(written.result));
+  });
+});
+
 describe('remote media jobs: the path rules', () => {
   const refused: Array<[string, RemoteMediaJobRequest, string]> = [
     [
