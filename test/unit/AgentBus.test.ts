@@ -338,6 +338,20 @@ describe('messages', () => {
     expect(linked).toContain('From Codex session "Build review". Your final answer is delivered to it automatically.');
   });
 
+  // An unnamed inbound link is titled `Claude session ae960211`, which the
+  // footer used to quote whole: `From Claude session "Claude session ae960211"`.
+  it('a default link title does not repeat the sender label in the footer', () => {
+    const sender = {
+      kind: 'claude' as const,
+      sessionId: 'ae960211-d668-4d44-84ad-ac15d4a16b5c',
+      title: 'Claude session ae960211',
+    };
+    expect(forgeInboundPrompt('claude', 'hi', sender)).toBe(
+      '**Claude says:**\n\nhi\n\n' +
+        'From Claude session "ae960211". Your final answer is delivered to it automatically.',
+    );
+  });
+
   // Finding 7 (2026-11-17 laptop fresh-install test): a sender whose session is
   // on another machine cannot be handed Forge's answer, and the footer used to
   // promise that it would be. The whole text is pinned because it is what the

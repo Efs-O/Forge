@@ -361,7 +361,14 @@ export function forgeInboundPrompt(
 ): string {
   if (!sender) return `**${from} says:**\n\n${text.trim()}`;
   const label = agentDisplayName(sender.kind);
-  const title = sender.title.replaceAll('"', '\\"');
+  // An unnamed inbound link is titled `<Label> session <id8>`
+  // (`createInboundLink`); quoting that whole read `From Claude session
+  // "Claude session ae960211"`.
+  const ownPrefix = `${label} session `;
+  const bare = sender.title.startsWith(ownPrefix)
+    ? sender.title.slice(ownPrefix.length)
+    : sender.title;
+  const title = bare.replaceAll('"', '\\"');
   const footer = deliverable
     ? `From ${label} session "${title}". Your final answer is delivered to it automatically.`
     : `From ${label} session "${title}". That session is not running on this machine, so your final answer is kept for it to read later (forge.sh read-verdict).`;
