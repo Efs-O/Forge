@@ -7,6 +7,7 @@
 ## SEARCH
 1. `web_fetch` on a URL slug I guessed (`huggingface.co/blog/harness-hub/pi-adapted`) → HTTP 404, twice: a post truncates its own link. web_search the exact title, take the real slug, then fetch
 2. `rg -n x .` → `dist/`, `coverage/`, `docs/reports/**`, one-line `test/fixtures/*.json` drown the answer (42 MB once); grep's `--include` filters names not dirs, `-g` is rg-only (GNU grep: `unknown option -- g`). exclude dirs with rg `--glob`
+3. `grep_search` query `toolName:` over `test/**/*.ts` → 30 files of unrelated AppMessage fixtures, answer buried, wasted round. "does any test pin this text?" greps the exact phrase the code emits
 
 ## RUN
 1. `stop_execution` on a background `npm run ci` → the wrapper dies, the child tree lives and holds the ci-lock, so the next run waits forever: `MSYS_NO_PATHCONV=1 taskkill /PID <top> /T /F`
