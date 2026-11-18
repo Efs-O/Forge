@@ -181,10 +181,11 @@ describe('FileLease.isHeld', () => {
     expect(await FileLease.isHeld({ directory, key: 'shared', staleAfterMs: 30_000 })).toBe(true);
     // A horizon small enough to test without sleeping: the same file is held or
     // free depending only on how old its sign is.
+    // Seconds of margin, not milliseconds: a 40 ms margin lost under a loaded full run.
     await writeLease(leasePath, Date.now() - 10);
-    expect(await FileLease.isHeld({ directory, key: 'shared', staleAfterMs: 50 })).toBe(true);
-    await writeLease(leasePath, Date.now() - 100);
-    expect(await FileLease.isHeld({ directory, key: 'shared', staleAfterMs: 50 })).toBe(false);
+    expect(await FileLease.isHeld({ directory, key: 'shared', staleAfterMs: 5_000 })).toBe(true);
+    await writeLease(leasePath, Date.now() - 10_000);
+    expect(await FileLease.isHeld({ directory, key: 'shared', staleAfterMs: 5_000 })).toBe(false);
   });
 
   /** `acquire` makes the folder because it is about to write in it; a reader may
