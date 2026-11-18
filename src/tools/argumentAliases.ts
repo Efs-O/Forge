@@ -47,19 +47,66 @@ function quoteAlternatives(items: readonly string[]): string {
 }
 
 /**
+ * A folder `find_files` was given as `path`, in the form its `pattern` can take.
+ * Empty means the workspace root. Undefined means this folder cannot become a
+ * pattern prefix — an absolute path or a `..` segment, where the fold would
+ * invent a search the tool was never asked to run.
+ */
+function findFilesFolder(value: string): string | undefined {
+  const folder = value.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
+  if (folder === '' || folder === '.') return '';
+  if (folder.startsWith('/') || /^[A-Za-z]:/.test(folder)) return undefined;
+  if (folder.split('/').includes('..')) return undefined;
+  return folder;
+}
+
+/**
+ * Fold a `find_files` folder argument into the glob pattern instead of refusing
+ * it. `find_files` has no folder argument — its `pattern` is anchored at the
+ * workspace root — and a folder is a prefix of the pattern that means the same
+ * search. Measured 2026-11-18: a laptop test on 0.17.195 sent
+ * `{"pattern":"*","path":"."}` and spent a round resending a call that had
+ * already been understood; most agent tool sets give a find tool a folder
+ * argument, so models keep sending one. Only fires while the advertised schema
+ * has `pattern` and no `path`, so it switches itself off if the tool ever gains
+ * a real folder argument.
+ */
+function foldFindFilesPath(
+  properties: Record<string, unknown>,
+  present: Record<string, unknown>,
+): void {
+  if (!Object.hasOwn(properties, 'pattern') || Object.hasOwn(properties, 'path')) return;
+  const value = present['path'];
+  if (typeof value !== 'string') return;
+  const folder = findFilesFolder(value);
+  if (folder === undefined) return;
+  const pattern = present['pattern'];
+  if (typeof pattern === 'string' && pattern.trim().length > 0) {
+    present['pattern'] = folder === '' ? pattern : `${folder}/${pattern}`;
+  } else {
+    present['pattern'] = folder === '' ? '**/*' : `${folder}/**`;
+  }
+  delete present['path'];
+}
+
+/**
  * Rename every wrong-but-equivalent key onto its declared argument, in place on
  * the live `args` object, so the handler and the schema checks both see the real
  * name. A key is rewritten only when its value is a string, the target is a
  * declared argument, and the target is absent: a call that sends both `include`
- * and `path` is ambiguous, and stays a refusal.
+ * and `path` is ambiguous, and stays a refusal. `find_files` gets the one
+ * non-renaming repair here, `foldFindFilesPath`, which folds a folder into a
+ * pattern rather than moving a key.
  */
 export function applyArgumentRewrites(
   name: string,
   properties: unknown,
   present: Record<string, unknown>,
 ): void {
+  if (typeof properties !== 'object' || properties === null) return;
+  if (name === 'find_files') foldFindFilesPath(properties as Record<string, unknown>, present);
   const rewrites = ARG_REWRITES[name];
-  if (!rewrites || typeof properties !== 'object' || properties === null) return;
+  if (!rewrites) return;
   for (const [wrong, target] of Object.entries(rewrites)) {
     const value = present[wrong];
     if (typeof value !== 'string') continue;
