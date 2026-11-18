@@ -143,3 +143,4 @@
 46. `desktop_press` · after focus moved to another window → `target lost focus (foreground is '<window>')`. call `desktop_capture` to re-capture and re-approve, then press again
 47. `desktop_press` · `consequential: true` → `unknown argument "consequential"`: it takes only `keys`. send `{"keys": ["enter"]}` alone
 48. `shell` · a script given a file under `~/.forge/` (a screenshot) → `refuses to change Forge's own files`, even when it only reads it. sample the live screen region instead
+49. `desktop_click` · a stale `capture_id` once the app lost focus → refused again on each retry. re-focus it (`desktop_focus_window`), capture anew, click by that id
