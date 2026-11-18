@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.201
+
+Includes 0.17.200, which was never published: its test runs on GitHub's Windows and macOS machines failed on tests that ran out of time or counted a refresh they should not have. No change to the app itself.
+
 ## 0.17.200
 
 **A message from a Claude or Codex session no longer names its sender twice.** A session with no name of its own was introduced to Forge as `From Claude session "Claude session ae960211"`. It now reads `From Claude session "ae960211"`.
