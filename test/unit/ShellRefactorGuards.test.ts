@@ -132,10 +132,11 @@ describe('shell/core-group refactor guards', () => {
   // repository paths, machine details and workflow rules stay local. The cap
   // leaves a small margin for these measured additions without making prompt
   // growth free.
-  it('config/templates/builtin/execute.njk is at most 9,741 bytes', () => {
+  // 2026-11-18: raised to 9,800 after ffccfd02 (plain-language reply guidance) took it to 9,754.
+  it('config/templates/builtin/execute.njk is at most 9,800 bytes', () => {
     const file = path.join(root, 'config', 'templates', 'builtin', 'execute.njk');
     const size = fs.statSync(file).size;
-    expect(size, `execute.njk is ${size} bytes; the cap is 9741`).toBeLessThanOrEqual(9741);
+    expect(size, `execute.njk is ${size} bytes; the cap is 9800`).toBeLessThanOrEqual(9800);
   });
 
   it('the dead src/templates/builtin copy is deleted', () => {
