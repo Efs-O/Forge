@@ -33,6 +33,7 @@
 7. a new top-level `config.yaml` key → `test/unit/ModelReferences.test.ts` fails until it is in `NON_MODEL_REF_FIELDS`, and `config.example.yaml` needs a commented block for it
 8. a test reading a media job's `job.json` after `status()` answers `done` → the file still holds `running`: `finish()` in `src/media/remoteMediaJobs.ts` writes without awaiting. poll the file until the field lands
 9. a gate setting added to `.github/workflows/ci.yml` only → `publish.yml` runs the same `npm run ci` without it and fails on a tree CI passed. grep every workflow that runs the gate and copy the env
+10. a promotion test that guards the `resources/tips/CODING_TIPS.md` add right after guarding the `docs/CODING_TIPS.md` delete → still refused: `src/tools/tipsWriteGuard.ts` only checks, and reads the project file from disk. write the delete to disk first
 
 ## PATHS
 1. `zipfile.ZipFile('test/fixtures/sample.xlsx')` in a scan → FileNotFoundError: that is not where the fixture lives. read the test's `fixture()` helper for the real path first
