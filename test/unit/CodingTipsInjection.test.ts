@@ -87,7 +87,7 @@ describe('loadCodingTips', () => {
     const block = loadCodingTips(workspace);
     expect(block).toBeDefined();
     expect(block?.sources.map((s) => s.kind)).toEqual(['shipped']);
-    expect(block?.text).toContain('## READ');
+    expect(block?.text).toContain('## FORGE_TOOLS');
   });
 
   it('clamps only the project table when it is too long, and says which file', () => {

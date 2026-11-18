@@ -102,7 +102,9 @@ describe('ensureForgeInstructionsFile', () => {
     // 2026-11-17: 9,082 bytes. Owner: a new workspace's starter carries every general
     // rule of this repository's FORGE.md (laptop fresh-install test): recording mistakes
     // in the tips table, refused tool arguments, gate logs, the push rule. Cap 9,157.
-    expect(Buffer.byteLength(content, 'utf8')).toBeLessThan(9157);
+    // 2026-11-18: 9,211 bytes. The tips rule names `## FORGE_TOOLS`, where a Forge-tool
+    // mistake goes (the tool's tips move into its description). Cap 9,286.
+    expect(Buffer.byteLength(content, 'utf8')).toBeLessThan(9286);
   });
 
   it('carries the review items that took this repo to 0.8% failed calls', () => {
