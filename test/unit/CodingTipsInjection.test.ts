@@ -24,6 +24,7 @@ import {
   PROJECT_TIPS_ALLOWANCE,
   resolveShippedTipsPath,
   SHIPPED_TIPS_ALLOWANCE,
+  workspaceShippedTipsPath,
 } from '../../src/llm/codingTips';
 import { pinCodingTips } from '../../src/sidebar/codingTipsPin';
 import { persistedToRuntime, runtimeToPersisted } from '../../src/sidebar/sessionPersistence';
@@ -53,6 +54,28 @@ function makeWorkspace(tips: string | undefined): string {
 }
 
 const TABLE = '## READ\n1. a guessed end_line → refused: start_line past end_line. read whole\n';
+
+/** A workspace that IS Forge's source: the marker is the root package name. */
+function makeForgeWorkspace(pkgName: string, shippedText: string | undefined): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'coding-tips-'));
+  fs.writeFileSync(path.join(dir, 'package.json'), `{"name":"${pkgName}"}`, 'utf8');
+  if (shippedText !== undefined) {
+    fs.mkdirSync(path.join(dir, 'resources', 'tips'), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'resources', 'tips', 'CODING_TIPS.md'),
+      shippedText,
+      'utf8',
+    );
+  }
+  return dir;
+}
+
+const OWN_SHIPPED = '## READ\n1. a workspace-only tip → proves which file was read\n';
+const OWN_TABLE_HEADING =
+  "Shipped table (this repository's resources/tips/CODING_TIPS.md — record a general tip here, " +
+  'a repo or PC tip in docs/CODING_TIPS.md):';
+const INSTALLED_HEADING =
+  'Shipped table (read-only, from the Forge install — record new mistakes in docs/CODING_TIPS.md instead):';
 
 let workspace = '';
 
@@ -165,6 +188,43 @@ describe('loadCodingTips', () => {
   it('returns nothing when there is no table at all', () => {
     workspace = makeWorkspace(undefined);
     expect(loadCodingTips(workspace, path.join(workspace, 'missing.md'))).toBeUndefined();
+  });
+
+  it('reads the workspace shipped table when the workspace is Forge source, and says so', () => {
+    workspace = makeForgeWorkspace('forge-llm', OWN_SHIPPED);
+    expect(workspaceShippedTipsPath(workspace)).toBe(
+      path.join(workspace, 'resources', 'tips', 'CODING_TIPS.md'),
+    );
+    const block = loadCodingTips(workspace);
+    expect(block?.sources.map((s) => s.kind)).toEqual(['shipped']);
+    expect(block?.sources[0]?.text).toBe(OWN_SHIPPED.trim());
+    expect(block?.text).toContain(OWN_TABLE_HEADING);
+    expect(block?.text).not.toContain('from the Forge install');
+  });
+
+  it('keeps the installed table for a workspace that merely has the same path', () => {
+    workspace = makeForgeWorkspace('my-app', OWN_SHIPPED);
+    expect(workspaceShippedTipsPath(workspace)).toBeUndefined();
+    const block = loadCodingTips(workspace);
+    const installed = fs.readFileSync(resolveShippedTipsPath() as string, 'utf8').trim();
+    expect(block?.sources[0]?.text, 'the vendor list, not the user repo file').toBe(installed);
+    expect(block?.text).toContain(INSTALLED_HEADING);
+    expect(block?.text).not.toContain('proves which file was read');
+  });
+
+  it('uses the installed table for Forge source with no shipped file of its own', () => {
+    workspace = makeForgeWorkspace('forge-llm', undefined);
+    expect(workspaceShippedTipsPath(workspace)).toBeUndefined();
+    const block = loadCodingTips(workspace);
+    const installed = fs.readFileSync(resolveShippedTipsPath() as string, 'utf8').trim();
+    expect(block?.sources[0]?.text).toBe(installed);
+  });
+
+  it('treats an unparsable package.json as "not Forge source", not as an error', () => {
+    workspace = makeForgeWorkspace('forge-llm', OWN_SHIPPED);
+    fs.writeFileSync(path.join(workspace, 'package.json'), '{ name: ', 'utf8');
+    expect(workspaceShippedTipsPath(workspace)).toBeUndefined();
+    expect(loadCodingTips(workspace)?.text).not.toContain('proves which file was read');
   });
 });
 

@@ -9,7 +9,9 @@
  *
  * Two sources, one block:
  *  - the SHIPPED table, read-only, inside the install folder (a user cannot edit
- *    it, and an agent must not: it is the vendor's list);
+ *    it, and an agent must not: it is the vendor's list). In this repository the
+ *    workspace's own `resources/tips/CODING_TIPS.md` replaces it, so an edit here
+ *    is what the next turn reads; see `workspaceShippedTipsPath`;
  *  - the PROJECT table, `docs/CODING_TIPS.md`, which is where an agent records
  *    what it just learned. It is the write target, so it grows.
  *
@@ -77,6 +79,34 @@ export function resolveShippedTipsPath(startDir?: string): string | undefined {
   return shippedTipsCandidates(startDir).find((candidate) => fs.existsSync(candidate));
 }
 
+/**
+ * The workspace's own shipped table, when the workspace IS Forge's source
+ * (root package.json name "forge-llm"); undefined for every other workspace,
+ * so a user repo that happens to have this path never replaces the vendor list.
+ *
+ * This is the live-read half of the split: an agent editing the shipped table in
+ * this repository sees its own edit on the next turn instead of the installed
+ * copy, which is the only version it can change.
+ */
+export function workspaceShippedTipsPath(workspaceRoot: string | undefined): string | undefined {
+  if (!workspaceRoot) return undefined;
+  const candidate = path.join(workspaceRoot, 'resources', 'tips', 'CODING_TIPS.md');
+  if (!fs.existsSync(candidate)) return undefined;
+  let name: unknown;
+  try {
+    name = (
+      JSON.parse(fs.readFileSync(path.join(workspaceRoot, 'package.json'), 'utf8')) as {
+        name?: unknown;
+      }
+    ).name;
+  } catch {
+    // A missing or unparsable package.json classifies this workspace as "not
+    // Forge's source", so the installed table stands: not an error swallowed.
+    return undefined;
+  }
+  return name === 'forge-llm' ? candidate : undefined;
+}
+
 interface CacheEntry {
   signature: string;
   block: CodingTipsBlock | undefined;
@@ -127,7 +157,7 @@ function readBounded(
  */
 export function loadCodingTips(
   workspaceRoot?: string,
-  shippedPath = resolveShippedTipsPath(),
+  shippedPath = workspaceShippedTipsPath(workspaceRoot) ?? resolveShippedTipsPath(),
 ): CodingTipsBlock | undefined {
   const projectPath = workspaceRoot
     ? path.join(workspaceRoot, PROJECT_TIPS_RELATIVE_PATH)
@@ -140,6 +170,10 @@ export function loadCodingTips(
   // A caller-named shipped file that does not exist is "no shipped table", not an
   // error: the project table alone still reaches the model.
   const shippedFile = shippedPath && fs.existsSync(shippedPath) ? shippedPath : undefined;
+
+  // Which shipped file this is decides only the heading the model sees; a caller
+  // that names the workspace file itself gets the same heading, correctly.
+  const fromWorkspace = !!shippedFile && shippedFile === workspaceShippedTipsPath(workspaceRoot);
 
   const key = `${shippedPath ?? '-'}|${projectPath ?? '-'}`;
   const signature = signatureOf(watched);
@@ -182,7 +216,9 @@ export function loadCodingTips(
     const parts = sources.map((source) => {
       const heading =
         source.kind === 'shipped'
-          ? `Shipped table (read-only, from the Forge install — record new mistakes in ${PROJECT_TIPS_RELATIVE_PATH} instead):`
+          ? fromWorkspace
+            ? `Shipped table (this repository's resources/tips/CODING_TIPS.md — record a general tip here, a repo or PC tip in ${PROJECT_TIPS_RELATIVE_PATH}):`
+            : `Shipped table (read-only, from the Forge install — record new mistakes in ${PROJECT_TIPS_RELATIVE_PATH} instead):`
           : `Project table (${PROJECT_TIPS_RELATIVE_PATH}, this repository's own):`;
       return `${heading}\n${source.text}`;
     });

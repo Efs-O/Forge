@@ -6,6 +6,10 @@
  * The rules live in `src/tools/tipsWriteGuard.ts`; the three tools that can write
  * the file call it on the bytes they are about to save. The wiring is proven in
  * `test/integration/FileToolExecution.test.ts`, which owns the tool harness.
+ *
+ * Phase 3 of CODING_TIPS_IN_TOOLS_PLAN.md adds the second table: in Forge's own
+ * repository (`package.json` name `forge-llm`) the shipped table
+ * `resources/tips/CODING_TIPS.md` is guarded too, so a promotion is a move.
  */
 import * as fs from 'fs';
 import * as os from 'os';
@@ -14,6 +18,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   guardTipsWrite,
   isProjectTipsPath,
+  isShippedTipsPath,
+  shippedTipsWriteRefusal,
   tipsWriteNote,
   tipsWriteRefusal,
 } from '../../src/tools/tipsWriteGuard';
@@ -197,5 +203,162 @@ describe('the count and the every-tenth review ping', () => {
     expect(
       tipsWriteNote(path.join(dir, 'sub', 'docs', 'CODING_TIPS.md'), '', shippedPath, dir),
     ).toBe('');
+  });
+});
+
+/**
+ * Phase 3: in this repository the shipped table is a file the agent can edit, so
+ * the duplicate rule has to run on it too — otherwise a promotion leaves the same
+ * tip in both tables, and the prompt pays for it twice.
+ *
+ * `shippedPath` is left undefined throughout: that is what makes the guard read
+ * the workspace's own shipped file instead of the installed fixture.
+ */
+describe("in Forge's own repository, both tables are guarded", () => {
+  const SHIPPED_HERE = '## EDIT\n1. a shipped tip → already reviewed\n';
+  const ws = (): string => path.join(dir, 'forge');
+  const shippedFile = (): string => path.join(ws(), 'resources', 'tips', 'CODING_TIPS.md');
+  const projectFile = (): string => path.join(ws(), 'docs', 'CODING_TIPS.md');
+
+  const makeForgeWorkspace = (pkgName: string): void => {
+    fs.mkdirSync(path.dirname(shippedFile()), { recursive: true });
+    fs.mkdirSync(path.dirname(projectFile()), { recursive: true });
+    fs.writeFileSync(path.join(ws(), 'package.json'), `{"name":"${pkgName}"}`, 'utf8');
+    fs.writeFileSync(shippedFile(), SHIPPED_HERE, 'utf8');
+    fs.writeFileSync(projectFile(), PROJECT, 'utf8');
+  };
+
+  it('recognises the shipped table only in a forge-llm workspace', () => {
+    makeForgeWorkspace('forge-llm');
+    expect(isShippedTipsPath(shippedFile(), ws())).toBe(true);
+    expect(isShippedTipsPath(path.join(ws(), 'resources', 'CODING_TIPS.md'), ws())).toBe(false);
+    makeForgeWorkspace('my-app');
+    expect(isShippedTipsPath(shippedFile(), ws())).toBe(false);
+  });
+
+  it('refuses a project-list line that the workspace shipped file already holds', () => {
+    makeForgeWorkspace('forge-llm');
+    expect(
+      () => {
+        guardTipsWrite(
+          projectFile(),
+          `${PROJECT.trim()}\n2. a shipped tip → already reviewed\n`,
+          PROJECT,
+          undefined,
+          ws(),
+        );
+      },
+      // The workspace copy, not the installed fixture, is what it was checked against.
+    ).toThrow('docs/CODING_TIPS.md already carries this tip');
+  });
+
+  it('refuses a shipped line the project list still holds, and says where it lives', () => {
+    makeForgeWorkspace('forge-llm');
+    const proposed = `${SHIPPED_HERE.trim()}\n2. a project tip → recorded here\n`;
+    const refusal =
+      'that line is still in docs/CODING_TIPS.md: delete it there first, ' +
+      'then add it here: "2. a project tip → recorded here"';
+    expect(() => {
+      guardTipsWrite(shippedFile(), proposed, SHIPPED_HERE, undefined, ws());
+    }).toThrow(new Error(`${refusal} No changes were written.`));
+  });
+
+  it('refuses a second copy of a line the shipped file already carries', () => {
+    makeForgeWorkspace('forge-llm');
+    const proposed = `${SHIPPED_HERE.trim()}\n2. a shipped tip → already reviewed\n`;
+    expect(
+      () => {
+        guardTipsWrite(shippedFile(), proposed, SHIPPED_HERE, undefined, ws());
+      },
+      // The same tip under another number is still the same tip.
+    ).toThrow(
+      'resources/tips/CODING_TIPS.md already carries this tip: ' +
+        '"1. a shipped tip → already reviewed" — sharpen that line instead of adding a copy.',
+    );
+  });
+
+  it('allows a genuinely new line in either table', () => {
+    makeForgeWorkspace('forge-llm');
+    expect(() => {
+      guardTipsWrite(
+        projectFile(),
+        `${PROJECT.trim()}\n2. a new tip → recorded now\n`,
+        PROJECT,
+        undefined,
+        ws(),
+      );
+    }).not.toThrow();
+    expect(() => {
+      guardTipsWrite(
+        shippedFile(),
+        `${SHIPPED_HERE.trim()}\n2. a new tip → reviewed now\n`,
+        SHIPPED_HERE,
+        undefined,
+        ws(),
+      );
+    }).not.toThrow();
+  });
+
+  it('allows a promotion done in order: out of the project list, then into the shipped file', () => {
+    makeForgeWorkspace('forge-llm');
+    const without = '## EDIT\n1. another tip → stays put\n';
+    expect(() => {
+      guardTipsWrite(projectFile(), without, PROJECT, undefined, ws());
+    }).not.toThrow();
+    // The guard only validates: the promotion is a move once the first file is
+    // actually on disk without the line, which is what the writer does next.
+    fs.writeFileSync(projectFile(), without, 'utf8');
+    expect(() => {
+      guardTipsWrite(
+        shippedFile(),
+        `${SHIPPED_HERE.trim()}\n2. a project tip → recorded here\n`,
+        SHIPPED_HERE,
+        undefined,
+        ws(),
+      );
+    }).not.toThrow();
+  });
+
+  it('does not blame an unrelated shipped edit for a pair that was already on file', () => {
+    makeForgeWorkspace('forge-llm');
+    // Both tables already hold the line (the pre-phase-3 state): rewording the
+    // shipped file must go through, because nothing in it grew.
+    const shippedWithBoth = `${SHIPPED_HERE.trim()}\n2. a project tip → recorded here\n`;
+    expect(() => {
+      guardTipsWrite(
+        shippedFile(),
+        `${shippedWithBoth}3. another tip → reworded\n`,
+        shippedWithBoth,
+        undefined,
+        ws(),
+      );
+    }).not.toThrow();
+  });
+
+  it('guards nothing of the shipped path in a workspace that is not Forge', () => {
+    makeForgeWorkspace('my-app');
+    expect(isShippedTipsPath(shippedFile(), ws())).toBe(false);
+    expect(() => {
+      guardTipsWrite(
+        shippedFile(),
+        `${SHIPPED_HERE.trim()}\n2. a project tip → recorded here\n`,
+        SHIPPED_HERE,
+        undefined,
+        ws(),
+      );
+    }).not.toThrow();
+  });
+
+  it('names the same refusal from the rule alone, for a caller that writes the file itself', () => {
+    expect(
+      shippedTipsWriteRefusal({
+        proposed: `## EDIT\n1. a tip → mistake\n`,
+        previous: '',
+        projectText: `## EDIT\n1. a tip → mistake\n`,
+      }),
+    ).toBe(
+      'that line is still in docs/CODING_TIPS.md: delete it there first, ' +
+        'then add it here: "1. a tip → mistake"',
+    );
   });
 });

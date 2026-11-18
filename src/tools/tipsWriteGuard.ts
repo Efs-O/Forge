@@ -1,12 +1,20 @@
 /**
- * The write path for the project tips table (`docs/CODING_TIPS.md`).
+ * The write path for the coding-tips tables. It guards the project table
+ * (`docs/CODING_TIPS.md`) in every workspace, and in Forge's own repository it
+ * also guards the shipped table (`resources/tips/CODING_TIPS.md`), where that
+ * file is the vendor list an agent is allowed to edit.
  *
- * The table is injected into every prompt, so a second copy of a line costs the
- * prompt twice, and a list nobody ever reviews grows without end. Both are
+ * The tables are injected into every prompt, so a second copy of a line costs
+ * the prompt twice, and a list nobody ever reviews grows without end. Both are
  * handled here rather than in prompt text the model has to remember: the three
  * tools that can write the file (`edit_file`, `write_file`, `apply_line_edits`)
  * all compute their final content before writing, so the rule runs on exactly the
  * bytes that reach the disk.
+ *
+ * A line may live in only one of the two tables, and the project list is the
+ * one an agent writes: a copy of a shipped line is refused there, and a line the
+ * project list still holds is refused in the shipped table, so a promotion is a
+ * move (delete it there, add it here) and never a duplicate that outlives it.
  *
  * The count is "entries this repository has that the shipped table does not",
  * recomputed from the two files on every write and never stored: promoting the
@@ -23,7 +31,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { resolveShippedTipsPath } from '../llm/codingTips';
+import {
+  PROJECT_TIPS_RELATIVE_PATH,
+  resolveShippedTipsPath,
+  workspaceShippedTipsPath,
+} from '../llm/codingTips';
 import { normalizePathForMatch } from './secretPaths';
 import { defaultWorkspaceRoot } from '../util/WorkspacePaths';
 
@@ -69,6 +81,21 @@ export function isProjectTipsPath(
   );
 }
 
+/**
+ * The shipped table of the open workspace, and only that one:
+ * `<root>/resources/tips/CODING_TIPS.md` in a workspace whose package.json names
+ * `forge-llm`. Everywhere else the shipped table is the install's, which no tool
+ * can write, so this guard has nothing to say about the path.
+ */
+export function isShippedTipsPath(
+  filePath: string,
+  workspaceRoot: string | undefined = defaultWorkspaceRoot(),
+): boolean {
+  const shipped = workspaceShippedTipsPath(workspaceRoot);
+  if (!shipped) return false;
+  return normalizePathForMatch(filePath) === normalizePathForMatch(shipped);
+}
+
 function entryKeys(text: string): string[] {
   return text
     .split(/\r?\n/)
@@ -82,21 +109,35 @@ function countBy(entries: string[]): Map<string, number> {
   return counts;
 }
 
-function resolveShipped(shippedPath: string | undefined): string | undefined {
+function resolveShipped(
+  shippedPath: string | undefined,
+  workspaceRoot: string | undefined,
+): string | undefined {
   // A caller-named file (a test fixture) is used as given; otherwise the shipped
-  // table is found relative to the running bundle, as the injection finds it.
+  // table is the workspace's own when this workspace IS Forge's source, and the
+  // installed copy otherwise — the same choice the injection makes.
   if (shippedPath !== undefined) return fs.existsSync(shippedPath) ? shippedPath : undefined;
-  return resolveShippedTipsPath();
+  return workspaceShippedTipsPath(workspaceRoot) ?? resolveShippedTipsPath();
 }
 
-function readShipped(shippedPath: string | undefined): string {
-  const resolved = resolveShipped(shippedPath);
+function readShipped(shippedPath: string | undefined, workspaceRoot: string | undefined): string {
+  const resolved = resolveShipped(shippedPath, workspaceRoot);
   if (!resolved) return '';
   try {
     return fs.readFileSync(resolved, 'utf8');
   } catch {
     return '';
   }
+}
+
+/** The project table of this workspace, or '' when it does not exist yet. Any
+ *  other read failure propagates: a table that cannot be read is not a table
+ *  that does not exist, and a guard that guesses lets a duplicate through. */
+function readProjectTips(workspaceRoot: string | undefined): string {
+  if (!workspaceRoot) return '';
+  const file = path.join(workspaceRoot, 'docs', 'CODING_TIPS.md');
+  if (!fs.existsSync(file)) return '';
+  return fs.readFileSync(file, 'utf8');
 }
 
 /** The entry to blame, as the text the agent wrote, not the normalised key. */
@@ -117,15 +158,48 @@ export function tipsWriteRefusal(params: {
   proposed: string;
   previous: string;
   shippedPath?: string | undefined;
+  workspaceRoot?: string | undefined;
 }): string | undefined {
   const previousCounts = countBy(entryKeys(params.previous));
   const proposedCounts = countBy(entryKeys(params.proposed));
-  const shippedKeys = new Set(entryKeys(readShipped(params.shippedPath)));
+  const shippedKeys = new Set(entryKeys(readShipped(params.shippedPath, params.workspaceRoot)));
   for (const [key, count] of proposedCounts) {
     if (count <= (previousCounts.get(key) ?? 0)) continue;
     if (count > 1 || shippedKeys.has(key)) {
       return (
         `docs/CODING_TIPS.md already carries this tip: ` +
+        `"${originalLineOf(params.proposed, key)}" — sharpen that line instead of adding a copy.`
+      );
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The other half of the same rule, for a write to the SHIPPED table in this
+ * repository: a line the project list still holds may not be added here (the
+ * promotion has to delete it first), and a second copy of a line this file
+ * already carries is refused as it is in the project table.
+ */
+export function shippedTipsWriteRefusal(params: {
+  proposed: string;
+  previous: string;
+  projectText: string;
+}): string | undefined {
+  const previousCounts = countBy(entryKeys(params.previous));
+  const proposedCounts = countBy(entryKeys(params.proposed));
+  const projectKeys = new Set(entryKeys(params.projectText));
+  for (const [key, count] of proposedCounts) {
+    if (count <= (previousCounts.get(key) ?? 0)) continue;
+    if (projectKeys.has(key)) {
+      return (
+        `that line is still in ${PROJECT_TIPS_RELATIVE_PATH}: delete it there first, ` +
+        `then add it here: "${originalLineOf(params.proposed, key)}"`
+      );
+    }
+    if (count > 1) {
+      return (
+        `resources/tips/CODING_TIPS.md already carries this tip: ` +
         `"${originalLineOf(params.proposed, key)}" — sharpen that line instead of adding a copy.`
       );
     }
@@ -144,9 +218,25 @@ export function guardTipsWrite(
   shippedPath?: string,
   workspaceRoot?: string,
 ): void {
-  if (!isProjectTipsPath(filePath, workspaceRoot)) return;
-  const refusal = tipsWriteRefusal({ proposed, previous, shippedPath });
-  if (refusal) throw new Error(`${refusal} No changes were written.`);
+  const root = workspaceRoot ?? defaultWorkspaceRoot();
+  if (isProjectTipsPath(filePath, root)) {
+    const refusal = tipsWriteRefusal({
+      proposed,
+      previous,
+      shippedPath,
+      workspaceRoot: root,
+    });
+    if (refusal) throw new Error(`${refusal} No changes were written.`);
+    return;
+  }
+  if (isShippedTipsPath(filePath, root)) {
+    const refusal = shippedTipsWriteRefusal({
+      proposed,
+      previous,
+      projectText: readProjectTips(root),
+    });
+    if (refusal) throw new Error(`${refusal} No changes were written.`);
+  }
 }
 
 /**
@@ -156,7 +246,8 @@ export function guardTipsWrite(
  * so the ping is a crossing of a tenth, not a hit on one: a re-word while the
  * count sits at 10 stays quiet, and a write that jumps 9 to 11 still fires once.
  * Empty for every other file, and for a project table that holds nothing the
- * shipped one does not.
+ * shipped one does not. A write to the SHIPPED table gets no note either: its
+ * only message is a refusal, and the count below is the project table's.
  *
  * Guarded writers are the three file tools. `move_file` onto this path, a shell
  * `>>` or `sed -i`, and `git checkout`/`restore` all change the file unguarded —
@@ -169,8 +260,9 @@ export function tipsWriteNote(
   shippedPath?: string,
   workspaceRoot?: string,
 ): string {
-  if (!isProjectTipsPath(filePath, workspaceRoot) || !fs.existsSync(filePath)) return '';
-  const shippedKeys = new Set(entryKeys(readShipped(shippedPath)));
+  const root = workspaceRoot ?? defaultWorkspaceRoot();
+  if (!isProjectTipsPath(filePath, root) || !fs.existsSync(filePath)) return '';
+  const shippedKeys = new Set(entryKeys(readShipped(shippedPath, root)));
   const unreviewedNow = new Set(
     entryKeys(fs.readFileSync(filePath, 'utf8')).filter((k) => !shippedKeys.has(k)),
   );
