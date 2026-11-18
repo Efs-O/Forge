@@ -47,7 +47,10 @@ function start(
     ...invocation,
   });
   return waitForCliProcessExit(child).then(() => {
-    const line = logged.lines[logged.lines.length - 1] ?? '';
+    // The start line, not merely the last line: a child that exits at once can leave
+    // the Windows job keeper unable to open it, and its `[windows-job] keeper err`
+    // line then lands after the start line under a loaded run.
+    const line = logged.lines.filter((l) => l.startsWith('[cli-agent] start')).at(-1) ?? '';
     if (!line) throw new Error('no start line was logged');
     return line;
   });
