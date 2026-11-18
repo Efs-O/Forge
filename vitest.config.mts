@@ -22,6 +22,11 @@ export default defineConfig({
   },
   test: {
     include: ['test/**/*.test.ts'],
+    // GitHub's runners (`CI` is set there) miss the 5 s default on a different
+    // test each run: three Windows runs of 0.17.199-0.17.200 failed on five
+    // separate timeouts, none of them a hang. Locally the default stays, so a
+    // real hang still shows up fast.
+    ...(process.env['CI'] ? { testTimeout: 20_000, hookTimeout: 20_000 } : {}),
     // Temp-leak guard: per-run and per-file temp folders (docs/plans/TEMP_LEAK_PLAN.md).
     globalSetup: ['test/support/tempGuard.global.ts'],
     setupFiles: ['test/support/tempGuard.setup.ts'],
