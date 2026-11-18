@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.202
+
+Includes 0.17.201, which was never published: a test of the jobs panel failed on GitHub's Linux and macOS machines because of a mistake in the test itself. No change to the app itself.
+
 ## 0.17.201
 
 Includes 0.17.200, which was never published: its test runs on GitHub's Windows and macOS machines failed on tests that ran out of time or counted a refresh they should not have. No change to the app itself.
