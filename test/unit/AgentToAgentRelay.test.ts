@@ -18,7 +18,11 @@ import { readEvents } from '../../src/agentMesh/exchangeLog';
 
 const dirs: string[] = [];
 afterEach(async () => {
-  for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true });
+  // Retries: one steering test leaves a Codex request running on purpose, and it can
+  // still be writing in the bus folder while this removes it (ENOTEMPTY on Linux).
+  for (const dir of dirs.splice(0)) {
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  }
 });
 
 const sender = { kind: 'claude' as const, sessionId: '8e395649-705e-47f9-b499-03a36e908f51' };

@@ -94,7 +94,10 @@ function conversation(rules: string[]): ConversationRuntime {
 }
 
 /** The dispatch, with the shell tool and a write tool wrapped in the real owner-only\n * guard, and the chat-rule answer wired exactly as `AgentLoop` wires it.\n */
-function buildDispatch(rules: string[]) {
+/** `shellPlatform` defaults to the faked `win32` every key-level case uses. The one case
+ *  that runs a shell call through to the wall passes the runner's own OS: built for
+ *  `win32` on Linux or macOS, the tool looks for Git Bash first and refuses with that. */
+function buildDispatch(rules: string[], shellPlatform: NodeJS.Platform = 'win32') {
   const registry = new ToolRegistry();
   // `permissions.exec.shell: bash` keeps the classification deterministic whatever
   // Git Bash this runner happens to have, so the deny-list rows below mean the same
@@ -115,7 +118,7 @@ function buildDispatch(rules: string[]) {
   registry.register(
     makeShellTool({
       home: REAL_HOME,
-      platform: 'win32',
+      platform: shellPlatform,
       getConfig: () => config,
       ownerOnly: () => ownerOnlySetFor({ home: REAL_HOME, workspaceRoot: REAL_WORKSPACE }).roots,
     }),
@@ -337,7 +340,7 @@ describe('the owner-only wall', () => {
   });
 
   it('refuses both calls in the dispatch, with rules present and the queue saying yes', async () => {
-    const harness = buildDispatch(['cross_chat', 'tool:shell', 'tool:write_file']);
+    const harness = buildDispatch(['cross_chat', 'tool:shell', 'tool:write_file'], process.platform);
     const write = await harness.run('write_file', { path: `${REAL_FORGE_DIR}/config.yaml` });
     expect(write).toContain("part of Forge's own files");
     // The shell's own wording for the same wall differs from the file tool's, and
