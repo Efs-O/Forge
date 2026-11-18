@@ -5,15 +5,21 @@
 **Not a second copy of the rules.** General behaviour belongs in `config/templates/builtin/execute.njk` (injected for every user); facts about this machine or repo belong in `FORGE.md` (injected here). A line that reads like advice rather than syntax is in the wrong file. **Delete a line once the code refuses the mistake** — name the gate in the commit message instead.
 
 ## SEARCH
-1. `rg -n "x" .` over the repo → `dist/`, `coverage/`, `.forge/tmp/`, `docs/local/**`, `docs/reports/**` corpora and one-line `test/fixtures/*.json` drown the answer (42 MB once); grep's `--include` filters names, not those dirs. exclude each with `-g`
+1. `web_fetch` on a URL slug I guessed (`huggingface.co/blog/harness-hub/pi-adapted`) → HTTP 404, twice: a post truncates its own link. web_search the exact title, take the real slug, then fetch
+2. `rg -n "x" .` over the repo → `dist/`, `coverage/`, `.forge/tmp/`, `docs/local/**`, `docs/reports/**` corpora and one-line `test/fixtures/*.json` drown the answer (42 MB once); grep's `--include` filters names, not those dirs. exclude each with `-g`
 
 ## RUN
 1. `stop_execution` on a background `npm run ci` → the wrapper dies, the child tree lives and holds the ci-lock, so the next run waits forever: `MSYS_NO_PATHCONV=1 taskkill /PID <top> /T /F`
 2. `npx eslint test/unit/x.test.ts` → "none of those TSConfigs include this file": the lint script is `eslint src webview-ui`, so tests have no typed-lint config. lint `src` only
 3. `npx prettier --check .forge/x.ts` → "All matched files use Prettier code style!" while nothing was checked: prettier matches no file in a dot-folder. copy it into `test/unit/`
-4. `grep_search` with `output_mode:` or `glob:` → refused: unknown argument; the fields are `output` (content/files/count) and `include`. same for `remember` (key/value/description): never invent an argument name from another tool
+4. `grep_search` with `output_mode:`/`glob:`, `shell` with `query:`/`include:`, `remember` with `title:` → refused: unknown argument; real fields are `output`/`include`, `command`, `key`/`value`/`description`. never send one tool's field to another
 5. `grep -P "(^|[^-])word" f` in Git Bash → "grep: -P supports only unibyte and UTF-8 locales"; adding `-E` → "conflicting matchers specified". use `rg -n --no-unicode` with an explicit char class instead
-6. `update_plan` `items` where one entry is typed as a bare string → refused: `"items" entries must be objects, not entry 5 (string)`. every entry is `{"text":…,"status":…}`, none bare
+6. `update_plan` `items` where one entry is typed as a bare string → refused: `"items" entries must be objects, not entry 5 (string)`. every entry is `{"text":…, "status":…}`, none bare
+7. a PowerShell double-quoted string holding `$Config:` → `ParserError: ':' was not followed by a valid variable name character` — a colon after a variable starts a drive-qualified name. write `${Config}:`, or no colon straight after a variable
+8. `python -c "…c['exe'].split('\\\\')…"` under bash → bash eats the backslashes first, so Python sees `'\'` → `SyntaxError: unterminated string literal`. keep backslashes out of a double-quoted `-c` body; print the value whole
+9. `wc -l src/x.ts` in a `shell: pwsh` call → "The term 'wc' is not recognized"; the refusal says rerun with `shell: "bash"`. POSIX text tools (`wc`, `sed`, `grep -o`) exist only in the bash shell
+10. a pwsh log name with a space (`> .forge/jcn- flakes-1.log`) → the later `Select-String -Path ".forge/jcn- flakes-1.log"` says the path does not exist. no spaces in log file names
+11. `git log … 2>/dev/null` in a `shell: pwsh` call → `Out-File: Could not find a part of the path 'N:\dev\null'`. in pwsh write `2>$null`; `/dev/null` only means something in bash
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green and the tree stood still: never run `record-ci-pass.mjs` by hand — the `ci:steps` chain writes it
@@ -26,6 +32,7 @@
 4. an edit that grows a src file past 500 lines → eslint `max-lines` errors, same limit as the tool's warning. check `wc -l <file>` first; move the code into a leaf module
 5. an `edit_file` batch carrying a no-op edit (`old_str` already equals `new_str`) → refused: not found, an earlier edit in that same batch moved the anchor. drop the no-op edit
 6. a delegate method written to fit one line under a `max-lines` cap → prettier expands `{ return x; }` into three lines. keep it one line as an arrow class property: `undo = (): Promise<string[]> => this.actions.undo();`
+7. threading a maybe-undefined value into an optional interface field (`postToJobChat: deps.postToJobChat`) → TS2379 with `exactOptionalPropertyTypes`. declare the field `?: T | undefined` (as `JobDeliveryDeps.summarize`), not just `?: T`
 
 ## TEST
 1. `fs.rmSync` on a killed child's cwd → EPERM is not in `maxRetries`' retried set, so the retries do nothing. use `removeTreeWhenFree` (test/support/removeTempTree.ts): polls until removable
