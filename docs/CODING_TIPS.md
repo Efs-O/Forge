@@ -48,7 +48,8 @@
 8. a fake loopback `http` server closed with `server.close()` alone → the test hangs to its timeout: fetch keeps the connection alive. call `server.closeAllConnections()` first
 9. a new top-level `config.yaml` key → `ModelReferences.test.ts` fails until it is in `NON_MODEL_REF_FIELDS`, and `config.example.yaml` needs a commented block for it
 10. an expected message built from fragments joined with `cond ? 'x' : ''` and no `+` before the next fragment → the assertion compares a mangled string. join every fragment with ` +`, and wrap each conditional in parentheses
-11. a test reading a media job's `job.json` after `status()` answers `done` → the file still holds the `running` record: `finish()` fires the terminal write without awaiting it. poll the file until the field lands
+11. a new method on a class that tests fake with `{ … } as unknown as X` → `TypeError: x.method is not a function` in other files' tests once a caller uses it. `grep -rn "as unknown as X" test scripts` and add the method to every fake in the same commit
+12. a test reading a media job's `job.json` after `status()` answers `done` → the file still holds the `running` record: `finish()` fires the terminal write without awaiting it. poll the file until the field lands
 
 ## PATHS
 1. comparing a tool's resolved path with the workspace root in a test → `fs.realpathSync` keeps the 8.3 short form `EFSOOF~1`, `fs/promises` `realpath` expands it: use the tool's resolver
