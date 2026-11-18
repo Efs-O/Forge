@@ -124,6 +124,12 @@ export interface ToolApprovalMetadata {
    *  that set it. Every one must lie inside the key's folder, or the key is wider
    *  than the card and `approvalKeysFor` refuses it. */
   approvalTargets?: readonly string[];
+  /** True when a refusal of this call must not end the run that made it. The two
+   *  unattended tails both tell the model what to do next — a job is told to stop
+   *  and report `RESULT: failed` — and for a call whose failure costs nothing more
+   *  than the thing it was saving, that tail fails a whole run over one note. With
+   *  this set, the refusal says only that nothing else is blocked. */
+  softDenial?: boolean;
 }
 
 export interface MultimodalToolResult {
@@ -221,6 +227,16 @@ export interface RegisteredTool {
     args: Record<string, unknown>,
     context?: { conversationId?: string },
   ) => ToolApprovalMetadata | undefined | Promise<ToolApprovalMetadata | undefined>;
+  /**
+   * A gate that exists ONLY where nobody is present to answer a card: a job, or a
+   * bus turn a job relayed to a peer chat. Attended chats and Clanker chats see no
+   * card and no refusal at all, because the owner is there and the tool is not
+   * dangerous to them; an unattended run is refused unless policy allows the key,
+   * naming the exact line to add. `toolApprovalEvaluation.ts` applies it only when
+   * `UnattendedConversationRegistry` says so, and a tool's own `approval` gate wins
+   * over it whenever the tool raised one.
+   */
+  unattendedGate?: ToolApprovalMetadata;
   /**
    * The handler's inputs and effects are structurally bounded enough to run
    * without the normal per-call confirmation. This must never be used for a

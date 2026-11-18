@@ -57,6 +57,7 @@ export function answerBeforeCard(
         job: unattended.jobMeta(conversationId) !== undefined,
         allowPath: options.policyAllowPath,
         ...(options.policyApprovalKey ? { approvalKey: options.policyApprovalKey } : {}),
+        ...(options.softDenial ? { soft: true } : {}),
         ...unattendedFlaggedExitDetails(options),
       }),
     );

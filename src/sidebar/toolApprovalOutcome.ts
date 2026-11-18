@@ -120,6 +120,10 @@ export class ToolApprovalPolicyDenied extends ToolApprovalRefusal {
        *  only says "no" sends the model back at the same wall; this is what
        *  changes its next move. */
       alternative?: string;
+      /** True for a gate whose refusal the run is meant to carry on past. The two
+       *  tails below both end by naming the next step, and for this one the next
+       *  step is the run itself: a memory that did not save is not a failed job. */
+      soft?: boolean;
     } = {},
   ) {
     const job = run.job ?? true;
@@ -134,15 +138,17 @@ export class ToolApprovalPolicyDenied extends ToolApprovalRefusal {
           : '',
         run.why ? asSentence(run.why) : '',
         run.alternative ? `Use this instead: ${asSentence(run.alternative)}` : '',
-        job
-          ? 'Stop and report RESULT: failed naming the action you needed.'
-          : 'Nobody is present to approve it, so do not retry it. ' +
-            // The recycle-bin hint is delete_file's alone: on any other tool it
-            // points the model at a to_trash argument that tool does not take.
-            (toolName === 'delete_file'
-              ? 'Recycle-bin deletes are allowed; only a permanent delete (to_trash: false) is dangerous. '
-              : '') +
-            'Continue with safe steps or report the step as not done.',
+        run.soft
+          ? 'This refusal ends nothing else: continue the run.'
+          : job
+            ? 'Stop and report RESULT: failed naming the action you needed.'
+            : 'Nobody is present to approve it, so do not retry it. ' +
+              // The recycle-bin hint is delete_file's alone: on any other tool it
+              // points the model at a to_trash argument that tool does not take.
+              (toolName === 'delete_file'
+                ? 'Recycle-bin deletes are allowed; only a permanent delete (to_trash: false) is dangerous. '
+                : '') +
+              'Continue with safe steps or report the step as not done.',
       ]
         .filter((part) => part !== '')
         .join(' '),
@@ -230,6 +236,10 @@ export interface ToolApprovalCallOptions {
   /** Set only for a keyed unattended call that policy did not allow. */
   policyAllowPath?: string;
   policyApprovalKey?: string;
+  /** The gate says a refusal of this call must not end the run. From
+   *  `ToolApprovalMetadata.softDenial`, carried so the refusal can say what the run
+   *  does instead of stopping: a job's tail would fail the whole run over one note. */
+  softDenial?: boolean;
   /** A box the caller hands in and reads back. The queue writes the owner's wait
    *  into it when it answers this call from a card, so the wait can reach the
    *  tool result while the outcome stays the plain `'approved'` string every

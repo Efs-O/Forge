@@ -61,5 +61,6 @@ export function approvalCallOptions(
     options.policyAllowPath = chatRule.allowPath;
     options.policyApprovalKey = chatRule.key;
   }
+  if (metadata?.softDenial === true) options.softDenial = true;
   return options;
 }

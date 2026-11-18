@@ -92,6 +92,20 @@ export function makeRememberTool(state: vscode.Memento): RegisteredTool {
       },
     },
     permission: 'read',
+    /** A memory is the one write that never leaves the machine yet changes every
+     *  later chat: every new chat in this workspace starts with the stored keys, so
+     *  a note a job wrote from a page it read is loaded by all of them, with nobody
+     *  to check it. The owner's answer is a refusal that names the policy line, not
+     *  a card nobody is there to click — and the run carries on and reports the
+     *  memory it wanted instead. Attended chats and Clanker chats are unchanged. */
+    unattendedGate: {
+      detail: 'Store a workspace memory that every later chat in this workspace will load.',
+      cardReason: 'The memory was NOT saved.',
+      declineHint:
+        'carry on without it, and list the memory you wanted to save (its key and its text) ' +
+        'in your final report',
+      softDenial: true,
+    },
     handler: async (args) => {
       const key = memoryKey(args, true);
       const value = args['value'];

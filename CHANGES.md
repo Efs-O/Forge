@@ -8,6 +8,8 @@
 
 **Two tool-call mistakes stopped costing a round.** `read_tool_result` now says "use exactly one mode" and puts the 1-to-10 limit for `max_matches` in that argument's own description, where the model reads it before guessing a bigger number. And a boolean written as a quoted string with spaces around it (`background: "TRUE "`) runs as the boolean it means, instead of being refused; a string that is not `true` or `false` is still refused.
 
+**`remember` is refused in a run nobody is watching.** A memory is the one write that never leaves the machine yet changes every later chat: each new chat in the workspace starts with the stored keys. A job or a bus turn that had read a page could therefore save a note that every future turn loads, with nobody to check it. Such a run is now refused, naming the exact `policy.yaml` line to add (`tool:remember` under `approvals.jobs.<jobId>.allow` or `approvals.unattended_bus.allow`), saying the memory was NOT saved, and carrying on — the refusal does not fail the run. Chats with a person in the tab, and Clanker chats, save memories exactly as before, with no card.
+
 ## 0.17.194
 
 **A laptop can generate and upscale images on its desktop.**

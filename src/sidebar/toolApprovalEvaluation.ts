@@ -12,6 +12,7 @@ import {
 } from '../tools/ownerPathsOpen';
 import { normalizePathForMatch } from '../tools/secretPaths';
 import { decideUntrustedExit, type UntrustedExitInput } from './untrustedExitPolicy';
+import { unattendedConversations } from './unattendedConversations';
 import type { ToolDispatchRoundContext } from './toolDispatchTypes';
 
 export type CachedToolApproval =
@@ -99,7 +100,18 @@ export function evaluateToolApproval(
   const mutationPaths = rawMutationPaths.map((filePath) => resolveWorkspacePath(filePath));
   // Read from the resolved paths: a skill file spelled `~/.forge/skills/...` or
   // relative to the workspace is the same write the tool is about to make.
-  const approvalMetadata = skillWriteGate(cached.metadata, mutationPaths);
+  const approvalMetadata = skillWriteGate(
+    // A tool that declares `unattendedGate` has no card anywhere else: the gate is
+    // for a run nobody is in, and the tool's own gate answers that call first when
+    // it raised one. An attended chat sees no metadata and no card, exactly as before.
+    cached.metadata ??
+      (reg.unattendedGate !== undefined &&
+      context.convId !== undefined &&
+      unattendedConversations.has(context.convId)
+        ? reg.unattendedGate
+        : undefined),
+    mutationPaths,
+  );
   const isDangerous =
     approvalMetadata?.dangerous ?? (tc.function.name === 'delete_file' && isDangerousDelete(args));
   const outsideMutationPaths = outsideWorkspaceMutationPaths(mutationPaths);
