@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+**A job's report now shows in its own chat as well as on Telegram.** A scheduled job reported to Telegram and to a toast, and nowhere else, so the window the owner reads showed nothing — a nightly job that switched a binary and rolled itself back looked like a job that never ran. Each report is now drawn in the job's own chat too, in the same words, when that chat is open in the window that runs the scheduler. It opens no model turn and no new chat, and says nothing at all for a job whose chat has never been opened.
+
 **Job and delegation task caps raised to 8000 characters.** A scheduled job's task text and an `ask_local_agent` task were both capped at 4000 characters; a job instruction that grew past the cap (like the daily scan's step list) could no longer be saved. The prompt each one carries per run roughly doubles at worst; no other 4000-sized limit in the tree is touched.
 
 ## 0.17.194

@@ -44,6 +44,8 @@ export interface JobSchedulerDeps {
   outboxDir?: string;
   /** Show a VS Code toast in the scheduler window (no Telegram needed). */
   notifyLocal?: (text: string) => void;
+  /** Show each report in the job's own chat too, as a notice row, when it is open here. */
+  postToJobChat?: (conversationId: string, text: string) => void;
   /** Injectable clock for tests. Defaults to the real clock. */
   now?: () => Date;
   /** The reason a turn/request/approval is outstanding, or undefined when idle. */
@@ -134,6 +136,7 @@ export class JobScheduler {
       store: this.store,
       outboxDir: this.outboxDir,
       notifyLocal: this.notifyLocal,
+      postToJobChat: deps.postToJobChat,
       busy: this.busy,
       summarize: this.summarize,
       now: () => this.now().getTime(),

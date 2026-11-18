@@ -105,6 +105,10 @@ export function setupJobs(
       instanceId,
       leaseDirectory: store.root,
       notifyLocal: (message) => void vscode.window.showInformationMessage(message),
+      // Every report also lands in the job's own chat as a notice row, so the
+      // window the owner reads shows what their phone showed them.
+      postToJobChat: (conversationId, text) =>
+        sidebar.getHostFacade().showConversationNotice(conversationId, text),
       busy: () => {
         // A turn streaming anywhere means the GPU is busy: a summarize must not
         // compete with a live chat, and sleep_if_idle must not suspend a box the

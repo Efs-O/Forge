@@ -27,6 +27,11 @@ export interface JobDeliveryDeps {
   outboxDir: string;
   /** Show a VS Code toast in the scheduler window (no Telegram needed). */
   notifyLocal: (text: string) => void;
+  /**
+   * Show the same fact in the job's own chat as a notice row, when that chat is
+   * open in this window. Optional: without it a report is toast + Telegram only.
+   */
+  postToJobChat?: ((conversationId: string, text: string) => void) | undefined;
   /** The reason a turn is outstanding, or undefined when idle. */
   busy: () => string | undefined;
   /** Run a `summarize` prompt through the model (no tools). Returns the reply. */
@@ -47,15 +52,37 @@ export class JobDelivery {
   constructor(private readonly deps: JobDeliveryDeps) {}
 
   /**
-   * Deliver a user-facing fact for a job: a toast in the scheduler window (no
-   * Telegram needed) and a coalesced outbox file for the Telegram lease holder
-   * to deliver to the owner chat (D2). The outbox write is the durable record;
-   * the toast is the local half when no Telegram window is around.
+   * Deliver a user-facing fact for a job: a toast in the scheduler window, the
+   * same fact in the job's own chat when that chat is open here, and a
+   * coalesced outbox file for the Telegram lease holder to deliver to the owner
+   * chat (D2). The outbox write is the durable record; the toast and the chat
+   * notice are the local halves, and they go first so a Telegram failure still
+   * leaves this window told.
    */
   async deliver(job: Job, text: string): Promise<void> {
     const message = `Job "${job.name}": ${text}`;
     this.deps.notifyLocal(message);
+    await this.postToJobChat(job.id, message);
     await writeOutboxItem(this.deps.outboxDir, job.id, job.name, message, this.deps.now());
+  }
+
+  /**
+   * The chat half of {@link deliver}: the report as a notice row in the
+   * conversation `state.conversation_id` names. Nothing is opened or created —
+   * a job that has never had its discuss chat has no chat to show it in, and a
+   * chat open only in another window is not this window's to draw. A failure is
+   * logged, never thrown: the toast and the outbox already carry the fact.
+   */
+  private async postToJobChat(jobId: string, message: string): Promise<void> {
+    const post = this.deps.postToJobChat;
+    if (!post) return;
+    try {
+      const conversationId = (await this.deps.store.load(jobId))?.state.conversation_id;
+      if (!conversationId) return;
+      await post(conversationId, message);
+    } catch (error) {
+      getLogger().warn(`[JobDelivery] report not shown in the job's chat: ${describeError(error)}`);
+    }
   }
 
   /**

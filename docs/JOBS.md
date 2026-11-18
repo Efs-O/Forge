@@ -272,8 +272,10 @@ that is a finding, not a setup mistake (unless noted).
 6. Trigger a change (push a release / bump the watched thing).
 7. **Expect:** within one interval, a run row is appended to
    `~/.forge/jobs/runs/<id>.jsonl` with `outcome: "ok"`, `changed: true`, and a
-   notification is delivered (a VS Code toast in the scheduler window, and — if
-   Telegram is bound — a message in the owner chat via the outbox).
+   notification is delivered (a VS Code toast in the scheduler window, the same
+   words in the job's own chat when that chat is open in the window that runs
+   the scheduler, and — if Telegram is bound — a message in the owner chat via
+   the outbox).
 8. **Expect:** the next run with no new change reports `changed: false`.
 
 ### C. Backoff on repeated failure
