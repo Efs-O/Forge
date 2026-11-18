@@ -705,6 +705,7 @@ overlaps with an existing owner, extend the owner instead.
 | Laptop→desktop media HTTP calls (capabilities, job submit/poll/cancel, file download) | `src/tools/remoteMedia/remoteMediaClient.ts` |
 | Laptop `generate_image` / `upscale_image` aimed at the desktop (cache, approval, path moves, saves) | `src/tools/remoteMedia/remoteMediaTools.ts` |
 | Laptop-side path handling: upload names made unique per job, output-vs-reference refusal, where a result lands | `src/tools/remoteMedia/remoteMediaInputs.ts` |
+| Remote media result text: desktop paths reduced to bare names on the desktop, names rewritten to laptop paths on the laptop | `src/media/remoteMediaResultText.ts` |
 | Media half of Connect to my desktop and Check connection (probe, config additions, check line) | `src/vscode/desktopConnectMedia.ts` |
 | `generate_video` tool                       | `src/tools/media/generateVideoTool.ts`  |
 | `generate_music` tool                       | `src/tools/media/generateMusicTool.ts`  |
