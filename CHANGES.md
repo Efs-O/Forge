@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.197
+
+**A cut-off tool call gets advice for its own tool.** When a tool call was cut off partway through its arguments, the model was told to keep its `content` argument under a limit and finish with `write_file` in append mode, whatever the tool was. A cut-off `render_html_to_image` call got that advice, for an argument it does not have. Now only `write_file` gets the chunking advice and `edit_file` keeps its own. Any other tool is told to send its call again, complete, within the stated character limit.
+
 ## 0.17.196
 
 **A laptop's images come back with laptop paths.** An image or upscale the desktop rendered for a laptop came back naming the desktop's own folder, a path the laptop cannot open, which also showed the desktop's user name, and it told the model to view that path. The result now names the file where it was saved on the laptop, with forward slashes. A backend the desktop does not serve is refused with "Not run:" and the setting that allows it, and the refusal no longer repeats the prompt.
