@@ -139,3 +139,7 @@
 42. `desktop_focus_window` · a window under a dialog → `is disabled because Open (HWND N) is open over it`; `focus lock` → ask the user to click it once. focus or close the dialog first
 43. `apply_code_action` · a refactor or command action → `this action is not a workspace-edit-only action`: only plain-edit actions run. make the change with `edit_file`
 44. `ask_agent` · a `target_id` from an earlier `list_agent_targets` → `CLI target is unknown or expired`: ids expire. call `list_agent_targets` again, then send
+45. `desktop_drag` · retried with the same `capture_id` after `foreground window is not the approved target` → every drag refused alike. `desktop_focus_window` the target, `desktop_capture`, then drag with the new id
+46. `desktop_press` · after focus moved to another window → `target lost focus (foreground is '<window>')`. call `desktop_capture` to re-capture and re-approve, then press again
+47. `desktop_press` · `consequential: true` → `unknown argument "consequential"`: it takes only `keys`. send `{"keys": ["enter"]}` alone
+48. `shell` · a script given a file under `~/.forge/` (a screenshot) → `refuses to change Forge's own files`, even when it only reads it. sample the live screen region instead
