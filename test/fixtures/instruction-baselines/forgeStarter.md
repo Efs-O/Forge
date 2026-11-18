@@ -25,7 +25,7 @@ Fill in the blanks below; delete any rule that does not fit this project.
 - Extend the file that already owns a concern instead of adding a sibling that half-overlaps it, and remove dead code only after checking every reference to it.
 
 ## Mistakes you make
-- Any call of yours refused or errored: add one line to `docs/CODING_TIPS.md` before your next call — `what I wrote → what happened → what to write instead`, with the error's first words copied. Forge injects that table into every prompt, so there is nothing to open later. Search it first and sharpen a line that is already there instead of adding a second. One line, at most 300 characters, under a `## READ`/`SEARCH`/`EDIT`/`WRITE`/`RUN`/`GIT`/`TEST`/`PATHS`/`DELEGATE`/`FORENSICS` heading.
+- Any call of yours refused or errored: add one line to `docs/CODING_TIPS.md` before your next call — `what I wrote → what happened → what to write instead`, with the error's first words copied. Forge injects that table into every prompt, so there is nothing to open later. Search it first and sharpen a line that is already there instead of adding a second. One line, at most 300 characters, under a `## READ`/`SEARCH`/`EDIT`/`WRITE`/`RUN`/`GIT`/`TEST`/`PATHS`/`DELEGATE`/`FORENSICS` heading; a mistake with a Forge tool goes under `## FORGE_TOOLS`, starting with the tool's name and ` · ` (`` 1. `read_file` · … ``).
 - Before the final answer, reread this turn's tool results and record what is still unrecorded: a wrong assumption, a search that answered nothing, an error you recovered from. Recovering is not a pass.
 
 ## Tool arguments that are refused (each refusal costs a round)

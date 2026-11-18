@@ -31,6 +31,7 @@ const read = (rel: string): string => fs.readFileSync(path.join(root, rel), 'utf
 const PROMPT = 'config/templates/builtin/execute.njk';
 const STARTER = 'resources/instructions/FORGE.starter.md';
 const TIPS = 'docs/CODING_TIPS.md';
+const SHIPPED = 'resources/tips/CODING_TIPS.md';
 const PROJECT = 'FORGE.md';
 
 /** Above this, two claims are the same rule said twice. Worst real pair today: 0.250. */
@@ -114,6 +115,7 @@ function worstPairs(left: string[], right: string[], gate: number): Pair[] {
 const prompt = claims(read(PROMPT));
 const starter = claims(starterContent());
 const tips = claims(read(TIPS));
+const shipped = claims(read(SHIPPED));
 const project = projectProse();
 const projectClaims = project ? claims(project) : [];
 
@@ -122,10 +124,14 @@ const coInjected: [string, string[], string, string[]][] = [
   [PROMPT, prompt, STARTER, starter],
   [PROMPT, prompt, TIPS, tips],
   [STARTER, starter, TIPS, tips],
+  [PROMPT, prompt, SHIPPED, shipped],
+  [STARTER, starter, SHIPPED, shipped],
+  [SHIPPED, shipped, TIPS, tips],
 ];
 if (project !== undefined) {
   coInjected.push([PROMPT, prompt, PROJECT, projectClaims]);
   coInjected.push([TIPS, tips, PROJECT, projectClaims]);
+  coInjected.push([SHIPPED, shipped, PROJECT, projectClaims]);
   // STARTER_CONTENT is never injected: the loader writes it to FORGE.md when that file
   // is missing (`writeFileSync(..., flag: 'wx')`), so it IS the project file rather than
   // a second source. Comparing the two scores a file against its own seed.
@@ -165,9 +171,16 @@ describe('injected instruction sources do not say the same rule twice', () => {
 
   it('has no near-duplicate rows inside the tips table', () => {
     const offenders: string[] = [];
-    for (let i = 0; i < tips.length; i++) {
-      for (const { score, a, b } of worstPairs([tips[i]], tips.slice(i + 1), TIPS_INTERNAL_GATE)) {
-        offenders.push(`${score.toFixed(2)}\n  A: ${a.slice(0, 110)}\n  B: ${b.slice(0, 110)}`);
+    for (const [name, rows] of [
+      [TIPS, tips],
+      [SHIPPED, shipped],
+    ] as const) {
+      for (let i = 0; i < rows.length; i++) {
+        for (const { score, a, b } of worstPairs([rows[i]], rows.slice(i + 1), TIPS_INTERNAL_GATE)) {
+          offenders.push(
+            `${score.toFixed(2)} ${name}\n  A: ${a.slice(0, 110)}\n  B: ${b.slice(0, 110)}`,
+          );
+        }
       }
     }
     expect(
