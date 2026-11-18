@@ -139,9 +139,12 @@ const latestOf = (id: string): JobPanelMeta | undefined =>
 class SlowFirstReadStore extends JobStore {
   private slow = true;
   override async loadAll(): Promise<JobFile[]> {
+    // Decided at call time: read A calls first, but its listing can finish
+    // after B's (seen on Linux), and then B was the slow, empty one.
+    const first = this.slow;
+    this.slow = false;
     const listed = await super.loadAll();
-    if (this.slow) {
-      this.slow = false;
+    if (first) {
       await sleep(120);
       // The stale read lists nothing, so a snapshot of it is unmistakable.
       return [];
