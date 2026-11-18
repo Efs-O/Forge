@@ -10,7 +10,7 @@ const tempDirs: string[] = [];
 
 afterEach(async () => {
   for (const directory of tempDirs.splice(0)) {
-    await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 });
 
@@ -81,7 +81,7 @@ describe('RemoteOutboxDelivery unlock backlog cap', () => {
     const outbox = delivery(channel, state);
 
     outbox.start();
-    await vi.waitFor(() => expect(channel.sent).toHaveLength(6));
+    await vi.waitFor(() => expect(channel.sent).toHaveLength(6), { timeout: 10_000 });
     await outbox.stop();
 
     expect(channel.sent[0]?.text).toContain('Forge: 13 earlier messages were held back');

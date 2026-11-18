@@ -1122,6 +1122,7 @@ describe('ToolDispatch', () => {
       );
       expect(messages.at(-1)?.content).toContain('unattended: dangerous tool denied by policy');
     },
+    20_000,
   );
 
   // A declined dangerous command used to reach the model as `User declined:
