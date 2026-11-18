@@ -61,3 +61,4 @@
 ## FORENSICS
 1. a print job parked in `JobStatus Printing` with `PrinterStatus 4` for minutes → the driver is waiting in its own preview window (Canon IJ Preview: Start Printing). screenshot the screen; the queue proves nothing
 2. `Get-PrintQueue`/`Get-PrintJob` → not recognized here (no PrintQueue module). job state: `Get-CimInstance Win32_PrintJob`; printer state: `Win32_Printer` `PrinterStatus` (3=idle 4=processing)
+3. a session-log call with arguments `{}` whose result says "was cut off after 47 bytes of arguments" → not an empty call by the model: Forge logs `{}` in place of the cut-off arguments, which are not kept. read the byte count, not the arguments
