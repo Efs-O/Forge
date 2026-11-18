@@ -40,7 +40,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Same cap as ci.yml's windows-latest job: the 4-CPU runner misses
+      # timing-bound deadlines at vitest's default 3 workers. Without it the
+      # 0.17.199 publish failed twice on a tree CI had passed.
       - name: Quality gates
+        env:
+          VITEST_MAX_WORKERS: '2'
         run: npm run ci
 
       # The release is the artifact the canonical `npm run package` gate built
