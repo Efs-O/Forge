@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.199
+
+Includes 0.17.198, which was never published: its Linux and macOS test runs failed in two more tests that assumed Windows. No change to the app itself.
+
 ## 0.17.198
 
 **The test suite passes on Linux and macOS.** No change to the app itself. Many tests assumed Windows: drive-letter paths, case-insensitive file names, `icacls`, Job Objects, Git Bash. They failed on clean Linux and macOS machines while passing on the owner's PC. Paths in those tests are now built for whichever system runs them, and tests of Windows-only behaviour run on Windows only. A few timing checks with millisecond margins, which failed on slow machines, now use seconds.
