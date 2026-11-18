@@ -1,5 +1,9 @@
 # Forge — Recent Changes
 
+## 0.17.198
+
+**The test suite passes on Linux and macOS.** No change to the app itself. Many tests assumed Windows: drive-letter paths, case-insensitive file names, `icacls`, Job Objects, Git Bash. They failed on clean Linux and macOS machines while passing on the owner's PC. Paths in those tests are now built for whichever system runs them, and tests of Windows-only behaviour run on Windows only. A few timing checks with millisecond margins, which failed on slow machines, now use seconds.
+
 ## 0.17.197
 
 **A cut-off tool call gets advice for its own tool.** When a tool call was cut off partway through its arguments, the model was told to keep its `content` argument under a limit and finish with `write_file` in append mode, whatever the tool was. A cut-off `render_html_to_image` call got that advice, for an argument it does not have. Now only `write_file` gets the chunking advice and `edit_file` keeps its own. Any other tool is told to send its call again, complete, within the stated character limit.
