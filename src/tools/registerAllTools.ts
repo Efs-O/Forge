@@ -462,6 +462,11 @@ export function registerAllTools(
   // Registered last, and self-suppressing until a lazy group is actually
   // bridged in: definitions() follows insertion order, so appending here
   // leaves the native prefix above byte-identical for the KV cache.
-  registry.register(makeLoadToolGroupTool());
+  registry.register(
+    makeLoadToolGroupTool((name) => {
+      const tool = registry.get(name);
+      return tool !== undefined && (tool.advertise === undefined || tool.advertise());
+    }),
+  );
   return sdServers;
 }

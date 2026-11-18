@@ -53,11 +53,15 @@ afterEach(async () => {
 });
 
 describe('render_html_to_image input validation', () => {
-  it('refuses both html and path, naming the absence of a fallback', async () => {
+  it('refuses both html and path, saying what path means', async () => {
     const { tool } = rig();
-    await expect(
-      tool.handler({ html: '<p>x</p>', path: 'poster.html' }, context()),
-    ).rejects.toThrow(/exactly one of html or path, not both/);
+    const error = await tool
+      .handler({ html: '<p>x</p>', path: 'poster.html' }, context())
+      .then(() => undefined)
+      .catch((e: unknown) => e as Error);
+    expect(error?.message).toBe(
+      'render_html_to_image: give exactly one of html or path, not both. path is an HTML file to render, not where the PNG is saved: with html, leave path out. The tool picks the PNG\'s name and the result names it; move it afterwards if it belongs elsewhere.',
+    );
   });
 
   it('refuses when neither is given', async () => {

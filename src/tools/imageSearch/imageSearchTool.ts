@@ -122,7 +122,10 @@ async function runImageSearch(
   args: Record<string, unknown>,
   context: ToolHandlerContext | undefined,
 ): Promise<string> {
-  if (!config) throw new Error('image_search: no image_search block in config.yaml.');
+  if (!config)
+    throw new Error(
+      'image_search: not set up on this machine: config.yaml has no image_search block (a reverse image search through SerpApi; see config.example.yaml for the block and the SerpApi key it needs). Do not retry; tell the user it needs setting up.',
+    );
   // Yandex is the default engine: it answers in ~5 s against Lens's 18-52 s, and
   // it kept answering on 2026-10-03 when Lens returned HTTP 200 with zero
   // matches. Lens stays reachable for identification and product queries.

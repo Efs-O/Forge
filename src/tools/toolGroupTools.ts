@@ -78,8 +78,17 @@ function buildDefinition(groups?: string[]): ToolDefinition {
   };
 }
 
-/** Demand-load entry point. Real schemas arrive through the next normal tools array. */
-export function makeLoadToolGroupTool(): RegisteredTool {
+/**
+ * Demand-load entry point. Real schemas arrive through the next normal tools
+ * array. `isAdvertised` lets the caller drop members the next request will not
+ * actually offer — a tool whose `advertise()` returns false, such as
+ * `image_search` on a machine with no `image_search` config block. With no
+ * argument, every member counts as advertised, so callers that do not care keep
+ * the old behaviour.
+ */
+export function makeLoadToolGroupTool(
+  isAdvertised?: (toolName: string) => boolean,
+): RegisteredTool {
   return {
     // Valid even before any native tool or MCP server has registered. The
     // runtime description supplies the currently available enum at advertise time.
@@ -125,12 +134,28 @@ export function makeLoadToolGroupTool(): RegisteredTool {
             'Answer from the workspace and the conversation instead.',
         );
       }
+      // `advertise` decides which schemas the next request really offers, so the
+      // reply must not name a member that will not arrive: on a laptop with no
+      // `image_search` block the load text listed it and the model called it.
+      const isMemberAdvertised = isAdvertised ?? (() => true);
+      const members = lazyGroupMembers(group);
+      const offered = members.filter(isMemberAdvertised);
+      const notOffered = members.filter((name) => !isMemberAdvertised(name));
+      if (offered.length === 0) {
+        throw new Error(
+          `load_tool_group: group "${group}" is unavailable because none of its tools ` +
+            'is set up in this window; do not retry. ' +
+            'Answer from the workspace and the conversation instead.',
+        );
+      }
       activateLazyGroup(conversationId, group);
       // The description no longer lists members, so the load says what arrived.
-      return (
-        `${group} tools enabled for this conversation: ${lazyGroupMembers(group).join(', ')}. ` +
-        'They are listed on the next step.'
-      );
+      const enabled =
+        `${group} tools enabled for this conversation: ${offered.join(', ')}. ` +
+        'They are listed on the next step.';
+      return notOffered.length === 0
+        ? enabled
+        : `${enabled} Not set up in this window, so not listed: ${notOffered.join(', ')}.`;
     },
   };
 }

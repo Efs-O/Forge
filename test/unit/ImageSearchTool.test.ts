@@ -204,6 +204,17 @@ describe('image_search tool', () => {
     expect(makeTool({ cfg: undefined }).tool.advertise?.()).toBe(false);
   });
 
+  it('refuses when config.yaml has no image_search block, naming the way forward', async () => {
+    const { tool } = makeTool({ cfg: undefined });
+    const error = await tool
+      .handler({}, { beforeMutate: () => undefined, conversationMessages: messages })
+      .then(() => undefined)
+      .catch((e: unknown) => e as Error);
+    expect(error?.message).toBe(
+      'image_search: not set up on this machine: config.yaml has no image_search block (a reverse image search through SerpApi; see config.example.yaml for the block and the SerpApi key it needs). Do not retry; tell the user it needs setting up.',
+    );
+  });
+
   it('uploads the attachment, searches, and returns trimmed text', async () => {
     const { tool, upload, search, readFile } = makeTool();
     const result = await tool.handler(

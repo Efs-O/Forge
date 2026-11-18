@@ -227,7 +227,7 @@ async function runRender(
   // meant `path` render the stale `html` it left in the call.
   if (hasHtml && hasPath) {
     throw new Error(
-      'render_html_to_image: give exactly one of html or path, not both — there is no fallback between them.',
+      "render_html_to_image: give exactly one of html or path, not both. path is an HTML file to render, not where the PNG is saved: with html, leave path out. The tool picks the PNG's name and the result names it; move it afterwards if it belongs elsewhere.",
     );
   }
   if (!hasHtml && !hasPath) {
