@@ -145,4 +145,4 @@
 48. `shell` · a script given a file under `~/.forge/` (a screenshot) → `refuses to change Forge's own files`, even when it only reads it. sample the live screen region instead
 49. `desktop_click` · a stale `capture_id` once the app lost focus → refused again on each retry. re-focus it (`desktop_focus_window`), capture anew, click by that id
 50. `find_files` · `include_ignored: "True"` → `"include_ignored" must be a JSON boolean, not a string`. send the bare `true`, no quotes
-51. `desktop_capture` · a window title after the app renamed it (`Untitled*` once edited) → `window not found`; a bare `Paint 3D` matches a different window of that name. take the HWND from `desktop_windows` and `desktop_focus_window` with `window_id`
+51. `desktop_capture` · a window title from before the app renamed it (`Untitled*` once edited) → `window not found`; a bare `Paint 3D` matches another window of that name. `desktop_focus_window` with the `window_id` from `desktop_windows`, then capture with the exact title its reply prints
