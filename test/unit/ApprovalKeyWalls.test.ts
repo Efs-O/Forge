@@ -11,6 +11,7 @@
  * phase that let a key, Clanker or a policy rule reach past a wall has to change
  * this file to stay green, which is the point of putting the row in the ledger.
  */
+import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -341,14 +342,24 @@ describe('the owner-only wall', () => {
     expect(write).toContain("part of Forge's own files");
     // The shell's own wording for the same wall differs from the file tool's, and
     // both name the folder: `refuses to change Forge's own files`.
-    const del = await harness.run('shell', { command: 'rm -rf ~/.forge/jobs', cwd: WORKSPACE });
-    expect(del).toContain("Forge's own files");
-    expect(del).toContain('~/.forge/jobs');
-    // The wall's own folder, not a folder inside it: the delete that would take
-    // every guard with it, and the one an ancestor rule used to be able to answer.
-    const whole = await harness.run('shell', { command: 'rm -rf ~/.forge', cwd: WORKSPACE });
-    expect(whole).toMatch(/^Error: shell: /u);
-    expect(whole).toContain("Forge's own files");
+    // A cwd that exists on every runner: `N:/ws/project` is a relative folder name on
+    // Linux and macOS, and the shell refuses a missing cwd before the wall is reached.
+    fs.mkdirSync(REAL_WORKSPACE, { recursive: true });
+    try {
+      const del = await harness.run('shell', {
+        command: 'rm -rf ~/.forge/jobs',
+        cwd: REAL_WORKSPACE,
+      });
+      expect(del).toContain("Forge's own files");
+      expect(del).toContain('~/.forge/jobs');
+      // The wall's own folder, not a folder inside it: the delete that would take
+      // every guard with it, and the one an ancestor rule used to be able to answer.
+      const whole = await harness.run('shell', { command: 'rm -rf ~/.forge', cwd: REAL_WORKSPACE });
+      expect(whole).toMatch(/^Error: shell: /u);
+      expect(whole).toContain("Forge's own files");
+    } finally {
+      fs.rmSync(REAL_WORKSPACE, { recursive: true, force: true });
+    }
     expect(harness.requestApproval).not.toHaveBeenCalled();
     expect(harness.rows).toHaveLength(0);
   });

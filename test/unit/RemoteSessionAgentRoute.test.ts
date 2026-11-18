@@ -56,7 +56,7 @@ describe('agent bus remote session routes', () => {
       await fs.writeFile(question, 'Which file?');
       const output = await new Promise<string>((resolve, reject) =>
         execFile(TEST_BASH, [path.join(busRoot, 'forge.sh'), 'remote-ask', 'codex', id, question],
-          { encoding: 'utf8', timeout: 10_000, windowsHide: true, env: { ...process.env, CODEX_SESSION_ID: id } },
+          { encoding: 'utf8', timeout: 10_000, windowsHide: true, env: { ...process.env, CODEX_SESSION_ID: id, TMPDIR: os.tmpdir().replace(/\\/gu, '/') } },
           (error, stdout, stderr) => error ? reject(new Error(stderr || error.message)) : resolve(stdout)),
       );
       expect(output).toBe('src/main.ts');

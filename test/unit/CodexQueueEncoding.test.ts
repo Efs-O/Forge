@@ -56,7 +56,8 @@ describe.runIf(process.platform === 'win32')('codex queue message delivery', () 
       '--message',
       message,
     ]);
-  });
+    // A cmd.exe shim starting node took over 5 s on a loaded GitHub Windows runner.
+  }, 20_000);
 
   it('refuses before spawning when the shim can only run through cmd.exe', async () => {
     const shim = path.join(dir, 'codex.bat');
