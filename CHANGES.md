@@ -1,6 +1,6 @@
 # Forge — Recent Changes
 
-## Unreleased
+## 0.17.195
 
 **A job's report now shows in its own chat as well as on Telegram.** A scheduled job reported to Telegram and to a toast, and nowhere else, so the window the owner reads showed nothing — a nightly job that switched a binary and rolled itself back looked like a job that never ran. Each report is now drawn in the job's own chat too, in the same words, when that chat is open in the window that runs the scheduler. It opens no model turn and no new chat, and says nothing at all for a job whose chat has never been opened.
 
@@ -9,6 +9,8 @@
 **Two tool-call mistakes stopped costing a round.** `read_tool_result` now says "use exactly one mode" and puts the 1-to-10 limit for `max_matches` in that argument's own description, where the model reads it before guessing a bigger number. And a boolean written as a quoted string with spaces around it (`background: "TRUE "`) runs as the boolean it means, instead of being refused; a string that is not `true` or `false` is still refused.
 
 **`remember` is refused in a run nobody is watching.** A memory is the one write that never leaves the machine yet changes every later chat: each new chat in the workspace starts with the stored keys. A job or a bus turn that had read a page could therefore save a note that every future turn loads, with nobody to check it. Such a run is now refused, naming the exact `policy.yaml` line to add (`tool:remember` under `approvals.jobs.<jobId>.allow` or `approvals.unattended_bus.allow`), saying the memory was NOT saved, and carrying on — the refusal does not fail the run. Chats with a person in the tab, and Clanker chats, save memories exactly as before, with no card.
+
+**Answers are sized to the question, and say what was tested.** The rules every Forge agent follows when it reports back changed: match the answer's length and depth to the question, allow more than the usual twelve lines when the request genuinely needs them, and state plainly what was measured or tested versus what was only read or inferred. Prompt text only — nothing else in the app changed.
 
 ## 0.17.194
 
