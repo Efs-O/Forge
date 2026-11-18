@@ -143,6 +143,8 @@ class SlowFirstReadStore extends JobStore {
     if (this.slow) {
       this.slow = false;
       await sleep(120);
+      // The stale read lists nothing, so a snapshot of it is unmistakable.
+      return [];
     }
     return listed;
   }
@@ -280,8 +282,11 @@ describe('JobsPanelBridge — pushing the store to an open panel', () => {
     bridge.openPanel(1); // read A starts and is slow
     bridge.openPanel(1); // read B for the same generation starts and is fast
     await sleep(JOBS_REFRESH_DEBOUNCE_MS + 300);
-    // Only B may publish; A landing later must not overwrite it or double-list.
-    expect(snapshots()).toHaveLength(1);
+    // Only B may publish; A landing later must not overwrite it. Not a count:
+    // macOS fs.watch can report the fixture's own writes, which is one more
+    // legitimate refresh (2 snapshots, both full, on a GitHub macOS runner).
+    expect(snapshots().length).toBeGreaterThan(0);
+    expect(snapshots().every((jobs) => jobs.length > 0)).toBe(true);
   });
 });
 
