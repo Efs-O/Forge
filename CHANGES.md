@@ -1,5 +1,13 @@
 # Forge — Recent Changes
 
+## 0.17.196
+
+**A laptop's images come back with laptop paths.** An image or upscale the desktop rendered for a laptop came back naming the desktop's own folder, a path the laptop cannot open, which also showed the desktop's user name, and it told the model to view that path. The result now names the file where it was saved on the laptop, with forward slashes. A backend the desktop does not serve is refused with "Not run:" and the setting that allows it, and the refusal no longer repeats the prompt.
+
+**Tools stop offering what cannot run here.** `load_tool_group` named every tool in a group, including ones this window does not offer: `image_search` with no `image_search` block, for example. Such tools are now listed separately as not set up. `search_codebase` is offered only while embeddings are on. When `image_search` has no config, its refusal says what is missing and not to retry.
+
+**Three tool calls that wasted a round now work, or say why not.** A `find_files` call with a folder (`path: "src"`) searches that folder instead of being refused. A path outside the workspace is still refused. `render_html_to_image` given both `html` and an output `path` now explains that `path` is an HTML file to render, not where the PNG goes.
+
 ## 0.17.195
 
 **A job's report now shows in its own chat as well as on Telegram.** A scheduled job reported to Telegram and to a toast, and nowhere else, so the window the owner reads showed nothing — a nightly job that switched a binary and rolled itself back looked like a job that never ran. Each report is now drawn in the job's own chat too, in the same words, when that chat is open in the window that runs the scheduler. It opens no model turn and no new chat, and says nothing at all for a job whose chat has never been opened.
