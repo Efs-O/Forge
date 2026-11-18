@@ -111,30 +111,31 @@
 14. `shell` · `query:`/`include:` or another tool's field → refused: unknown argument. fields are `command`/`cwd`/`timeout_ms`/`background`/…
 15. `stop_execution` · on a background `npm run ci` → the wrapper dies, the child tree may live and hold its lock: `MSYS_NO_PATHCONV=1 taskkill /PID <top> /T /F`; with NO_PATHCONV `//PID` → `Invalid argument/option - '//PID'`
 16. `monitor_execution` · `wait_ms: 90000` remembered from `wait`'s 900 s → refused: must be within 0 to 60000. re-read the advertised bounds instead of recalling them
-17. `edit_file` · `old_str` rebuilt from wrapped prose, retyped (`diver` for `diverge`), or read before a formatter pass → refused: not found. copy the physical lines verbatim from the newest read
-18. `edit_file` · `new_str` that leaves out part of what `old_str` covers (a heading, a trailing line) → that text is deleted or the next line glues on. end both at the same point; re-include anchored lines
-19. `edit_file` · `new_str` equal to the current text → alone it reports Applied and changes nothing; in a batch → refused: not found. diff the file, not the reply; drop the no-op edit
-20. `edit_file` · a typed `\n` in `new_str` lands as two characters; a `\` before a raw newline → refused: `arrived as a string, not an array and is not valid JSON`. type real newlines, no stray backslash
-21. `edit_file` · a new function inserted just above `export async function f` → f's doc comment ends up describing the new function. anchor above that doc comment, not below it
-22. `apply_line_edits` · `expected_lines` invented rather than copied → refused: has N lines but the range is M. copy the current lines the refusal prints
-23. `apply_line_edits` · a range counted from an unnumbered `read_file`, or from before a formatter pass → refused: `operation 1 is stale ... they DO match lines 276-279`. read with `numbered: true` in the same round
-24. `write_file` · a backtick I thought it had escaped → it writes exactly what I typed, so a later `old_str` misses. read_file it back before blaming the write
-25. `desktop_click` · on a field may not move the caret → text runs on behind it. move with `tab`, clear with `ctrl+a`+`delete`; a new capture drops the old `capture_id`
-26. `read_tool_result` · `message_index` of a tool result → refused: that index is a tool result, use its tool_call_id. results take tool_call_id, prompts take message_index
-27. `update_plan` · `items` → refused: `"items" must be a JSON array, not a string`, for a bare-string entry or one missing `"text"`. every entry is exactly `{"text":…,"status":…}`; resend the whole array
-28. `remember` · `title:`, `path:`, `name:` or `content:` → refused: unknown argument. name the memory with `key`, put its text in `value`
-29. `recall` · the fields `remember` takes → refused. send the memory's name alone: `{"key": …}`
-30. `ask_user` · a top-level `header` → refused: unknown argument. `header` belongs to each question
-31. `image_search` · `query:"red fox"` → refused: unknown argument "query"; it takes `image_url`/`attachment_index`. it is a reverse search of an image you have; for pictures by words use `web_search`
-32. `render_html_to_image` · `html` plus `path:"out/x.png"` → refused: exactly one of html or path. `path` is an HTML file to render, not the output; send html alone, then `move_file` the PNG it names
-33. `notify_user` · with no remote chat bound → `Shown in the VS Code window only`: a local toast, never a phone ping. do not report that the user was notified remotely
-34. `manage_jobs` · check `{kind: "none"}` → `get` says `runs every tick; on_change delivers nothing`: the job is inert. mute or restore with `on_change`, never a new check
-35. `manage_jobs` · `run_now` → runs in whichever window holds the scheduler lease, ~40 s later. verify in `jobs/runs/<name>.jsonl`; do not re-call `run_now`
-36. `ask_agent` · with a `target_id` → `existing_session` is that live session, `new_task` a new background one; without it → the linked session (`/link`)
-37. `list_delegation_targets` · lists local models beside cloud ones → a local one loads weights and fights the chat model for VRAM. prefer cloud
-38. `shell` · a `timeout_ms` recalled from memory → refused: `timeout_ms must be within N to N`. take the bounds from the schema; a run longer than that goes `background: true`
-39. `desktop_focus_window` · a VS Code window → `refusing to control a VS Code window`: Forge never drives an editor. pick another window from `desktop_windows`
-40. `desktop_focus_window` · `window_id: 123` → `window_id must be a JSON string, not a number`; `window:` → unknown argument. send the id as a string, or `window_title`
-41. `desktop_focus_window` · a window under a dialog → `is disabled because Open (HWND N) is open over it`; `focus lock` → ask the user to click it once. focus or close the dialog first
-42. `apply_code_action` · a refactor or command action → `this action is not a workspace-edit-only action`: only plain-edit actions run. make the change with `edit_file`
-43. `ask_agent` · a `target_id` from an earlier `list_agent_targets` → `CLI target is unknown or expired`: ids expire. call `list_agent_targets` again, then send
+17. `monitor_execution` · `suggested_next_wait_ms` echoed back as an argument → `unknown argument "suggested_next_wait_ms"`: it is a returned field. pass its value as `wait_ms`
+18. `edit_file` · `old_str` rebuilt from wrapped prose, retyped (`diver` for `diverge`), or read before a formatter pass → refused: not found. copy the physical lines verbatim from the newest read
+19. `edit_file` · `new_str` that leaves out part of what `old_str` covers (a heading, a trailing line) → that text is deleted or the next line glues on. end both at the same point; re-include anchored lines
+20. `edit_file` · `new_str` equal to the current text → alone it reports Applied and changes nothing; in a batch → refused: not found. diff the file, not the reply; drop the no-op edit
+21. `edit_file` · a typed `\n` in `new_str` lands as two characters; a `\` before a raw newline → refused: `arrived as a string, not an array and is not valid JSON`. type real newlines, no stray backslash
+22. `edit_file` · a new function inserted just above `export async function f` → f's doc comment ends up describing the new function. anchor above that doc comment, not below it
+23. `apply_line_edits` · `expected_lines` invented rather than copied → refused: has N lines but the range is M. copy the current lines the refusal prints
+24. `apply_line_edits` · a range counted from an unnumbered `read_file`, or from before a formatter pass → refused: `operation 1 is stale ... they DO match lines 276-279`. read with `numbered: true` in the same round
+25. `write_file` · a backtick I thought it had escaped → it writes exactly what I typed, so a later `old_str` misses. read_file it back before blaming the write
+26. `desktop_click` · on a field may not move the caret → text runs on behind it. move with `tab`, clear with `ctrl+a`+`delete`; a new capture drops the old `capture_id`
+27. `read_tool_result` · `message_index` of a tool result → refused: that index is a tool result, use its tool_call_id. results take tool_call_id, prompts take message_index
+28. `update_plan` · `items` → refused: `"items" must be a JSON array, not a string`, for a bare-string entry or one missing `"text"`. every entry is exactly `{"text":…,"status":…}`; resend the whole array
+29. `remember` · `title:`, `path:`, `name:` or `content:` → refused: unknown argument. name the memory with `key`, put its text in `value`
+30. `recall` · the fields `remember` takes → refused. send the memory's name alone: `{"key": …}`
+31. `ask_user` · a top-level `header` → refused: unknown argument. `header` belongs to each question
+32. `image_search` · `query:"red fox"` → refused: unknown argument "query"; it takes `image_url`/`attachment_index`. it is a reverse search of an image you have; for pictures by words use `web_search`
+33. `render_html_to_image` · `html` plus `path:"out/x.png"` → refused: exactly one of html or path. `path` is an HTML file to render, not the output; send html alone, then `move_file` the PNG it names
+34. `notify_user` · with no remote chat bound → `Shown in the VS Code window only`: a local toast, never a phone ping. do not report that the user was notified remotely
+35. `manage_jobs` · check `{kind: "none"}` → `get` says `runs every tick; on_change delivers nothing`: the job is inert. mute or restore with `on_change`, never a new check
+36. `manage_jobs` · `run_now` → runs in whichever window holds the scheduler lease, ~40 s later. verify in `jobs/runs/<name>.jsonl`; do not re-call `run_now`
+37. `ask_agent` · with a `target_id` → `existing_session` is that live session, `new_task` a new background one; without it → the linked session (`/link`)
+38. `list_delegation_targets` · lists local models beside cloud ones → a local one loads weights and fights the chat model for VRAM. prefer cloud
+39. `shell` · a `timeout_ms` recalled from memory → refused: `timeout_ms must be within N to N`. take the bounds from the schema; a run longer than that goes `background: true`
+40. `desktop_focus_window` · a VS Code window → `refusing to control a VS Code window`: Forge never drives an editor. pick another window from `desktop_windows`
+41. `desktop_focus_window` · `window_id: 123` → `window_id must be a JSON string, not a number`; `window:` → unknown argument. send the id as a string, or `window_title`
+42. `desktop_focus_window` · a window under a dialog → `is disabled because Open (HWND N) is open over it`; `focus lock` → ask the user to click it once. focus or close the dialog first
+43. `apply_code_action` · a refactor or command action → `this action is not a workspace-edit-only action`: only plain-edit actions run. make the change with `edit_file`
+44. `ask_agent` · a `target_id` from an earlier `list_agent_targets` → `CLI target is unknown or expired`: ids expire. call `list_agent_targets` again, then send
