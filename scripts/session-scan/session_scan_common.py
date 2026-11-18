@@ -10,6 +10,8 @@ file is written as UTF-8 with '\n' line endings.
 """
 
 import argparse
+import collections
+import json
 import os
 import sys
 import time
@@ -30,6 +32,7 @@ OUT_FILES = {
     'recovery': 'recovery.txt',
     'spot': 'failed_tools_spot.txt',
     'versions': 'failed_tools_versions.txt',
+    'repeats': 'tips_repeats.txt',
 }
 
 
@@ -166,6 +169,49 @@ def epoch_of(ts_str, idx):
     return time.mktime(
         (day.tm_year, day.tm_mon, day.tm_mday, int(hhmm[0]), int(hhmm[1]), 0, -1, -1, -1)
     ) * 1000
+
+
+def load_versions(sessions, start_epoch):
+    """sid -> [(timestamp_ms, forge_version)] from each log's session_start rows.
+
+    version_join.py and tips_repeats.py both ask which Forge version a failure row
+    happened on, so the lookup lives here rather than twice. A log whose file
+    modification time is before the window start cannot hold a row in the window, so
+    it is skipped; sid is the first 8 characters of the log's file name, as in every
+    other script here.
+    """
+    vers = collections.defaultdict(list)
+    for path in session_files(sessions):
+        if os.path.getmtime(path) < start_epoch:
+            continue
+        sid = os.path.basename(path)[:8]
+        for line in open(path, encoding='utf-8', errors='replace'):
+            try:
+                r = json.loads(line)
+            except Exception:
+                continue
+            if r.get('type') == 'session_start':
+                vers[sid].append((r.get('timestamp_ms') or 0, r.get('forge_version') or '?'))
+    return vers
+
+
+def version_at(vers, idx, sid, ts_str):
+    """The Forge version that was running when this raw row happened.
+
+    The raw stamp carries no year or month, so the row's moment comes from the scan
+    window through epoch_of; a row that matches no day in the window answers '?' the
+    same way. Otherwise the answer is the last version the session logged at or just
+    before that moment (a minute of slack: the version is written when the chat
+    starts, the failure arrives later in it).
+    """
+    e = epoch_of(ts_str, idx)
+    if e is None:
+        return '?'
+    best = '?'
+    for ts, v in sorted(vers.get(sid, [])):
+        if ts <= e + 60000:
+            best = v
+    return best
 
 
 def read_summary(out_dir):

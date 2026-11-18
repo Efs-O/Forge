@@ -8,17 +8,17 @@ themselves (for the forge_version on each session_start); writes
 Shared argument handling is in session_scan_common.py.
 """
 
-import json, collections, os, sys, time
+import collections, sys
 from session_scan_common import (
     REPO_ROOT,
     OUT_FILES,
     parse,
     need_sessions,
-    session_files,
     window,
     writer,
     day_index,
-    epoch_of,
+    load_versions,
+    version_at,
 )
 
 opts = parse('join failure rows to the Forge version they happened on')
@@ -29,34 +29,13 @@ RAW = opts.out / OUT_FILES['raw']
 if not RAW.exists():
     sys.exit(f'{RAW} is missing; run scan_logs.py with the same --out first')
 
-# sid -> list of (ts, forge_version) from session_start records
-vers = collections.defaultdict(list)
-for path in session_files(opts.sessions):
-    if os.path.getmtime(path) < CUT_S:
-        continue
-    sid = os.path.basename(path)[:8]
-    for line in open(path, encoding='utf-8', errors='replace'):
-        try:
-            r = json.loads(line)
-        except Exception:
-            continue
-        if r.get('type') == 'session_start':
-            vers[sid].append((r.get('timestamp_ms') or 0, r.get('forge_version') or '?'))
+# sid -> list of (ts, forge_version) from session_start records; built in
+# session_scan_common.py so tips_repeats.py asks the same question of the same dict.
+vers = load_versions(opts.sessions, CUT_S)
 
 # The raw stamp carries no year or month, so the date is recovered from the scan
 # window instead of being hard-coded to one month.
 IDX = day_index(CUT_S, CUT_E)
-
-
-def version_at(sid, ts_str):
-    e = epoch_of(ts_str, IDX)
-    if e is None:
-        return '?'
-    best = '?'
-    for ts, v in sorted(vers.get(sid, [])):
-        if ts <= e + 60000:
-            best = v
-    return best
 
 
 def cls(err):
@@ -111,7 +90,7 @@ by_class_ver = collections.defaultdict(collections.Counter)
 for r in rows:
     if r['bucket'] == 'SHELL_NONZERO':
         continue
-    v = version_at(r['sid'], r['ts'])
+    v = version_at(vers, IDX, r['sid'], r['ts'])
     c = cls(r['err'])
     tab[(c, v)] += 1
     by_class_ver[c][v] += 1
@@ -126,7 +105,7 @@ with writer(opts.out, 'versions') as out:
     per = collections.Counter()
     perc = collections.defaultdict(collections.Counter)
     for r in rows:
-        v = version_at(r['sid'], r['ts'])
+        v = version_at(vers, IDX, r['sid'], r['ts'])
         per[(r['sid'], v)] += 1
         perc[(r['sid'], v)][cls(r['err'])] += 1
     for (sid, v), c in per.most_common():

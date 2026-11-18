@@ -40,6 +40,33 @@ every line — they share the raw rows and the frozen cutoff.
 4. `spot.py` — reads the logs only. Writes `failed_tools_spot.txt`: up to three
    full examples (arguments and error text) for each recurring error string.
 
+## tips_repeats.py
+
+`tips_repeats.py` — reads `docs/CODING_TIPS.md` and `resources/tips/CODING_TIPS.md`,
+the git history that first added each of their rows, and `failed_tools_raw.txt` (plus
+the logs, for the Forge version under each repeat). Writes `tips_repeats.txt`: one
+line per measurable tip row — repeats, chats, the row's date, its id, tool, what it
+matches on, Forge versions, models — sorted by repeats, then the rows it cannot
+measure and why.
+
+A failed call counts as a repeat of a tip row when all three hold:
+
+* the tool matches (or the row is in a non-`FORGE_TOOLS` section, so any tool does);
+* the call happened on or after the day after the day `git log -S` says the row was
+  added — a row it cannot date counts from the window start, and the line says
+  `undated`;
+* the error text contains the row's quoted error words, or, for a `FORGE_TOOLS` row
+  that quotes no error, its `ARGS` field contains the wrong argument it names.
+
+A row with repeats is a tip that is not stopping the mistake: it should become a
+tool fix — the refusal or the tool description names the right call — and then the
+row is deleted, which is what keeps the tables short.
+
+```
+python scripts/session-scan/scan_logs.py    --out .forge/tmp/scan-p4-lane --since 2026-11-01
+python scripts/session-scan/tips_repeats.py --out .forge/tmp/scan-p4-lane --since 2026-11-01
+```
+
 ## The frozen cutoff
 
 `scan_logs.py` fixes the end of the window the first time it runs and saves it in
