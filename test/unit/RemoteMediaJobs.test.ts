@@ -33,6 +33,22 @@ import type { RemoteMediaJobRequest } from '../../src/media/remoteMediaContract'
  */
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+/** A render held until `pending` settles, that stops on its abort as the real
+ *  cloud client does. A fake that ignored the abort went on to write its PNG
+ *  after the teardown had removed the store, and the folder came back as a
+ *  temp leak (full CI, 2026-11-18). */
+function heldRender(pending: Promise<void>) {
+  return async (request: { signal?: AbortSignal }): Promise<{ bytes: Buffer; mime: string }> => {
+    const signal = request.signal;
+    await Promise.race([
+      pending,
+      new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true })),
+    ]);
+    signal?.throwIfAborted();
+    return { bytes: PNG, mime: 'image/png' };
+  };
+}
 const TOOLS: FfmpegTools = { ffmpeg: '/bin/ffmpeg', ffprobe: '/bin/ffprobe' };
 const UPSCALE = {
   binary: 'V:/models/sd-cli.exe',
@@ -132,7 +148,7 @@ interface Rig {
 
 function rig(
   media: Partial<NonNullable<ForgeConfig['cloud_relay']>['media']> = {},
-  options: { generate?: () => Promise<unknown>; now?: () => number } = {},
+  options: { generate?: (request: { signal?: AbortSignal }) => Promise<unknown>; now?: () => number } = {},
 ): Rig {
   const generate = vi.fn(
     options.generate ?? (async () => ({ bytes: PNG, mime: 'image/png' })),
@@ -451,23 +467,27 @@ describe('remote media jobs: the queue and the cancel', () => {
     const { jobs: runner } = rig(
       { image_backends: ['grok-imagine'], queue_limit: 2 },
       {
-        generate: async () => {
-          await pending;
-          return { bytes: PNG, mime: 'image/png' };
-        },
+        generate: heldRender(pending),
       },
     );
     const first = await runner.create(
       request({ tool: 'generate_image', args: { prompt: 'one' } }),
     );
     expect(first.status).toBe(202);
-    expect((await runner.create(request({ tool: 'generate_image', args: { prompt: 'two' } }))).status).toBe(202);
-    expect((await runner.create(request({ tool: 'generate_image', args: { prompt: 'three' } }))).status).toBe(202);
+    const second = await runner.create(request({ tool: 'generate_image', args: { prompt: 'two' } }));
+    expect(second.status).toBe(202);
+    const third = await runner.create(request({ tool: 'generate_image', args: { prompt: 'three' } }));
+    expect(third.status).toBe(202);
     const fourth = await runner.create(request({ tool: 'generate_image', args: { prompt: 'four' } }));
     expect(fourth.status).toBe(429);
     expect(await errorOf(fourth)).toBe(REMOTE_MEDIA_TEXT.queueFull(2));
     release();
-    await until(async () => (await stateOf(runner, (await bodyOf(first)).id as string)).state === 'done');
+    // All three, not just the first: the other two run after it, and a render
+    // still writing when the test ends lands after the teardown.
+    for (const accepted of [first, second, third]) {
+      const id = (await bodyOf(accepted)).id as string;
+      await until(async () => (await stateOf(runner, id)).state === 'done');
+    }
   });
 
   it('cancels a running job and marks it failed: cancelled', async () => {
@@ -476,10 +496,7 @@ describe('remote media jobs: the queue and the cancel', () => {
     const { jobs: runner } = rig(
       { image_backends: ['grok-imagine'] },
       {
-        generate: async () => {
-          await pending;
-          return { bytes: PNG, mime: 'image/png' };
-        },
+        generate: heldRender(pending),
       },
     );
     const accepted = await runner.create(
@@ -505,10 +522,7 @@ describe('remote media jobs: the queue and the cancel', () => {
       root: path.join(root, 'store'),
       secrets: undefined,
       imageDeps: {
-        generate: (async () => {
-          await pending;
-          return { bytes: PNG, mime: 'image/png' };
-        }) as never,
+        generate: heldRender(pending) as never,
       },
     });
     jobs = runner;
