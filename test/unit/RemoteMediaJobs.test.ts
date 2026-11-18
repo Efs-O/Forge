@@ -211,7 +211,9 @@ beforeEach(async () => {
 afterEach(async () => {
   jobs?.dispose();
   jobs = undefined;
-  await fs.promises.rm(root, { recursive: true, force: true });
+  // Retries: a cancelled job's child can still hold its store folder for a moment,
+  // and Windows answers EBUSY until it lets go (seen in a full CI run).
+  await fs.promises.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 });
 
 describe('remote media jobs: the ledger sweep', () => {
