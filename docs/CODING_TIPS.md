@@ -55,6 +55,7 @@
 13. a python heredoc writing a TS test that holds `'\n'` escapes → Python turns them into real newlines, so vitest fails at `PARSE_ERROR` on the unterminated string. write the escapes as `chr(92)+"n"` in the heredoc, or edit the test with the edit tool
 14. a gate setting added to `ci.yml` only (`VITEST_MAX_WORKERS: 2` on windows-latest) → `publish.yml` runs the same `npm run ci` without it and fails on 5 s timeouts on a tree CI passed. grep every workflow that runs the gate and copy the env
 15. a "the stale read must not publish" test asserting `snapshots().toHaveLength(1)` → fails on macOS with 2: `fs.watch` reports the fixture's own writes, which starts one more legitimate refresh. make the stale read's result distinguishable (return `[]`) and assert no snapshot is it
+16. a fake that picks "the first call is the slow one" after `await super.x()` → two concurrent calls race to that check, so on Linux the second call took the slow role and the test failed on its own fake. read and clear the flag before the first await
 
 ## PATHS
 1. comparing a tool's resolved path with the workspace root in a test → `fs.realpathSync` keeps the 8.3 short form `EFSOOF~1`, `fs/promises` `realpath` expands it: use the tool's resolver
