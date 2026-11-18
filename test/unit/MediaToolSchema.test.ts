@@ -173,7 +173,10 @@ function registryFor(media: Record<string, unknown> | undefined): ToolRegistry {
   const registry = new ToolRegistry();
   const workspaceState = { get: () => undefined, update: async () => undefined } as unknown as vscode.Memento;
   const secrets = { get: async () => undefined } as unknown as vscode.SecretStorage;
-  const indexManager = { search: async () => [] } as unknown as IndexManager;
+  const indexManager = {
+    search: async () => [],
+    isEnabled: () => true,
+  } as unknown as IndexManager;
   registerAllTools(
     registry,
     workspaceState,

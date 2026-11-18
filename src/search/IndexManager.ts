@@ -69,6 +69,17 @@ export class IndexManager {
     return this.backend.startApproval();
   }
 
+  /**
+   * Whether embeddings are switched on in the config this manager holds. The
+   * `search_codebase` advertisement reads it, so it must be the same
+   * `this.config` that `applyForgeConfig` replaces: a config reload then takes
+   * effect with no restart. Only `enabled` is judged — a missing `model_path`
+   * still advertises, because the call-time check names that field exactly.
+   */
+  isEnabled(): boolean {
+    return this.config.embeddings?.enabled === true;
+  }
+
   markDirty(fsPath: string): void {
     const normalized = this.toWorkspaceRelative(fsPath);
     if (!normalized) return;

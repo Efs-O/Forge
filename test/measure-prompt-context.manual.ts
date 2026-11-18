@@ -126,7 +126,10 @@ describe('prompt context measurement', () => {
     const registry = new ToolRegistry();
     const workspaceState = { get: () => undefined, update: async () => undefined } as never;
     const secrets = { get: async () => undefined } as never;
-    const indexManager = { search: async () => [] } as unknown as IndexManager;
+    const indexManager = {
+      search: async () => [],
+      isEnabled: () => true,
+    } as unknown as IndexManager;
     const delegation = { ask: async () => '' } as unknown as LocalDelegationService;
     registerAllTools(
       registry,

@@ -30,6 +30,11 @@ export function makeSearchCodebaseTool(indexManager: IndexManager): RegisteredTo
       },
     },
     permission: 'read',
+    /** Offered only while embeddings are enabled: on a machine with no
+     *  `embeddings` block the handler can only refuse, and a laptop test wasted
+     *  a call finding that out. `load_tool_group` still names it under
+     *  "Not set up in this window". */
+    advertise: () => indexManager.isEnabled(),
     approval: () => indexManager.startApproval(),
     handler: async (args) => {
       const query = args['query'];

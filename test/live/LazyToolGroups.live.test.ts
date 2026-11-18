@@ -113,7 +113,10 @@ async function buildRegistry(): Promise<void> {
     { get: () => undefined, update: async () => undefined } as unknown as vscode.Memento,
     { get: async () => undefined } as unknown as vscode.SecretStorage,
     undefined,
-    { search: async () => [] } as unknown as IndexManager,
+    {
+      search: async () => [],
+      isEnabled: () => true,
+    } as unknown as IndexManager,
     new UserQuestionService(),
     new UserNotificationService(),
     undefined,

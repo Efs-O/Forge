@@ -95,7 +95,10 @@ describe('set_checkin registration follows the config block', () => {
       { get: () => undefined, update: async () => undefined } as unknown as vscode.Memento,
       { get: async () => undefined } as unknown as vscode.SecretStorage,
       { provider: 'tavily', secret_key_name: 'audit-key' },
-      { search: async () => [] } as unknown as IndexManager,
+      {
+        search: async () => [],
+        isEnabled: () => true,
+      } as unknown as IndexManager,
       new UserQuestionService(),
       new UserNotificationService(),
       undefined,

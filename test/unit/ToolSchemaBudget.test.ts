@@ -262,7 +262,10 @@ function makeMaximalRegistry(): ToolRegistry {
     update: async () => undefined,
   } as unknown as vscode.Memento;
   const secrets = { get: async () => undefined } as unknown as vscode.SecretStorage;
-  const indexManager = { search: async () => [] } as unknown as IndexManager;
+  const indexManager = {
+    search: async () => [],
+    isEnabled: () => true,
+  } as unknown as IndexManager;
   const config = maximalConfig();
   const delegation = {
     ask: async () => ({ text: 'ok', targetModel: 'worker', bestEffort: false }),

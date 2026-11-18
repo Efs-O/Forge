@@ -87,7 +87,7 @@ function registryWith(config: ForgeConfig): ToolRegistry {
   const registry = new ToolRegistry();
   const workspaceState = { get: () => undefined, update: async () => undefined };
   const secrets = { get: async () => undefined };
-  const indexManager = { search: async () => [] };
+  const indexManager = { search: async () => [], isEnabled: () => true };
   const delegation = {
     ask: async () => ({ text: 'ok', targetModel: 'm', bestEffort: false }),
   } as unknown as LocalDelegationService;

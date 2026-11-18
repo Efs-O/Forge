@@ -158,7 +158,10 @@ function makeRegistry(
     update: async () => undefined,
   } as unknown as vscode.Memento;
   const secrets = { get: async () => undefined } as unknown as vscode.SecretStorage;
-  const indexManager = { search: async () => [] } as unknown as IndexManager;
+  const indexManager = {
+    search: async () => [],
+    isEnabled: () => true,
+  } as unknown as IndexManager;
   const config: ForgeConfig = {
     active_model: 'primary',
     llama_server: {},
