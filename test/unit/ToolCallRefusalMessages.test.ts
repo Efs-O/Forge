@@ -478,13 +478,25 @@ describe('ToolRegistry.invalidArgs quoted-type refusals', () => {
     ['no', 'no'],
     ['one', '1'],
     ['zero', '0'],
-    ['leading space', ' true'],
-    ['trailing space', 'true '],
     ['empty string', ''],
+    ['a word with spaces', ' not a boolean '],
   ])('refuses %s for a declared boolean', (_label, value) => {
     expect(registry.invalidArgs(execTool, { command: 'npx', background: value })).toBe(
       'Error: shell: "background" must be a JSON boolean, not a string. Resend the call with background as true or false.',
     );
+  });
+
+  // Spaces around the word carry no meaning: the model that wrote `background: "TRUE "`
+  // meant the job to run in the background, and a refusal costs a round either way.
+  it.each([
+    ['true ', true],
+    [' true', true],
+    ['  TRUE  ', true],
+    [' false ', false],
+  ])('accepts the quoted boolean %j whatever spaces surround it', (value, expected) => {
+    const args = { command: 'npx', background: value };
+    expect(registry.invalidArgs(execTool, args)).toBeUndefined();
+    expect(args.background).toBe(expected);
   });
 
   it('refuses other string spellings with the same required JSON shape', () => {
