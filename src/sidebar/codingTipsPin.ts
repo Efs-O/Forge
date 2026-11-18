@@ -13,6 +13,9 @@
  * same reason. A tip recorded mid-chat therefore reaches the model at the next
  * compaction or in a new chat, not immediately — accepted deliberately: the
  * alternative is a cold prefill every time an agent records something.
+ *
+ * The tool list reads the same pin, so the tips that move into a tool's
+ * description and the table that does not renew together, on one window move.
  */
 
 import { z } from 'zod';
@@ -21,25 +24,56 @@ import type { ConversationRuntime } from './sessionTypes';
 import { compactionWindowStart } from './compactionWindow';
 import { codingTipsPinSchema } from './pinSchemas';
 import { loadCodingTips } from '../llm/codingTips';
+import { splitToolTips, withToolTips } from '../llm/toolTips';
+import type { ToolDefinition } from '../llm/types';
 
 export type CodingTipsPin = z.infer<typeof codingTipsPinSchema>;
 
+type TipsPinConversation = Pick<ConversationRuntime, 'compaction'> & {
+  codingTipsPin?: CodingTipsPin;
+};
+
 /**
- * Called once per ROUND, from `ModelTurn.ts`'s message preparation: compaction can
- * move the window mid-turn, and the request that follows it must carry the renewed
- * block rather than the stale one. Mutates `conv`'s pin; the caller's normal persist
- * writes it. Returns what the system prompt must render.
+ * Called once per ROUND, from both `ModelTurn.ts`'s message preparation and its
+ * tool-list builder: compaction can move the window mid-turn, and the request
+ * that follows it must carry the renewed block rather than the stale one. The
+ * tool list is built before the messages (`ToolCallingLoop.ts`), so this is what
+ * creates the pin on a chat's first request. Mutates `conv`'s pin; the caller's
+ * normal persist writes it. Returns the pinned block text ('' when there is none).
  */
-export function pinCodingTips(
-  conv: Pick<ConversationRuntime, 'compaction'> & { codingTipsPin?: CodingTipsPin },
+export function ensureCodingTipsPin(
+  conv: TipsPinConversation,
   workspaceRoot: string | undefined,
-): string | undefined {
+): string {
   const current = loadCodingTips(workspaceRoot)?.text ?? '';
   const windowStart = compactionWindowStart(conv.compaction);
   const pin = conv.codingTipsPin;
   if (!pin || pin.windowStart !== windowStart) {
     conv.codingTipsPin = { text: current, windowStart };
-    return current || undefined;
+    return current;
   }
-  return pin.text || undefined;
+  return pin.text;
+}
+
+/**
+ * What the system prompt must render: the pinned block, minus the rows that
+ * belong inside a tool's description instead (`src/llm/toolTips.ts`).
+ */
+export function pinCodingTips(
+  conv: TipsPinConversation,
+  workspaceRoot: string | undefined,
+): string | undefined {
+  return splitToolTips(ensureCodingTipsPin(conv, workspaceRoot)).table || undefined;
+}
+
+/**
+ * The advertised tools, with each one's tips appended to its description. Reads
+ * the same pin as `pinCodingTips`, so tools and table renew together.
+ */
+export function withPinnedToolTips(
+  conv: TipsPinConversation,
+  workspaceRoot: string | undefined,
+  defs: ToolDefinition[],
+): ToolDefinition[] {
+  return withToolTips(defs, splitToolTips(ensureCodingTipsPin(conv, workspaceRoot)).byTool);
 }

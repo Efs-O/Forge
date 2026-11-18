@@ -38,7 +38,7 @@ import {
   type TurnContextState,
 } from './turnContext';
 import { pinForgeInstructions } from './forgeInstructionsPin';
-import { pinCodingTips } from './codingTipsPin';
+import { pinCodingTips, withPinnedToolTips } from './codingTipsPin';
 import { formatCompactionResumeNote } from './compactionTypes';
 import { terminalCommandTracker } from '../tools/TerminalCommandTracker';
 import { toolOutputLimits } from '../tools/toolOutputLimits';
@@ -220,7 +220,7 @@ export async function runModelTurn(
       .filter(
         ({ function: { name } }) => !hiddenLazyTools.has(name) && !unattendedRefusals?.has(name),
       );
-    return budget.filterDefinitions(advertised);
+    return withPinnedToolTips(conv, ctx.forgeLoader?.root, budget.filterDefinitions(advertised));
   };
   const nativeTools = runtimeCaps?.likelySupportsTools !== false;
   if (buildToolDefinitions().length > 0 && !nativeTools) {
