@@ -247,5 +247,9 @@ describe('claimed agent-bus replies', () => {
       'Forge restarted before answering.',
     );
     expect(pending.list()).toEqual([]);
-  });
+    // A slow runner, not a slow product: everything this test waits on is a handful
+    // of small file writes in one temp folder. The GitHub windows runner timed it
+    // out at the 5 s default while the rest of the suite had the machine; the
+    // assertions are unchanged, only the ceiling around them.
+  }, 20_000);
 });

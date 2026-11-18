@@ -156,6 +156,26 @@ async function readLease(): Promise<MediaGpuLeaseRecord> {
   return JSON.parse(await fs.readFile(leasePath, 'utf8')) as MediaGpuLeaseRecord;
 }
 
+/** Wait until the lease record names this pid, on a clock rather than a count of
+ *  tries, and read only every 50 ms: the re-attribution is a write + flush + rename
+ *  over a file this test is watching, and on Windows a reader can make that rename
+ *  wait. Measured on the GitHub windows runner and on a local full-suite run, both
+ *  of which saw the record still naming stage 1's child long after a 50 ms sleep and
+ *  once after 8 s of polling, while the same test lands the transfer in a few ms when
+ *  the machine is quiet — so the wait is long and the assertions are unchanged. */
+async function leaseNames(pid: number, timeoutMs = 25_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      if ((await readLease()).pid === pid) return true;
+    } catch {
+      // The record is between writes.
+    }
+    if (Date.now() > deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 describe('startMediaRender: the lease is released on every exit path', () => {
   it('releases the lease when the child exits 0, and names the child while it runs', async () => {
     const manager = fakeManager();
@@ -255,13 +275,16 @@ describe('startMediaRender: the lease is released on every exit path', () => {
     expect(await startedStages(manager, 2)).toBe(true);
     // The lease is re-attributed to the newest child: a failed transfer would
     // have logged it, and the record names that child rather than stage 1's.
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    const transferred = await leaseNames(4242);
     expect(logs.join(' ')).not.toContain('still names this window');
+    expect(transferred, 'the lease never named stage 2’s child').toBe(true);
     expect((await readLease()).pid).toBe(4242);
     manager.resolve();
     expect(await leaseReleased()).toBe(true);
     expect(started.executionId).toBe('exec-1');
-  });
+    // The wait above can run for up to 25 s on a loaded machine, so the test gets
+    // a ceiling of its own instead of the 5 s default.
+  }, 40_000);
 
   it('ends the chain without rendering when the next stage cannot be prepared', async () => {
     const manager = fakeManager();

@@ -173,9 +173,12 @@ function makeSearch(archive: ArchivedSessions, sidebar: SidebarRuntime = emptySe
     getSidebar: () => sidebar,
     getView: () => view,
     overflow: archive,
-    // One file per pass. The pass boundary is what these tests measure, and the
-    // production budget would swallow it inside the first pass anyway.
-    passBudgetMs: 1,
+    // One file per pass, guaranteed: the budget is spent before the pass has read
+    // anything, so the pass boundary — which is what these tests measure — always
+    // publishes a partial. `1` meant the same thing but only held when a read happened
+    // to cross a clock tick; on the ubuntu runner the whole walk finished inside one
+    // millisecond and no partial was ever published.
+    passBudgetMs: 0,
     resumeMs: 5,
   });
   search = bridge;

@@ -46,6 +46,15 @@ const RULE_KEY = `rdelete:${WORKDIR.replace(/\\/gu, '/')}/deep`;
 const KEY_ROW = `rdelete:${WORKDIR.replace(/\\/gu, '/').toLowerCase()}/deep`;
 const FORGE_HOME = 'C:/Users/someone';
 
+/** The tests marked with this run their delete for real, and the harness pins the
+ *  shell tool to `platform: 'win32'`, so the bash call is resolved by the Windows
+ *  branch — Git for Windows. A Linux or macOS runner has none, and the tool answers
+ *  `bash: Git Bash was not found` instead of running the command. What these tests
+ *  pin about chat rules and Clanker holds on every OS; only the delete running is
+ *  Windows behaviour, so it is the run that is skipped, never the assertion.
+ */
+const SHELL_RUNS_HERE = process.platform === 'win32';
+
 function conversation(rules: string[], options: { flagged?: boolean } = {}): ConversationRuntime {
   return {
     id: 'chat-1',
@@ -376,7 +385,8 @@ describe('a covered call runs with no card and leaves one gate row', () => {
     expect(probe.requestApproval).toHaveBeenCalledTimes(2);
   });
 
-  it('runs `rm -rf ./deep/build` allowed by a rule for that folder', async () => {
+  // The delete really runs: see SHELL_RUNS_HERE.
+  it.skipIf(!SHELL_RUNS_HERE)('runs `rm -rf ./deep/build` allowed by a rule for that folder', async () => {
     const probe = harness([RULE_KEY]);
     const result = await probe.run('rm -rf ./deep/build');
     expect(probe.requestApproval).not.toHaveBeenCalled();
@@ -427,7 +437,8 @@ describe('a covered call runs with no card and leaves one gate row', () => {
 });
 
 describe('Clanker, armed for this chat, answers a key the owner could have allowed', () => {
-  it('asks the owner for a keyed deny-list delete: the deny list still asks', async () => {
+  // The delete really runs, after the card is answered: see SHELL_RUNS_HERE.
+  it.skipIf(!SHELL_RUNS_HERE)('asks the owner for a keyed deny-list delete: the deny list still asks', async () => {
     // No chat rule covers the folder, so Clanker is the only thing that could have
     // answered it, and plan §2 keeps the deny list out of its reach: the banner
     // promises "the deny list still asks". The card opens, the owner's answer runs
@@ -440,7 +451,8 @@ describe('Clanker, armed for this chat, answers a key the owner could have allow
     expect(probe.rows).toHaveLength(0);
   });
 
-  it('still lets a chat rule answer that same delete, row saying `chat_rule`', async () => {
+  // Same: the delete really runs, answered by the rule instead of the card.
+  it.skipIf(!SHELL_RUNS_HERE)('still lets a chat rule answer that same delete, row saying `chat_rule`', async () => {
     // Only Clanker is excluded. The rule the owner clicked for this chat answers the
     // deny-list delete exactly as it did in phase 2, and the row names that rule.
     const probe = harness([RULE_KEY], { clanker: true });

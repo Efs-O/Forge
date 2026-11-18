@@ -1,3 +1,4 @@
+import * as cp from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -23,22 +24,78 @@ import { setNestedField } from '../../src/config/ConfigWriterHelpers';
 
 const tempDirs: string[] = [];
 
-function cleanup(): void {
-  for (const dir of tempDirs.splice(0)) {
-    for (const name of fs.readdirSync(dir)) {
-      const filePath = path.join(dir, name);
+/** Put every path in one tree back to a mode this user can delete from, then remove
+ *  the tree. Two things the old one-level sweep got wrong on POSIX, both measured on
+ *  the ubuntu runner: it chmod'd the `.forge` FOLDER to 0o600, which has no execute
+ *  bit, so nothing under it could be opened or unlinked any more (`ENOTEMPTY` on
+ *  macOS, `EACCES` on Linux — and the suite-level temp guard failed on the same
+ *  tree); and it never reached the locked file, which is one level deeper. Files get
+ *  0o600, folders get 0o700, and the walk goes all the way down, folder first. */
+function restoreDeletableModes(dir: string): void {
+  try {
+    fs.chmodSync(dir, 0o700);
+  } catch {
+    // Windows: the ACL is not a mode, so chmod cannot undo a lock here.
+  }
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const filePath = path.join(dir, entry.name);
+    if (entry.isDirectory()) restoreDeletableModes(filePath);
+    else {
       try {
-        // A file left locked is not deletable by this user on Windows, and not
-        // writable on POSIX: unlock by mode first, which is what the POSIX branch
-        // needs, and ignore the rest.
         fs.chmodSync(filePath, 0o600);
       } catch {
-        // Windows: the ACL is not a mode, so chmod cannot undo a lock here.
+        // Windows again.
       }
     }
+  }
+}
+
+function cleanup(): void {
+  for (const dir of tempDirs.splice(0)) {
+    restoreDeletableModes(dir);
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
+
+/** Whether this process's token has the Administrators group ENABLED — in practice,
+ *  whether it runs elevated. It decides whether the lock can be proved at all, so it
+ *  is a skip condition here and not an assertion: `lockPolicyFile` grants
+ *  `BUILTIN\Administrators:(F)` on purpose, because an elevated prompt is the way
+ *  back, so an elevated process takes that grant instead of its own read-only entry,
+ *  opens the file for write, and `lockPolicyFile` throws its "icacls said it locked
+ *  ... and the file disagrees" error. Measured on the GitHub windows runner, which
+ *  runs the job as `runneradmin` elevated; the same suite is green locally as a
+ *  normal user. Asked of the Security API rather than of `whoami`'s text, because the
+ *  answer is this token's own group list: a localized group name, or the medium
+ *  integrity label a service runs a full admin token at, would each fool a text match.
+ */
+function processRunsElevated(): boolean {
+  if (process.platform !== 'win32') return false;
+  try {
+    const result = cp.spawnSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        '([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent())' +
+          '.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)',
+      ],
+      { encoding: 'utf8', windowsHide: true },
+    );
+    return result.status === 0 && result.stdout.trim() === 'True';
+  } catch {
+    return false;
+  }
+}
+
+const elevatedWindows = process.platform === 'win32' && processRunsElevated();
 
 function policyInTempHome(): { home: string; policyPath: string } {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-lock-home-'));
@@ -60,7 +117,9 @@ function writeError(filePath: string): string {
 
 afterEach(cleanup);
 
-describe('locking the real policy file', () => {
+// Every test here asks the lock to actually refuse this process. On Windows that is
+// only provable to a user who is not an administrator: see `processRunsElevated`.
+describe.skipIf(elevatedWindows)('locking the real policy file', () => {
   it('makes the file unwritable to this process, reports it, and gives the write back', () => {
     const { policyPath } = policyInTempHome();
     expect(readPolicyLockState(policyPath).state).toBe('unlocked');
@@ -104,7 +163,8 @@ describe('locking the real policy file', () => {
   });
 });
 
-describe('a locked policy file and Forge’s own writers', () => {
+// Same skip condition as the describe above.
+describe.skipIf(elevatedWindows)('a locked policy file and Forge’s own writers', () => {
   it('refuses the write and names Unlock, instead of falling back to config.yaml', () => {
     const { policyPath } = policyInTempHome();
     const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-lock-config-'));
@@ -162,7 +222,12 @@ describe('a locked policy file and Forge’s own writers', () => {
       renamed = (err as NodeJS.ErrnoException).code ?? 'failed';
     }
     const replaceable = renamed === 'renamed' ? 'rename-replaceable' : 'blocked';
-    expect(replaceable).toBe(process.platform === 'win32' ? 'rename-replaceable' : 'blocked');
+    // Measured on all three CI systems, not assumed: the lock makes the file
+    // read-only and the rename still lands everywhere. Replacement is decided by the
+    // FOLDER (its POSIX write bit, Windows "delete child"), which no part of the lock
+    // touches — so the hole this test exists to pin is not Windows-only, and the
+    // Windows answer this line used to pin is the answer on macOS and Linux too.
+    expect(replaceable).toBe('rename-replaceable');
     if (renamed === 'renamed') {
       // The hole, stated as a fact rather than a hope: the file that arrives by\n
       // rename carries the folder's permissions, so the lock is simply gone. This is\n

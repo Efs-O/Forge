@@ -153,6 +153,13 @@ async function answer(
 beforeAll(() => {
   fs.mkdirSync(PROBE_DIR, { recursive: true });
   fs.writeFileSync(SKILL_FILE, 'the skill as it was\n');
+  // The memories area has to exist before a write into it is admitted. The file
+  // tools real-path each open root (`~/.forge/memories` is one) and a root that is
+  // not on disk "contributes nothing", so the write is refused as outside the
+  // workspace and the file is never created — measured on the GitHub runners, where
+  // nothing had ever made that folder. Every real machine has it, because activation
+  // creates a per-workspace folder under it; a clean runner does not.
+  fs.mkdirSync(MEMORY_DIR, { recursive: true });
   fs.mkdirSync(path.join(WORKSPACE, '.git'), { recursive: true });
   (vscode.workspace.workspaceFolders as unknown as Array<{ uri: { fsPath: string } }>).splice(
     0,

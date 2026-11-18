@@ -179,6 +179,12 @@ import {
 // 2026-11-18: 68,029 (+12) after read_tool_result said "use exactly one mode" and moved
 // the 1-to-10 `max_matches` range into that argument's own description. The lab's clean
 // arm (T1) reproduced the model guessing a bigger limit and passing several modes at once.
+// 2026-11-18: 68,029 (unchanged) made host-independent. The maximal config now pins
+// `permissions.exec.shell` to bash: with no configured shell, `shellTool` asks
+// whether Git for Windows is installed and falls back to pwsh, and the pwsh-shaped
+// shell description is 518 chars shorter — so the ubuntu and macOS runners measured
+// 67,511 for the same tree. Naming the shell makes bash-on-Windows the measured case
+// everywhere, which is the worst case this gate says it prices.
 const MEASURED_CHARS = 68_029;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
@@ -247,7 +253,12 @@ function maximalConfig(): ForgeConfig {
     // `message_chat`'s gated actions are advertised text, so pricing the worst
     // case means pricing them: a window with `permissions.chats` on shows more
     // than one without, and the ceiling has to cover what a user can turn on.
-    permissions: { chats: { new_chat: true, steer: true } },
+    // `exec.shell` is pinned for the mirror reason: left unset, the shell tool
+    // probes for Git for Windows, and a host without it prices the shorter
+    // PowerShell-shaped description — which is how the same tree measured 67,511 on
+    // the ubuntu and macOS runners and 68,029 here. The worst case is bash on
+    // Windows, so that is what every runner has to measure.
+    permissions: { chats: { new_chat: true, steer: true }, exec: { shell: 'bash' } },
     agent_links: { open_panel: 'every_ask', panel_live_timeout_ms: 20_000 },
     // `set_checkin` is registered only when this block exists, so pricing the
     // maximally-advertised set means pricing it with the block present.

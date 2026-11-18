@@ -501,7 +501,13 @@ describe('the Windows stop path', () => {
   });
 });
 
-describe('a background execution', () => {
+// The keeper's `kill <token>` line is what a stop sends, and only a Windows stop
+// sends it: `terminateProcessTree` runs the job-object half (`signalWindowsTree`,
+// which is where `beginTreeStop`/`finishStoppedTree` live) behind
+// `process.platform === 'win32'`. On POSIX the child's own exit event is what
+// reaches the keeper, and it says `release`. The ordering this file exists to pin
+// is still proved on every OS by the faked-deps tests above.
+describe.skipIf(process.platform !== 'win32')('a background execution', () => {
   it('is protected while it runs and swept when it is stopped', async () => {
     const root = path.join(process.cwd(), '.test-tmp', 'job-guard');
     fs.mkdirSync(root, { recursive: true });

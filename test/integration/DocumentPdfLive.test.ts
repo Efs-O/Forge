@@ -37,27 +37,41 @@ function skipWithoutSystemBrowser(
 }
 
 describe('document PDF browser paths against a system browser', () => {
-  it('renders a PDF page to PNG', async (ctx) => {
-    const pdf = await fs.readFile(path.resolve('test/fixtures/documents/sample.pdf'));
-    const attempt = await withSystemBrowser((channel) =>
-      renderPdfPages(pdf, [1], () => configFor(channel), new AbortController().signal),
-    );
-    if ('missing' in attempt) skipWithoutSystemBrowser(ctx, attempt);
-    const page = attempt.value[0];
-    expect(page.png.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
-    expect(page.width).toBeGreaterThan(0);
-    expect(page.height).toBeGreaterThan(0);
-  });
+  // Both tests launch a real Chrome or Edge and render through it. That costs
+  // seconds on a warm machine and minutes when the runner is loaded, so neither
+  // runs on the 5 s default: the macOS runner timed the first one out. The
+  // assertions are the same; only the ceiling around them moved.
+  const SYSTEM_BROWSER_TIMEOUT_MS = 60_000;
 
-  it('exports Markdown HTML to PDF', async (ctx) => {
-    const attempt = await withSystemBrowser((channel) =>
-      printHtmlToPdf(
-        '<!doctype html><html><body><p>tiny Markdown export</p></body></html>',
-        () => configFor(channel),
-        new AbortController().signal,
-      ),
-    );
-    if ('missing' in attempt) skipWithoutSystemBrowser(ctx, attempt);
-    expect(attempt.value.toString('ascii', 0, 4)).toBe('%PDF');
-  });
+  it(
+    'renders a PDF page to PNG',
+    async (ctx) => {
+      const pdf = await fs.readFile(path.resolve('test/fixtures/documents/sample.pdf'));
+      const attempt = await withSystemBrowser((channel) =>
+        renderPdfPages(pdf, [1], () => configFor(channel), new AbortController().signal),
+      );
+      if ('missing' in attempt) skipWithoutSystemBrowser(ctx, attempt);
+      const page = attempt.value[0];
+      expect(page.png.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+      expect(page.width).toBeGreaterThan(0);
+      expect(page.height).toBeGreaterThan(0);
+    },
+    SYSTEM_BROWSER_TIMEOUT_MS,
+  );
+
+  it(
+    'exports Markdown HTML to PDF',
+    async (ctx) => {
+      const attempt = await withSystemBrowser((channel) =>
+        printHtmlToPdf(
+          '<!doctype html><html><body><p>tiny Markdown export</p></body></html>',
+          () => configFor(channel),
+          new AbortController().signal,
+        ),
+      );
+      if ('missing' in attempt) skipWithoutSystemBrowser(ctx, attempt);
+      expect(attempt.value.toString('ascii', 0, 4)).toBe('%PDF');
+    },
+    SYSTEM_BROWSER_TIMEOUT_MS,
+  );
 });
