@@ -6,6 +6,8 @@
 
 **Job and delegation task caps raised to 8000 characters.** A scheduled job's task text and an `ask_local_agent` task were both capped at 4000 characters; a job instruction that grew past the cap (like the daily scan's step list) could no longer be saved. The prompt each one carries per run roughly doubles at worst; no other 4000-sized limit in the tree is touched.
 
+**Two tool-call mistakes stopped costing a round.** `read_tool_result` now says "use exactly one mode" and puts the 1-to-10 limit for `max_matches` in that argument's own description, where the model reads it before guessing a bigger number. And a boolean written as a quoted string with spaces around it (`background: "TRUE "`) runs as the boolean it means, instead of being refused; a string that is not `true` or `false` is still refused.
+
 ## 0.17.194
 
 **A laptop can generate and upscale images on its desktop.**

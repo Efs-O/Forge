@@ -279,7 +279,8 @@ export function makeReadToolResultTool(): RegisteredTool {
         name: 'read_tool_result',
         description:
           'Search and read earlier text in this conversation, including messages before a compaction. ' +
-          'Use query for literal search, message_index for an exact conversation message (including tool results), or tool_call_id for an exact or unique-prefix ID.',
+          'Use exactly one mode: query (literal search), tool_call_id (exact or unique-prefix ID), ' +
+          'or message_index (any message or tool row by its zero-based index).',
         parameters: {
           type: 'object',
           properties: {
@@ -304,7 +305,7 @@ export function makeReadToolResultTool(): RegisteredTool {
               type: 'integer',
               minimum: 1,
               maximum: 10,
-              description: 'Search result limit; defaults to 6.',
+              description: 'Search result limit (1 to 10); defaults to 6.',
             },
             offset: {
               type: 'integer',

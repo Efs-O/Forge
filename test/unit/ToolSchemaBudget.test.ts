@@ -176,7 +176,10 @@ import {
 // 2026-11-16: 68,017 (+12) after monitor_execution named its own ceiling in prose: the
 // bound sat only in the schema's `maximum`, so an agent that guessed a longer wait was
 // refused and lost a round.
-const MEASURED_CHARS = 68_017;
+// 2026-11-18: 68,029 (+12) after read_tool_result said "use exactly one mode" and moved
+// the 1-to-10 `max_matches` range into that argument's own description. The lab's clean
+// arm (T1) reproduced the model guessing a bigger limit and passing several modes at once.
+const MEASURED_CHARS = 68_029;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.

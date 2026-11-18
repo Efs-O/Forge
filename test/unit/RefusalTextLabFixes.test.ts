@@ -255,6 +255,8 @@ describe('lab-measured refusal texts', () => {
       ['true', true],
       ['True', true],
       ['TRUE', true],
+      ['TRUE ', true],
+      ['  false  ', false],
       ['false', false],
       ['False', false],
       ['FALSE', false],

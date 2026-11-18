@@ -80,7 +80,10 @@ describe('read_tool_result shape recovery', () => {
   it('states the full search modes and that message_index includes tool results', () => {
     const fn = makeReadToolResultTool().definition.function;
     expect(fn.description).toBe(
-      'Search and read earlier text in this conversation, including messages before a compaction. Use query for literal search, message_index for an exact conversation message (including tool results), or tool_call_id for an exact or unique-prefix ID.',
+      'Search and read earlier text in this conversation, including messages before a compaction. Use exactly one mode: query (literal search), tool_call_id (exact or unique-prefix ID), or message_index (any message or tool row by its zero-based index).',
+    );
+    expect(fn.parameters?.properties['max_matches']?.description).toBe(
+      'Search result limit (1 to 10); defaults to 6.',
     );
     expect(fn.parameters?.properties['tool_call_id']?.description).toBe(
       'Tool-result mode: exact ID or unique prefix (8+ characters).',
