@@ -116,6 +116,11 @@ def error_words(after):
     span = PLACEHOLDER_RE.split(span)[0].strip(STRIP)
     if len(span) < 8 or span[0] in '{[':
         return None
+    # One plain word ('"remember"') is a name, not an answer: it matches every
+    # refusal that mentions that tool. A single token counts only when it carries
+    # a '-', '/', '_' or '.', as 'max-lines' or 'record-ci-pass.mjs' do.
+    if not re.search(r'[\s/_.-]', span):
+        return None
     return span
 
 
