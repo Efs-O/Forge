@@ -196,7 +196,16 @@ function deepReverseKeys(value: unknown): unknown {
     // Preserve the prototype: isDeepStrictEqual compares prototypes, and a
     // null-prototype dictionary must not be cloned into a normal object.
     const out = Object.create(Object.getPrototypeOf(value)) as Record<string, unknown>;
-    for (const key of Object.keys(source).reverse()) out[key] = deepReverseKeys(source[key]);
+    // defineProperty, not `out[key] =`: fast-check generates an own `__proto__` key,
+    // and assigning it would set the clone's prototype instead of copying the key.
+    for (const key of Object.keys(source).reverse()) {
+      Object.defineProperty(out, key, {
+        value: deepReverseKeys(source[key]),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    }
     return out;
   }
   return value;
