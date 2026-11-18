@@ -52,6 +52,9 @@
 10. an expected message built from fragments joined with `cond ? 'x' : ''` and no `+` before the next fragment → the assertion compares a mangled string. join every fragment with ` +`, and wrap each conditional in parentheses
 11. a new method on a class that tests fake with `{ … } as unknown as X` → `TypeError: x.method is not a function` in other files' tests once a caller uses it. `grep -rn "as unknown as X" test scripts` and add the method to every fake in the same commit
 12. a test reading a media job's `job.json` after `status()` answers `done` → the file still holds the `running` record: `finish()` fires the terminal write without awaiting it. poll the file until the field lands
+13. a python heredoc writing a TS test that holds `'\n'` escapes → Python turns them into real newlines, so vitest fails at `PARSE_ERROR` on the unterminated string. write the escapes as `chr(92)+"n"` in the heredoc, or edit the test with the edit tool
+14. a gate setting added to `ci.yml` only (`VITEST_MAX_WORKERS: 2` on windows-latest) → `publish.yml` runs the same `npm run ci` without it and fails on 5 s timeouts on a tree CI passed. grep every workflow that runs the gate and copy the env
+15. a "the stale read must not publish" test asserting `snapshots().toHaveLength(1)` → fails on macOS with 2: `fs.watch` reports the fixture's own writes, which starts one more legitimate refresh. make the stale read's result distinguishable (return `[]`) and assert no snapshot is it
 
 ## PATHS
 1. comparing a tool's resolved path with the workspace root in a test → `fs.realpathSync` keeps the 8.3 short form `EFSOOF~1`, `fs/promises` `realpath` expands it: use the tool's resolver
