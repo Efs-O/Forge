@@ -99,6 +99,15 @@ describe('web_fetch DNS SSRF protection', () => {
     ['IPv6 link-local', 'fe80::1'],
     ['IPv4-mapped loopback', '::ffff:127.0.0.1'],
     ['IPv4-compatible private address', '::a00:1'],
+    // Each of these carries an IPv4 inside it, and none is global unicast:
+    // refusing everything outside `2000::/3` covers the last three as well.
+    ['6to4 loopback', '2002:7f00:1::'],
+    ['6to4 link-local', '2002:a9fe:8064::'],
+    ['6to4 private', '2002:0a00:0001::'],
+    ['Teredo loopback', '2001::7f00:1'],
+    ['DNS64 well-known loopback', '64:ff9b::7f00:1'],
+    ['IPv6 documentation range', '2001:db8::1'],
+    ['IPv6 multicast', 'ff02::1'],
   ])('rejects DNS answers in the %s range', async (_name, address) => {
     const lookup = vi.fn(async () => [{ address, family: address.includes(':') ? 6 : 4 }]);
     const fetch = vi.fn(async () => new Response('should not be fetched'));
@@ -107,6 +116,27 @@ describe('web_fetch DNS SSRF protection', () => {
 
     await expect(tool.handler({ url: 'https://public.example.test/' })).rejects.toThrow(/blocked/i);
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['global unicast', '2606:2800:220:1d::2'],
+    ['a root-server space that sits clear of Teredo', '2001:500::1'],
+    ['the far end of the global unicast range', '3fff:ffff:ffff:ffff::1'],
+  ])('still fetches a page served from %s', async (_name, address) => {
+    const lookup = vi.fn(async () => [{ address, family: 6 }]);
+    const fetch = vi.fn(async () => new Response('<p>public page</p>'));
+    vi.stubGlobal('fetch', fetch);
+    const tool = makeWebFetchTool({ lookup, fetch });
+
+    await expect(tool.handler({ url: 'https://public.example.test/' })).resolves.toContain(
+      'public page',
+    );
+    expect(fetch).toHaveBeenCalledExactlyOnceWith(
+      'https://public.example.test/',
+      { address, family: 6 },
+      expect.any(Object),
+      expect.anything(),
+    );
   });
 
   it('passes only the vetted address to the connection layer', async () => {

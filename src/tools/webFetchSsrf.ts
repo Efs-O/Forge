@@ -131,6 +131,20 @@ function blockedAddress(address: string): boolean {
     ].join('.');
     return blockedIpv4(mappedIpv4);
   }
+  // Only global unicast is a place a public page can live. Everything else in
+  // IPv6 is reserved space or a transition address that carries an IPv4 inside
+  // it, and none of it reaches the tests above: 6to4 `2002::/16` (so
+  // `2002:7f00:1::` is 127.0.0.1 and `2002:a9fe:8064::` is 169.254.128.100),
+  // Teredo `2001::/32`, documentation `2001:db8::/32`, the DNS64/NAT64
+  // well-known prefix `64:ff9b::/96`, and multicast `ff00::/8`. Refusing
+  // everything outside `2000::/3` closes all of those at once, and closes any
+  // space nobody has assigned yet too - refused rather than allowed.
+  const head = groups[0] as number;
+  if (head < 0x2000 || head > 0x3fff) return true;
+  if (head === 0x2002) return true;
+  if (head === 0x2001 && ((groups[1] as number) === 0 || (groups[1] as number) === 0x0db8)) {
+    return true;
+  }
   return false;
 }
 
