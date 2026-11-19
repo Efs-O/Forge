@@ -39,6 +39,11 @@ import { ChatCapacityError, type ForgeHostFacade } from '../../src/sidebar/Forge
 import { chatCapMessage } from '../../src/sidebar/sessionTypes';
 import type { ForgeRequestOutcome } from '../../src/sidebar/turnOutcome';
 import { readOutboxItem } from '../../src/jobs/JobOutbox';
+import { JobDelivery } from '../../src/jobs/JobDelivery';
+import {
+  recoverInterruptedRuns,
+  startTaskRunHeartbeat,
+} from '../../src/jobs/agentTaskState';
 import { openDiscussChat, resolveJobConversation } from '../../src/jobs/jobDiscuss';
 import { nextDueWithBackoff } from '../../src/jobs/backoff';
 import { UserQuestionService } from '../../src/sidebar/UserQuestionService';
@@ -550,6 +555,172 @@ describe('crash recovery (AC7)', () => {
       await ownerLease.release();
     }
   });
+
+  /** A tick's snapshot of one job, with the marker it held when the tick read it. */
+  function staleSnapshot(startedAt: number, live: JobFile): JobFile {
+    return {
+      job: live.job,
+      state: {
+        ...live.state,
+        task_run: { started_at: startedAt, conversation_id: 'conv-1' },
+      },
+    };
+  }
+
+  it('re-reads each job before acting on it, so a marker cleared mid-tick survives', async () => {
+    await store.saveJob(baseJob());
+    const startedAt = Date.parse('2026-01-01T03:00:00');
+    store.patchState('agent-task', {
+      task_run: { started_at: startedAt, conversation_id: 'conv-1' },
+    });
+    const snapshot = staleSnapshot(startedAt, (await store.load('agent-task'))!);
+    // The run finished and cleared its marker while the loop read other jobs.
+    store.patchState('agent-task', { task_run: null });
+
+    const outboxDir = path.join(jobsRoot, 'outbox');
+    const cleared = await recoverInterruptedRuns(
+      store,
+      outboxDir,
+      () => Date.parse('2026-01-01T04:00:00'),
+      { jobs: [snapshot], isOwn: () => false },
+    );
+    expect(cleared.size).toBe(0);
+    expect(await store.readRuns('agent-task')).toEqual([]);
+    expect(await readOutboxItem(outboxDir, 'agent-task')).toBeUndefined();
+  });
+
+  it('a marker that started beating again after the snapshot belongs to a live window', async () => {
+    await store.saveJob(baseJob());
+    const startedAt = Date.parse('2026-01-01T03:00:00');
+    store.patchState('agent-task', {
+      task_run: { started_at: startedAt, conversation_id: 'conv-1' },
+    });
+    const snapshot = staleSnapshot(startedAt, (await store.load('agent-task'))!);
+    const nowMs = Date.parse('2026-01-01T04:00:00');
+    // Another window picked the beat back up between the snapshot and this loop.
+    store.patchState('agent-task', {
+      task_run: { started_at: startedAt, conversation_id: 'conv-1', heartbeat_at: nowMs - 10_000 },
+    });
+
+    const outboxDir = path.join(jobsRoot, 'outbox');
+    const cleared = await recoverInterruptedRuns(store, outboxDir, () => nowMs, {
+      jobs: [snapshot],
+      isOwn: () => false,
+    });
+    expect(cleared.size).toBe(0);
+    expect(await store.readRuns('agent-task')).toEqual([]);
+    expect((await store.load('agent-task'))!.state.task_run).not.toBeNull();
+  });
+
+  it('recovers a marker still stale on disk, claiming nothing about a restart', async () => {
+    await store.saveJob(baseJob());
+    const startedAt = Date.parse('2026-01-01T03:00:00');
+    store.patchState('agent-task', {
+      task_run: { started_at: startedAt, conversation_id: 'conv-1' },
+    });
+    const snapshot = staleSnapshot(startedAt, (await store.load('agent-task'))!);
+
+    const outboxDir = path.join(jobsRoot, 'outbox');
+    const cleared = await recoverInterruptedRuns(
+      store,
+      outboxDir,
+      () => Date.parse('2026-01-01T04:00:00'),
+      { jobs: [snapshot], isOwn: () => false },
+    );
+    expect(cleared).toEqual(new Set(['agent-task']));
+    const item = await readOutboxItem(outboxDir, 'agent-task');
+    expect(item).toBeDefined();
+    expect(item!.text).toContain('no heartbeat for');
+    expect(item!.text).not.toContain('Forge restarted');
+    const runs = await store.readRuns('agent-task');
+    expect(runs[0]!.summary).toContain('no heartbeat for');
+    expect(runs[0]!.summary).not.toContain('Forge restarted');
+  });
+});
+
+// ── The heartbeat that keeps a live run's marker fresh ───────────────────────
+
+describe('task_run heartbeat', () => {
+  /** The two store calls the beat makes, with the marker's owner visible. */
+  function beatStore(marker: Record<string, unknown> | null) {
+    const state: { task_run: Record<string, unknown> | null } = { task_run: marker };
+    const patches: Array<Record<string, unknown>> = [];
+    return {
+      state,
+      patches,
+      load: async () => ({ state }),
+      patchState: (_id: string, patch: Record<string, unknown>) => {
+        patches.push(patch);
+        Object.assign(state, patch);
+      },
+    };
+  }
+  const asStore = (s: ReturnType<typeof beatStore>): JobStore => s as unknown as JobStore;
+
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('refreshes the marker while it names this run', async () => {
+    const s = beatStore({ started_at: 1_000, conversation_id: 'c' });
+    const stop = startTaskRunHeartbeat(asStore(s), 'j', 1_000, () => 'c', () => 2_000);
+    try {
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(s.state.task_run).toMatchObject({ started_at: 1_000, heartbeat_at: 2_000 });
+    } finally {
+      stop();
+    }
+  });
+
+  it('a beat landing after the marker was cleared does not put it back', async () => {
+    const s = beatStore({ started_at: 1_000 });
+    const stop = startTaskRunHeartbeat(asStore(s), 'j', 1_000, () => 'c', () => 2_000);
+    try {
+      s.state.task_run = null; // finish() cleared it before this beat ran
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(s.state.task_run).toBeNull();
+      expect(s.patches.filter((p) => p['task_run'] !== null)).toEqual([]);
+    } finally {
+      stop();
+    }
+  });
+
+  it('leaves a marker naming a newer run alone, and a stop does not clear it', async () => {
+    const s = beatStore({ started_at: 1_000 });
+    const stop = startTaskRunHeartbeat(asStore(s), 'j', 1_000, () => 'c', () => 2_000);
+    s.state.task_run = { started_at: 5_000, heartbeat_at: 5_000 };
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(s.state.task_run).toEqual({ started_at: 5_000, heartbeat_at: 5_000 });
+    stop();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.state.task_run).toEqual({ started_at: 5_000, heartbeat_at: 5_000 });
+  });
+
+  it('a stop clears the marker once more, in case a beat that read it first lands late', async () => {
+    const s = beatStore({ started_at: 1_000 });
+    const stop = startTaskRunHeartbeat(asStore(s), 'j', 1_000, () => 'c', () => 2_000);
+    try {
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(s.state.task_run).not.toBeNull();
+      stop();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(s.patches[s.patches.length - 1]).toEqual({ task_run: null });
+      expect(s.state.task_run).toBeNull();
+    } finally {
+      stop();
+    }
+  });
+
+  it('a stop that reports an unfinished finish leaves the marker for recovery', async () => {
+    const s = beatStore({ started_at: 1_000 });
+    const stop = startTaskRunHeartbeat(asStore(s), 'j', 1_000, () => 'c', () => 2_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+    stop(false); // finish() threw: no run row was written, no notice was sent
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.state.task_run).not.toBeNull();
+    // The beat is dead, so the marker ages and recovery can report the run.
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(s.patches.filter((p) => p['task_run'] !== null)).toHaveLength(1);
+  });
 });
 
 describe('lease takeover while the old window is alive', () => {
@@ -606,7 +777,13 @@ describe('lease takeover while the old window is alive', () => {
       await scheduler.tick();
       const runs = await store.readRuns('agent-task');
       expect(runs[0]!.summary).toContain('interrupted');
+      // The tick that declares a run interrupted does not also start it again:
+      // this tick cleared that marker, so the job counts as busy until the next
+      // one. Starting it in the same breath is how a run that was still alive,
+      // just not beating, used to end up running twice (BL-043).
+      expect(runSpy).not.toHaveBeenCalled();
       // The kept run_now request and the due schedule run it once, here.
+      await scheduler.tick();
       expect(runSpy).toHaveBeenCalledTimes(1);
     } finally {
       runSpy.mockRestore();
@@ -682,6 +859,45 @@ describe('AgentTaskRunner', () => {
     const item = await readOutboxItem(outboxDir, 'agent-task');
     expect(item).toBeDefined();
     expect(item!.text).toContain('ok');
+  });
+
+  /**
+   * BL-043 follow-up from Claude's review: the beat stops in the `finally`, and
+   * a stop that cleared the marker after a `finish()` that threw left the run
+   * with no row, no notice and no marker — invisible to recovery as well. The
+   * stop now reports whether `finish()` got through, so the marker survives and
+   * recovery writes the failed row it would write for any dead window.
+   */
+  it('a finish() that throws leaves the marker for recovery instead of losing the run', async () => {
+    const job = baseJob({ action: { kind: 'agent_task', task: 'install', report: 'always' } });
+    await store.saveJob(job);
+    const tryDeliver = vi
+      .spyOn(JobDelivery.prototype, 'tryDeliver')
+      .mockRejectedValue(new Error('delivery exploded'));
+    try {
+      await new AgentTaskRunner(makeDeps()).run({ job, state: JobStateSchema.parse({}) }, false);
+    } catch (err) {
+      expect(String(err)).toContain('delivery exploded');
+    } finally {
+      tryDeliver.mockRestore();
+    }
+    // The stop function's read-and-clear is a promise chain: settle it before
+    // reading, or the assertion below passes whether or not the marker survived.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Nothing declared this run interrupted, and no row was written for it.
+    const marker = (await store.load('agent-task'))!.state.task_run;
+    expect(marker).not.toBeNull();
+    expect(await store.readRuns('agent-task')).toEqual([]);
+
+    // Recovery is what reports it, once the beat is older than the stale limit.
+    const started = marker!.started_at;
+    const cleared = await recoverInterruptedRuns(store, outboxDir, () => started + 5 * 60_000);
+    expect(cleared).toEqual(new Set(['agent-task']));
+    const runs = await store.readRuns('agent-task');
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.outcome).toBe('failed');
+    expect(runs[0]!.summary).toContain('no heartbeat for');
   });
 
   /**

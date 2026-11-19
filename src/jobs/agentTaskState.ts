@@ -66,9 +66,23 @@ const TASK_RUN_HEARTBEAT_MS = 30_000;
 const TASK_RUN_STALE_MS = 120_000;
 
 /**
- * Keep a run's `task_run` marker fresh so a scheduler that takes the lease
- * over while this window is still alive leaves the run alone. Returns the stop
- * function; call it before the marker is cleared.
+ * Keep a run's `task_run` marker fresh so a scheduler that takes the lease over
+ * while this window is still alive leaves the run alone.
+ *
+ * Two rules exist because the caller cannot stop the beat at the exact moment
+ * the marker is cleared: `finish()` releases the model and delivers the report
+ * before it clears the marker, and the beat is the only thing keeping another
+ * window's scheduler from calling a finished run interrupted. So (1) every beat
+ * re-reads the state and patches only while the marker still names THIS run's
+ * `started_at` - a marker that is gone, or belongs to a newer run, is left
+ * alone; and (2) stopping the beat clears the marker once more, in case a beat
+ * that had already read the state lands after the clear and puts it back.
+ *
+ * The stop function takes one argument: whether the run's own `finish()` got
+ * through. `false` stops the beat but leaves the marker, because nothing wrote
+ * the run's row or its notice — recovery is then what reports it, as it would
+ * for any dead window. Clearing the marker on a failed finish would drop the
+ * run from the record entirely.
  */
 export function startTaskRunHeartbeat(
   store: JobStore,
@@ -76,17 +90,36 @@ export function startTaskRunHeartbeat(
   startedAt: number,
   conversationId: () => string | null,
   now: () => number,
-): () => void {
-  const timer = setInterval(() => {
+): (finished?: boolean) => void {
+  let stopped = false;
+  /** True while the marker on disk still belongs to this run. */
+  const stillOurs = async (): Promise<boolean> => {
+    const fresh = await store.load(jobId);
+    return fresh?.state.task_run?.started_at === startedAt;
+  };
+  const beat = async (): Promise<void> => {
     try {
+      if (!(await stillOurs())) return;
+      // The read above is an await: the run can finish while it is in flight.
+      if (stopped) return;
       store.patchState(jobId, {
         task_run: { started_at: startedAt, conversation_id: conversationId(), heartbeat_at: now() },
       });
     } catch {
       // A missed beat only ages the marker; the next one retries.
     }
-  }, TASK_RUN_HEARTBEAT_MS);
-  return () => clearInterval(timer);
+  };
+  const timer = setInterval(() => void beat(), TASK_RUN_HEARTBEAT_MS);
+  return (finished = true) => {
+    stopped = true;
+    clearInterval(timer);
+    if (!finished) return;
+    void stillOurs()
+      .then((ours) => {
+        if (ours) store.patchState(jobId, { task_run: null });
+      })
+      .catch(() => undefined);
+  };
 }
 
 /** Whether a `task_run` marker is still being refreshed by a live window. */
@@ -98,9 +131,12 @@ function taskRunIsLive(state: JobState, now: number): boolean {
 
 /**
  * Crash / reload recovery (CI-enforced). A job whose state still holds a
- * `task_run` that nobody refreshes was running when its window died: report it
- * through the outbox, record a `failed` run row, and clear the marker. Not
- * retried automatically — the next tick runs it. Idempotent.
+ * `task_run` that nobody refreshes was running when the window that started it
+ * stopped beating — its process may have died, or only stopped writing the
+ * marker — so report it through the outbox, record a `failed` run row, and
+ * clear the marker. Not retried automatically; the next tick runs it.
+ * Idempotent, and each job is re-read before it is acted on, since the list
+ * above is a snapshot taken at the start of the tick.
  *
  * A marker this window owns (`isOwn`) or one still heartbeating is left alone:
  * the scheduler lease can move to another window while the old one is alive
@@ -120,15 +156,35 @@ export async function recoverInterruptedRuns(
   for (const { job, state } of jobs) {
     if (!state.task_run) continue;
     if (options.isOwn?.(job.id) || taskRunIsLive(state, now())) continue;
-    const started = new Date(state.task_run.started_at);
+    // Everything above is a snapshot taken at the start of the tick. Re-read the
+    // job before acting on it: the run may have finished and cleared its marker
+    // while this loop read the other jobs, and a marker that started beating
+    // again in the meantime belongs to a window that is alive right now.
+    const fresh = await store.load(job.id);
+    const run = fresh?.state.task_run;
+    if (!fresh || !run) continue;
+    if (taskRunIsLive(fresh.state, now())) continue;
+    const started = new Date(run.started_at);
     const hhmm = `${String(started.getHours()).padStart(2, '0')}:${String(started.getMinutes()).padStart(2, '0')}`;
+    // What Forge actually knows is that the beat stopped. Whether the window
+    // restarted, exited or merely stopped responding is not something a stale
+    // marker can tell, and the sentence this used to say asserted the one case
+    // that is least likely - a run whose window died mid-report leaves no
+    // `session_start` behind, so "Forge restarted" is a guess the owner cannot
+    // check against a log that says nothing of the kind.
+    const silentMin = Math.max(
+      1,
+      Math.round((now() - (run.heartbeat_at ?? run.started_at)) / 60_000),
+    );
+    const sentence =
+      `interrupted — no heartbeat for ${silentMin} min; the run's window stopped ` +
+      `responding or exited (started ${hhmm})`;
     const backupPath = configBackupPath(store, job.id);
     const delivered = await writeOutboxItem(
       outboxDir,
       job.id,
       job.name,
-      `interrupted — Forge restarted during the run (started ${hhmm}); ` +
-        `config.yaml backup kept at ${backupPath}`,
+      `${sentence}; config.yaml backup kept at ${backupPath}`,
       now(),
     ).then(
       () => 1,
@@ -145,8 +201,8 @@ export async function recoverInterruptedRuns(
         late: false,
         outcome: 'failed',
         changed: false,
-        summary: 'interrupted — Forge restarted during the run',
-        error: 'interrupted — Forge restarted during the run',
+        summary: sentence,
+        error: sentence,
         delivered,
       })
       .catch(() => undefined);

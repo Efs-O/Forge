@@ -347,20 +347,34 @@ export class AgentTaskRunner {
         };
       }
       // Step 9: clean up on every exit path.
-      stopHeartbeat();
       marker?.dispose();
       hold?.dispose();
-      await this.releaseJobModel(jobModel, host, pool);
-      await this.finish(
-        jobFile,
-        action,
-        wasLate,
-        startedAt,
-        outcome,
-        conversationId,
-        backupPath,
-        staleWindow,
-      );
+      // The beat stops last, and even when the two awaits below throw: it is the
+      // only thing keeping another window's scheduler from calling this run
+      // interrupted, and `finish()` releases the model and delivers the report
+      // before it clears `task_run`. Stopping the beat ahead of them let the
+      // marker age unrefreshed for exactly as long as they took, so a tick in
+      // another window reported a finished run as "interrupted" and started it a
+      // second time. A `finish()` that threw says so: the marker then stays, so
+      // recovery reports the run instead of it vanishing with no row and no
+      // notice.
+      let finished = false;
+      try {
+        await this.releaseJobModel(jobModel, host, pool);
+        await this.finish(
+          jobFile,
+          action,
+          wasLate,
+          startedAt,
+          outcome,
+          conversationId,
+          backupPath,
+          staleWindow,
+        );
+        finished = true;
+      } finally {
+        stopHeartbeat(finished);
+      }
     }
   }
 

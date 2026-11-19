@@ -320,9 +320,11 @@ export class JobScheduler {
     // inherits its stale `task_run` markers.
     const cleared = await this.recoverRuns(jobs);
     for (const jf of jobs) if (cleared.has(jf.job.id)) jf.state.task_run = null;
-    // A live marker this window does not own is a run in another window.
+    // A live marker another window owns is a run in progress; a marker this tick
+    // cleared counts as busy too, so only the next tick may start that job.
     const isOwn = (id: string): boolean => this.runningJobs.has(id);
-    const busy = (jf: JobFile | undefined): boolean => !!jf?.state.task_run && !isOwn(jf.job.id);
+    const busy = (jf: JobFile | undefined): boolean =>
+      (!!jf?.state.task_run && !isOwn(jf.job.id)) || (!!jf && cleared.has(jf.job.id));
     const gap = this.lastTickAt === undefined ? 0 : now.getTime() - this.lastTickAt;
     const firstTick = this.lastTickAt === undefined;
     this.lastTickAt = now.getTime();
