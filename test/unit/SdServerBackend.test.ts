@@ -354,7 +354,7 @@ describe('SdServerBackend startup and lifecycle', () => {
     expect(serverRelease).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(server.config.idle_timeout_ms);
     await vi.waitFor(() => expect(server.kill).toHaveBeenCalledTimes(1));
-    expect(serverRelease).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(serverRelease).toHaveBeenCalledTimes(1));
   });
 
   it('transfers the media lease to the spawned sd-server, using the owner record identity', async () => {
