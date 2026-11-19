@@ -1,5 +1,10 @@
 import * as fs from 'fs';
-import { deleteOutboxItem, readOutboxItems, renderOutboxMessage } from '../jobs/JobOutbox';
+import {
+  deleteOutboxItem,
+  readOutboxItems,
+  reclaimOutboxClaims,
+  renderOutboxMessage,
+} from '../jobs/JobOutbox';
 
 /**
  * Watches the jobs outbox directory and delivers each pending item to the
@@ -112,6 +117,12 @@ export class JobOutboxWatcher {
     if (this.draining) return;
     this.draining = true;
     try {
+      // A delivery that died between its claim and its settle left the job's
+      // newest change in a claim no reader can see; hand it back before the
+      // pass reads the pending set, or it waits out the TTL for nothing.
+      await reclaimOutboxClaims(this.outboxDir).catch((err: Error) => {
+        this.onError(`Forge could not reclaim a job outbox hand-off: ${err.message}`);
+      });
       const items = await readOutboxItems(this.outboxDir);
       for (const item of items) {
         if (generation !== this.generation) return;

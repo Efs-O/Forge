@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { writeOutboxItem } from '../../src/jobs/JobOutbox';
+import { CLAIM_STALE_MS, writeOutboxItem } from '../../src/jobs/JobOutbox';
 import { JobOutboxWatcher } from '../../src/remote/JobOutboxWatcher';
 
 let dir: string;
@@ -147,6 +147,33 @@ describe('JobOutboxWatcher (B.4 delivery route)', () => {
     await watcher.drain();
     expect(delivered).toHaveLength(2);
     expect(delivered[1]).toContain('second');
+  });
+
+  it('hands a stranded hand-off back to the pending set before delivering', async () => {
+    // A delivery whose process died between its claim and its settle leaves the
+    // job's newest change in a file no drain reads. Without the reclaim step in
+    // the pass, that change waits out the TTL and may never reach its chat.
+    const claim = path.join(dir, 'j.json.claim-00000000-0000-4000-8000-000000000000');
+    fs.writeFileSync(
+      claim,
+      JSON.stringify({
+        job_id: 'j',
+        name: 'J',
+        text: 'stranded',
+        changed_at: 5,
+        earlier_count: 0,
+        first_undelivered_at: 5,
+      }),
+    );
+    const stale = new Date(Date.now() - CLAIM_STALE_MS - 60_000);
+    fs.utimesSync(claim, stale, stale);
+
+    await makeWatcher().drain();
+
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]).toContain('stranded');
+    // Delivered and settled: neither the claim nor the item is left behind.
+    expect(await fs.promises.readdir(dir)).toEqual([]);
   });
 
   it('deletes a file only after delivery is accepted (reached > 0)', async () => {
