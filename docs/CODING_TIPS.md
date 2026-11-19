@@ -13,13 +13,15 @@
 1. `npx eslint test/unit/x.test.ts` → "none of those TSConfigs include this file": the lint script is `eslint src webview-ui`, so tests have no typed-lint config. lint `src` only
 2. `npx tsc --noEmit` → checks `src` only: the root tsconfig excludes `webview-ui` and `test`. a webview-ui change needs `npx tsc --noEmit -p webview-ui/tsconfig.json`
 3. `gh api` or `web_fetch` in the basalt-watch job → `approval key denied by policy` (needs `net:prog:gh-api` / `net:github.com` in `approvals.jobs.basalt-watch.allow` in `~/.forge/policy.yaml`). judge from the watch JSON's 600-char snippets and name what was cut
+4. `npm run check:changed -- src/tools/webFetchSsrf.ts test/unit/WebFetchSsrf.test.ts` → imports cannot lead to the affected tests, so it runs the FULL suite and the known load class goes red on an unrelated commit. rerun those files alone and report it as contention
+5. `cwd: "n:/vs code/apps/Forge"` → `does not exist`: this workspace root has a space, `N:/vs code apps/Forge`. a typo'd cwd refuses the whole call, and a background one loses the job it was starting
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green and the tree stood still: never run `record-ci-pass.mjs` by hand — the `ci:steps` chain writes it
 2. `git add AI SETUP.md` → `fatal: pathspec 'AI' did not match any files`: the underscore became a space. the file is `AI_SETUP.md`
 
 ## EDIT
-1. a rename lengthens an identifier, or a call takes several arguments on one line → the `prettier/prettier` gate fails at `.prettierrc` printWidth 100. fix: `npx prettier --write <file>`
+1. a rename lengthens an identifier, a call takes several arguments on one line, or I hand-split a `.then()` chain → the `prettier/prettier` gate fails at `.prettierrc` printWidth 100. fix: `npx prettier --write <src file>` before the gate
 2. `apply_line_edits` on `docs/TOOL_COVERAGE.md` → `ToolHarness.test.ts` diffs it against a fresh generation and normalises only `Generated:`. restore_file it after a demo
 3. `npx prettier --write` on a test file → it rewrites lines nobody touched: `test/` is not prettier-clean. --write only the src files the gate lints
 4. an edit that grows a src file past 500 lines → eslint `max-lines` (`.eslintrc.json`) errors. check `wc -l <file>` first; move the code into a leaf module
@@ -35,6 +37,7 @@
 8. a test reading a media job's `job.json` after `status()` answers `done` → the file still holds `running`: `finish()` in `src/media/remoteMediaJobs.ts` writes without awaiting. poll the file until the field lands
 9. a gate setting added to `.github/workflows/ci.yml` only → `publish.yml` runs the same `npm run ci` without it and fails on a tree CI passed. grep every workflow that runs the gate and copy the env
 10. a promotion test that guards the `resources/tips/CODING_TIPS.md` add right after guarding the `docs/CODING_TIPS.md` delete → still refused: `src/tools/tipsWriteGuard.ts` only checks, and reads the project file from disk. write the delete to disk first
+11. a file-age gate tested as `now = Date.now() + STALE + 1` in `test/unit/JobOutbox.test.ts` → flaky: Windows stamps a file's mtime ahead of `Date.now()`, so the age lands under the threshold and `reclaimOutboxClaims` skips it. pass a whole threshold of margin, never 1 ms
 
 ## PATHS
 1. `zipfile.ZipFile('test/fixtures/sample.xlsx')` in a scan → FileNotFoundError: that is not where the fixture lives. read the test's `fixture()` helper for the real path first
