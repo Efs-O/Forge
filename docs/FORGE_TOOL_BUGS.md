@@ -125,7 +125,12 @@ Entry shape (copy it, fill it, newest entry last):
 - Should: keep what it accepted, or report that the write did not persist — a silent loss makes
   the previous day's "already reported" state unusable for dedupe
 - Workaround: re-derive the lost facts from the current watch run and fold them into the new note
-- Status: open
+- Status: closed 2026-11-19 — not a store bug. Claude traced the loss to an explicit call: chat
+  ec64f51f ran `forget {"key":"basalt-watch-2026-11-13"}` at 11-14 09:59 (and forgot
+  `basalt-watch-2026-11-12` as well). The entry's dates were also wrong: the note was written
+  11-13 06:51 in eef4b3f8, and 11-15 06:48 is the recall that found nothing. A `forget` that removes
+  the file is correct behaviour, so there is nothing here to fix — and the 2026-11-19 duplicate-key
+  heal (chat 8f53bf68, ledger BL-038) is a different mechanism: it leaves a file present but skipped.
 
 ## `desktop_click` on a dialog field reports success but does not move focus
 
@@ -172,4 +177,34 @@ Entry shape (copy it, fill it, newest entry last):
   when the restart comes after its last message
 - Workaround: the report is in the chat; the retried run re-sweeps and answers "nothing new since
   the report minutes ago"
+- Status: open
+
+---
+
+## laptop-test `run` prints the exchange id as `CHAT=`, so `wait` and `status` 404
+
+- Seen: 2026-11-18, laptop Forge 0.17.197, chat b1657c11-378e-44f2-a6ac-7a955cd0c59d
+- Tool: `scripts/laptop.ps1 run <prompt.md>` — it printed `CHAT=9fda2847-09b3-4825-b700-34a8c0989dfe`,
+  which is that call's `exchangeId`, not the `conversationId` every other verb takes
+- Did: `wait 9fda2847-…` → `curl: (22) The requested URL returned error: 404` /
+  `forge.sh: Forge's endpoint did not accept it (see above).` / `EXIT=1` — not the `EXIT=124` a
+  still-running chat prints, so it reads as a dead chat
+- Should: print the id its own `wait`/`status`/`collect` accept, e.g.
+  `CHAT=<conversationId> EXCHANGE=<exchangeId>`
+- Workaround: take `conversationId` from the `run` JSON; `status <exchangeId>` names it in its own
+  error (`is an exchange id, not a chat id: its chat is --to b1657c11-…`)
+- Status: fixed in the skill script (edited 2026-11-18 16:36): `run` now prints
+  `CHAT=<conversationId>  (pass this to wait / status / collect)` and `EXCHANGE=<exchangeId>  (not a chat id)`
+
+---
+
+## `shell` aborts a plain `ls | grep` pipeline with exit 134 and prints no result
+
+- Seen: 2026-11-19, Forge 0.17.202, chat "SEARCH THE CODEBASE TO FIND 5 CRITICAL BUGS"
+- Tool: `shell` — `ls test/unit | grep -i -e ssrf -e webfetch -e fetch`
+- Did: `exit 134 · 0.5 s` with `/usr/bin/bash: line 1: 2003 Done ls test/unit` / `2004 Aborted | grep …`;
+  the listing printed nothing, so the answer to "is there an SSRF test?" was lost, not just failed
+- Should: run the pipeline, or refuse with the reason; a SIGABRT from the shell's own job control
+  is not something the caller can act on
+- Workaround: `find_files` / `grep_search` instead of piping `ls` into `grep`
 - Status: open
