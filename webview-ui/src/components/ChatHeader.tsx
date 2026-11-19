@@ -4,6 +4,7 @@ import {
   type AgentKind,
   type AgentLinks,
 } from '../../../src/agentLinks/chatAgentLinks';
+import { shortChatTitle } from '../../../src/sidebar/chatMessageText';
 
 interface Props {
   title: string;
@@ -14,6 +15,14 @@ interface Props {
   onRename?: (title: string) => void;
   agentLinks?: AgentLinks;
   onUnlinkAgent: (kind: AgentKind) => void;
+  /**
+   * The open chats this one exchanges `message_chat` messages with. They are not
+   * linked sessions, so their chip has no Unlink: it disappears when either
+   * side closes. Computed on the host per tab projection.
+   */
+  messagedChats?: { id: string; title: string }[];
+  /** Switch the panel to that chat; the same handler the history list uses. */
+  onOpenChat?: (id: string) => void;
 }
 
 export function ChatHeader({
@@ -24,6 +33,8 @@ export function ChatHeader({
   onRename,
   agentLinks,
   onUnlinkAgent,
+  messagedChats,
+  onOpenChat,
 }: Props): React.ReactElement {
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -38,6 +49,9 @@ export function ChatHeader({
     if (next.trim() && next !== title) onRename?.(next);
     setEditing(false);
   }, [onRename, title]);
+
+  const links = Object.values(agentLinks ?? {}).filter((item) => item !== undefined);
+  const chats = messagedChats ?? [];
 
   return (
     <>
@@ -74,29 +88,40 @@ export function ChatHeader({
             {title}
           </span>
         )}
-        {Object.values(agentLinks ?? {}).some((item) => item !== undefined) && (
-          <div id="agent-links-strip" aria-label="Linked agent sessions">
-            {Object.values(agentLinks ?? {})
-              .filter((item) => item !== undefined)
-              .map((item) => (
-                <div
-                  className={`agent-link-group agent-link-${item.kind}`}
-                  key={item.kind}
-                  aria-label={`${agentDisplayName(item.kind)} linked`}
-                  title={`${item.title}\nLast used ${new Date(item.lastUsedAt).toLocaleString()}`}
+        {(links.length > 0 || chats.length > 0) && (
+          <div id="agent-links-strip" aria-label="Linked agents and chats">
+            {links.map((item) => (
+              <div
+                className={`agent-link-group agent-link-${item.kind}`}
+                key={item.kind}
+                aria-label={`${agentDisplayName(item.kind)} linked`}
+                title={`${item.title}\nLast used ${new Date(item.lastUsedAt).toLocaleString()}`}
+              >
+                <span className="agent-link-name">{agentDisplayName(item.kind)}</span>
+                <span className="agent-link-state">Linked</span>
+                <button
+                  type="button"
+                  aria-label={`Unlink ${agentDisplayName(item.kind)}`}
+                  title={`Unlink ${agentDisplayName(item.kind)}`}
+                  onClick={() => onUnlinkAgent(item.kind)}
                 >
-                  <span className="agent-link-name">{agentDisplayName(item.kind)}</span>
-                  <span className="agent-link-state">Linked</span>
-                  <button
-                    type="button"
-                    aria-label={`Unlink ${agentDisplayName(item.kind)}`}
-                    title={`Unlink ${agentDisplayName(item.kind)}`}
-                    onClick={() => onUnlinkAgent(item.kind)}
-                  >
-                    Unlink
-                  </button>
-                </div>
-              ))}
+                  Unlink
+                </button>
+              </div>
+            ))}
+            {chats.map((chat) => (
+              <button
+                type="button"
+                className="agent-link-group agent-link-forge"
+                key={chat.id}
+                aria-label={`Open chat ${chat.title}`}
+                title={`${chat.title}\n${chat.id}`}
+                onClick={() => onOpenChat?.(chat.id)}
+              >
+                <span className="agent-link-name">Forge</span>
+                <span className="agent-link-state">{shortChatTitle(chat.title)}</span>
+              </button>
+            ))}
           </div>
         )}
         <div id="chats-toolbar-actions">

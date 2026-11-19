@@ -8,6 +8,7 @@
  */
 
 import type { ChatMessage } from '../llm/types';
+import { messagedChatsByConversation } from './chatMessageText';
 import { capDisplayText } from '../tools/resultCap';
 import { isFailureResult, resultLabel } from './toolResultView';
 import { extractToolDetail } from './toolSummary';
@@ -257,6 +258,7 @@ export function tabMetasFromSession(
   streamingIds?: ReadonlySet<string>,
   getActiveTimeMs?: (conversation: ConversationRuntime) => number,
 ): SessionTabMeta[] {
+  const messagedChats = messagedChatsByConversation(session.conversations);
   return session.conversations.map((c) => {
     // Tool turns are restored but must not inflate the user-facing badge.
     return {
@@ -269,6 +271,7 @@ export function tabMetasFromSession(
       messageCount: countDisplayMessages(c.messages, c.displayDiffs),
       ...(c.active_model !== undefined ? { active_model: c.active_model } : {}),
       ...(c.agentLinks !== undefined ? { agentLinks: { ...c.agentLinks } } : {}),
+      ...(messagedChats.get(c.id)?.length ? { messagedChats: messagedChats.get(c.id)! } : {}),
       ...(c.title_source !== undefined ? { title_source: c.title_source } : {}),
       ...(c.origin_agent !== undefined ? { origin_agent: c.origin_agent } : {}),
       clanker: c.clanker === true,

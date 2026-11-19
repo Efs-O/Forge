@@ -169,6 +169,73 @@ describe('ChatHeader title rename', () => {
   });
 });
 
+describe('ChatHeader messaged-chat chip', () => {
+  const otherId = '8f53bf68-1111-4111-8111-111111111111';
+
+  function renderChats(
+    messagedChats?: { id: string; title: string }[],
+    onOpenChat?: (id: string) => void,
+    agentLinks?: AgentLinks,
+  ): void {
+    act(() => {
+      root.render(
+        React.createElement(ChatHeader, {
+          title: 'hello man',
+          historyExpanded: false,
+          onNew: vi.fn(),
+          onToggleHistory: vi.fn(),
+          onUnlinkAgent: vi.fn(),
+          agentLinks,
+          messagedChats,
+          onOpenChat,
+        }),
+      );
+    });
+  }
+
+  it('renders one chip per messaged chat with no Unlink, and opens that chat on click', () => {
+    const onOpenChat = vi.fn();
+    renderChats([{ id: otherId, title: 'Claude: Bug hunt A. Two lanes' }], onOpenChat);
+    const strip = container.querySelector<HTMLElement>('#agent-links-strip')!;
+    expect(strip.getAttribute('aria-label')).toBe('Linked agents and chats');
+    const chips = Array.from(container.querySelectorAll<HTMLButtonElement>('.agent-link-forge'));
+    expect(chips).toHaveLength(1);
+    const chip = chips[0]!;
+    expect(chip.tagName).toBe('BUTTON');
+    expect(chip.getAttribute('aria-label')).toBe('Open chat Claude: Bug hunt A. Two lanes');
+    expect(chip.getAttribute('title')).toBe(`Claude: Bug hunt A. Two lanes\n${otherId}`);
+    expect(chip.textContent).toContain('Forge');
+    expect(chip.textContent).toContain('Bug hunt A');
+    expect(chip.textContent).not.toContain('Unlink');
+    // The chip is the group itself: nothing nests inside it, so it cannot carry
+    // the agent groups' Unlink button.
+    expect(chip.querySelector('button')).toBeNull();
+    act(() => chip.click());
+    expect(onOpenChat).toHaveBeenCalledTimes(1);
+    expect(onOpenChat).toHaveBeenCalledWith(otherId);
+  });
+
+  it('sits beside the agent groups without becoming one of their Unlink buttons', () => {
+    renderChats(
+      [{ id: otherId, title: 'Bug hunt A' }],
+      vi.fn(),
+      { claude: link('claude', '11111111-1111-4111-8111-111111111111', 'Claude task') },
+    );
+    expect(container.querySelectorAll('.agent-link-group')).toHaveLength(2);
+    const unlinks = Array.from(container.querySelectorAll('button'))
+      .map((button) => button.getAttribute('aria-label') ?? '')
+      .filter((label) => label.startsWith('Unlink'));
+    expect(unlinks).toEqual(['Unlink Claude']);
+  });
+
+  it('shows the strip for messaged chats alone, and keeps it away for an empty list', () => {
+    renderChats([]);
+    expect(container.querySelector('#agent-links-strip')).toBeNull();
+    renderChats([{ id: otherId, title: 'Bug hunt A' }]);
+    expect(container.querySelector('#agent-links-strip')).not.toBeNull();
+  });
+});
+
 describe('Header compaction forecast hint', () => {
   it('shows the threshold tick and explains the next-request forecast in the title', () => {
     act(() =>

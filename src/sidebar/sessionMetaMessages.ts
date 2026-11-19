@@ -13,6 +13,7 @@
  */
 import type { TitleSource } from './conversationTitle';
 import type { AgentLinks } from '../agentLinks/chatAgentLinks';
+import type { MessagedChatRef } from './chatMessageText';
 import type { RemoteOriginChannel } from '../remote/remoteInboundSchema';
 
 /** Tab row mirrored for host + webview. */
@@ -30,6 +31,14 @@ export interface SessionTabMeta {
   /** Accumulated active-agent time for the tab badge. */
   active_time_ms?: number;
   agentLinks?: AgentLinks;
+  /**
+   * The other OPEN chats this one exchanges `message_chat` messages with, read
+   * from both transcripts at each tab projection (`messagedChatsByConversation`,
+   * `chatMessageText.ts`) — never stored. They are not *linked* CLI sessions: a
+   * chat cannot be unlinked from them, so the header chip carries no Unlink, and
+   * it disappears when either side closes.
+   */
+  messagedChats?: MessagedChatRef[];
   /** Who named this chat; `user` means a person typed it and it is shown verbatim. */
   title_source?: TitleSource;
   /** Who started it, when an agent-bus prompt did — the sender name as the bus wrote it. */

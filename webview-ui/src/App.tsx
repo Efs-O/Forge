@@ -383,7 +383,11 @@ export function App(): React.ReactElement {
                 agentLinks={
                   state.tabs.find((tab) => tab.id === state.activeConversationId)?.agentLinks
                 }
+                messagedChats={
+                  state.tabs.find((tab) => tab.id === state.activeConversationId)?.messagedChats
+                }
                 onUnlinkAgent={handleUnlinkAgent}
+                onOpenChat={handleSwitchFromPanel}
                 onNew={handleNewConversation}
                 onToggleHistory={() => setHistoryExpanded((expanded) => !expanded)}
                 onRename={
