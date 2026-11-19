@@ -86,7 +86,28 @@ export function reclaim(lockPath: string, seen: string): void {
     // Gone already: what was moved was mid-delete (its holder released it
     // while another process had it open), so there is nothing to restore.
     const moved = readIfPresent(aside);
-    if (moved !== undefined && moved !== seen) fs.linkSync(aside, lockPath);
+    if (moved !== undefined && moved !== seen) {
+      try {
+        fs.linkSync(aside, lockPath);
+      } catch (err) {
+        // A live publisher took the path while we were moving the record
+        // aside, so the path is that holder's now and we leave it to it: the
+        // alternative was throwing EEXIST out of a caller that has no catch,
+        // failing the read-modify-write the lock was protecting. `tryPublish`
+        // above already reads EEXIST this way; only this half of the recovery
+        // was missing it.
+        //
+        // Accepted residual race, and it is not nothing: reaching here needs a
+        // third process to take the empty path between the rename-aside and
+        // this link-back. The `finally` then unlinks `aside`, so the holder
+        // whose record we moved loses the lock without knowing it, while the
+        // publisher holds it - two holders, not a spurious failure. Looping
+        // back onto the live record is the right recovery for the caller that
+        // came to reclaim; the loser's read-modify-write is the damage left
+        // for later, and it needs three-way contention in a few milliseconds.
+        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      }
+    }
   } finally {
     unlinkQuiet(aside);
   }
