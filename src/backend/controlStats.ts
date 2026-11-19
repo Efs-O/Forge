@@ -200,23 +200,42 @@ function usageDelta(previous: UsageTotals, current: UsageTotals): UsageTotals {
  * Count started turns that were displaced by another turn or a later run
  * without a matching end row. A final open turn may still be running, and
  * blocked admissions have an end row without a user-message opener.
+ *
+ * A `session_start` row is NOT one of those ends. The process that resumes a
+ * reloaded chat repairs the interrupted tool calls and then writes `turn_error`
+ * plus `turn_end` for the turn that was open, seconds later, so counting the
+ * opener at the boundary reported a turn that did end as missing one - three
+ * hunt runs in a row had to hand-trace that number back through a session log.
+ * The opener is kept pending across the boundary instead: a later `turn_end`
+ * closes it silently, a later user row still counts it as displaced, and only a
+ * restart that left it behind with nothing after it is counted when the file
+ * runs out, where no live process can still be holding it.
  */
 function countTurnsWithoutEnd(rows: Array<Record<string, unknown>>, day: string): number {
   // Older session logs have no end markers at all; they predate this counter.
   if (!rows.some((row) => row['type'] === 'turn_end')) return 0;
 
   let openedAt: number | undefined;
+  // Set when a `session_start` arrives with an opener still pending: that opener
+  // was left behind by a process that is gone, which is the crash case this
+  // counter exists for, so it is counted once the file runs out.
+  let leftBehindByRestart = false;
   let missing = 0;
   const markMissing = (): void => {
     if (openedAt !== undefined && localDay(openedAt) === day) missing += 1;
     openedAt = undefined;
+    leftBehindByRestart = false;
   };
 
   for (const row of rows) {
     const timestampMs = row['timestamp_ms'];
     if (typeof timestampMs !== 'number' || !Number.isFinite(timestampMs)) continue;
     if (row['type'] === 'session_start') {
-      markMissing();
+      // Nothing was open: this boundary is a plain restart, not a lost turn.
+      if (openedAt === undefined) continue;
+      // A new process has started, so whatever was open cannot still be running
+      // in it. Remember that, and let the end of the file decide.
+      leftBehindByRestart = true;
     } else if (row['role'] === 'user' && row['delivered'] !== 'mid_turn') {
       // Forge's own notes (a stop-while-thinking nudge, a mid-turn compaction
       // resume) land inside a running turn without the mid-turn flag; only a
@@ -226,8 +245,13 @@ function countTurnsWithoutEnd(rows: Array<Record<string, unknown>>, day: string)
       openedAt = timestampMs;
     } else if (row['type'] === 'turn_end' && row['outcome'] !== 'blocked') {
       openedAt = undefined;
+      leftBehindByRestart = false;
     }
   }
+  // The tail. An opener still pending normally belongs to a turn that may still
+  // be running, so it is not counted - unless a restart left it behind, in which
+  // case no live process can be holding it and it is the crash case.
+  if (openedAt !== undefined && leftBehindByRestart && localDay(openedAt) === day) missing += 1;
   return missing;
 }
 

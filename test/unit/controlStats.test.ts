@@ -169,6 +169,44 @@ describe('control stats', () => {
     expect(builder(env.dir).build().today.turns_without_end).toBe(2);
   });
 
+  it('does not count a turn the next process repaired, and does count one a restart left behind', () => {
+    const env = setup();
+    // Every file here carries one completed turn first: a log with no end marker
+    // at all is a pre-counter legacy log and is skipped entirely.
+    const completedTurn = [
+      { type: 'session_start', timestamp_ms: FIXED_NOW },
+      { role: 'user', content: 'first', timestamp_ms: FIXED_NOW + 1 },
+      { type: 'turn_end', outcome: 'completed', timestamp_ms: FIXED_NOW + 2 },
+    ];
+    // The real resume sequence: the new process writes `session_start`, repairs
+    // the interrupted tool calls, then closes the open turn with `turn_error`
+    // and `turn_end` seconds later. That turn ended, so it is not missing.
+    env.write('repaired.jsonl', [
+      ...completedTurn,
+      { role: 'user', content: 'open when the window died', timestamp_ms: FIXED_NOW + 3 },
+      { type: 'session_start', timestamp_ms: FIXED_NOW + 4 },
+      { type: 'turn_error', reason: 'interrupted', timestamp_ms: FIXED_NOW + 5 },
+      { type: 'turn_end', outcome: 'failed', timestamp_ms: FIXED_NOW + 6 },
+    ]);
+    expect(builder(env.dir).build().today.turns_without_end).toBe(0);
+
+    // Same boundary, but nothing ever closed the opener: no live process can be
+    // holding it, so this is the crash case the counter exists for.
+    env.write('left-behind.jsonl', [
+      ...completedTurn,
+      { role: 'user', content: 'open when the window died', timestamp_ms: FIXED_NOW + 3 },
+      { type: 'session_start', timestamp_ms: FIXED_NOW + 4 },
+    ]);
+    expect(builder(env.dir).build().today.turns_without_end).toBe(1);
+
+    // A plain tail with no restart after it may still be running: adds nothing.
+    env.write('live-tail.jsonl', [
+      ...completedTurn,
+      { role: 'user', content: 'still running', timestamp_ms: FIXED_NOW + 3 },
+    ]);
+    expect(builder(env.dir).build().today.turns_without_end).toBe(1);
+  });
+
   it('counts replayed session rows once', () => {
     const env = setup();
     const u1 = { role: 'user', content: 'same', timestamp_ms: FIXED_NOW };
