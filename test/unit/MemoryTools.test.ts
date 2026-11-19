@@ -257,6 +257,95 @@ describe('workspace markdown memories', () => {
     expect(result).not.toContain('draft.md.tmp');
   });
 
+  it('heals a duplicated key when the same key is remembered again', async () => {
+    const m = memory();
+    const store = await MemoryStore.migrate(m.directory, m.state);
+    m.attach(store);
+    fs.mkdirSync(m.directory, { recursive: true });
+    for (const fileName of ['one.md', 'two.md']) {
+      fs.writeFileSync(
+        path.join(m.directory, fileName),
+        `---\nname: dup\ndescription: ${fileName}\nupdated: 2026-01-01T00:00:00.000Z\n---\n\nbody ${fileName}`,
+      );
+    }
+    expect(store.read('dup')).toBeUndefined();
+
+    await store.remember('dup', 'the note I still need', 'still needed');
+
+    // The key reads again, and the copies that made it ambiguous are still on
+    // disk - moved out of the store's own namespace, not deleted.
+    expect(store.read('dup')?.value).toBe('the note I still need');
+    expect(store.list().map((entry) => entry.key)).toContain('dup');
+    const files = fs.readdirSync(m.directory).sort();
+    expect(files).toContain('dup.md');
+    expect(files.filter((name) => name.endsWith('.bak'))).toHaveLength(2);
+    expect(fs.readFileSync(path.join(m.directory, 'MEMORY.md'), 'utf8')).toContain('[dup](dup.md)');
+  });
+
+  it("moves aside a file at this key's name that belongs to another key", async () => {
+    const m = memory();
+    const store = await MemoryStore.migrate(m.directory, m.state);
+    m.attach(store);
+    fs.mkdirSync(m.directory, { recursive: true });
+    // The reachable form of a silent overwrite: a duplicate-key copy that
+    // parsedFiles skips is sitting on the very name remember() is about to
+    // write, and both renameSync and writeAtomic replace a target without a
+    // word. These bytes belong to another key and must survive.
+    for (const [fileName, key] of [
+      ['other-key.md', 'other-key'],
+      ['the-key.md', 'other-key'],
+    ] as const) {
+      fs.writeFileSync(
+        path.join(m.directory, fileName),
+        `---\nname: ${key}\ndescription: not mine\nupdated: 2026-01-01T00:00:00.000Z\n---\n\nnot my bytes in ${fileName}`,
+      );
+    }
+
+    await store.remember('the-key', 'my note', 'mine');
+
+    expect(store.read('the-key')?.value).toBe('my note');
+    const files = fs.readdirSync(m.directory).sort();
+    const quarantined = files.filter((name) => name.endsWith('.bak'));
+    expect(quarantined).toHaveLength(1);
+    expect(fs.readFileSync(path.join(m.directory, 'the-key.md'), 'utf8')).toContain('my note');
+    expect(
+      fs.readFileSync(path.join(m.directory, quarantined[0]!), 'utf8'),
+    ).toContain('not my bytes in the-key.md');
+    // Nothing was lost: the other key is readable from its own file now.
+    expect(store.list().map((entry) => entry.key)).toEqual(expect.arrayContaining(['the-key', 'other-key']));
+  });
+
+  it('forgets a key that only duplicated copies hold', async () => {
+    const m = memory();
+    const store = await MemoryStore.migrate(m.directory, m.state);
+    m.attach(store);
+    fs.mkdirSync(m.directory, { recursive: true });
+    for (const fileName of ['one.md', 'two.md']) {
+      fs.writeFileSync(
+        path.join(m.directory, fileName),
+        `---\nname: dup\ndescription: ${fileName}\nupdated: 2026-01-01T00:00:00.000Z\n---\n\nbody`,
+      );
+    }
+    expect(store.forget('dup')).toBe(true);
+    expect(store.read('dup')).toBeUndefined();
+    expect(fs.readdirSync(m.directory).filter((name) => name.endsWith('.md'))).toEqual([
+      'MEMORY.md',
+    ]);
+  });
+
+  it('writes durably, so a sibling at the old fixed temp name cannot break a save', async () => {
+    const m = memory();
+    const store = await MemoryStore.migrate(m.directory, m.state);
+    fs.mkdirSync(m.directory, { recursive: true });
+    // The writer used to rename a plain writeFileSync over `<file>.tmp`, so two
+    // windows writing the same file (any two `remember` calls, since every write
+    // also rewrites MEMORY.md) raced on that one name. Nothing may live there now.
+    fs.mkdirSync(path.join(m.directory, 'note.md.tmp'));
+    await store.remember('note', 'body', 'desc');
+    expect(store.read('note')?.value).toBe('body');
+    expect(fs.readFileSync(path.join(m.directory, 'note.md'), 'utf8')).toContain('body');
+  });
+
   it('renders the index from the write itself, byte-for-byte as a fresh scan would', async () => {
     const m = memory();
     const store = await MemoryStore.migrate(m.directory, m.state);

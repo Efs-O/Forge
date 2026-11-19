@@ -1,9 +1,10 @@
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import type * as vscode from 'vscode';
 import { workspaceIdFor } from '../remote/RemoteWorkspaceHandoff';
+import { writeFileAtomicSync } from '../util/atomicWrite';
 
 export interface StoredMemory {
   key: string;
@@ -84,11 +85,22 @@ function parseMemory(fileName: string, content: string): StoredMemory {
   return { key, description, value: match[2]!, fileName, updated };
 }
 
+/**
+ * One file, one durable write: the shared atomic writer, not a local copy.
+ *
+ * The local version this replaces renamed a plain writeFileSync over a fixed
+ * `<name>.tmp`, which cost two things. It never flushed, so a power loss could
+ * keep the renamed file's size and lose its data - the exact failure
+ * `util/atomicWrite.ts` documents - and the temp name was predictable, so every
+ * extension host writing the same file raced on it. That was not two saves of
+ * one note: `regenerateIndex` rewrites `MEMORY.md` on every write and every
+ * forget, so any two windows remembering anything at the same moment were
+ * writing the same temp name, and the loser got ENOENT (its temp had already
+ * been renamed away) or a Windows EPERM.
+ */
 function atomicWrite(filePath: string, content: string): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tempPath = `${filePath}.tmp`;
-  fs.writeFileSync(tempPath, content, { encoding: 'utf8' });
-  fs.renameSync(tempPath, filePath);
+  writeFileAtomicSync(filePath, content);
 }
 
 export class MemoryStore {
@@ -167,8 +179,12 @@ export class MemoryStore {
     }
   }
 
-  private parsedFiles(): { memories: StoredMemory[]; skipped: string[] } {
-    if (!fs.existsSync(this.directory)) return { memories: [], skipped: [] };
+  private parsedFiles(): {
+    memories: StoredMemory[];
+    duplicates: StoredMemory[];
+    skipped: string[];
+  } {
+    if (!fs.existsSync(this.directory)) return { memories: [], duplicates: [], skipped: [] };
     const memories: StoredMemory[] = [];
     const skipped: string[] = [];
     for (const fileName of fs.readdirSync(this.directory).sort()) {
@@ -186,13 +202,71 @@ export class MemoryStore {
     }
     const counts = new Map<string, number>();
     for (const memory of memories) counts.set(memory.key, (counts.get(memory.key) ?? 0) + 1);
-    const duplicates = new Set([...counts].filter(([, count]) => count > 1).map(([key]) => key));
+    const duplicated = new Set([...counts].filter(([, count]) => count > 1).map(([key]) => key));
+    const duplicates: StoredMemory[] = [];
     const kept = memories.filter((memory) => {
-      if (!duplicates.has(memory.key)) return true;
+      if (!duplicated.has(memory.key)) return true;
+      // Every copy of the key is unreadable, not just the extra one: two files
+      // that both say `name: dup` leave the key ambiguous, so the store answers
+      // nothing for it. The copies come back as well as being skipped, because
+      // `write` and `forget` below are the only thing that can make it readable
+      // again, and a caller that cannot see them cannot clear them either.
+      duplicates.push(memory);
       skipped.push(`Skipped ${memory.fileName}: another file has the same name "${memory.key}"`);
       return false;
     });
-    return { memories: kept.sort(compareMemories), skipped };
+    return { memories: kept.sort(compareMemories), duplicates, skipped };
+  }
+
+  /**
+   * Move every file carrying `key` except the one we just wrote out of the
+   * store's own namespace, so the key becomes readable again.
+   *
+   * Until this existed the state was permanent: `parsedFiles` drops every copy
+   * of a duplicated key, so `write` never saw the extras and added a third
+   * file, `remember` reported success while `read` still answered nothing, and
+   * `forget` said the key did not exist. Nothing is deleted here: each copy
+   * goes through `quarantineCopy` below, which stops it matching the `*.md`
+   * scan while keeping the owner's bytes to recover.
+   */
+  private quarantineCopies(key: string, keep: string): number {
+    const { duplicates } = this.parsedFiles();
+    let moved = 0;
+    for (const copy of duplicates) {
+      if (copy.key !== key || copy.fileName === keep) continue;
+      this.quarantineCopy(copy.fileName);
+      moved += 1;
+    }
+    return moved;
+  }
+
+  /**
+   * Move one file out of the store's namespace without replacing anything that
+   * is already there. The random suffix is not decoration: `renameSync` does
+   * replace an existing target on Windows and POSIX alike, so a counter that
+   * restarts at 1 on every call would let a second heal overwrite the first
+   * one's backup and drop the bytes this is meant to keep.
+   */
+  private quarantineCopy(fileName: string): void {
+    fs.renameSync(
+      path.join(this.directory, fileName),
+      path.join(this.directory, `${fileName}.forge-duplicate-${randomUUID()}.bak`),
+    );
+  }
+
+  /** True only when the file already at `fileName` really is this key's file:
+   *  its frontmatter parses and names this key. Anything else - another key's
+   *  note, or bytes that do not parse at all - is not this key's file, so the
+   *  caller moves it aside instead of renaming or writing over it. */
+  private targetCarriesKey(fileName: string, key: string): boolean {
+    try {
+      return (
+        parseMemory(fileName, fs.readFileSync(path.join(this.directory, fileName), 'utf8')).key ===
+        key
+      );
+    } catch {
+      return false;
+    }
   }
 
   list(): StoredMemory[] {
@@ -260,6 +334,17 @@ export class MemoryStore {
         SAFE.test(memory.key) && !RESERVED.test(memory.key) && !colliding.has(memory.key);
       const fileName = safe ? `${memory.key}.md` : hashedName(memory.key);
       const target = path.join(this.directory, fileName);
+      // Neither `renameSync` nor `writeAtomic` replaces quietly, so a file that
+      // is not this key's has to be moved aside before either touches it: a
+      // hand-renamed file, or a copy `parsedFiles` skipped, can already sit at
+      // the name this key wants. `MEMORY.md` is left alone - the scan above
+      // treats that exact name as the generated index, not as a memory file.
+      if (
+        fileName !== 'MEMORY.md' &&
+        fs.existsSync(target) &&
+        !this.targetCarriesKey(fileName, memory.key)
+      )
+        this.quarantineCopy(fileName);
       if (memory.key !== key && memory.fileName !== fileName) {
         fs.renameSync(path.join(this.directory, memory.fileName), target);
       }
@@ -273,16 +358,22 @@ export class MemoryStore {
       }
       named.push(entry);
     }
+    if (written) this.quarantineCopies(key, written.fileName);
     named.sort(compareMemories);
     this.regenerateIndex(named);
     return written!;
   }
 
   forget(key: string): boolean {
-    const { memories } = this.parsedFiles();
+    const { memories, duplicates } = this.parsedFiles();
     const memory = memories.find((entry) => entry.key === key);
-    if (!memory) return false;
-    fs.unlinkSync(path.join(this.directory, memory.fileName));
+    // A key held only by duplicated copies is invisible to `memories`, so this
+    // used to answer "no such memory" while its files sat on disk. Clearing a
+    // key has to clear every copy of it, or the next `remember` poisons it again.
+    const copies = duplicates.filter((entry) => entry.key === key);
+    if (!memory && copies.length === 0) return false;
+    if (memory) fs.unlinkSync(path.join(this.directory, memory.fileName));
+    copies.forEach((copy) => this.quarantineCopy(copy.fileName));
     this.regenerateIndex(memories.filter((entry) => entry !== memory));
     return true;
   }
