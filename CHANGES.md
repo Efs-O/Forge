@@ -1,5 +1,52 @@
 # Forge — Recent Changes
 
+## 0.17.203
+
+**A job that finished and reported is no longer also logged as a failure.** A scheduled job that had
+already delivered its report could be recorded as `failed — interrupted`, the owner could be told
+"Forge restarted during the run" when nothing restarted, and the job could then run again minutes
+later and answer "nothing new since my report six minutes ago". This happened on three days running
+on this machine. The run's heartbeat is now kept fresh until the report is delivered, a window that
+finds a stale marker re-reads the job before reporting it, a tick that reports a run interrupted does
+not also start it again in the same tick, and the message now says what Forge actually knows: no
+heartbeat for N minutes, so the window running it stopped responding or exited.
+
+**A resumed chat no longer makes the stats report a turn that never ended.** After a window reload,
+the turn that was open is repaired and closed by the new process a few seconds later, but the daily
+stats counted it as a turn with no end. It is counted only when a restart really did leave a turn
+behind with nothing after it.
+
+**A duplicated note name no longer loses the note.** Two memory files carrying the same key made that
+note permanently unreadable: `remember` reported success, `read` and `list` could not find it, and the
+index `MEMORY.md` advertised it. The duplicate is now set aside as a `.bak` file and the note reads
+again.
+
+**Memory notes are written durably.** They used a fixed temporary name and no flush, so a power loss
+could land a half-written note, and two windows writing the same key at once could fail. They now use
+the same writer conversations use: an unguessable temporary name, a flush, and a retry when another
+window is writing.
+
+**A job's change can no longer be dropped in the hand-off.** When a job's pending change was replaced
+by a newer one in the few milliseconds between reading it and deleting it, the newer one was deleted
+too and never delivered. The outbox now claims a pending item by renaming it before deleting, and
+reclaims claims a crash left behind — so a message can occasionally arrive twice, which beats losing
+it.
+
+**`web_fetch` can no longer reach an internal address through an IPv6 form that hides an IPv4 one.**
+A host answering with a 6to4, Teredo or DNS64 address (for example `2002:7f00:1::`, which is
+127.0.0.1) passed the guard. Only global unicast addresses are allowed now.
+
+**The agent-mesh lock stops throwing where its caller cannot catch it.** Reclaiming a dead process's
+lock could fail with an error the caller had no handler for, and the record of the process whose lock
+had been moved aside was deleted, leaving two holders of the same lock.
+
+The seven fixes above are ledger rows BL-038 to BL-044, found by the 2026-11-19 weekly bug hunt (two
+by that run, five by a second chat working in the same tree), each confirmed by a second model before
+it was fixed.
+
+Includes 0.17.202, which was never published: a jobs-panel test failed on GitHub's Linux and macOS
+machines because of a mistake in the test itself.
+
 ## 0.17.202
 
 Includes 0.17.201, which was never published: a test of the jobs panel failed on GitHub's Linux and macOS machines because of a mistake in the test itself. No change to the app itself.
