@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { groupTellBatches, inputTextOf, runsAfterStop } from '../../src/sidebar/undeliveredTells';
+import type { MidTurnTell } from '../../src/agent/MidTurnInbox';
+import {
+  groupTellBatches,
+  inputTextOf,
+  runsAfterStop,
+  sendNowOrder,
+} from '../../src/sidebar/undeliveredTells';
 
 it('preserves origin when queued agent messages become follow-up prompts', () => {
   const batches = groupTellBatches([
@@ -40,5 +46,32 @@ describe('inputTextOf', () => {
         { text: 'second', internal: false },
       ]),
     ).toBe('first\n\nsecond');
+  });
+});
+
+describe('sendNowOrder', () => {
+  const tells: MidTurnTell[] = [
+    { id: 'chat', text: 'agent reply', origin: { kind: 'chat' } },
+    { id: 'user1', text: 'first words', sendNow: true },
+    { id: 'internal', text: 'background notice', internal: true },
+    { id: 'user2', text: 'second words' },
+  ];
+
+  it("puts the user's own tells ahead of delivered and internal ones", () => {
+    expect(sendNowOrder('interrupted', tells).map((tell) => tell.id)).toEqual([
+      'user1',
+      'user2',
+      'chat',
+      'internal',
+    ]);
+  });
+
+  it('leaves the arrival order alone when nothing interrupted the turn', () => {
+    expect(sendNowOrder('completed', tells).map((tell) => tell.id)).toEqual([
+      'chat',
+      'user1',
+      'internal',
+      'user2',
+    ]);
   });
 });

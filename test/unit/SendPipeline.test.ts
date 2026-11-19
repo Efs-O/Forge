@@ -709,6 +709,23 @@ describe('SendPipeline.send', () => {
     );
   });
 
+  it('runs a "Send now" tell ahead of an agent reply queued behind it', async () => {
+    const h = harness();
+    h.runTurn.mockResolvedValueOnce({ kind: 'interrupted', finalText: '' });
+    h.midTurnInbox.add('conv-1', {
+      id: 'reply',
+      text: 'Claude replied',
+      origin: { kind: 'chat' },
+    });
+    h.midTurnInbox.add('conv-1', { id: 'tell-1', text: 'stop, do not fix' });
+    h.midTurnInbox.markSendNow('conv-1', 'tell-1');
+
+    await h.pipeline.send('start');
+
+    expect(h.runTurn.mock.calls[1]?.[2]).toBe('stop, do not fix');
+    expect(h.runTurn.mock.calls[2]?.[2]).toBe('Claude replied');
+  });
+
   it('lets Stop win over "Send now": a cancelled turn hands the tell back', async () => {
     const h = harness();
     h.runTurn.mockResolvedValueOnce({ kind: 'cancelled', finalText: '' });

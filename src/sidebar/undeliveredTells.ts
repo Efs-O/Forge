@@ -72,3 +72,10 @@ export function heldTellsOf(batches: readonly TellBatch[]): MidTurnTell[] {
 export function runsAfterStop(kind: string, tells: readonly MidTurnTell[]): boolean {
   return kind === 'interrupted' && tells.some((tell) => tell.sendNow === true);
 }
+
+/** After a "Send now" interrupt the user's tells run first; the rest follow, in arrival order. */
+export function sendNowOrder(kind: string, tells: readonly MidTurnTell[]): MidTurnTell[] {
+  if (!runsAfterStop(kind, tells)) return [...tells];
+  const isUserTell = (tell: MidTurnTell) => tell.internal !== true && !tell.origin;
+  return [...tells.filter(isUserTell), ...tells.filter((tell) => !isUserTell(tell))];
+}

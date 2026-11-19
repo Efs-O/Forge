@@ -40,6 +40,7 @@ import {
   heldTellsOf,
   inputTextOf,
   runsAfterStop,
+  sendNowOrder,
   type TellBatch,
 } from './undeliveredTells';
 
@@ -329,7 +330,7 @@ export class SendPipeline {
           );
           this.sessionLogs.logTurnEnd(conv.id, end.outcome, rounds, end.finishReason);
           const undelivered = deps.midTurnInbox.takeUndelivered(conv.id);
-          pendingTellBatches.push(...groupTellBatches(undelivered));
+          pendingTellBatches.push(...groupTellBatches(sendNowOrder(turn.kind, undelivered)));
           if (pendingTellBatches.length > 0) {
             if (turn.kind === 'cancelled' || turn.kind === 'interrupted') {
               sendNowHeld = runsAfterStop(turn.kind, undelivered);
