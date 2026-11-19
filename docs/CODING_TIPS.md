@@ -12,6 +12,7 @@
 ## RUN
 1. `npx eslint test/unit/x.test.ts` → "none of those TSConfigs include this file": the lint script is `eslint src webview-ui`, so tests have no typed-lint config. lint `src` only
 2. `npx tsc --noEmit` → checks `src` only: the root tsconfig excludes `webview-ui` and `test`. a webview-ui change needs `npx tsc --noEmit -p webview-ui/tsconfig.json`
+3. `gh api` or `web_fetch` in the basalt-watch job → `approval key denied by policy` (needs `net:prog:gh-api` / `net:github.com` in `approvals.jobs.basalt-watch.allow` in `~/.forge/policy.yaml`). judge from the watch JSON's 600-char snippets and name what was cut
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green and the tree stood still: never run `record-ci-pass.mjs` by hand — the `ci:steps` chain writes it
@@ -41,3 +42,5 @@
 
 ## FORENSICS
 1. a Canon print job parked in `Printing`, `PrinterStatus 4` → it waits in Canon IJ Preview (Start Printing); `Get-PrintJob` is not installed here: use `Get-CimInstance Win32_PrintJob` / `Win32_Printer`
+2. `rg -c "Status: open" docs/FORGE_TOOL_BUGS.md` → the count includes the template line `- Status: open | by design | wont fix | fixed in …`. subtract it, or count per `## ` block with `^- Status: open\s*$`
+3. counting shell failures by hand with `^exit \d+` → it matches `exit 0 · 0.6 s` too, so 5,000 instead of 168. mirror `bucket()` in `scripts/session-scan/scan_logs.py`, which only counts a non-zero exit
