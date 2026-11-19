@@ -75,6 +75,7 @@
 15. a python heredoc writing a file that holds `'\n'` escapes → Python turns them into real newlines (vitest: `PARSE_ERROR`). write the escape as `chr(92)+"n"`, or use the edit tool
 16. a "the stale read must not publish" test asserting a snapshot count → fails on macOS: `fs.watch` reports the fixture's own writes. make the stale result distinguishable (`[]`) and assert none is it
 17. a fake that picks "the first call is the slow one" after `await super.x()` → two concurrent calls race to that check and the wrong one goes slow. read and clear the flag before the first await
+18. `gh api` or `web_fetch` inside a scheduled job → `approval key denied by policy`: a job holds only the keys in `approvals.jobs.<name>.allow` in `~/.forge/policy.yaml`. add them, or judge from the job's own snippets and name what was cut
 
 ## PATHS
 1. `~/.forge/sessions/<short-id>.jsonl` → no such file: logs carry the full 8-4-4-4-12 chat id. resolve a short id with a prefix glob
@@ -148,3 +149,5 @@
 51. `desktop_capture` · a window title from before the app renamed it (`Untitled*` once edited) → `window not found`; a bare `Paint 3D` matches another window of that name. `desktop_focus_window` with the `window_id` from `desktop_windows`, then capture with the exact title its reply prints
 52. `desktop_capture` · the last `capture_id` sent back to refresh it → `unknown argument "capture_id"`: a capture always starts new and returns its own id. send only `window_title` (or `monitor`) and `kind`
 53. `shell` · a background script that drives the mouse for minutes and checks the foreground once at the start → a dialog that pops up meanwhile takes the clicks. check the foreground before every stroke and stop when it changes
+54. `shell` · `cd "C:/Users/<name>/.forge/jobs" && python -c '…'` → refused: after a `cd` into Forge's own files only a classed read may follow, so a read-only scan dies too. run from the workspace and pass absolute paths
+55. `edit_file` · an import block whose `old_str` held one name → the name was replaced, not added, and the file lost a symbol it still used: `ReferenceError: OUTBOX_STALE_MS is not defined` at the use line, not the import. anchor the edit on the neighbouring line and keep ASCII sort

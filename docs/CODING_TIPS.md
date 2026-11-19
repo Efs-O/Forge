@@ -12,9 +12,8 @@
 ## RUN
 1. `npx eslint test/unit/x.test.ts` → "none of those TSConfigs include this file": the lint script is `eslint src webview-ui`, so tests have no typed-lint config. lint `src` only
 2. `npx tsc --noEmit` → checks `src` only: the root tsconfig excludes `webview-ui` and `test`. a webview-ui change needs `npx tsc --noEmit -p webview-ui/tsconfig.json`
-3. `gh api` or `web_fetch` in the basalt-watch job → `approval key denied by policy` (needs `net:prog:gh-api` / `net:github.com` in `approvals.jobs.basalt-watch.allow` in `~/.forge/policy.yaml`). judge from the watch JSON's 600-char snippets and name what was cut
-4. `npm run check:changed -- src/tools/webFetchSsrf.ts test/unit/WebFetchSsrf.test.ts` → imports cannot lead to the affected tests, so it runs the FULL suite and the known load class goes red on an unrelated commit. rerun those files alone and report it as contention
-5. `cwd: "n:/vs code/apps/Forge"` → `does not exist`: this workspace root has a space, `N:/vs code apps/Forge`. a typo'd cwd refuses the whole call, and a background one loses the job it was starting
+3. `npm run check:changed -- src/tools/webFetchSsrf.ts test/unit/WebFetchSsrf.test.ts` → imports cannot lead to the affected tests, so it runs the FULL suite and the known load class goes red on an unrelated commit. rerun those files alone and report it as contention
+4. `cwd: "n:/vs code/apps/Forge"` → `does not exist`: this workspace root has a space, `N:/vs code apps/Forge`. a typo'd cwd refuses the whole call, and a background one loses the job it was starting
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green and the tree stood still: never run `record-ci-pass.mjs` by hand — the `ci:steps` chain writes it
