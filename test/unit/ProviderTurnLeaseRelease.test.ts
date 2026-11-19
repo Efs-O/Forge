@@ -70,11 +70,8 @@ vi.mock('../../src/backend/DirectBackend', () => {
   return { DirectBackend: FakeDirectBackend };
 });
 
-import {
-  runCloudProviderTurn,
-  runLocalProviderTurn,
-  type ProviderTurnContext,
-} from '../../src/sidebar/ProviderTurn';
+import { runLocalProviderTurn, type ProviderTurnContext } from '../../src/sidebar/ProviderTurn';
+import { runCloudProviderTurn } from '../../src/sidebar/cloudProviderTurn';
 import { TurnLifecycle } from '../../src/sidebar/TurnLifecycle';
 import { SystemPromptRenderError } from '../../src/llm/SystemPromptInjector';
 import * as cloudRequestResolver from '../../src/llm/CloudRequestResolver';

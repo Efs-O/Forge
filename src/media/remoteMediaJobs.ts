@@ -1,10 +1,11 @@
 /**
  * The desktop's job runner for laptop media (docs/plans/LAPTOP_REMOTE_MEDIA_PLAN.md):
- * the queue, the standing-consent gate, the job-scoped tool instances, and the
- * sweep. The files a job owns live in `remoteMediaJobStore.ts`, what the desktop
- * advertises in `remoteMediaCapabilities.ts`, the HTTP shape in
- * `remoteMediaRoutes.ts`. The jobs live here and not in `CloudRelayServer`: a
- * relay restart on a port or body-cap change must not touch a running render.
+ * the queue, the standing-consent gate, and the sweep. The files a job owns live
+ * in `remoteMediaJobStore.ts`, the job-scoped tool instances in
+ * `remoteMediaJobTools.ts`, what the desktop advertises in
+ * `remoteMediaCapabilities.ts`, the HTTP shape in `remoteMediaRoutes.ts`. The
+ * jobs live here and not in `CloudRelayServer`: a relay restart on a port or
+ * body-cap change must not touch a running render.
  */
 import { createReadStream } from 'fs';
 import { randomUUID } from 'crypto';
@@ -17,17 +18,10 @@ import { getLogger } from '../util/logger';
 import { isProcessAlive } from '../util/processLiveness';
 import { isPathInside } from '../util/pathContainment';
 import { backendCostTag, pickBackend } from '../tools/imageGeneration/generateImageToolFormat';
-import {
-  makeGenerateImageTool,
-  type GenerateImageDeps,
-} from '../tools/imageGeneration/generateImageTool';
-import {
-  makeUpscaleImageTool,
-  type UpscaleImageDeps,
-} from '../tools/imageGeneration/upscaleImageTool';
+import type { GenerateImageDeps } from '../tools/imageGeneration/generateImageTool';
+import type { UpscaleImageDeps } from '../tools/imageGeneration/upscaleImageTool';
 import type { RegisteredTool } from '../tools/ToolRegistry';
 import {
-  REMOTE_MEDIA_PATH_ARGS,
   REMOTE_MEDIA_TEXT,
   type RemoteMediaCapabilities,
   type RemoteMediaJobRequest,
@@ -36,9 +30,7 @@ import {
 import { buildCapabilities } from './remoteMediaCapabilities';
 import {
   Job,
-  JobNotifier,
   errText,
-  isPlainRelative,
   kindOf,
   mimeOf,
   readRecord,
@@ -50,6 +42,7 @@ import {
   type StoredFile,
 } from './remoteMediaJobStore';
 import { desktopPathsToNames, toolResultText } from './remoteMediaResultText';
+import { imageToolFor, jobToolFor, rewritePathArgs, upscaleToolFor } from './remoteMediaJobTools';
 import { jsonReply, type MediaReply, type RemoteMediaPort } from './remoteMediaRoutes';
 
 const log = getLogger();
@@ -144,8 +137,8 @@ export class RemoteMediaJobs implements RemoteMediaPort {
 
   capabilities(): RemoteMediaCapabilities {
     return buildCapabilities(this.deps.getConfig(), (root) => ({
-      generate_image: this.imageTool(root, () => undefined),
-      upscale_image: this.upscaleTool(root, () => undefined),
+      generate_image: imageToolFor(this.deps, root, () => undefined),
+      upscale_image: upscaleToolFor(this.deps, root, () => undefined),
     }));
   }
 
@@ -155,7 +148,7 @@ export class RemoteMediaJobs implements RemoteMediaPort {
     if (!SERVED_TOOLS.includes(request.tool)) {
       return jsonReply(400, { error: `${request.tool} is not served yet` });
     }
-    const paths = this.rewritePathArgs(request);
+    const paths = rewritePathArgs(request);
     if (!paths.ok) return jsonReply(400, { error: paths.text });
     // A spent queue slot leaves no folder behind, so the cap is checked before
     // anything is written, and before the approval gate reads anything.
@@ -166,7 +159,7 @@ export class RemoteMediaJobs implements RemoteMediaPort {
     const consent = await this.consentFor(
       request.tool,
       paths.args,
-      this.toolFor(job, () => {}),
+      jobToolFor(this.deps, job, () => {}),
     );
     if (consent?.required && !consent.listed) {
       return jsonReply(403, {
@@ -264,7 +257,7 @@ export class RemoteMediaJobs implements RemoteMediaPort {
     await writeFileRecord(job.dir, recordOf(job)).catch((err: unknown) =>
       log.warn(`remote media job ${job.id}: ${errText(err)}`),
     );
-    const tool = this.toolFor(job, (absolute) => job.delivered.add(absolute));
+    const tool = jobToolFor(this.deps, job, (absolute) => job.delivered.add(absolute));
     const context = {
       beforeMutate: (): void => undefined,
       abortSignal: job.controller.signal,
@@ -320,42 +313,6 @@ export class RemoteMediaJobs implements RemoteMediaPort {
     return stored;
   }
 
-  // ── Job-scoped tool instances ─────────────────────────────────────────────
-
-  /**
-   * A FRESH instance per job, with the job's own root as its workspace root, a
-   * reveal that opens no desktop editor tab, and the window's real `sd-server`
-   * handles, so a laptop render keeps one server warm for the desktop chats too.
-   */
-  private toolFor(job: Job, record: (absolutePath: string) => void): RegisteredTool {
-    return job.tool === 'upscale_image'
-      ? // `upscale_image` names its output beside the input and refuses a path
-        // outside `workspaceRoot`, so its root is the job folder, not `out/`.
-        this.upscaleTool(job.dir, record)
-      : this.imageTool(job.outDir, record);
-  }
-
-  private imageTool(workspaceRoot: string, record: (path: string) => void): RegisteredTool {
-    return makeGenerateImageTool({
-      getConfig: this.deps.getConfig,
-      secrets: this.deps.secrets,
-      notifications: new JobNotifier(record),
-      ...(this.deps.sdServers ? { sdServers: this.deps.sdServers } : {}),
-      workspaceRoot,
-      reveal: async () => undefined,
-      ...this.deps.imageDeps,
-    });
-  }
-
-  private upscaleTool(workspaceRoot: string, record: (path: string) => void): RegisteredTool {
-    return makeUpscaleImageTool({
-      getConfig: this.deps.getConfig,
-      notifications: new JobNotifier(record),
-      workspaceRoot,
-      ...this.deps.upscaleDeps,
-    });
-  }
-
   // ── Standing consent ──────────────────────────────────────────────────────
 
   /**
@@ -395,56 +352,6 @@ export class RemoteMediaJobs implements RemoteMediaPort {
       required: approval?.dangerous === true || backend.provider !== 'sdcpp',
       detail: approval?.detail ?? `${backend.name} (${backendCostTag(backend)})`,
     };
-  }
-
-  // ── Path arguments ────────────────────────────────────────────────────────
-
-  /**
-   * Apply `REMOTE_MEDIA_PATH_ARGS` and rewrite what passes.
-   *
-   * An input argument's value must be the bare name of an uploaded input, and
-   * becomes a path inside the job; an output argument must be a plain relative
-   * path. Nothing else is accepted, so a refusal reads no desktop file.
-   */
-  private rewritePathArgs(
-    request: RemoteMediaJobRequest,
-  ): { ok: true; args: Record<string, unknown> } | { ok: false; text: string } {
-    const args = { ...request.args };
-    const uploaded = new Set((request.inputs ?? []).map((input) => input.name));
-    for (const [arg, direction] of Object.entries(REMOTE_MEDIA_PATH_ARGS[request.tool])) {
-      const value = args[arg];
-      if (value === undefined) continue;
-      if (direction === 'output') {
-        const text = typeof value === 'string' ? value.trim() : '';
-        if (!text || !isPlainRelative(text)) {
-          return { ok: false, text: REMOTE_MEDIA_TEXT.outputRefused(arg) };
-        }
-        continue;
-      }
-      if (direction === 'input-list') {
-        const names = Array.isArray(value) ? value : [];
-        if (!names.every((name) => typeof name === 'string' && uploaded.has(name))) {
-          return { ok: false, text: REMOTE_MEDIA_TEXT.pathRefused(arg) };
-        }
-        args[arg] = names.map((name) => this.inputLink(request.tool, name as string));
-        continue;
-      }
-      const name = typeof value === 'string' ? value.trim() : '';
-      if (!uploaded.has(name)) return { ok: false, text: REMOTE_MEDIA_TEXT.pathRefused(arg) };
-      args[arg] = this.inputLink(request.tool, name);
-    }
-    return { ok: true, args };
-  }
-
-  /**
-   * How an uploaded input is named from the root that tool resolves against.
-   *
-   * `generate_image` gets `out/` as its root (the plan's choice), so its inputs
-   * sit one level up. `upscale_image` cannot: its output name is derived beside
-   * the input, so its root is the job folder and the input needs no `..`.
-   */
-  private inputLink(tool: RemoteMediaTool, name: string): string {
-    return tool === 'upscale_image' ? `inputs/${name}` : `../inputs/${name}`;
   }
 
   private now = (): number => this.deps.now?.() ?? Date.now();

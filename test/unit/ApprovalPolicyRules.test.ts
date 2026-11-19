@@ -10,11 +10,12 @@ import {
   approvalPolicyLinesForWorkspace,
   writeApprovalAlways,
 } from '../../src/sidebar/approvalPolicyRules';
-import { approvalEnvFor, createChatRuleApproval } from '../../src/sidebar/chatApprovalRules';
+import { approvalEnvFor } from '../../src/sidebar/chatApprovalRules';
+import { createChatRuleApproval } from '../../src/sidebar/chatRuleApproval';
 import { handleApprovalsSlashCommand } from '../../src/sidebar/approvalSlashCommands';
 import { ToolApprovalPolicyDenied } from '../../src/sidebar/toolApprovalOutcome';
 import { unattendedConversations } from '../../src/sidebar/unattendedConversations';
-import type { ChatRuleCall } from '../../src/sidebar/chatApprovalRules';
+import type { ChatRuleCall } from '../../src/sidebar/chatRuleApproval';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 

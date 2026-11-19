@@ -23,7 +23,8 @@ import { SharedRuntimeRegistry } from '../../src/backend/SharedRuntimeRegistry';
 import { ForgeConfigSchema } from '../../src/config/schema';
 import { resolveRequestModel } from '../../src/config/ConfigResolver';
 import type { ForgeConfig } from '../../src/config/types';
-import { runCloudProviderTurn, type ProviderTurnContext } from '../../src/sidebar/ProviderTurn';
+import { type ProviderTurnContext } from '../../src/sidebar/ProviderTurn';
+import { runCloudProviderTurn } from '../../src/sidebar/cloudProviderTurn';
 import { logger } from '../../src/util/logger';
 
 vi.mock('vscode', () => ({

@@ -21,7 +21,7 @@ import { rememberQuestionRecord } from './sessionQuestionRecords';
 import { isFailureResult, readPathArg, resultLabel, touchedFilePath } from './toolResultView';
 import type { PlanItem } from './sessionTypes';
 import type { QuestionAnswerRecord } from '../util/questionAnswers';
-import type { ChatRuleApproval } from './chatApprovalRules';
+import type { ChatRuleApproval } from './chatRuleApproval';
 import { getLogger } from '../util/logger';
 import {
   approvalGrantNote,

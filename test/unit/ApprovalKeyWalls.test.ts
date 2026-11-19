@@ -24,11 +24,11 @@ import { ToolRegistry } from '../../src/tools/ToolRegistry';
 import type { RegisteredTool } from '../../src/tools/ToolRegistry';
 import type { ForgeConfig } from '../../src/config/types';
 import { approvalKeysFor, type ApprovalKeyContext } from '../../src/sidebar/approvalKey';
+import { allowForChat } from '../../src/sidebar/chatApprovalRules';
 import {
-  allowForChat,
   createChatRuleApproval,
   type ChatRuleApproval,
-} from '../../src/sidebar/chatApprovalRules';
+} from '../../src/sidebar/chatRuleApproval';
 import { GateEventLog, type GateEventRow } from '../../src/sidebar/gateEventLog';
 import { ToolDispatch } from '../../src/sidebar/ToolDispatch';
 import type { CheckpointStack } from '../../src/checkpoint/CheckpointStack';

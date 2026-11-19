@@ -17,8 +17,8 @@ vi.mock('vscode', () => ({
 }));
 
 import type { ForgeConfig } from '../../src/config/types';
-import { createChatRuleApproval } from '../../src/sidebar/chatApprovalRules';
-import type { ChatRuleCall } from '../../src/sidebar/chatApprovalRules';
+import { createChatRuleApproval } from '../../src/sidebar/chatRuleApproval';
+import type { ChatRuleCall } from '../../src/sidebar/chatRuleApproval';
 import type { ConversationRuntime } from '../../src/sidebar/sessionTypes';
 import { ToolApprovalService } from '../../src/sidebar/ToolApprovalService';
 import { chatClankerRecords } from '../../src/sidebar/chatClanker';
@@ -121,7 +121,7 @@ const DROP_CASES: DropCase[] = [
     },
   },
   {
-    source: 'jobTools.ts:166 CLI-agent consent gate',
+    source: 'jobTools.ts:153 CLI-agent consent gate',
     call: { toolName: 'manage_jobs', dangerous: true },
   },
   {

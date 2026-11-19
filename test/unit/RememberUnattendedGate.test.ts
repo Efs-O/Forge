@@ -5,7 +5,7 @@ import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolDispatch } from '../../src/sidebar/ToolDispatch';
 import { answerBeforeCard } from '../../src/sidebar/approvalAutoAnswer';
-import { createChatRuleApproval } from '../../src/sidebar/chatApprovalRules';
+import { createChatRuleApproval } from '../../src/sidebar/chatRuleApproval';
 import { unattendedConversations } from '../../src/sidebar/unattendedConversations';
 import { MemoryStore, attachMemoryStore } from '../../src/memory/memoryStore';
 import { makeRememberTool } from '../../src/tools/memoryTools';

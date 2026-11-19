@@ -86,14 +86,15 @@ export function canStartNow(
  * only logs the chat it cuts off: right for `/unloadAll` and for a window
  * exiting, wrong for a run nobody typed (BL-025).
  *
- * No process filter, deliberately. `ProviderTurn.ts:142` takes the hold BEFORE
- * `markStreaming` at `:162` — an awaited target resolution sits between them —
- * so a hold in THIS window can exist while its chat reads as not streaming, and
- * `streamingConversationIds` is only one window's list, so it cannot see another
- * window's turn at all. Adding a pid filter here would reopen the hole this rule
- * exists to close. Pool keys never carry an `@profile`, so the job model is
- * compared by its base name — an alias that resolves to another base blocks
- * conservatively: the job defers, and nobody's turn is cut off.
+ * No process filter, deliberately. `cloudProviderTurn.ts:36` takes the hold
+ * BEFORE `markStreaming` at `:62` — an awaited target resolution sits between
+ * them — so a hold in THIS window can exist while its chat reads as not
+ * streaming, and `streamingConversationIds` is only one window's list, so it
+ * cannot see another window's turn at all. Adding a pid filter here would
+ * reopen the hole this rule exists to close. Pool keys never carry an
+ * `@profile`, so the job model is compared by its base name — an alias that
+ * resolves to another base blocks conservatively: the job defers, and nobody's
+ * turn is cut off.
  */
 export function blockingExternalHolds(
   holds: readonly ExternalTurnHold[],

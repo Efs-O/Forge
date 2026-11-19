@@ -6,7 +6,7 @@
  * not exist — so each found zero peers against real output: Connect never offered
  * a device and Check connection never saw one. One owner here (CLAUDE.md "Single
  * Point of Truth"): `parseTailnetPeers` in `desktopConnectPlan.ts` filters this
- * for the picker, and `parseTailscaleView` in `desktopCheckConnection.ts` keeps
+ * for the picker, and `parseTailscaleView` in `desktopCheckTailscale.ts` keeps
  * the offline entries because a check has to name them.
  */
 

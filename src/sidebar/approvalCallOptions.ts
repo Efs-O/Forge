@@ -15,7 +15,7 @@
 import type { ToolApprovalMetadata } from '../tools/toolContract';
 import type { ExitKind, UntrustedExitVerdict } from './untrustedExitPolicy';
 import type { ToolApprovalCallOptions } from './toolApprovalOutcome';
-import type { ChatRuleDecision } from './chatApprovalRules';
+import type { ChatRuleDecision } from './chatRuleApproval';
 
 /**
  * Build the queue's options for one gated call.

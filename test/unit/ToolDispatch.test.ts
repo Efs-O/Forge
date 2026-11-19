@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolDispatch, resolveToolPath } from '../../src/sidebar/ToolDispatch';
 import { ToolApprovalPolicyDenied } from '../../src/sidebar/toolApprovalOutcome';
-import { createChatRuleApproval } from '../../src/sidebar/chatApprovalRules';
+import { createChatRuleApproval } from '../../src/sidebar/chatRuleApproval';
 import { unattendedConversations } from '../../src/sidebar/unattendedConversations';
 import { isFailureResult } from '../../src/sidebar/toolResultView';
 import { classifyResult } from '../../src/sidebar/compactionLedger';

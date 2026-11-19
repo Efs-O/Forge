@@ -82,7 +82,8 @@ overlaps with an existing owner, extend the owner instead.
 | Tool-calling loop input and result contracts | `src/agent/toolCallingLoopTypes.ts` |
 | Reasoning runaway detection (repetition loop and character cap, per request) | `src/agent/reasoningRunawayGuard.ts` |
 | Once-per-run nudge when a round's answer is unparsed tool-call markup | `src/agent/brokenToolCallMarkup.ts` |
-| Cloud target / local backend startup                 | `src/sidebar/ProviderTurn.ts`            |
+| Local backend startup turn                           | `src/sidebar/ProviderTurn.ts`            |
+| Cloud provider turn: token resolve and direct API call | `src/sidebar/cloudProviderTurn.ts` |
 | Turn served by a local CLI agent                     | `src/sidebar/CliTurn.ts`                 |
 | One-shot prompt (compaction, /review)                | `src/sidebar/PromptRun.ts`               |
 | Thinking kwargs, strip, template context             | `src/sidebar/turnModelBehavior.ts`       |
@@ -441,6 +442,7 @@ overlaps with an existing owner, extend the owner instead.
 | The one reader of the peer list in `tailscale status --json` (`Peer` object keyed by node key; `DNSName`/`HostName`), shared by Connect and Check connection | `src/vscode/tailscalePeers.ts` |
 | The once-per-laptop-window keeping-up notice: one read, one "Add them", "Not now" remembered for the window only | `src/vscode/desktopKeepingUp.ts` |
 | The laptop's "Check connection": the five-link walk, the first broken link named in plain words, the address choice reused from `RemoteStarterRoute`, nothing started and nothing written | `src/vscode/desktopCheckConnection.ts` |
+| This computer's `tailscale status --json` for Check connection: the daemon's state, the peers it sees (offline ones kept), and which dial addresses are tailnet rather than LAN | `src/vscode/desktopCheckTailscale.ts` |
 | Desktop "Share this computer" and "Stop sharing": the confirmed dialog, the one comment-preserving switch write, the two `serve` changes and the window kinds that do nothing at all | `src/vscode/desktopShare.ts` |
 | What Share and Stop sharing decide: which two ports are shared and which two are never named, the two config switches, the created blocks' required fields, and which shares the run leaves still open | `src/vscode/desktopSharePlan.ts` |
 | The two warnings and the messages after a Share or Stop run: the ACL note, the hosted-window refusal, and the ports still shared that the message has to name | `src/vscode/desktopShareText.ts` |
@@ -699,7 +701,8 @@ overlaps with an existing owner, extend the owner instead.
 | `media:` configuration schema                  | `src/config/mediaSchema.ts`            |
 | Media setup report (sidebar and Telegram)    | `src/media/mediaSetupCheck.ts`          |
 | Laptop↔desktop remote media wire contract (routes, schemas, error texts) | `src/media/remoteMediaContract.ts` |
-| Desktop media jobs: FIFO queue, TTL sweep, approval gate with `cloud_relay.media` as standing consent, path-argument rewrite, job-scoped tool instances | `src/media/remoteMediaJobs.ts` |
+| Desktop media jobs: FIFO queue, TTL sweep, approval gate with `cloud_relay.media` as standing consent | `src/media/remoteMediaJobs.ts` |
+| Remote media job tools: the job-scoped generate/upscale instances and the `REMOTE_MEDIA_PATH_ARGS` path-argument rewrite | `src/media/remoteMediaJobTools.ts` |
 | Desktop media job folder: `job.json` record, owner pid, inputs/out layout | `src/media/remoteMediaJobStore.ts` |
 | Served-backend media capabilities payload (backends, tools[], refused[], body cap) | `src/media/remoteMediaCapabilities.ts` |
 | The five `/v1/media/*` relay route handlers | `src/media/remoteMediaRoutes.ts` |
@@ -790,6 +793,7 @@ overlaps with an existing owner, extend the owner instead.
 | The key grammar: how a path compares, what a rule is allowed to name, whether a rule covers a requirement | `src/sidebar/approvalKeyGrammar.ts` |
 | Human-readable names for approval keys | `src/sidebar/approvalKeyWords.ts` |
 | The chat's approval rules: what may be stored, the fetch-store split for `net:`, and what clears them | `src/sidebar/chatApprovalRules.ts` |
+| The chat-rule decision: one gated call in, one verdict out, and the `allow`/`always` writes that follow the owner's click | `src/sidebar/chatRuleApproval.ts` |
 | Chat approval write result and owner-facing message | `src/sidebar/approvalChatWriter.ts` |
 | Owner policy approval matching, unattended allow lists and `/approvals` policy rows | `src/sidebar/approvalPolicyRules.ts` |
 | Current-window policy rules after an owner click | `src/sidebar/approvalPolicySession.ts` |
@@ -926,6 +930,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Human-readable job description (for `/jobs`)               | `src/jobs/jobDescribe.ts`                                      |
 | `manage_jobs` create confirmation text (enabled/disabled, agent model) | `src/jobs/jobCreateText.ts` |
 | `manage_jobs` tool (create/update/pause/delete)            | `src/tools/jobTools.ts`                                        |
+| The `manage_jobs` action bodies: what each action does to the store and what it reports back | `src/tools/jobToolActions.ts` |
 | Job reference resolution (exact id/name, then substring) shared by `manage_jobs` and `/job` | `src/jobs/jobRefResolver.ts` |
 | Discuss chat seeding (`manage_jobs` + `/job chat`)         | `src/jobs/jobDiscuss.ts`                                       |
 | `agent_task` runner (unattended agent turn)                 | `src/jobs/agentTask.ts`                                        |

@@ -27,7 +27,7 @@ import { makeDeleteFileTool } from '../../src/tools/fileEditTools';
 import { openForgeFileRoots, SKILL_WRITE_REASON } from '../../src/tools/ownerPathsOpen';
 import { ToolDispatch } from '../../src/sidebar/ToolDispatch';
 import { ToolApprovalService } from '../../src/sidebar/ToolApprovalService';
-import { createChatRuleApproval } from '../../src/sidebar/chatApprovalRules';
+import { createChatRuleApproval } from '../../src/sidebar/chatRuleApproval';
 import { unattendedConversations } from '../../src/sidebar/unattendedConversations';
 import type { HostToWebview } from '../../src/sidebar/messageBridge';
 import type { CheckpointStack } from '../../src/checkpoint/CheckpointStack';

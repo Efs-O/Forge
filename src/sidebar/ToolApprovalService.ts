@@ -8,7 +8,7 @@ import {
   type ToolApprovalSink,
 } from './toolApprovalEvents';
 import type { ApprovalDecision, ApprovalOffer } from './approvalMessages';
-import type { ChatRuleApproval } from './chatApprovalRules';
+import type { ChatRuleApproval } from './chatRuleApproval';
 import type { AlwaysApprovalWriteResult } from './approvalPolicyRules';
 import { applyAlwaysProjectApproval } from './approvalProjectWriter';
 import { applyChatApprovalRule } from './approvalChatWriter';

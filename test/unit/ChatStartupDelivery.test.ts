@@ -12,7 +12,8 @@ vi.mock('../../src/sidebar/SessionLogger', () => ({
 }));
 import { createSidebarPromptRouter } from '../../src/sidebar/backgroundExitNotice';
 import { SendPipeline, type SendPipelineDeps } from '../../src/sidebar/SendPipeline';
-import { runCloudProviderTurn, runLocalProviderTurn, type ProviderTurnContext } from '../../src/sidebar/ProviderTurn';
+import { runLocalProviderTurn, type ProviderTurnContext } from '../../src/sidebar/ProviderTurn';
+import { runCloudProviderTurn } from '../../src/sidebar/cloudProviderTurn';
 import * as cloudResolver from '../../src/llm/CloudRequestResolver';
 import { TurnLifecycle } from '../../src/sidebar/TurnLifecycle';
 import { RequestChainLifecycle } from '../../src/sidebar/RequestChainLifecycle';
