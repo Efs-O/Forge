@@ -151,3 +151,4 @@
 53. `shell` · a background script that drives the mouse for minutes and checks the foreground once at the start → a dialog that pops up meanwhile takes the clicks. check the foreground before every stroke and stop when it changes
 54. `shell` · `cd "C:/Users/<name>/.forge/jobs" && python -c '…'` → refused: after a `cd` into Forge's own files only a classed read may follow, so a read-only scan dies too. run from the workspace and pass absolute paths
 55. `edit_file` · an import block whose `old_str` held one name → the name was replaced, not added, and the file lost a symbol it still used: `ReferenceError: OUTBOX_STALE_MS is not defined` at the use line, not the import. anchor the edit on the neighbouring line and keep ASCII sort
+56. `shell` · `ls test/unit | grep -i -e a -e b` → `exit 134` with `Aborted` and no listing, so the answer is lost not just failed: MSYS job control kills the pipeline. use `find_files` / `grep_search` instead of piping `ls`

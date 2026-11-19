@@ -37,6 +37,7 @@
 9. a gate setting added to `.github/workflows/ci.yml` only → `publish.yml` runs the same `npm run ci` without it and fails on a tree CI passed. grep every workflow that runs the gate and copy the env
 10. a promotion test that guards the `resources/tips/CODING_TIPS.md` add right after guarding the `docs/CODING_TIPS.md` delete → still refused: `src/tools/tipsWriteGuard.ts` only checks, and reads the project file from disk. write the delete to disk first
 11. a file-age gate tested as `now = Date.now() + STALE + 1` in `test/unit/JobOutbox.test.ts` → flaky: Windows stamps a file's mtime ahead of `Date.now()`, so the age lands under the threshold and `reclaimOutboxClaims` skips it. pass a whole threshold of margin, never 1 ms
+12. a `test/unit/agentTask.test.ts` assertion that the `task_run` marker survived `stopHeartbeat()` → it passes with the fix reverted: that stop clears through a promise chain, so the read lands first. sleep 50 ms before the assertion, then prove it with the revert control
 
 ## PATHS
 1. `zipfile.ZipFile('test/fixtures/sample.xlsx')` in a scan → FileNotFoundError: that is not where the fixture lives. read the test's `fixture()` helper for the real path first
