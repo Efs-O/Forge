@@ -1,5 +1,29 @@
 # Forge — Recent Changes
 
+## 0.17.204
+
+**Your "Send now" runs first.** Pressing "Send now" did interrupt the turn, but the words you typed
+then ran *after* an agent's reply that had arrived while the turn was still running, so the next turn
+read that reply instead of your instruction (chat 8f53bf68, 2026-11-19). The messages waiting in the
+inbox are now re-ordered before they are queued: yours go first, and the delivered replies and
+background notices follow in the order they arrived. Pressing Stop instead still wins, and a turn that
+finished by itself keeps the order it had.
+
+**The chat header shows which Forge chats are talking to each other.** Chats that message each other
+through `message_chat` showed nothing, so it was impossible to see at a glance that two lanes were
+coordinating. A chip now appears beside the linked-agent chips: `Forge` plus the other chat's name,
+and clicking it opens that chat. Unlike a Claude or Codex link there is nothing to unlink — the pair
+is worked out from the two conversations every time the tabs refresh, and nothing is stored, so
+closing or deleting either chat makes the chip disappear on both sides. After `/compact` the messages
+are no longer in the transcript, and the chip goes with them.
+
+**Full test runs stop failing at random.** Six runs in a row had failed with five or six different
+files red each time, every one of them green when run on its own. The suites that start a real child
+process or lean on the temporary folder now run in their own group, once the parallel ones have
+drained; both groups carry the temporary-folder guard they were missing; and a PowerShell child that
+compiles code now gets its own scratch folder instead of leaving files behind in the folder the test
+was counting. Nothing was skipped and no timeout was raised.
+
 ## 0.17.203
 
 **A job that finished and reported is no longer also logged as a failure.** A scheduled job that had
