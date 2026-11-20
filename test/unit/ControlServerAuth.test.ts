@@ -44,7 +44,7 @@ const pool: IBackendPool = {
 
 function makeConfig(port: number): ForgeConfig {
   return {
-    models: [{ name: 'grok', provider: 'xai', api_key_secret: 'forge.xai' }],
+    models: [{ name: 'grok', provider: 'openrouter', api_key_secret: 'forge.grok' }],
     active_model: 'grok',
     llama_server: {},
     control_server: { enabled: true, port },

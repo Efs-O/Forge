@@ -42,7 +42,7 @@ describe('preserve_thinking', () => {
       preservesThinking({ name: 'q', provider, sampling: { preserve_thinking: flag } } as never);
     expect(at('openai-compatible', true)).toBe(true);
     expect(at('openai-compatible')).toBe(false);
-    for (const cloud of ['xai', 'openrouter', 'openai', 'ollama']) expect(at(cloud, true)).toBe(false);
+    for (const cloud of ['openrouter', 'openai', 'ollama']) expect(at(cloud, true)).toBe(false);
   });
 
   it('is on only for a llama.cpp model with the flag explicitly true', () => {

@@ -81,9 +81,9 @@ function config(
       backends: [
         {
           name: 'grok-imagine',
-          provider: 'xai',
+          provider: 'openai',
           model: 'grok-imagine-image-2.0',
-          api_key_secret: 'xai',
+          api_key_secret: 'image-key',
           confirm_each: true,
         },
         {
@@ -368,7 +368,7 @@ describe('remote media jobs: the result text', () => {
     expect(String(status.result)).toBe(
       'Generated image saved to cat.png (image/png, 8 bytes) with backend grok-imagine.\n' +
         'No remote chat is watching this turn, so nothing was sent to a phone.\n' +
-        'This was a paid xai API call, billed per image.\n' +
+        'This was a paid openai API call, billed per image.\n' +
         'To inspect it, call view_image on that path.',
     );
     expect(String(status.result)).not.toContain(desktopPath);
@@ -556,7 +556,7 @@ describe('remote media jobs: capabilities', () => {
         name: 'grok-imagine',
         paid: true,
         confirm_each: true,
-        cost: 'cloud · billed per image · xai · grok-imagine-image-2.0',
+        cost: 'cloud · billed per image · openai · grok-imagine-image-2.0',
         reference_images: false,
       },
     ]);

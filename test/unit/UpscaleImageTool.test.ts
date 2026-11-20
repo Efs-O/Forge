@@ -101,7 +101,7 @@ function configWith(upscale: Record<string, unknown> | undefined): ForgeConfig {
     ...(upscale
       ? {
           image_generation: {
-            backends: [{ name: 'grok', provider: 'xai' as const, model: 'img', confirm_each: true }],
+            backends: [{ name: 'grok', provider: 'openai' as const, model: 'img', confirm_each: true }],
             output_dir: 'generated-images',
             upscale,
           } as unknown as ForgeConfig['image_generation'],

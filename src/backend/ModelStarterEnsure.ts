@@ -139,7 +139,7 @@ export function remoteServability(
       reason: 'ollama_not_shared',
     };
   }
-  if (provider === 'xai' || provider === 'openrouter' || provider === 'openai') {
+  if (provider === 'openrouter' || provider === 'openai') {
     return { remote: false, kind: null, port: null, port_shared: false, reason: 'not_local' };
   }
   if (provider === 'openai-compatible') {

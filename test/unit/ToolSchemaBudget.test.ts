@@ -189,7 +189,7 @@ import {
 // goes back as. "Reuse the returned cursors and suggested_next_wait_ms" was being read as
 // "send suggested_next_wait_ms back as an argument", and the week's scan counted 6 refusals
 // of exactly that unknown key (docs/plans/SESSION_SCAN_CAUSE_FIXES_PLAN.md Phase 2).
-const MEASURED_CHARS = 68_161;
+const MEASURED_CHARS = 68_164;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.
@@ -231,7 +231,7 @@ function maximalConfig(): ForgeConfig {
     ],
     image_generation: {
       output_dir: 'generated-images',
-      backends: [{ name: 'grok', provider: 'xai', model: 'img', confirm_each: true }],
+      backends: [{ name: 'grok', provider: 'openai', model: 'img', confirm_each: true }],
       // The worst case includes the upscale block: `upscale_image` is only
       // registered when it is configured, so pricing the maximally-advertised
       // set means pricing it with the block present.

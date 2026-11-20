@@ -61,11 +61,11 @@ const EXECUTABLE = 'C:/Program Files/Tailscale/tailscale.exe';
 function desktopConfig(overrides: Record<string, unknown> = {}): ForgeConfig {
   return ForgeConfigSchema.parse({
     models: [
-      // `api_key_secret` is required for `xai` by `modelSchema.ts` even though
-      // `validateCloudRelayConfig` lets an xai model through without one (it may
-      // authorise from the OpenCode OAuth file), so the fixture carries one and
-      // the allowlist rule being tested is still the relay's, not the entry's.
-      { name: 'grok', provider: 'xai', api_key_secret: 'xai-key' },
+      // Every allowlisted cloud model needs `api_key_secret` — the relay rule and
+      // the entry rule now agree, since the `xai` OAuth-file exception is gone —
+      // so the fixture carries one and the allowlist rule being tested is still
+      // the relay's, not the entry's.
+      { name: 'grok', provider: 'openrouter', api_key_secret: 'grok-key' },
       { name: 'gpt', provider: 'openai', api_key_secret: 'openai-key' },
       { name: 'llama3:cloud', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' },
       { name: 'ollama-local', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' },
@@ -150,11 +150,11 @@ describe('the state Share starts from', () => {
   });
 
   it('the relay allowlist is the models that need a relay, and only those', () => {
-    // `xai` may authorise from its OAuth file instead of a stored key, so it is
-    // allowed without `api_key_secret`; every other kind needs one. An Ollama
-    // model is allowed only when it is a `:cloud` model on a loopback endpoint,
-    // because that is what `validateCloudRelayConfig` requires and a block Share
-    // creates must not be the thing that makes the config invalid.
+    // Every kind of allowlisted cloud model needs a stored key: the old `xai`
+    // exception (it could authorise from another app's OAuth file) is gone. An
+    // Ollama model is allowed only when it is a `:cloud` model on a loopback
+    // endpoint, because that is what `validateCloudRelayConfig` requires and a
+    // block Share creates must not be the thing that makes the config invalid.
     expect(relayAllowlist(desktopConfig())).toEqual([
       'grok',
       'gpt',

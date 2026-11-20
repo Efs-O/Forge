@@ -10,7 +10,6 @@ function groupLabel(entry: ModelEntry): string {
   if (entry.group) return entry.group;
   const p = entry.provider;
   if (!p || p === 'llama.cpp') return 'Local — llama.cpp';
-  if (p === 'xai') return 'xAI / Grok';
   if (p === 'openrouter') return 'OpenRouter';
   if (p === 'openai') return 'OpenAI';
   if (p === 'openai-compatible') return 'Other OpenAI-compatible';

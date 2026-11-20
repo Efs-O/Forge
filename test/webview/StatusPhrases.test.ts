@@ -13,7 +13,7 @@ beforeEach(() => resetPhraseBags());
 
 describe('phrasePool', () => {
   it('gives a cloud turn no phrase about the user own hardware', () => {
-    // The whole point of the split: claiming local VRAM load during an xAI call
+    // The whole point of the split: claiming local VRAM load during a cloud call
     // would undercut the residency signalling the rest of the sidebar does.
     const pool = phrasePool({ local: false, clanker: false });
     for (const phrase of LOCAL_PHRASES) expect(pool).not.toContain(phrase);

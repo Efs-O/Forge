@@ -67,7 +67,7 @@ function getSamplingDefaults(model?: ModelConfig): SamplingDefaults {
     max_tokens: 4096,
   };
 
-  const cloudLikeProviders = new Set(['openai', 'openai-compatible', 'xai', 'openrouter']);
+  const cloudLikeProviders = new Set(['openai', 'openai-compatible', 'openrouter']);
   if (cloudLikeProviders.has(model?.provider ?? '')) {
     return baseDefaults;
   }

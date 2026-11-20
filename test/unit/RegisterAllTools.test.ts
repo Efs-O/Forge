@@ -186,7 +186,7 @@ function makeRegistry(
           image_generation: {
             output_dir: 'generated-images',
             backends: [
-              { name: 'grok', provider: 'xai' as const, model: 'img', confirm_each: true },
+              { name: 'grok', provider: 'openai' as const, model: 'img', confirm_each: true },
             ],
             ...(options.upscale
               ? {

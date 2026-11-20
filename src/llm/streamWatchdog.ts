@@ -6,7 +6,7 @@ const log = getLogger();
  * Idle budgets before a stream is considered stalled.
  *
  * Two budgets, because silence means different things either side of the first
- * byte. Before it, a provider that sends headers early (OpenAI, xAI) may be
+ * byte. Before it, a provider that sends headers early (OpenAI) may be
  * reasoning with nothing to stream for minutes, and a server without
  * early-error handling may still be prefilling a long prompt. Once bytes flow,
  * a long gap is more suspicious.

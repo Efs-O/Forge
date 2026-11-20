@@ -124,7 +124,7 @@ describe.runIf(linkSupported)('symlink escape is refused by every write/move/del
   it('refuses generate_image saving through the link', async () => {
     const config = {
       image_generation: {
-        backends: [{ name: 'test', provider: 'xai', model: 'm', confirm_each: false }],
+        backends: [{ name: 'test', provider: 'openai', model: 'm', confirm_each: false }],
         default: 'test',
         output_dir: 'images',
       },

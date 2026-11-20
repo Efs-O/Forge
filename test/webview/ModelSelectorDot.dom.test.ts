@@ -66,7 +66,7 @@ describe('ModelSelector residency dot', () => {
 
   it('renders no dot for a model the host gave no residency', () => {
     // Remote routes hold no VRAM here; absence is the honest rendering.
-    render([{ name: 'grok-4', provider: 'xai' }]);
+    render([{ name: 'grok-4', provider: 'openrouter' }]);
     openPanel();
 
     expect(dotClasses()).toEqual([]);

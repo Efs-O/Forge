@@ -40,7 +40,7 @@ function config(): ForgeConfig {
       model('ollama-cloud', 'ollama', 'https://ollama.com'),
       // Cloud-routed via the LOCAL daemon: only the name's tag suffix marks it.
       model('gpt-oss:20b-cloud', 'ollama', 'http://127.0.0.1:11434'),
-      model('xai-model', 'xai'),
+      model('grok-model', 'openrouter'),
       model('openai-model', 'openai'),
       model('openrouter-model', 'openrouter'),
       model('compat-model', 'openai-compatible', 'https://api.example.test'),
@@ -154,7 +154,7 @@ describe('delegation eligibility', () => {
     expect(resolveDelegationTarget(config(), 'ollama-local').provider).toBe('ollama');
   });
 
-  it.each([['xai-model'], ['openai-model'], ['openrouter-model'], ['compat-model']])(
+  it.each([['grok-model'], ['openai-model'], ['openrouter-model'], ['compat-model']])(
     'classifies configured cloud provider %s as a cloud target',
     (target) => {
       expect(resolveDelegationTarget(config(), target).provider).toBe('cloud');
@@ -199,9 +199,9 @@ describe('delegation eligibility', () => {
 
   it('rejects an ambiguous fuzzy target with a structured candidate list', () => {
     const cfg = config();
-    // Both "xai-model" and "xai-model-2" would prefix-match "xai".
-    cfg.models = [...cfg.models, model('xai-model-2', 'xai')];
-    expect(() => resolveDelegationTarget(cfg, 'xai')).toThrow(/Ambiguous model "xai"/);
+    // Both "grok-model" and "grok-model-2" would prefix-match "grok".
+    cfg.models = [...cfg.models, model('grok-model-2', 'openrouter')];
+    expect(() => resolveDelegationTarget(cfg, 'grok')).toThrow(/Ambiguous model "grok"/);
   });
 });
 

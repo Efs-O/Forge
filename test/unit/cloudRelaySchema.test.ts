@@ -63,6 +63,11 @@ describe('cloud_relay config schema', () => {
       { models: ['compatible'] },
     );
     expect(issues(keyless)).toContain('keyed cloud provider');
+    // The exception that let a keyless `xai` model through (it could read
+    // another app's OAuth file) is gone: an allowlisted cloud model without a
+    // stored key is refused whatever its provider.
+    const keylessRouter = parse({ name: 'router', provider: 'openrouter' }, { models: ['router'] });
+    expect(issues(keylessRouter)).toContain('keyed cloud provider');
     // The type check stays strict: a model that IS configured but is not a
     // cloud model is still a hard error, because this list is a security
     // allowlist, not a preference.
@@ -85,7 +90,7 @@ describe('cloud_relay config schema', () => {
 
   it('requires a non-empty allowlist', () => {
     const empty = parse(
-      { name: 'cloud', provider: 'xai' },
+      { name: 'cloud', provider: 'openrouter' },
       { models: [] },
     );
     expect(empty.success).toBe(false);

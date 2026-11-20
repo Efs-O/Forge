@@ -5,7 +5,7 @@
  *
  * A remote window's extension host runs ON the desktop, but its SecretStorage is
  * the keychain of the machine being typed on, which by owner rule holds no API
- * keys. So xAI, OpenRouter, OpenAI and keyed `openai-compatible` models would
+ * keys. So OpenRouter, OpenAI and keyed `openai-compatible` models would
  * fail there with "no bearer token" — on a machine that has the desktop's
  * models, the desktop's GPUs and none of the desktop's keys. The desktop's own
  * (non-remote) Forge window already holds the keys and already runs the relay on

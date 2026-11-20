@@ -315,18 +315,23 @@ describe('runPromptToMarkdown options', () => {
   });
 
   it('leaves a named cloud provider on its requested effort, guessing no off switch', async () => {
-    const withXai = (): ForgeConfig => {
+    const withCloudRouter = (): ForgeConfig => {
       const base = config();
       return {
         ...base,
         models: [
           ...base.models,
-          { name: 'grok', provider: 'xai', endpoint: 'https://api.x.ai', api_key_secret: 'xai' },
+          {
+            name: 'grok',
+            provider: 'openrouter',
+            endpoint: 'https://api.x.ai',
+            api_key_secret: 'cloud-key',
+          },
         ],
       } as unknown as ForgeConfig;
     };
     await runPromptToMarkdown(
-      { ...ctx(), getConfig: withXai, secrets: { get: async () => 'k' } as never },
+      { ...ctx(), getConfig: withCloudRouter, secrets: { get: async () => 'k' } as never },
       'summarize',
       'c1',
       { modelName: 'grok', outputTokens: 4_000, reasoningEffort: 'low', disableThinking: true },
@@ -336,20 +341,20 @@ describe('runPromptToMarkdown options', () => {
   });
 
   it('sends a cloud group its configured thinking_off_effort when thinking is off', async () => {
-    const withXaiGroup = (): ForgeConfig => {
+    const withCloudGroup = (): ForgeConfig => {
       const base = config();
       return {
         ...base,
-        groups: { ...base.groups, xai: { provider: 'xai', thinking_off_effort: 'none' } },
+        groups: { ...base.groups, cloud: { provider: 'openrouter', thinking_off_effort: 'none' } },
         models: [
           ...base.models,
-          { name: 'grok', group: 'xai', endpoint: 'https://api.x.ai', api_key_secret: 'xai' },
+          { name: 'grok', group: 'cloud', endpoint: 'https://api.x.ai', api_key_secret: 'cloud-key' },
         ],
       } as unknown as ForgeConfig;
     };
     const run = (disableThinking: boolean) =>
       runPromptToMarkdown(
-        { ...ctx(), getConfig: withXaiGroup, secrets: { get: async () => 'k' } as never },
+        { ...ctx(), getConfig: withCloudGroup, secrets: { get: async () => 'k' } as never },
         'summarize',
         'c1',
         { modelName: 'grok', outputTokens: 4_000, reasoningEffort: 'low', disableThinking },

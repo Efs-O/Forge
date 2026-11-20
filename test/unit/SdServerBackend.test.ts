@@ -174,9 +174,16 @@ async function writeOrphanRecord(server: Rig, lastUsedAt: number): Promise<strin
 describe('sdcpp image_generation schema', () => {
   it('keeps today’s cloud backend shape valid and enforces the timeout boundary', () => {
     const cloud = ImageGenerationConfigSchema.parse({
-      backends: [{ name: 'xai-image', provider: 'xai', model: 'grok-imagine-image-2.0' }],
+      backends: [
+        {
+          name: 'cloud-image',
+          provider: 'openai',
+          model: 'grok-imagine-image-2.0',
+          api_key_secret: 'image-key',
+        },
+      ],
     });
-    expect(cloud.backends[0]).toMatchObject({ provider: 'xai', confirm_each: true });
+    expect(cloud.backends[0]).toMatchObject({ provider: 'openai', confirm_each: true });
     expect(sdcppBackendConfig(root).media_gpu_lease_enabled).toBe(false);
 
     expect(() =>

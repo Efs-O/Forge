@@ -437,7 +437,7 @@ export const ForgeConfigSchema = z.object(ForgeConfigShape).superRefine((cfg, ct
     validateRemoteStartEntry(model, provider, endpoint, ['models', index], ctx);
     if (
       // openai-compatible may omit it: local servers usually take no key.
-      (provider === 'xai' || provider === 'openrouter' || provider === 'openai') &&
+      (provider === 'openrouter' || provider === 'openai') &&
       !model.api_key_secret
     ) {
       ctx.addIssue({

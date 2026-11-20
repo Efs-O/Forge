@@ -117,7 +117,7 @@ describe('remote_start entries (the laptop half)', () => {
   });
 
   it('is refused on any provider that is not openai-compatible', () => {
-    for (const provider of ['llama.cpp', 'ollama', 'xai']) {
+    for (const provider of ['llama.cpp', 'ollama', 'openrouter']) {
       const parsed = parse({ provider, gguf_path: '/m.gguf', api_key_secret: 'k' });
       expect(parsed.success, provider).toBe(false);
       expect(issueText(parsed)).toContain(

@@ -23,7 +23,7 @@ function config(): ForgeConfig {
     models: [
       { name: '12b', provider: 'llama.cpp', gguf_path: '/12b.gguf' },
       { name: '27b', provider: 'llama.cpp', gguf_path: '/27b.gguf' },
-      { name: 'grok', provider: 'xai' },
+      { name: 'grok', provider: 'openrouter' },
     ],
     active_model: '12b',
     llama_server: { port: 8080 },

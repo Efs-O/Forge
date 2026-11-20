@@ -50,9 +50,9 @@ describe('describeBackend', () => {
   it('names the provider for a remote route rather than inventing a load state', () => {
     // Absent residency is the remote case by design — rendering it as `cold`
     // would advertise a VRAM load cost that does not exist.
-    expect(describeBackend({ modelName: 'grok-4', provider: 'xai', contextMax: 131072 })).toEqual({
+    expect(describeBackend({ modelName: 'grok-4', provider: 'openrouter', contextMax: 131072 })).toEqual({
       tone: 'ok',
-      primary: 'grok-4 · xai',
+      primary: 'grok-4 · openrouter',
       secondary: '131.1k ctx per slot',
     });
   });

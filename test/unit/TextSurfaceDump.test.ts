@@ -28,7 +28,7 @@ function maximalConfig(): ForgeConfig {
     ],
     image_generation: {
       output_dir: 'generated-images',
-      backends: [{ name: 'grok', provider: 'xai', model: 'img', confirm_each: true }],
+      backends: [{ name: 'grok', provider: 'openai', model: 'img', confirm_each: true }],
       upscale: {
         binary: '/models/sd-cli.exe',
         model: '/models/ESRGAN/4x_foolhardy_Remacri.pth',

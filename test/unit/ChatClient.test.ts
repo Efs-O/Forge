@@ -58,7 +58,7 @@ describe('streamModelChatCompletion headers-timeout routing', () => {
   });
 
   it('leaves every cloud provider on the extension host fetch', async () => {
-    for (const provider of ['xai', 'openrouter', 'openai', 'openai-compatible'] as const) {
+    for (const provider of ['openrouter', 'openai', 'openai-compatible'] as const) {
       expect(await route({ name: 'c', provider })).toBe('global');
     }
   });

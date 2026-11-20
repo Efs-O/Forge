@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { LOCAL_HEADERS_TIMEOUT_MS } from '../llm/localLlamaFetch';
 import { ImageUpscaleSchema } from './imageUpscaleSchema';
+import { XAI_REMOVED_MESSAGE } from './schemaShared';
 
 const BackendNameSchema = z
   .string()
@@ -28,10 +29,13 @@ const SdcppSizeSchema = z.object({
  */
 const CloudImageBackendSchema = z.object({
   name: BackendNameSchema,
-  provider: z.enum(['xai', 'openai', 'openai-compatible']),
-  /** Provider model id, e.g. `grok-imagine-image-2.0`. */
+  provider: z.enum(['openai', 'openai-compatible'], {
+    error: (iss: { input: unknown }): string | undefined =>
+      iss.input === 'xai' ? XAI_REMOVED_MESSAGE : undefined,
+  }),
+  /** Provider model id, e.g. `gpt-image-1`. */
   model: z.string().min(1),
-  /** SecretStorage key. For `xai`, OpenCode's OAuth file is the fallback. */
+  /** SecretStorage key holding the bearer token. */
   api_key_secret: z.string().min(1).optional(),
   /** Base URL; required for `openai-compatible` and ignored otherwise. */
   endpoint: z.string().url().optional(),
@@ -41,6 +45,28 @@ const CloudImageBackendSchema = z.object({
    */
   confirm_each: z.boolean().default(true),
 });
+
+/**
+ * A backend that still names the provider this release removed. It is a union
+ * option rather than a refused discriminator because the discriminated union's
+ * own failure for an unknown `provider` is a bare "Invalid input", which names
+ * no fix: this is the only way to land the replacement message on `provider`.
+ * The issue always fires, so nothing can satisfy it and no caller ever sees the
+ * shape — the `never` transform keeps a removed provider out of the parsed
+ * backend type.
+ */
+const RemovedXaiImageBackendSchema = z
+  .object({ provider: z.literal('xai') })
+  .superRefine((_backend, ctx) => {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['provider'],
+      message: XAI_REMOVED_MESSAGE,
+    });
+  })
+  .transform((): never => {
+    throw new Error(XAI_REMOVED_MESSAGE);
+  });
 
 const SdcppImageBackendSchema = z.object({
   name: BackendNameSchema,
@@ -124,7 +150,12 @@ export const MAX_REFERENCE_IMAGES = 4;
 export const MAX_IMAGE_VARIATIONS = 2;
 
 const ImageBackendSchema = z
-  .discriminatedUnion('provider', [CloudImageBackendSchema, SdcppImageBackendSchema])
+  .discriminatedUnion('provider', [
+    CloudImageBackendSchema,
+    SdcppImageBackendSchema,
+    // Reached only by a config that still says `provider: xai`.
+    RemovedXaiImageBackendSchema,
+  ])
   .superRefine((backend, ctx) => {
     if (backend.provider === 'openai-compatible' && !backend.endpoint) {
       ctx.addIssue({
@@ -133,7 +164,7 @@ const ImageBackendSchema = z
         message: 'provider openai-compatible requires endpoint',
       });
     }
-    if (backend.provider !== 'xai' && backend.provider !== 'sdcpp' && !backend.api_key_secret) {
+    if (backend.provider !== 'sdcpp' && !backend.api_key_secret) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['api_key_secret'],

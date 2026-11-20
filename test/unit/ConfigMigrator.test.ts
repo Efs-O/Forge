@@ -99,14 +99,14 @@ models:
     sampling: { max_tokens: 65536 }
 
   - name: grok-4
-    provider: xai
-    api_key_secret: xai
+    provider: openrouter
+    api_key_secret: cloud-key
     capabilities: [tool-call]
     sampling: { temperature: 0.7 }
 
   - name: grok-mini
-    provider: xai
-    api_key_secret: xai
+    provider: openrouter
+    api_key_secret: cloud-key
     capabilities: [tool-call]
     sampling: { temperature: 0.5 }
 `;
@@ -131,7 +131,7 @@ describe('migrateConfig', () => {
 
     expect(result.migrated).toBe(true);
     // 7 duplicate gemma workers and 4 local ollama entries each factor into
-    // one group; gemma-tuned, qwen-solo, and the two xai entries stay inline
+    // one group; gemma-tuned, qwen-solo, and the two grok entries stay inline
     // (no group worth manufacturing for them).
     expect(result.groupCount).toBe(2);
     expect(result.linesBefore).toBe(linesBefore);

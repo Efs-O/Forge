@@ -27,7 +27,7 @@ describe('groupModels', () => {
     ]);
   });
 
-  it('shows the Desktop group between Ollama Cloud and xAI', () => {
+  it('shows the Desktop group between Ollama Cloud and OpenRouter', () => {
     // The host sends `group` for every model, so a `remote_start` entry arrives
     // as 'Desktop' and the sidebar orders it by MODEL_PICKER_GROUP_ORDER —
     // which the webview imports, so it cannot fall out of step with the host.
@@ -38,14 +38,14 @@ describe('groupModels', () => {
     };
     expect(
       groupModels([
-        { name: 'grok', provider: 'xai', group: 'xAI / Grok' },
+        { name: 'grok', provider: 'openrouter', group: 'OpenRouter' },
         desktopModel,
         { name: 'qwen:cloud', provider: 'ollama', group: 'Ollama Cloud' },
       ]),
     ).toEqual([
       { label: 'Ollama Cloud', entries: [{ name: 'qwen:cloud', provider: 'ollama', group: 'Ollama Cloud' }] },
       { label: 'Desktop', entries: [desktopModel] },
-      { label: 'xAI / Grok', entries: [{ name: 'grok', provider: 'xai', group: 'xAI / Grok' }] },
+      { label: 'OpenRouter', entries: [{ name: 'grok', provider: 'openrouter', group: 'OpenRouter' }] },
     ]);
   });
 });

@@ -45,7 +45,6 @@ export type SystemPromptMode = 'append' | 'replace';
 export type ModelProvider =
   | 'llama.cpp'
   | 'ollama'
-  | 'xai'
   | 'openrouter'
   | 'openai'
   | 'openai-compatible'
@@ -251,7 +250,7 @@ export interface ModelConfig {
   /**
    * The `reasoning_effort` Forge sends when it turns thinking off for a request
    * (today: the compaction summary when its budget reserves no reasoning tokens).
-   * openai-compatible defaults to 'none'. xai/openrouter/openai name their effort
+   * openai-compatible defaults to 'none'. openrouter/openai name their effort
    * levels differently, so Forge sends nothing extra for them unless this is set.
    * llama.cpp and Ollama use `enable_thinking: false` and ignore it.
    */
@@ -260,7 +259,7 @@ export interface ModelConfig {
   profiles?: string[];
   /** When true, strip visible thinking/channel markup when think is explicitly false. */
   strip_thinking_channels?: boolean;
-  /** SecretStorage key holding the bearer token for OpenAI-compatible cloud providers (for example xAI, OpenAI, or OpenRouter). */
+  /** SecretStorage key holding the bearer token for OpenAI-compatible cloud providers (for example OpenAI or OpenRouter). */
   api_key_secret?: string;
   /** Spawn-time facts (F6). When present, overrides flat fields at spawn resolution. */
   spawn?: SpawnConfig;

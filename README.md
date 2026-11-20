@@ -81,7 +81,7 @@ no telemetry, analytics, or auto-update pings.
 - Frame extraction from workspace video for vision models (`view_video`, needs ffmpeg)
 - Direct `llama-server` lifecycle management
 - Ollama local and Ollama cloud routing through the local daemon
-- Optional cloud or self-hosted providers: `xai`, `openrouter`, `openai`, `openai-compatible`
+- Optional cloud or self-hosted providers: `openrouter`, `openai`, `openai-compatible`
 - External CLI agents (`provider: cli` — Claude Code, Codex) as full-rights agents — both in direct chat and as `ask_local_agent` delegation targets, where they can read and edit the workspace with their own tools — using each CLI's own authentication. See [delegation](docs/DELEGATION.md) for which runs Keep/Undo covers
 - Agent mesh: two-way messaging between Forge and Claude Code, Codex and Copilot sessions (`ask_agent`, plus the fifteen verbs in `forge.sh`'s own usage header)
 - Localhost control server for external orchestrators and shared model lifecycle
@@ -588,7 +588,6 @@ wrappers, external infra) via the `openai-compatible` provider with an
 
 Supported provider values:
 
-- `xai`
 - `openrouter`
 - `openai`
 - `openai-compatible`
@@ -811,7 +810,8 @@ Example:
 ```yaml
 models:
   - name: grok-code-fast
-    provider: xai
+    provider: openai-compatible
+    endpoint: https://api.x.ai/v1
     api_key_secret: xai
 
   - name: hosted-coder
@@ -819,6 +819,8 @@ models:
     endpoint: https://example-host/v1
     api_key_secret: hosted-coder-token
 ```
+
+xAI has no provider of its own: reach it as openai-compatible, as above.
 
 ## Control Server
 

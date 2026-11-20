@@ -544,7 +544,6 @@ overlaps with an existing owner, extend the owner instead.
 | Re-read annotation (model copy)              | `src/agent/staleReadSupersede.ts`            |
 | Chat message / tool call wire types          | `src/llm/types.ts`                           |
 | Buffered in-host chat for POST /chat         | `src/llm/ControlChatProxy.ts`                |
-| xAI token resolution (SecretStorage/OAuth)   | `src/llm/XaiAuth.ts`                         |
 | FORGE.md workspace instructions loader       | `src/llm/ForgeInstructionsLoader.ts`         |
 | FORGE.md chain assembly + byte budget        | `src/llm/forgeInstructionsChain.ts`          |
 | Per-chat pinned FORGE.md text + change note  | `src/sidebar/forgeInstructionsPin.ts`        |

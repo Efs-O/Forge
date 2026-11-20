@@ -27,7 +27,7 @@ function cloudConfig(confirmEach: boolean): ImageGenerationConfig {
     backends: [
       {
         name: 'cloud',
-        provider: 'xai',
+        provider: 'openai',
         model: 'image-model',
         confirm_each: confirmEach,
       },

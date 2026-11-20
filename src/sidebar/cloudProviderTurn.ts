@@ -1,5 +1,5 @@
 /**
- * The cloud half of getting a turn to its endpoint (xai, openrouter): resolve
+ * The cloud half of getting a turn to its endpoint (openrouter, openai): resolve
  * the token and call the API directly, with no local backend to wait for.
  *
  * Split out of `ProviderTurn.ts`, which keeps the local path and the shared
@@ -22,7 +22,7 @@ import {
 
 const log = getLogger();
 
-/** Cloud providers (xai, openrouter): no local backend — resolve the token and
+/** Cloud providers (openrouter, openai): no local backend — resolve the token and
  *  call the API directly. */
 export async function runCloudProviderTurn(
   ctx: ProviderTurnContext,

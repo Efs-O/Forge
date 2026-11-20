@@ -52,7 +52,7 @@ export function makeStarterConfig(
       unload_path: '/unload',
     },
     { name: 'cerebras', provider: 'openai-compatible', endpoint: 'https://api.cerebras.ai' },
-    { name: 'grok', provider: 'xai', api_key_secret: 'forge.xai' },
+    { name: 'grok', provider: 'openrouter', api_key_secret: 'forge.grok' },
     { name: 'llama3', provider: 'ollama', endpoint: 'http://127.0.0.1:11434' },
     { name: 'claude-code', provider: 'cli', cli: 'claude' },
   ];

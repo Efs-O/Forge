@@ -7,7 +7,6 @@ export const MODEL_PICKER_GROUP_ORDER = [
   'Ollama Local',
   'Ollama Cloud',
   'Desktop',
-  'xAI / Grok',
   'Cerebras',
   'OpenAI',
   'OpenRouter',
@@ -61,8 +60,8 @@ function titleCase(label: string): string {
  * `remote_start` is checked before the route: such an entry is this machine's
  * view of ANOTHER machine's server — it routes as `direct-cloud` because its
  * endpoint is an openai-compatible URL, and grouping it by provider buried the
- * models served by the desktop under "Other OpenAI-compatible" next to Grok and
- * Groq. The picker shows them as what they are: a desktop's models. Routing is
+ * models served by the desktop under "Other OpenAI-compatible" next to Groq.
+ * The picker shows them as what they are: a desktop's models. Routing is
  * untouched — `classifyModelRoute` still answers `direct-cloud`, and the
  * request still goes through `RemoteStarterClient`.
  */
@@ -78,7 +77,6 @@ export function modelPickerGroup(model: ModelConfig): ModelPickerGroup {
     case 'cli-agent':
       return 'CLI agents';
     case 'direct-cloud': {
-      if (model.provider === 'xai') return 'xAI / Grok';
       if (model.provider === 'openai') return 'OpenAI';
       if (model.provider === 'openrouter') return 'OpenRouter';
       return titleCase(getProviderDisplayName(model)) === 'Cerebras'

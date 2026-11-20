@@ -90,7 +90,7 @@ export const RemoteMediaCancelRequestSchema = z.object({ id: JobId }).strict();
 const BackendCapabilitySchema = z
   .object({
     name: z.string().min(1),
-    /** True for xai/openai/openai-compatible backends: billed per call. */
+    /** True for openai/openai-compatible backends: billed per call. */
     paid: z.boolean(),
     confirm_each: z.boolean(),
     /** The tool's cost tag text, shown in the laptop's approval detail. */

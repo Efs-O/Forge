@@ -100,8 +100,8 @@ llama_server: {}
 models:
   # tuned by hand on 2026-10-20
   - name: grok
-    provider: xai
-    api_key_secret: xai-key
+    provider: openrouter
+    api_key_secret: grok-key
     sampling: { temperature: 0.3 }
   - name: llama3:cloud
     provider: ollama
@@ -124,8 +124,8 @@ cloud_relay:
   models: [grok]
 models:
   - name: grok
-    provider: xai
-    api_key_secret: xai-key
+    provider: openrouter
+    api_key_secret: grok-key
 `;
 
 /** `model_starter.enabled` with `control_server` off: the pair the schema
@@ -137,8 +137,8 @@ model_starter:
   shared_ports: [8080]
 models:
   - name: grok
-    provider: xai
-    api_key_secret: xai-key
+    provider: openrouter
+    api_key_secret: grok-key
 `;
 
 const EXECUTABLE = 'C:/Program Files/Tailscale/tailscale.exe';

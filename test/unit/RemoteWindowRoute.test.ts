@@ -34,8 +34,8 @@ import { findFreeLoopbackPort, listenLoopback } from '../support/listenLoopback'
 
 const grok = {
   name: 'grok',
-  provider: 'xai',
-  api_key_secret: 'forge.xai',
+  provider: 'openrouter',
+  api_key_secret: 'forge.grok',
 } as ModelConfig;
 
 /** `vscode.env` is read-only in @types/vscode; the test alias is a plain object. */
@@ -66,7 +66,7 @@ function configWithRelay(port: number, relayModels: string[] = ['grok']): ForgeC
     // `validateCloudRelayConfig`: a test that allowlists a model the config does
     // not have fails at parse time, not at the request.
     models: [
-      { name: 'grok', provider: 'xai', api_key_secret: 'forge.xai' },
+      { name: 'grok', provider: 'openrouter', api_key_secret: 'forge.grok' },
       {
         name: 'cerebras',
         provider: 'openai-compatible',
@@ -168,8 +168,8 @@ describe('a key-based cloud model in a VS Code Remote window', () => {
 
     const target = await resolveCloudRequestTarget(grok, secrets as unknown as vscode.SecretStorage);
 
-    expect(target).toEqual({ baseUrl: 'https://api.x.ai', apiKey: 'the-desktop-key' });
-    expect(secrets.get).toHaveBeenCalledWith('forge.xai');
+    expect(target).toEqual({ baseUrl: 'https://openrouter.ai/api', apiKey: 'the-desktop-key' });
+    expect(secrets.get).toHaveBeenCalledWith('forge.grok');
     expect(stub.requests).toEqual([]);
   });
 
@@ -261,10 +261,10 @@ describe('a key-based cloud model in a window that is not hosted elsewhere', () 
       );
 
       expect(target).toEqual({
-        baseUrl: 'https://api.x.ai',
+        baseUrl: 'https://openrouter.ai/api',
         apiKey: 'the-key-on-this-computer',
       });
-      expect(secrets.get).toHaveBeenCalledWith('forge.xai');
+      expect(secrets.get).toHaveBeenCalledWith('forge.grok');
       expect(stub.requests).toEqual([]);
     },
   );

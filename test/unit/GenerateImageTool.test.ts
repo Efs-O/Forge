@@ -44,9 +44,9 @@ function imageConfig(overrides: Record<string, unknown> = {}): ImageGenerationCo
     backends: [
       {
         name: 'grok-imagine',
-        provider: 'xai',
+        provider: 'openai',
         model: 'grok-imagine-image-2.0',
-        api_key_secret: 'xai',
+        api_key_secret: 'image-key',
       },
       {
         name: 'other-api',
@@ -116,7 +116,7 @@ describe('image_generation config schema', () => {
     expect(result.success).toBe(false);
   });
 
-  it('rejects a keyless non-xai backend, duplicate names, and an unknown default', () => {
+  it('rejects a keyless cloud backend, duplicate names, and an unknown default', () => {
     const parse = (value: unknown): boolean => ImageGenerationConfigSchema.safeParse(value).success;
     expect(parse({ backends: [{ name: 'o', provider: 'openai', model: 'gpt-image-1' }] })).toBe(
       false,
@@ -124,13 +124,13 @@ describe('image_generation config schema', () => {
     expect(
       parse({
         backends: [
-          { name: 'a', provider: 'xai', model: 'm' },
-          { name: 'a', provider: 'xai', model: 'n' },
+          { name: 'a', provider: 'openai', model: 'm' },
+          { name: 'a', provider: 'openai', model: 'n' },
         ],
       }),
     ).toBe(false);
     expect(
-      parse({ default: 'missing', backends: [{ name: 'a', provider: 'xai', model: 'm' }] }),
+      parse({ default: 'missing', backends: [{ name: 'a', provider: 'openai', model: 'm' }] }),
     ).toBe(false);
   });
 });
@@ -186,9 +186,9 @@ describe('generate_image', () => {
       }),
     );
     expect(delivered).toEqual([
-      { conversationId: 'c1', text: '🖼 grok-imagine (paid xai API): a red fox', imagePath: saved },
+      { conversationId: 'c1', text: '🖼 grok-imagine (paid openai API): a red fox', imagePath: saved },
     ]);
-    expect(result).toContain('This was a paid xai API call, billed per image.');
+    expect(result).toContain('This was a paid openai API call, billed per image.');
     expect(result).toContain('art/fox.jpg');
     expect(result).toContain('Queued for 1 remote chat(s).');
     expect(result).toContain('view_image');
@@ -278,7 +278,7 @@ describe('generate_image with a job workspaceRoot', () => {
 describe('generateCloudImage', () => {
   const secrets = { get: async () => 'plain-api-key' } as unknown as vscode.SecretStorage;
   const backends = imageConfig().backends;
-  const xai = backends[0]!;
+  const cloud = backends[0]!;
   const custom = backends[1]!;
 
   function imageFetchDependencies(
@@ -301,7 +301,7 @@ describe('generateCloudImage', () => {
     }) as unknown as typeof fetch;
 
     const image = await generateCloudImage({
-      backend: xai,
+      backend: cloud,
       prompt: 'fox',
       secrets,
       fetchImpl,
@@ -310,7 +310,7 @@ describe('generateCloudImage', () => {
 
     expect(image.mime).toBe('image/jpeg');
     expect(calls).toEqual([
-      'https://api.x.ai/v1/images/generations',
+      'https://api.openai.com/v1/images/generations',
       'https://imgen.x.ai/tmp/a.jpeg',
     ]);
   });
@@ -331,7 +331,7 @@ describe('generateCloudImage', () => {
 
     await expect(
       generateCloudImage({
-        backend: xai,
+        backend: cloud,
         prompt: 'fox',
         secrets,
         fetchImpl,
@@ -370,7 +370,7 @@ describe('generateCloudImage', () => {
 
     await expect(
       generateCloudImage({
-        backend: xai,
+        backend: cloud,
         prompt: 'fox',
         secrets,
         fetchImpl,
@@ -398,12 +398,14 @@ describe('generateCloudImage', () => {
     expect(image).toMatchObject({ mime: 'image/png', revisedPrompt: 'a fox, detailed' });
   });
 
-  it('turns a credential rejection into the login fix', async () => {
+  it('turns a credential rejection into the set-the-key fix', async () => {
     const fetchImpl = (async () =>
       new Response('bad credentials', { status: 401 })) as unknown as typeof fetch;
     await expect(
-      generateCloudImage({ backend: xai, prompt: 'fox', secrets, fetchImpl }),
-    ).rejects.toThrow(/opencode auth login/);
+      generateCloudImage({ backend: cloud, prompt: 'fox', secrets, fetchImpl }),
+    ).rejects.toThrow(
+      /Set the key with "Forge: Set Cloud Provider Token" \(key: image-key\)/,
+    );
   });
 
   it('refuses bytes that are not an image, and a non-https image URL', async () => {
@@ -411,7 +413,7 @@ describe('generateCloudImage', () => {
     const notImage = (async () =>
       new Response(JSON.stringify({ data: [{ b64_json: html }] }))) as unknown as typeof fetch;
     await expect(
-      generateCloudImage({ backend: xai, prompt: 'fox', secrets, fetchImpl: notImage }),
+      generateCloudImage({ backend: cloud, prompt: 'fox', secrets, fetchImpl: notImage }),
     ).rejects.toThrow(/not a PNG, JPEG/);
 
     const plainHttp = (async () =>
@@ -420,7 +422,7 @@ describe('generateCloudImage', () => {
       )) as unknown as typeof fetch;
     await expect(
       generateCloudImage({
-        backend: xai,
+        backend: cloud,
         prompt: 'fox',
         secrets,
         fetchImpl: plainHttp,
@@ -457,9 +459,9 @@ describe('generate_image with an sdcpp backend', () => {
         LOCAL,
         {
           name: 'grok-imagine',
-          provider: 'xai',
+          provider: 'openai',
           model: 'grok-imagine-image-2.0',
-          api_key_secret: 'xai',
+          api_key_secret: 'image-key',
         },
       ],
     }) as ImageGenerationConfig;
@@ -576,7 +578,7 @@ describe('generate_image with an sdcpp backend', () => {
       'qwen-local (local · free · sdcpp · qwen_image_2.1-Q4_K; sizes: square 1328x1328, portrait 928x1664, landscape 1664x928)',
     );
     expect(backend?.description).toContain(
-      'grok-imagine (cloud · billed per image · xai · grok-imagine-image-2.0)',
+      'grok-imagine (cloud · billed per image · openai · grok-imagine-image-2.0)',
     );
     expect(backend?.description).not.toContain('undefined');
   });
@@ -602,7 +604,7 @@ describe('generate_image with an sdcpp backend', () => {
   it('tags each backend by provider alone', () => {
     const [local, cloud] = localConfig().backends;
     expect(backendCostTag(local!)).toBe('local · free · sdcpp · qwen_image_2.1-Q4_K');
-    expect(backendCostTag(cloud!)).toBe('cloud · billed per image · xai · grok-imagine-image-2.0');
+    expect(backendCostTag(cloud!)).toBe('cloud · billed per image · openai · grok-imagine-image-2.0');
   });
 
   it('says the description no longer promises an approval for every call', () => {

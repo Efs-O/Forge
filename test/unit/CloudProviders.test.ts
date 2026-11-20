@@ -23,7 +23,6 @@ describe('getProviderDisplayName', () => {
   });
 
   it('uses the provider label for named cloud providers', () => {
-    expect(getProviderDisplayName(model({ provider: 'xai' }))).toBe('xAI');
     expect(getProviderDisplayName(model({ provider: 'openrouter' }))).toBe('OpenRouter');
   });
 

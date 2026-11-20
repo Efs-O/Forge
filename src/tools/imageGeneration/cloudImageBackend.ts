@@ -37,16 +37,16 @@ interface ImagesResponse {
  * One image from an OpenAI-style `POST /v1/images/generations`.
  *
  * `response_format` is not sent: gpt-image models reject it (they only return
- * base64) while xAI returns a URL by default, so both shapes are accepted on
- * the way back instead. A URL is fetched immediately — providers serve these
- * from short-lived temporary storage.
+ * base64) while some providers return a URL by default, so both shapes are
+ * accepted on the way back instead. A URL is fetched immediately — providers
+ * serve these from short-lived temporary storage.
  */
 export async function generateCloudImage(request: CloudImageRequest): Promise<GeneratedImage> {
   const { backend, prompt } = request;
   const fetchImpl = request.fetchImpl ?? fetch;
   const signal = withTimeout(request.signal);
   // The same resolver chat uses, so a backend authenticates exactly like a
-  // chat model on the same provider -- xAI's OpenCode OAuth refresh included.
+  // chat model on the same provider.
   const { baseUrl, apiKey } = await resolveCloudRequestTarget(
     {
       name: `image backend "${backend.name}"`,
@@ -128,10 +128,7 @@ async function describeHttpFailure(
   const detail = (await response.text().catch(() => '')).slice(0, MAX_ERROR_BODY_CHARS);
   const prefix = `${backend.name}: HTTP ${response.status}${detail ? `: ${detail}` : ''}`;
   if (response.status === 401 || response.status === 403) {
-    const fix =
-      backend.provider === 'xai'
-        ? 'Run "opencode auth login" and pick xAI, or set an API key with "Forge: Set Cloud Provider Token".'
-        : `Set the key with "Forge: Set Cloud Provider Token" (key: ${backend.api_key_secret ?? 'unset'}).`;
+    const fix = `Set the key with "Forge: Set Cloud Provider Token" (key: ${backend.api_key_secret ?? 'unset'}).`;
     return `${prefix} — the provider rejected the credentials. ${fix}`;
   }
   if (response.status === 404 || response.status === 400) {

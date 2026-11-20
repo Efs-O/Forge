@@ -1,7 +1,6 @@
 import type * as vscode from 'vscode';
 import type { ModelConfig } from '../config/types';
 import { getCloudBaseUrl, getCloudProviderLabel, isCloudProvider } from './CloudProviders';
-import { resolveXaiToken } from './XaiAuth';
 import { beforeExternalRequest } from '../backend/ExternalModelServers';
 import { remoteStarterFor } from './RemoteStarterClient';
 import { remoteRelayTarget } from './RemoteWindowRoute';
@@ -39,9 +38,6 @@ export async function resolveCloudRequestTarget(
     if (relay) return relay;
   }
   const baseUrl = getCloudBaseUrl(model);
-  if (model.provider === 'xai') {
-    return { baseUrl, apiKey: await resolveXaiToken(model.api_key_secret, secrets) };
-  }
   const keyName = model.api_key_secret;
   // A `remote_start` model is another machine's server: the port in its
   // `endpoint` is the one this window guessed, and the server may not even be

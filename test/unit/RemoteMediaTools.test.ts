@@ -72,7 +72,7 @@ function capabilities(overrides: Record<string, unknown> = {}): Record<string, u
           name: 'grok-imagine',
           paid: true,
           confirm_each: true,
-          cost: 'cloud · billed per image · xai · grok-imagine',
+          cost: 'cloud · billed per image · openai · grok-imagine',
           reference_images: false,
         },
       ],
@@ -397,7 +397,7 @@ describe('the desktop media tools', () => {
     const paid = generate.approval?.({ prompt: 'a cat', backend: 'grok-imagine' });
     expect(paid?.dangerous).toBe(true);
     expect(paid?.detail).toContain('grok-imagine');
-    expect(paid?.detail).toContain('cloud · billed per image · xai · grok-imagine');
+    expect(paid?.detail).toContain('cloud · billed per image · openai · grok-imagine');
     await fs.rm(root, { recursive: true, force: true });
   });
 

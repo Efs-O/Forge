@@ -12,7 +12,7 @@ Set `permissions.agents.delegate: true` to let the primary agent use `ask_local_
 | Path | What the target gets | Can it change the workspace? | Time limit | Keep/Undo coverage |
 | --- | --- | --- | --- | --- |
 | Local delegation (llama.cpp / Ollama, including Ollama `:cloud` models) | The task, plus up to 8 context files sent as text (256 KiB each, 1 MiB total). No tool channel. | No, because the request has no `tools` array. | 120 s | Not needed |
-| Cloud delegation (xai, openrouter, openai, openai-compatible) | Same bounded request as local | No | 300 s | Not needed |
+| Cloud delegation (openrouter, openai, openai-compatible) | Same bounded request as local | No | 300 s | Not needed |
 | CLI delegation (`provider: cli` via `ask_local_agent`) | The task, the context paths as *suggested starting files*, and a short-reply contract | **Yes.** It runs unrestricted with the CLI's own tools and may read, edit, and run commands. | 600 s | **None.** See the warning below. |
 | Direct CLI chat (a `cli` model selected in the sidebar) | The conversation, in a warm per-conversation process | **Yes.** Full-rights external agent. | Per turn | **None.** Forge Keep/Undo is not offered for its edits. |
 | Linked `ask_agent` to Claude or Codex | The request sent to the linked CLI session | **Yes.** The session has its own tools. | Per ask | **None.** Forge does not snapshot its workspace. |

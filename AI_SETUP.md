@@ -255,7 +255,7 @@ daemon; Forge sends no key.
 
 ## Step 4 — Cloud or CLI models (when selected from the survey)
 
-- OpenAI-compatible providers (`xai`, `openrouter`, `openai`,
+- OpenAI-compatible providers (`openrouter`, `openai`,
   `openai-compatible`): start from `config/starter/openai-compatible.yaml`.
   If a key is needed, tell the user to run **Forge: Set Cloud Provider Token**
   (`forge.setCloudToken`) in VS Code, enter it there, and wait. Never request,
@@ -544,11 +544,12 @@ exists, and it needs `permissions.net.fetch: true` (a local backend is fetched
 over localhost too). Include all model and server downloads and sizes in the
 one plan summary.
 
-**Cloud (xAI Grok Imagine, billed per image).** If the key is not already
-stored, tell the user to run **Forge: Set Cloud Provider Token**
-(`forge.setCloudToken`) in VS Code and enter it there. Wait, then copy the
-`image_generation:` block with the `grok-imagine` backend from
-`config.example.yaml`. Every call asks for approval.
+**Cloud (billed per image).** Any provider serving the OpenAI images endpoint
+(`openai`, or `openai-compatible` with an `endpoint`). If the key is not
+already stored, tell the user to run **Forge: Set Cloud Provider Token**
+(`forge.setCloudToken`) in VS Code and enter it there. Wait, then add a backend
+with `provider`, `model` and `api_key_secret` to the `image_generation:` block.
+Every call asks for approval.
 
 **Local (stable-diffusion.cpp + Qwen-Image-2.1 Turbo, free per image).** Forge
 does not ship the image server or the models; it starts `sd-server` when the

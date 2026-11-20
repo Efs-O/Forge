@@ -1,16 +1,14 @@
 import type { ModelConfig } from '../config/types';
 
-export type CloudProvider = 'xai' | 'openrouter' | 'openai' | 'openai-compatible';
+export type CloudProvider = 'openrouter' | 'openai' | 'openai-compatible';
 
 const CLOUD_PROVIDER_LABELS: Record<CloudProvider, string> = {
-  xai: 'xAI',
   openrouter: 'OpenRouter',
   openai: 'OpenAI',
   'openai-compatible': 'OpenAI-compatible',
 };
 
-const CLOUD_PROVIDER_BASE_URLS: Record<'xai' | 'openrouter' | 'openai', string> = {
-  xai: 'https://api.x.ai',
+const CLOUD_PROVIDER_BASE_URLS: Record<'openrouter' | 'openai', string> = {
   openrouter: 'https://openrouter.ai/api',
   openai: 'https://api.openai.com',
 };
@@ -20,12 +18,7 @@ export function normalizeOpenAiCompatibleBaseUrl(baseUrl: string): string {
 }
 
 export function isCloudProvider(provider: ModelConfig['provider']): provider is CloudProvider {
-  return (
-    provider === 'xai' ||
-    provider === 'openrouter' ||
-    provider === 'openai' ||
-    provider === 'openai-compatible'
-  );
+  return provider === 'openrouter' || provider === 'openai' || provider === 'openai-compatible';
 }
 
 export function getCloudProviderLabel(provider: CloudProvider): string {

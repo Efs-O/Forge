@@ -5,8 +5,6 @@ import { streamModelChatCompletion } from '../../src/llm/ChatClient';
 
 // Mock the streaming client: drive whatever handlers the proxy passes.
 vi.mock('../../src/llm/ChatClient', () => ({ streamModelChatCompletion: vi.fn() }));
-// xAI token resolution would otherwise touch the filesystem.
-vi.mock('../../src/llm/XaiAuth', () => ({ resolveXaiToken: async () => 'xai-token' }));
 
 import { buildControlChatProxy, ProxyError } from '../../src/llm/ControlChatProxy';
 
@@ -17,7 +15,7 @@ const handlersOf = (args: unknown[]): StreamHandlers => args[3] as StreamHandler
 function config(): ForgeConfig {
   return {
     models: [
-      { name: 'grok', provider: 'xai', api_key_secret: 'forge.xai' },
+      { name: 'grok', provider: 'openrouter', api_key_secret: 'forge.grok' },
       { name: 'router', provider: 'openrouter', api_key_secret: 'forge.or' },
       { name: 'local', provider: 'llama.cpp', gguf_path: '/l.gguf' },
       { name: 'claude-code', provider: 'cli', cli: 'claude' },
@@ -27,7 +25,10 @@ function config(): ForgeConfig {
   } as ForgeConfig;
 }
 
-const secrets = { get: async (k: string) => (k === 'forge.or' ? 'or-key' : undefined) } as never;
+const secrets = {
+  get: async (k: string) =>
+    k === 'forge.or' ? 'or-key' : k === 'forge.grok' ? 'grok-key' : undefined,
+} as never;
 
 describe('buildControlChatProxy', () => {
   beforeEach(() => {
@@ -79,13 +80,13 @@ describe('buildControlChatProxy', () => {
     });
   });
 
-  it('passes the resolved xAI key + cloud baseUrl to the client', async () => {
+  it('passes the resolved cloud key + baseUrl to the client', async () => {
     streamMock.mockImplementation(async (...args: unknown[]) => handlersOf(args).onDone('stop'));
     const proxy = buildControlChatProxy(config, secrets);
     await proxy({ model: 'grok', messages: [{ role: 'user', content: 'hi' }] });
     const [baseUrl, , , , , apiKey] = streamMock.mock.calls[0];
-    expect(baseUrl).toBe('https://api.x.ai');
-    expect(apiKey).toBe('xai-token');
+    expect(baseUrl).toBe('https://openrouter.ai/api');
+    expect(apiKey).toBe('grok-key');
   });
 
   it('rejects a local model with ProxyError(422)', async () => {

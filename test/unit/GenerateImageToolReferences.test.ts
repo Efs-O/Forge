@@ -66,9 +66,9 @@ function localConfig(overrides: Record<string, unknown> = {}): ImageGenerationCo
       backendWith(overrides),
       {
         name: 'grok-imagine',
-        provider: 'xai',
+        provider: 'openai',
         model: 'grok-imagine-image-2.0',
-        api_key_secret: 'xai',
+        api_key_secret: 'image-key',
       },
     ],
   }) as ImageGenerationConfig;

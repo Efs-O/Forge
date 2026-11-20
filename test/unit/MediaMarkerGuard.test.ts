@@ -49,7 +49,7 @@ describe('neutralizeMediaMarkers', () => {
   it('is applied to llama.cpp requests and not to other providers', () => {
     const request = { messages: [{ role: 'user' as const, content: RANDOM }] };
     const llama: ModelConfig = { name: 'local', provider: 'llama.cpp' } as ModelConfig;
-    const cloud: ModelConfig = { name: 'grok', provider: 'xai' } as ModelConfig;
+    const cloud: ModelConfig = { name: 'grok', provider: 'openrouter' } as ModelConfig;
     expect(JSON.stringify(normalizeRequestForModel(request, llama))).not.toContain(RANDOM);
     expect(normalizeRequestForModel(request, cloud)).toBe(request);
   });

@@ -115,9 +115,8 @@ export interface SharePlan {
 /** The names a `cloud_relay` block may list, mirroring what
  *  `validateCloudRelayConfig` accepts, so a block Share creates cannot be the
  *  one thing that makes the config invalid: Ollama cloud models on a loopback
- *  endpoint, and keyed provider models (xai may use its OAuth file instead of a
- *  stored key). Group-defined models are merged first, because that is what the
- *  validator sees. */
+ *  endpoint, and keyed provider models. Group-defined models are merged first,
+ *  because that is what the validator sees. */
 export function relayAllowlist(config: ForgeConfig): string[] {
   return config.models
     .map((entry) => mergeGroupsIntoModel(config, entry as unknown as ModelConfig))
@@ -130,8 +129,8 @@ export function relayAllowlist(config: ForgeConfig): string[] {
           (host === 'localhost' || host === '127.0.0.1' || host === '::1')
         );
       }
-      if (!['xai', 'openrouter', 'openai', 'openai-compatible'].includes(provider)) return false;
-      return provider === 'xai' || Boolean(model.api_key_secret);
+      if (!['openrouter', 'openai', 'openai-compatible'].includes(provider)) return false;
+      return Boolean(model.api_key_secret);
     })
     .map((model) => model.name);
 }

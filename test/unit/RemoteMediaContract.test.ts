@@ -55,12 +55,12 @@ describe('remote media contract', () => {
     // refusal quotes only the headline, so the prompt never reaches the laptop.
     expect(
       REMOTE_MEDIA_TEXT.notListed(
-        'grok-imagine (cloud · billed per image · xai · m)\n\na fox',
+        'grok-imagine (cloud · billed per image · openai · m)\n\na fox',
         'grok-imagine',
         'image_backends',
       ),
     ).toBe(
-      "Not run: grok-imagine (cloud · billed per image · xai · m) is not allowed from the laptop. Add grok-imagine to cloud_relay.media.image_backends in the desktop's policy.yaml to allow it.",
+      "Not run: grok-imagine (cloud · billed per image · openai · m) is not allowed from the laptop. Add grok-imagine to cloud_relay.media.image_backends in the desktop's policy.yaml to allow it.",
     );
   });
 

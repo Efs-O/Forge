@@ -198,7 +198,6 @@ export function registerNativeCommands(
           return;
         }
         if (
-          selectedModel?.provider === 'xai' ||
           selectedModel?.provider === 'openrouter' ||
           selectedModel?.provider === 'openai' ||
           selectedModel?.provider === 'openai-compatible'

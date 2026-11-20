@@ -70,7 +70,7 @@ function makeConfig(port: number, maxModels = 1): ForgeConfig {
     models: [
       { name: 'A', provider: 'llama.cpp', gguf_path: '/a.gguf' },
       { name: 'B', provider: 'llama.cpp', gguf_path: '/b.gguf' },
-      { name: 'grok', provider: 'xai', api_key_secret: 'forge.xai' },
+      { name: 'grok', provider: 'openrouter', api_key_secret: 'forge.grok' },
     ],
     active_model: 'A',
     llama_server: {},
@@ -105,11 +105,11 @@ function makeGroupedProviderConfig(port: number): ForgeConfig {
   return {
     models: [
       { name: 'local-ollama', group: 'ollama-local' },
-      { name: 'cloud-grok', group: 'xai-cloud', api_key_secret: 'forge.xai' },
+      { name: 'cloud-grok', group: 'cloud-group', api_key_secret: 'forge.grok' },
     ],
     groups: {
       'ollama-local': { provider: 'ollama', endpoint: 'http://127.0.0.1:11434' },
-      'xai-cloud': { provider: 'xai' },
+      'cloud-group': { provider: 'openrouter' },
     },
     active_model: 'local-ollama',
     llama_server: {},
@@ -633,7 +633,7 @@ describe('ControlServer', () => {
     expect((await post(base, 'A')).status).toBe(200);
     expect((await (await post(base, 'A', 'release')).json()).released).toBe(true);
 
-    // Dispatching the xai model must fail with the reason — and must NOT have
+    // Dispatching the cloud model must fail with the reason — and must NOT have
     // evicted idle A as collateral.
     const res = await post(base, 'grok');
     expect(res.status).toBe(422);
@@ -795,8 +795,8 @@ describe('ControlServer', () => {
       servable: true,
     });
     expect(byName['cloud-grok']).toMatchObject({
-      backend: 'xai',
-      provider: 'xAI',
+      backend: 'openrouter',
+      provider: 'OpenRouter',
       route: 'chat',
       action: 'configure',
       servable: false,

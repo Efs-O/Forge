@@ -3,7 +3,7 @@ import type { ImageUpscaleConfig } from './imageUpscaleSchema';
 /** Cloud image backend entry. */
 export interface CloudImageBackendConfig {
   name: string;
-  provider: 'xai' | 'openai' | 'openai-compatible';
+  provider: 'openai' | 'openai-compatible';
   model: string;
   api_key_secret?: string;
   endpoint?: string;

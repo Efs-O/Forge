@@ -30,15 +30,21 @@ export const SamplingSchema = z.object({
 
 export const CapabilitiesSchema = z.array(z.enum(['tool-call', 'vision', 'long-context']));
 
-export const ProviderSchema = z.enum([
-  'llama.cpp',
-  'ollama',
-  'xai',
-  'openrouter',
-  'openai',
-  'openai-compatible',
-  'cli',
-]);
+/** What a config that still names the removed `xai` provider is told, and why
+ *  Forge will not rewrite the entry itself: `openai-compatible` carries
+ *  Strata-specific defaults, so it is a decision for the user to make. */
+export const XAI_REMOVED_MESSAGE =
+  'provider "xai" was removed in Forge 0.17.207. To keep using Grok, set provider: openai-compatible, endpoint: https://api.x.ai/v1 and api_key_secret (store the key with "Forge: Set Cloud Provider Token"), or delete the entry.';
+
+/** A bad enum value keeps zod's own message, except the one provider this
+ *  release removed: that one names the replacement. */
+const providerEnumError = (iss: { input: unknown }): string | undefined =>
+  iss.input === 'xai' ? XAI_REMOVED_MESSAGE : undefined;
+
+export const ProviderSchema = z.enum(
+  ['llama.cpp', 'ollama', 'openrouter', 'openai', 'openai-compatible', 'cli'],
+  { error: providerEnumError },
+);
 
 export const ToolCallLimitsSchema = z.record(z.string().min(1), z.number().int().min(0));
 

@@ -66,14 +66,14 @@ models:
     sampling: { max_tokens: 65536 }
 
   - name: grok-4
-    provider: xai
-    api_key_secret: xai
+    provider: openrouter
+    api_key_secret: cloud-key
     capabilities: [tool-call]
     sampling: { temperature: 0.7 }
 
   - name: grok-mini
-    provider: xai
-    api_key_secret: xai
+    provider: openrouter
+    api_key_secret: cloud-key
     capabilities: [tool-call]
     sampling: { temperature: 0.5 }
 `;

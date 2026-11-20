@@ -32,7 +32,6 @@ describe('modelPickerGroup', () => {
       },
       'Other OpenAI-compatible',
     ],
-    [{ provider: 'xai' }, 'xAI / Grok'],
     [{ provider: 'openai-compatible', endpoint: 'https://api.cerebras.ai/v1' }, 'Cerebras'],
     [{ provider: 'openai' }, 'OpenAI'],
     [{ provider: 'openrouter' }, 'OpenRouter'],
@@ -104,7 +103,7 @@ describe('the Desktop group (models served by the desktop)', () => {
       MODEL_PICKER_GROUP_ORDER.indexOf('Ollama Cloud') + 1,
     );
     const ordered = modelPickerSelectionEntries([
-      { name: 'grok', group: 'xAI / Grok' },
+      { name: 'grok', group: 'OpenRouter' },
       { name: 'strata', group: 'Desktop' },
       { name: 'qwen:cloud', group: 'Ollama Cloud' },
       { name: 'local', group: 'Local — llama.cpp' },
@@ -113,7 +112,7 @@ describe('the Desktop group (models served by the desktop)', () => {
       'Local — llama.cpp',
       'Ollama Cloud',
       'Desktop',
-      'xAI / Grok',
+      'OpenRouter',
     ]);
   });
 });

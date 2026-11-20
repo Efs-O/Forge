@@ -46,7 +46,7 @@ const mixedConfig = makeConfig([
 ]);
 
 const cloudOnlyConfig = makeConfig([
-  model('xai-model', 'xai'),
+  model('grok-model', 'openrouter'),
   model('openai-model', 'openai'),
   model('openrouter-model', 'openrouter'),
 ]);

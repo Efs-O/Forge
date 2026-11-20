@@ -78,15 +78,13 @@ export function validateCloudRelayConfig(
         });
       }
     } else if (
-      !['xai', 'openrouter', 'openai', 'openai-compatible'].includes(model.provider ?? '') ||
-      (model.provider !== 'xai' && !model.api_key_secret)
+      !['openrouter', 'openai', 'openai-compatible'].includes(model.provider ?? '') ||
+      !model.api_key_secret
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['cloud_relay', 'models'],
-        message:
-          `cloud_relay model "${name}" must be a keyed cloud provider model ` +
-          '(xai may use the OpenCode OAuth file)',
+        message: `cloud_relay model "${name}" must be a keyed cloud provider model`,
       });
     }
   }

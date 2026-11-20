@@ -59,7 +59,7 @@ export function normalizeRequestForModel(
   }
 
   if (provider !== 'ollama') {
-    // OpenAI-route providers (Strata, Cerebras, xAI, OpenRouter, OpenAI) take a
+    // OpenAI-route providers (Strata, Cerebras, OpenRouter, OpenAI) take a
     // top-level reasoning_effort. Forward it only when configured: a server's
     // own default (Strata's is xhigh) is the user's choice until they set one.
     if (

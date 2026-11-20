@@ -17,7 +17,7 @@ const MINIMAL = {
 
 function parse(block: Record<string, unknown>) {
   return ImageGenerationConfigSchema.parse({
-    backends: [{ name: 'grok', provider: 'xai', model: 'img', confirm_each: true }],
+    backends: [{ name: 'grok', provider: 'openai', model: 'img', api_key_secret: 'image-key', confirm_each: true }],
     upscale: block,
   });
 }
@@ -41,7 +41,7 @@ describe('image_generation.upscale schema', () => {
 
   it('leaves the block undefined when it is absent, so the tool stays unregistered', () => {
     const parsed = ImageGenerationConfigSchema.parse({
-      backends: [{ name: 'grok', provider: 'xai', model: 'img', confirm_each: true }],
+      backends: [{ name: 'grok', provider: 'openai', model: 'img', api_key_secret: 'image-key', confirm_each: true }],
     });
     expect(upscaleBlock(parsed)).toBeUndefined();
     expect(upscaleBlock(undefined)).toBeUndefined();

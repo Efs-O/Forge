@@ -78,7 +78,7 @@ describe('buildModelsMessage', () => {
         active_model: 'gpt-oss:120b-cloud',
         models: [
           { name: 'gpt-oss:120b-cloud', provider: 'ollama' },
-          { name: 'y', provider: 'xai' },
+          { name: 'y', provider: 'openrouter' },
           { name: 'z', provider: 'openrouter' },
         ],
       } as ForgeConfig,

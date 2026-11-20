@@ -199,11 +199,8 @@ groups:
       - tool-call
       - long-context
     sampling: { max_tokens: 16384 }
-  xai-cloud:
-    provider: xai
-    sampling: { temperature: 0.7 }
     # reasoning_effort Forge sends when it turns thinking off (the compaction
-    # summary, when its budget reserves no reasoning tokens). Unset on xai /
+    # summary, when its budget reserves no reasoning tokens). Unset on
     # openrouter / openai: Forge sends nothing extra, because their models name
     # effort levels differently. openai-compatible defaults to none; llama.cpp
     # and Ollama use enable_thinking: false instead.
@@ -817,25 +814,6 @@ models:
     group: ollama-cloud
 
 
-  # xAI via `opencode auth login` (SuperGrok OAuth). grok-imagine is images-only, not listed here.
-  - name: grok-4.6
-    api_key_secret: xai
-    num_ctx: 500000
-    capabilities: [ tool-call, long-context, vision ]
-    image_retention_turns: 2
-    sampling: { max_tokens: 30000 }
-    group: xai-cloud
-
-
-  - name: grok-build-0.1
-    api_key_secret: xai
-    num_ctx: 256000
-    capabilities: [ tool-call, long-context, vision ]
-    image_retention_turns: 2
-    sampling: { max_tokens: 30000 }
-    group: xai-cloud
-
-
   - name: "openrouter/free"
     api_key_secret: openrouter
     group: openrouter-cloud
@@ -987,20 +965,20 @@ embeddings:
   include_globs: [ "**/src/**", "**/test/**", "**/tests/**", "**/docs/**" ]
   exclude_globs: [ "**/node_modules/**", "**/dist/**", "**/out/**", "**/.git/**", "**/.forge/**" ]
 
-# generate_image tool (xAI grok-imagine, ~$0.04 per image).
+# generate_image tool.
 # Disabling the `fetch` permission disables this tool entirely -- including a
 # local sdcpp backend below: the image is fetched over localhost HTTP, so the
 # permission gate is the same one. Turning fetch off is not a way to keep the
 # tool but refuse the network.
-image_generation:
-  default: grok-imagine
-  output_dir: generated-images
-  backends:
-    - name: grok-imagine
-      provider: xai
-      model: grok-imagine-image-2.0
-      api_key_secret: xai
-      confirm_each: true
+# No backend is enabled here, so the whole block is commented: uncomment
+# `image_generation:` and one backend to get the tool. A cloud backend needs a
+# key in SecretStorage (any provider serving the OpenAI images endpoint, so
+# `openai`, or `openai-compatible` with an `endpoint`); the local one needs the
+# sd-server build and the model files, which AI_SETUP.md step 10 lists.
+# image_generation:
+#   output_dir: generated-images
+#   default: qwen-image-local
+#   backends:
     # Local image generation via stable-diffusion.cpp (docs/plans/
     # LOCAL_IMAGE_GENERATION_PLAN.md). Free per image, but it occupies a GPU:
     # Forge spawns sd-server.exe on `port` (127.0.0.1 only), refuses to start it
