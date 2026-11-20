@@ -7,9 +7,16 @@
  * touching it, and never duplicated by a second run.
  *
  * Everything exercised here is the pure writer in `src/agentBus/agentMeshNote.ts`
- * — no VS Code, no workspace, no model.
+ * — no workspace, no model — plus the one sentence it reports through
+ * `describeAgentMeshNoteInstall` (the `vscode` import there is the test suite's
+ * own stub).
  */
+import * as path from 'path';
 import { describe, expect, it } from 'vitest';
+import {
+  describeAgentMeshNoteInstall,
+  type AgentMeshNoteFileResult,
+} from '../../src/vscode/agentMeshNoteSetup';
 import {
   AGENT_NOTE_END,
   AGENT_NOTE_START,
@@ -331,5 +338,25 @@ describe('which files get the section', () => {
     expect(hasAgentsMdImportLine('# Mine\r\n\n@AGENTS.md\r\n')).toBe(true);
     expect(hasAgentsMdImportLine('Rules say to read `@AGENTS.md` first.\n')).toBe(false);
     expect(hasAgentsMdImportLine('')).toBe(false);
+  });
+});
+
+/**
+ * The sentence the log and the toast show after a write. It used to tell the
+ * owner to delete the marked section by hand; Forge takes it out again itself —
+ * the workspace copies when `agent_bus.enabled` goes off, every recorded copy
+ * (the user-wide ones too) on uninstall — so a hand edit is no longer the way.
+ */
+describe('the sentence that reports the write', () => {
+  it('names the two switches that remove the note, not a hand edit', () => {
+    const created: AgentMeshNoteFileResult = {
+      path: path.join('C:', 'any', 'workspace', 'AGENTS.md'),
+      status: 'created',
+    };
+    expect(describeAgentMeshNoteInstall([created])).toBe(
+      'Forge added its agent note to AGENTS.md. Turning off "Talk to Forge" ' +
+        '(agent_bus.enabled) removes it from workspace files; uninstalling Forge ' +
+        'removes it everywhere.',
+    );
   });
 });

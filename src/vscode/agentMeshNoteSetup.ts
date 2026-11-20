@@ -323,7 +323,7 @@ export function describeAgentMeshNoteInstall(results: readonly AgentMeshNoteFile
       return `The agent note is already in ${names(unchanged)} — nothing changed.`;
     return 'Nothing to write: every file was skipped or failed.';
   }
-  return `Forge ${parts.join(' and ')}. Delete everything between the two \`forge-agent-mesh\` comment lines to remove it.`;
+  return `Forge ${parts.join(' and ')}. Turning off "Talk to Forge" (agent_bus.enabled) removes it from workspace files; uninstalling Forge removes it everywhere.`;
 }
 
 export interface AgentMeshNoteCommandDeps {

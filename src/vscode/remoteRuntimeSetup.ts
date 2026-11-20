@@ -6,6 +6,7 @@ import { loadConfig } from '../config/ConfigLoader';
 import { updateForgeKeyFile } from '../config/ConfigWriter';
 import { getHostIdentity } from '../agentMesh/hostIdentity';
 import { RemoteRuntime } from '../remote/RemoteRuntime';
+import { RemoteSetupIncompleteError } from '../remote/RemoteStartRetry';
 import { currentWorkspaceIdentity, workspaceAliases } from '../remote/remoteControllerOptions';
 import {
   createRemoteWindowSurface,
@@ -128,7 +129,7 @@ export async function setupRemoteRuntime(
       telegram: async (cursor) => {
         const token = await context.secrets.get(TELEGRAM_BOT_TOKEN_SECRET);
         if (!token) {
-          throw new Error(
+          throw new RemoteSetupIncompleteError(
             'Telegram is enabled but no bot token is stored. Run “Forge: Set Telegram Bot Token”.',
           );
         }

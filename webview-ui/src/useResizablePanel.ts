@@ -202,8 +202,11 @@ export function useResizablePanel(
         if (!start) return;
         const next = clampPanelSize(
           {
-            width: start.width + (event.clientX - start.x),
-            height: start.height + (event.clientY - start.y),
+            // A scaled display reports a fractional `clientX`, so the raw sum
+            // is fractional; the host refuses a fractional size (its schema is
+            // `int`) and the drag is lost on reload. Whole pixels here.
+            width: Math.round(start.width + (event.clientX - start.x)),
+            height: Math.round(start.height + (event.clientY - start.y)),
           },
           room.width,
           room.height,

@@ -13,11 +13,16 @@ export interface RemoteStartRetryDeps {
   start: (config: ForgeConfig) => Promise<void>;
 }
 
+/** A start that waits on the user (a missing token), not on time: never retried. */
+export class RemoteSetupIncompleteError extends Error {}
+
 /**
  * Retries a failed remote start: 5 s, 15 s, 60 s, then every 60 s. Without it
  * a start that loses a race (a lock its killed predecessor still held) left
  * the chat silent until a manual reload. A lease refusal is not a failure —
- * another window serves the chat — so it never schedules a retry.
+ * another window serves the chat — so it never schedules a retry. A
+ * RemoteSetupIncompleteError is not retried either: only the user can fix it,
+ * and the command that does (storing the token) restarts the transport itself.
  */
 export class RemoteStartRetry {
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -26,7 +31,13 @@ export class RemoteStartRetry {
   constructor(private readonly deps: RemoteStartRetryDeps) {}
 
   failed(config: ForgeConfig, error: unknown): void {
-    if (error instanceof RemoteLeaseError || !this.deps.wanted(config) || this.timer) return;
+    if (
+      error instanceof RemoteLeaseError ||
+      error instanceof RemoteSetupIncompleteError ||
+      !this.deps.wanted(config) ||
+      this.timer
+    )
+      return;
     const delay = RETRY_DELAYS_MS[Math.min(this.attempt, RETRY_DELAYS_MS.length - 1)]!;
     this.attempt += 1;
     this.timer = setTimeout(() => {

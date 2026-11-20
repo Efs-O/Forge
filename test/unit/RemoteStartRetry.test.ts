@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ForgeConfig } from '../../src/config/types';
-import { RemoteStartRetry } from '../../src/remote/RemoteStartRetry';
+import { RemoteStartRetry, RemoteSetupIncompleteError } from '../../src/remote/RemoteStartRetry';
 import { RemoteLeaseError } from '../../src/remote/RemoteTransportLease';
 
 /**
  * A failed remote start used to end in a toast and silence until a manual
  * reload. The retry must back off, stop once the runtime no longer wants the
  * start, and never fire for a lease refusal: in a two-window setup losing the
- * lease is normal, and retrying it would loop forever in the second window.
+ * lease is normal, and retrying it would loop forever in the second window. A
+ * start that waits on the user (no bot token stored) is the same story: only a
+ * command can fix it, and that command starts the transport itself.
  */
 
 const config = {} as ForgeConfig;
@@ -30,6 +32,22 @@ describe('RemoteStartRetry', () => {
     retry.failed(config, new RemoteLeaseError('held by another window'));
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(start).not.toHaveBeenCalled();
+  });
+
+  it('never retries a start that waits on the user', async () => {
+    const { retry, start } = harness([]);
+    retry.failed(config, new RemoteSetupIncompleteError('no token'));
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('stops retrying when a scheduled start turns out to wait on the user', async () => {
+    const { retry, start } = harness([new RemoteSetupIncompleteError('no token')]);
+    retry.failed(config, new Error('Forge remote state lock timed out'));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(start).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(start).toHaveBeenCalledTimes(1);
   });
 
   it('backs off 5 s, 15 s, then 60 s while the start keeps failing', async () => {
