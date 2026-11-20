@@ -21,6 +21,7 @@
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green and the tree stood still: never run `record-ci-pass.mjs` by hand — the `ci:steps` chain writes it
 2. `git add AI SETUP.md` or `read_file "AI SETUP.md"` → `fatal: pathspec 'AI' did not match any files` / `nothing exists there`: the underscore I typed arrived as a space. the file is `AI_SETUP.md`
+3. `git status` showing `M docs/CODING_TIPS.md` after a tips edit → it is tracked (re-admitted in .gitignore), not a local file: only docs/plans and docs/reports are untracked. Name it in the report or it rides along uncommitted
 
 ## EDIT
 1. a rename lengthens an identifier, a call takes several arguments on one line, or I hand-split a `.then()` chain → the `prettier/prettier` gate fails at `.prettierrc` printWidth 100. fix: `npx prettier --write <src file>` before the gate
@@ -42,6 +43,7 @@
 11. a file-age gate tested as `now = Date.now() + STALE + 1` in `test/unit/JobOutbox.test.ts` → flaky: Windows stamps a file's mtime ahead of `Date.now()`, so the age lands under the threshold and `reclaimOutboxClaims` skips it. pass a whole threshold of margin, never 1 ms
 12. a `test/unit/agentTask.test.ts` assertion that the `task_run` marker survived `stopHeartbeat()` → it passes with the fix reverted: that stop clears through a promise chain, so the read lands first. sleep 50 ms before the assertion, then prove it with the revert control
 13. a timing probe in `.forge/tmp/` → `npx vitest run` runs nothing: both projects include `test/**/*.test.ts`. give the probe its own config with `resolve.alias` vscode → `test/support/vscode.ts` and `setupFiles: ['test/support/tempGuard.setup.ts']`
+14. asserting `ControlServer.status().listening` is false right after `start()` on a busy port → it is true: `listenOn` assigns `this.server` before the async EADDRINUSE error lands. `vi.waitFor` it
 
 ## PATHS
 1. `zipfile.ZipFile('test/fixtures/sample.xlsx')` in a scan → FileNotFoundError: that is not where the fixture lives. read the test's `fixture()` helper for the real path first
