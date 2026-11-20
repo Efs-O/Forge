@@ -9,8 +9,8 @@
 
 Load GGUF models through llama.cpp, share one loaded model across VS Code
 windows, use tool calling hardened for local-model context limits, and review
-file-changing turns with visible diffs and Keep/Undo checkpoints. Forge has no
-telemetry and requires no cloud account.
+file-changing turns with visible diffs and Keep/Undo checkpoints. Forge itself
+sends no telemetry and requires no cloud account.
 
 This is the official Forge LLM extension by [Efsoo](https://github.com/Efs-O),
 licensed under Apache License 2.0. Cloud and OpenAI-compatible providers are
@@ -47,10 +47,10 @@ available only when you explicitly configure them.
   gate, and read the diff from your phone.
 
 Local execution is the default. Search, fetch, cloud providers, and external
-CLI agents run only when you configure or invoke them, and Forge sends no
-telemetry, analytics, or auto-update pings.
+CLI agents run only when you configure or invoke them, and Forge itself sends
+no telemetry, analytics, or auto-update pings.
 
-![Forge agent loop in action](assets/readme/demo.gif)
+![Forge agent loop in action](https://raw.githubusercontent.com/Efs-O/Forge/main/assets/readme/demo.gif)
 
 ## Screenshots
 
@@ -1130,7 +1130,7 @@ keep backups of anything that matters.**
 
 ## Privacy
 
-Forge does not send telemetry, analytics, or auto-update pings.
+Forge itself sends no telemetry, analytics, or auto-update pings.
 
 Outbound traffic is limited to the endpoints you explicitly use:
 
@@ -1140,8 +1140,30 @@ Outbound traffic is limited to the endpoints you explicitly use:
 - Tavily if search is enabled
 - user-approved fetch targets
 - an authenticated Claude Code or Codex CLI agent you explicitly invoke; that CLI uses its own tools and network configuration
+- Telegram's Bot API (`api.telegram.org`) when you turn on Telegram remote control
+- WhatsApp's servers when you turn on the experimental WhatsApp channel. It uses Baileys, an unofficial WhatsApp Web client, which in Forge's use talks only to WhatsApp
 
 Configured MCP servers run as local stdio child processes — Forge sends them no network traffic.
+
+## How to verify a release
+
+Every release is a git tag `v0.17.N` whose `package.json` version is
+`0.17.N`; the publish workflow (`.github/workflows/publish.yml`) refuses a tag
+that names another version. It builds the VSIX from that tag with
+`npm run package` and uploads the same file to the VS Code Marketplace, Open
+VSX and the GitHub release.
+
+To rebuild it yourself:
+
+```bash
+git checkout v0.17.N
+npm ci
+npm run package
+```
+
+This writes `forge-llm-0.17.N.vsix`. The archive is not byte-identical to the
+published one (zip timestamps differ), so compare the files inside it, for
+example by unzipping both and diffing the `extension/` folders.
 
 ## Development
 

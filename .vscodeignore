@@ -9,6 +9,9 @@ ScreenShot*.jpg
 # work is a recording of someone speaking. whisper-resident-live.wav shipped
 # inside 0.15.14's VSIX because only images were excluded here.
 *.wav
+# The README's demo GIF is 5 MB and only the listing page shows it; the README
+# links it by absolute URL, so the Marketplace still renders it.
+assets/readme/demo.gif
 legacy/**
 .claude/**
 .cursor/**
