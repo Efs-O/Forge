@@ -12,6 +12,17 @@
  * it tested, and it starts counting for a push the moment a commit has exactly that tree. Run
  * `npm run ci` after the commit it certifies to record it under HEAD's tree directly.
  *
+ * The working tree holds files Git does not track at all, and one stray untracked folder makes
+ * that hash a tree no commit can ever have: on the 0.17.205 release the green run certified a
+ * tree that included two `smoke-1xx/` folders, `check-push.mjs` found no proof for it, and a
+ * full CI run was wasted. So when the two differ the recorder marks the same green run a second
+ * time, under the **tracked tree** — HEAD plus every edit to a tracked file, untracked files
+ * left out — which is the tree a commit can actually reach.
+ *
+ * The risk this accepts: a tracked test that passes only because of an untracked file (a
+ * fixture that was never committed, say) is not caught here. The GitHub CI run before the tag,
+ * which checks out a clean clone, is what catches it.
+ *
  * The suite takes minutes, and this worktree is shared, so the tree at the END is not the tree
  * the suite read. `scripts/ci-lock.mjs` therefore hashes the working tree the moment it takes the
  * lock and hands the hash down as `FORGE_CI_START_TREE`; if the tree moved while CI ran, this
@@ -46,12 +57,12 @@ export function treeHashOfHead(cwd = process.cwd()) {
 }
 
 /**
- * The tree of the **working tree**, uncommitted edits included — which is what `npm run ci`
- * actually tested. Builds it in a throw-away index under `os.tmpdir()` so the repository's real
- * index, and therefore any other agent's staged changes, are untouched. `git add -A` skips
- * ignored files, exactly as it does for a normal add.
+ * Builds a tree from HEAD plus the working tree in a throw-away index under `os.tmpdir()`, so
+ * the repository's real index — and therefore any other agent's staged changes — is untouched.
+ * `addArgs` decides what joins HEAD: `-A` takes every file that is not ignored, `-u` only the
+ * paths Git already tracks. Either way `write-tree` prints the tree those files describe.
  */
-export function treeHashOfWorkingTree(cwd = process.cwd()) {
+function treeHashWith(addArgs, cwd) {
   const index = join(tmpdir(), `forge-ci-pass-index-${process.pid}-${randomUUID()}`);
   const git = (args) =>
     execFileSync('git', args, {
@@ -62,7 +73,7 @@ export function treeHashOfWorkingTree(cwd = process.cwd()) {
     });
   try {
     git(['read-tree', 'HEAD']);
-    git(['add', '-A']);
+    git(['add', ...addArgs]);
     return git(['write-tree']).trim();
   } finally {
     try {
@@ -71,6 +82,41 @@ export function treeHashOfWorkingTree(cwd = process.cwd()) {
       // Git never created the index, or something else already removed it: nothing to clean.
     }
   }
+}
+
+/**
+ * The tree of the **working tree**, uncommitted edits included — which is what `npm run ci`
+ * actually tested. `git add -A` skips ignored files, exactly as it does for a normal add, but
+ * it does count untracked ones: see `treeHashOfTrackedTree` for the tree without them.
+ */
+export function treeHashOfWorkingTree(cwd = process.cwd()) {
+  return treeHashWith(['-A'], cwd);
+}
+
+/**
+ * The tree of the **tracked files only**: every edit to a tracked file is in it, and every
+ * untracked file is out of it. That is the tree a commit of this working tree would have, so a
+ * green run is worth recording under it when an untracked folder keeps the working tree's own
+ * hash unreachable. Ignored files are out of both trees.
+ */
+export function treeHashOfTrackedTree(cwd = process.cwd()) {
+  return treeHashWith(['-u'], cwd);
+}
+
+/**
+ * The paths Git does not track, a whole untracked folder collapsed to `folder/`. These are the
+ * files that make the working tree's hash unreachable for a commit, so the recorder names them
+ * whenever it has to mark the tracked tree as well.
+ */
+export function untrackedPaths(cwd = process.cwd()) {
+  const out = execFileSync('git', ['ls-files', '--others', '--exclude-standard', '--directory'], {
+    cwd,
+    encoding: 'utf8',
+  });
+  return out
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
 }
 
 /**
@@ -150,7 +196,22 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     process.exit(0);
   }
   const headTree = treeHashOfHead();
+  // Read the untracked list before writing anything: the recorder's own marker folder would
+  // otherwise show up in it, and the list describes the tree the suite actually read.
+  const untracked = untrackedPaths();
   const file = record({ dir: MARKER_DIR, treeHash });
+  // The tree a commit of this working tree would have. When untracked files stand between the
+  // two, the run is worth a marker under both: the working tree certifies these bytes, the
+  // tracked tree is the one a commit — and so a push — can match.
+  const trackedTree = treeHashOfTrackedTree();
+  const proofTree = trackedTree === treeHash ? treeHash : trackedTree;
+  if (trackedTree !== treeHash) {
+    record({ dir: MARKER_DIR, treeHash: trackedTree });
+    console.log(
+      `ci-pass: also recorded tree ${trackedTree.slice(0, 12)}, the tracked files only ` +
+        `(untracked left out: ${untracked.join(', ')})`,
+    );
+  }
   const removed = prune(MARKER_DIR);
   console.log(
     `ci-pass: recorded a green run for tree ${treeHash.slice(0, 12)} (${basename(file)})` +
@@ -158,9 +219,9 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
         ? `; pruned ${removed.length} older marker${removed.length === 1 ? '' : 's'}`
         : ''),
   );
-  if (treeHash !== headTree) {
+  if (proofTree !== headTree) {
     console.log(
-      `CI pass recorded for the working tree ${treeHash.slice(0, 12)}, which is not HEAD's tree. ` +
+      `CI pass recorded for the working tree ${proofTree.slice(0, 12)}, which is not HEAD's tree. ` +
         'It counts for a push only once a commit has exactly this tree.',
     );
   }

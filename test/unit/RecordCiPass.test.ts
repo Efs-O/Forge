@@ -6,11 +6,12 @@
  * step exited 0.
  *
  * These tests pin what makes that proof mean something: it names the tree the run actually
- * read (working tree, uncommitted edits included), a marker that cannot be read is never a
+ * read (working tree, uncommitted edits included), it is marked again under the tree a commit
+ * could have when untracked files sit in the repo, a marker that cannot be read is never a
  * pass, and the directory stays bounded.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -21,7 +22,9 @@ import {
   readMarker,
   record,
   treeHashOfHead,
+  treeHashOfTrackedTree,
   treeHashOfWorkingTree,
+  untrackedPaths,
 } from '../../scripts/record-ci-pass.mjs';
 
 let dir: string;
@@ -146,6 +149,56 @@ describe('the tree a recorded pass is keyed by', () => {
     treeHashOfWorkingTree(root);
     expect(gitIn(root, ['diff', '--cached', '--name-only'])).toBe(before);
   });
+
+  /**
+   * A stray untracked folder used to void a green run entirely: on 2026-11-20 the 0.17.205
+   * CI pass was recorded over a tree that held two `smoke-1xx/` folders, no commit could ever
+   * have that tree, and `check-push.mjs` refused the push for want of proof. The tracked tree
+   * is the one a commit can reach, so it is the one a push is matched against.
+   */
+  it("leaves an untracked file out, so the tracked tree is still exactly HEAD's", () => {
+    const root = repoWithOneCommit();
+    writeFileSync(join(root, 'smoke-1'), 'untracked\n');
+    const head = treeHashOfHead(root);
+    expect(treeHashOfTrackedTree(root)).toBe(head);
+    expect(treeHashOfWorkingTree(root)).not.toBe(head);
+  });
+
+  it('carries a tracked edit into the tracked tree, and an ignored file into neither', () => {
+    const root = repoWithOneCommit();
+    writeFileSync(join(root, '.gitignore'), 'scratch.log\n');
+    gitIn(root, ['add', '.gitignore']);
+    gitIn(root, ['commit', '-q', '-m', 'chore: ignore scratch']);
+    writeFileSync(join(root, 'a.txt'), 'edited, still uncommitted\n');
+    const head = treeHashOfHead(root);
+    const work = treeHashOfWorkingTree(root);
+    const tracked = treeHashOfTrackedTree(root);
+    expect(tracked).not.toBe(head);
+    // Nothing is untracked here, so both trees describe the same files.
+    expect(tracked).toBe(work);
+    expect(gitIn(root, ['cat-file', 'blob', `${tracked}:a.txt`])).toBe('edited, still uncommitted');
+    writeFileSync(join(root, 'scratch.log'), 'ignored by both trees\n');
+    expect(treeHashOfTrackedTree(root)).toBe(tracked);
+    expect(treeHashOfWorkingTree(root)).toBe(work);
+  });
+
+  it('names an untracked folder once, as the folder and not as the files inside it', () => {
+    const root = repoWithOneCommit();
+    mkdirSync(join(root, 'smoke-1'));
+    writeFileSync(join(root, 'smoke-1', 'prompt.md'), 'the laptop test prompt\n');
+    writeFileSync(join(root, 'loose.txt'), 'untracked\n');
+    expect(untrackedPaths(root)).toEqual(['loose.txt', 'smoke-1/']);
+  });
+
+  it("does not disturb the index, so another agent's staged change survives the tracked tree", () => {
+    const root = repoWithOneCommit();
+    writeFileSync(join(root, 'staged.txt'), 'staged by another agent\n');
+    gitIn(root, ['add', 'staged.txt']);
+    const before = gitIn(root, ['diff', '--cached', '--name-only']);
+    writeFileSync(join(root, 'a.txt'), 'dirty but never staged\n');
+    treeHashOfTrackedTree(root);
+    expect(gitIn(root, ['diff', '--cached', '--name-only'])).toBe(before);
+  });
 });
 
 /**
@@ -198,5 +251,35 @@ describe('the pass a finished run records, against the tree it started on', () =
     const run = runRecorder(root);
     expect(run.status).toBe(0);
     expect(readMarker(join(root, '.forge', 'ci-pass'), head)).toMatchObject({ tree: head });
+  });
+
+  it('marks the tracked tree too, naming what it left out, when an untracked folder is present', () => {
+    const root = repoWithOneCommit();
+    mkdirSync(join(root, 'smoke-1'));
+    writeFileSync(join(root, 'smoke-1', 'prompt.md'), 'the laptop test prompt\n');
+    const work = treeHashOfWorkingTree(root);
+    const head = treeHashOfHead(root);
+    expect(work).not.toBe(head);
+    const run = runRecorder(root, work);
+    expect(run.status).toBe(0);
+    const markerDir = join(root, '.forge', 'ci-pass');
+    expect(readMarker(markerDir, work)).toMatchObject({ tree: work });
+    expect(readMarker(markerDir, head)).toMatchObject({ tree: head });
+    expect(run.stdout.trimEnd().split(/\r?\n/)).toEqual([
+      `ci-pass: also recorded tree ${head.slice(0, 12)}, the tracked files only ` +
+        '(untracked left out: smoke-1/)',
+      `ci-pass: recorded a green run for tree ${work.slice(0, 12)} (${work}.json)`,
+    ]);
+  });
+
+  it('writes one marker and no extra line when the repo has nothing untracked', () => {
+    const root = repoWithOneCommit();
+    const head = treeHashOfHead(root);
+    const run = runRecorder(root);
+    expect(run.status).toBe(0);
+    expect(readdirSync(join(root, '.forge', 'ci-pass'))).toEqual([`${head}.json`]);
+    expect(run.stdout.trimEnd().split(/\r?\n/)).toEqual([
+      `ci-pass: recorded a green run for tree ${head.slice(0, 12)} (${head}.json)`,
+    ]);
   });
 });
