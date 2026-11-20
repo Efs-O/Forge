@@ -76,7 +76,6 @@
 15. a python heredoc writing a file that holds `'\n'` escapes → Python turns them into real newlines (vitest: `PARSE_ERROR`). write the escape as `chr(92)+"n"`, or use the edit tool
 16. a "the stale read must not publish" test asserting a snapshot count → fails on macOS: `fs.watch` reports the fixture's own writes. make the stale result distinguishable (`[]`) and assert none is it
 17. a fake that picks "the first call is the slow one" after `await super.x()` → two concurrent calls race to that check and the wrong one goes slow. read and clear the flag before the first await
-18. `gh api` or `web_fetch` inside a scheduled job → `approval key denied by policy`: a job holds only the keys in `approvals.jobs.<name>.allow` in `~/.forge/policy.yaml`. add them, or judge from the job's own snippets and name what was cut
 
 ## PATHS
 1. `~/.forge/sessions/<short-id>.jsonl` → no such file: logs carry the full 8-4-4-4-12 chat id. resolve a short id with a prefix glob
@@ -153,3 +152,5 @@
 54. `shell` · `cd "C:/Users/<name>/.forge/jobs" && python -c '…'` → refused: after a `cd` into Forge's own files only a classed read may follow, so a read-only scan dies too. run from the workspace and pass absolute paths
 55. `edit_file` · an import block whose `old_str` held one name → the name was replaced, not added, and the file lost a symbol it still used: `ReferenceError: OUTBOX_STALE_MS is not defined` at the use line, not the import. anchor the edit on the neighbouring line and keep ASCII sort
 56. `shell` · `ls test/unit | grep -i -e a -e b` → `exit 134` with `Aborted` and no listing, so the answer is lost not just failed: MSYS job control kills the pipeline. use `find_files` / `grep_search` instead of piping `ls`
+57. `web_fetch` · `remember` or a `gh api` shell call in a scheduled job → `approval key denied by policy`: a job holds only the keys in `approvals.jobs.<job>.allow` in `~/.forge/policy.yaml` (the owner adds them). do not retry; name the denied key in the job's result and work from its own snippets
+58. `edit_file` · an `edits[]` item with only `old_str`, meant to delete a line → refused: `edit 1 needs string old_str and new_str (it has: old_str)`. the delete form is `new_str: ""`

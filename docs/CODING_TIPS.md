@@ -16,6 +16,7 @@
 4. `cwd: "n:/vs code/apps/Forge"` → `does not exist`: this workspace root has a space, `N:/vs code apps/Forge`. a typo'd cwd refuses the whole call, and a background one loses the job it was starting
 5. editing `src/` while `npm run ci` runs → its `build` step bundles the half-edited tree: `No matching export in "src/util/powershellScratchDir.ts" for import "powershellScratchEnv"` and `ci exit: 1` on a tree that is fine. finish the edits, then run the gate
 6. `npm run type-check` in a shared tree → dies on the other lane's half-edited file (`undeliveredTells.ts(77,30): error TS6133`) and its chained `&&` skips the webview pass. grep the log for your own paths, then run `npx tsc -p webview-ui/tsconfig.json --noEmit` yourself
+7. `test/unit/ToolSchemaBudget.test.ts` red mid-run (`expected 68161 to be 68029`) → another lane's tool-description edit landed while my `npm run ci` was reading the schema, so that number is theirs: rerun the file alone, green, and report it as theirs
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green and the tree stood still: never run `record-ci-pass.mjs` by hand — the `ci:steps` chain writes it
