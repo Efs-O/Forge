@@ -1114,8 +1114,8 @@ what each one does and does not cover:
   delegation and the browser and desktop tools, each behind the confirmation
   gate above; every new browser origin is approved once per session. Web search
   (needs a key) and `permissions.exec.terminal` (typing into a real terminal)
-  stay off until you turn them on; watching your own terminal is on by default
-  and `forge.terminal.watchUserCommands` turns it off. A config that omits a
+  stay off until you turn them on; watching your own terminal stays off until
+  you turn on `forge.terminal.watchUserCommands`. A config that omits a
   permission keeps it off. It also keeps `permissions.chats` off, so a new
   install's agent cannot open (`new_chat`) or interrupt (`steer`) another chat
   until you set them true.

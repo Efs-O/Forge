@@ -4,6 +4,8 @@ import * as vscode from 'vscode';
 const MAX_USER_OUTPUT_CHARS = 4_000;
 /** How many of the user's own recent commands are retained. */
 const MAX_USER_COMMANDS = 5;
+/** The setting that turns the user's own terminal capture on and off. */
+const WATCH_USER_COMMANDS = 'forge.terminal.watchUserCommands';
 const ESC = String.fromCharCode(27);
 const BEL = String.fromCharCode(7);
 
@@ -21,9 +23,11 @@ export interface UserTerminalCommand {
 interface CapturedOutput {
   output?: string | undefined;
   outputTruncated: boolean;
+  /** Set when capture was switched off: stop reading, publish nothing. */
+  cancelled?: boolean;
 }
 
-interface TrackedUserCommand extends UserTerminalCommand {
+interface TrackedUserCommand extends UserTerminalCommand, CapturedOutput {
   execution: vscode.TerminalShellExecution;
   readTask?: Promise<void> | undefined;
 }
@@ -37,16 +41,31 @@ interface TerminalExecutionEvents {
   ): vscode.Disposable;
 }
 
+/** The VS Code surface that reports configuration changes. */
+interface ConfigurationEvents {
+  onDidChangeConfiguration(
+    listener: (event: { affectsConfiguration(section: string): boolean }) => void,
+  ): vscode.Disposable;
+}
+
 function cwdOf(uri: vscode.Uri | undefined): string | undefined {
   if (!uri) return undefined;
   return uri.scheme === 'file' ? uri.fsPath : uri.toString(true);
 }
 
-/** Read live so toggling the setting takes effect without a reload. */
+/**
+ * Read live so toggling the setting takes effect without a reload. A window
+ * whose configuration cannot be read gets the safe answer: capture is off, so
+ * nothing the user typed is offered to the model.
+ */
 function userCaptureEnabled(): boolean {
-  return vscode.workspace
-    .getConfiguration('forge')
-    .get<boolean>('terminal.watchUserCommands', true);
+  try {
+    return vscode.workspace
+      .getConfiguration('forge')
+      .get<boolean>('terminal.watchUserCommands', false);
+  } catch {
+    return false;
+  }
 }
 
 function stripTerminalEscapes(text: string): string {
@@ -60,26 +79,43 @@ function stripTerminalEscapes(text: string): string {
  *
  * Only executions that start after activation are seen; no scrollback or
  * terminal history is ever read, and the user's own commands are captured only
- * while `forge.terminal.watchUserCommands` is enabled.
+ * while `forge.terminal.watchUserCommands` is enabled. Switching that setting
+ * off forgets what was already captured, and nothing is handed to the model
+ * while it is off.
  */
 export class TerminalCommandTracker implements vscode.Disposable {
   private readonly byUserExecution = new Map<vscode.TerminalShellExecution, TrackedUserCommand>();
   /** Oldest first; trimmed to MAX_USER_COMMANDS. */
   private readonly userCommands: TrackedUserCommand[] = [];
   private readonly subscriptions: vscode.Disposable[] = [];
+  /** Injected so tests can switch capture without a live configuration. */
+  private readonly captureEnabled: () => boolean;
 
-  start(events: TerminalExecutionEvents = vscode.window): void {
+  constructor(captureEnabled: () => boolean = userCaptureEnabled) {
+    this.captureEnabled = captureEnabled;
+  }
+
+  start(
+    events: TerminalExecutionEvents = vscode.window,
+    config: ConfigurationEvents = vscode.workspace,
+  ): void {
     if (this.subscriptions.length > 0) return;
     this.subscriptions.push(
       events.onDidStartTerminalShellExecution((event) => this.captureStarted(event)),
       events.onDidEndTerminalShellExecution((event) => {
         void this.captureEnded(event);
       }),
+      config.onDidChangeConfiguration((event) => {
+        if (event.affectsConfiguration(WATCH_USER_COMMANDS) && !this.captureEnabled()) {
+          this.forget();
+        }
+      }),
     );
   }
 
-  /** The user's own recent commands, newest first. */
+  /** The user's own recent commands, newest first; empty while capture is off. */
   recentUserCommands(): UserTerminalCommand[] {
+    if (!this.captureEnabled()) return [];
     return this.userCommands
       .map((entry) => ({
         command: entry.command,
@@ -104,7 +140,7 @@ export class TerminalCommandTracker implements vscode.Disposable {
   }
 
   captureStarted(event: vscode.TerminalShellExecutionStartEvent): void {
-    if (!userCaptureEnabled()) return;
+    if (!this.captureEnabled()) return;
     const command = event.execution.commandLine.value.trim();
     if (!command) return;
     const record: TrackedUserCommand = {
@@ -127,6 +163,13 @@ export class TerminalCommandTracker implements vscode.Disposable {
   dispose(): void {
     for (const subscription of this.subscriptions) subscription.dispose();
     this.subscriptions.length = 0;
+    this.forget();
+  }
+
+  /** Drop everything captured and stop every reader still running. */
+  private forget(): void {
+    for (const record of this.userCommands) record.cancelled = true;
+    for (const record of this.byUserExecution.values()) record.cancelled = true;
     this.byUserExecution.clear();
     this.userCommands.length = 0;
   }
@@ -138,6 +181,7 @@ export class TerminalCommandTracker implements vscode.Disposable {
   ): Promise<void> {
     let output = '';
     for await (const chunk of execution.read()) {
+      if (tracked.cancelled) return;
       if (output.length >= limit) {
         tracked.outputTruncated = true;
         continue;
@@ -146,6 +190,7 @@ export class TerminalCommandTracker implements vscode.Disposable {
       output += chunk.slice(0, remaining);
       if (chunk.length > remaining) tracked.outputTruncated = true;
     }
+    if (tracked.cancelled) return;
     const clean = stripTerminalEscapes(output).trim();
     if (clean) tracked.output = clean;
   }

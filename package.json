@@ -475,8 +475,8 @@
         },
         "forge.terminal.watchUserCommands": {
           "type": "boolean",
-          "default": true,
-          "description": "Let the agent see commands you run in your own VS Code terminals, so it can spot a failure and reply with the corrected command. Requires VS Code shell integration. Only executions that start while Forge is active are seen; terminal scrollback and history are never read. Turn this off to keep your own terminal private to you."
+          "default": false,
+          "description": "Let the agent see the commands you run in your own VS Code terminals and their output (the last five, up to 4,000 characters each), so it can spot a failure and reply with the corrected command. That text goes to the model you chat with, which may be a cloud model. Requires VS Code shell integration. Only executions that start while this is on are seen; terminal scrollback and history are never read. Turning it off forgets what was captured; it cannot take back what an earlier turn already sent."
         },
         "forge.editor.autoOpenChangedFiles": {
           "type": "boolean",
