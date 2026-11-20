@@ -130,16 +130,38 @@ describe('AI_SETUP.md', () => {
 
   // The audited 4 GB laptop had no reason to pick a local backend: its desktop
   // already served 28 models over one read-only GET, and the guide never looked.
-  // A host name is refused by the model starter, so the bullet has to say IP.
-  it('surveys the other computer\u2019s model list and never prints the git identity', () => {
+  // A host name is refused by the model starter, so the paragraph has to say IP.
+  // That GET reaches computers other than this one, so it waits for the user's
+  // yes: the survey itself may only check that the `tailscale` command exists.
+  it('asks before it reads the other computer\u2019s model list, and never prints the git identity', () => {
     const text = doc.replace(/\s+/gu, ' ');
     expect(text).toContain(
-      'Does another of the user\'s computers serve Forge models? When Tailscale is ' +
-        'installed, run `tailscale status` (it reads and changes nothing). For each ' +
-        'other machine it lists, read `GET http://<its Tailscale IP>:8798/models` ' +
-        '(read-only; use the IP, because Forge refuses a host name). Note every model ' +
-        'whose `remote` is `true`, by `name`.',
+      '- Is Tailscale installed? Check only that the `tailscale` command exists ' +
+        '(`tailscale version`); do not run `tailscale status` and do not contact any ' +
+        'other machine during the survey.',
     );
+    expect(text).toContain(
+      '**Other computer, asked first.** When Tailscale is installed, ask one question ' +
+        'before you choose the backend: "Use models from another of your computers over ' +
+        'Tailscale?" with "Yes, look for them" and "No". Only after a yes, run ' +
+        '`tailscale status` (it reads and changes nothing). For each other machine it ' +
+        'lists, read `GET http://<its Tailscale IP>:8798/models` (read-only; use the ' +
+        'IP, because Forge refuses a host name). Note every model whose `remote` is ' +
+        '`true`, by `name`. A yes here is a yes to "Other computer" in question 6. ' +
+        'After a no, or without Tailscale, do not contact any other machine.',
+    );
+    // The probe has to come after the ask. The bare needle "run `tailscale status`"
+    // also matches the survey bullet's "do not run `tailscale status`", which sits
+    // earlier in Step 0, so the affirmative instruction is pinned by its comma.
+    const step0Start = text.indexOf('## Step 0');
+    const step0End = text.indexOf('## Step 1');
+    expect(step0Start).toBeGreaterThanOrEqual(0);
+    expect(step0End).toBeGreaterThan(step0Start);
+    const step0 = text.slice(step0Start, step0End);
+    const askAt = step0.indexOf('"Yes, look for them"');
+    expect(askAt).toBeGreaterThanOrEqual(0);
+    expect(step0.indexOf(', run `tailscale status`')).toBeGreaterThan(askAt);
+    expect(text).not.toContain('When Tailscale is installed, run `tailscale status`');
     // A privacy hook refused the printed value, so the survey reads exit status.
     expect(text).toContain(
       'Check whether `git config --global user.name` and ' +
@@ -159,13 +181,27 @@ describe('AI_SETUP.md', () => {
         'Step 0 question:',
     );
     expect(text).toContain(
-      `- **Other computer** \u2014 the survey found models another of the user's ` +
-        'computers serves: this machine uses them through **Forge: Connect to my ' +
-        'desktop** (Step 12), so a small GPU here does not matter. CLI models are added ' +
-        'beside them when `claude` or `codex` is installed.',
+      `- **Other computer** \u2014 the user said yes to the question above and another ` +
+        'of their computers serves models: this machine uses them through **Forge: ' +
+        'Connect to my desktop** (Step 12), so a small GPU here does not matter. CLI ' +
+        'models are added beside them when `claude` or `codex` is installed.',
     );
     expect(text).not.toContain('do not ask the user to choose:');
     expect(text).not.toContain('**one** backend');
+  });
+
+  // The ask must not cost the audited laptop its backend: a 4 GB machine whose
+  // desktop serves models still reaches them, and Step 12 still reads Tailscale.
+  it('keeps the small machine its path to the other computer after the ask', () => {
+    const text = doc.replace(/\s+/gu, ' ');
+    expect(text).toContain(
+      '**Forge: Connect to my desktop** (Step 12), so a small GPU here does not matter',
+    );
+    const step12Start = text.indexOf('## Step 12');
+    const step12End = text.indexOf('## Step 13');
+    expect(step12Start).toBeGreaterThanOrEqual(0);
+    expect(step12End).toBeGreaterThan(step12Start);
+    expect(text.slice(step12Start, step12End)).toContain('You may run only `tailscale status`');
   });
 
   it('recommends a default model in the plan summary, from either computer', () => {
@@ -239,8 +275,9 @@ describe('AI_SETUP.md', () => {
         'this reload and before the checks below.',
     );
     expect(text).toContain(
-      'When the survey already read the other computer\'s list, skip items 1-3: that ' +
-        'computer is shared and its access rule already lets this one in.',
+      'When Step 0 already read the other computer\'s list after the user\'s yes, ' +
+        'skip items 1-3: that computer is shared and its access rule already lets this ' +
+        'one in.',
     );
     expect(text).toContain(
       '5. When the user chose a model from the other computer as the default, set ' +

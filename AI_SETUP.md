@@ -74,20 +74,29 @@ Collect and show the user in a short table:
 - Check whether `git config --global user.name` and
   `git config --global user.email` are set, from their exit status only; never
   print either value.
-- Does another of the user's computers serve Forge models? When Tailscale is
-  installed, run `tailscale status` (it reads and changes nothing). For each
-  other machine it lists, read `GET http://<its Tailscale IP>:8798/models`
-  (read-only; use the IP, because Forge refuses a host name). Note every model
-  whose `remote` is `true`, by `name`.
+- Is Tailscale installed? Check only that the `tailscale` command exists
+  (`tailscale version`); do not run `tailscale status` and do not contact
+  any other machine during the survey.
+
+**Other computer, asked first.** When Tailscale is installed, ask one
+question before you choose the backend: "Use models from another of your
+computers over Tailscale?" with "Yes, look for them" and "No". Only after a
+yes, run `tailscale status` (it reads and changes nothing). For each other
+machine it lists, read `GET http://<its Tailscale IP>:8798/models`
+(read-only; use the IP, because Forge refuses a host name). Note every model
+whose `remote` is `true`, by `name`. A yes here is a yes to "Other computer"
+in question 6. After a no, or without Tailscale, do not contact any other
+machine.
 
 Then choose the backend from the survey and state why; do not ask the user to
 choose the backend. The one thing you ask is which model is the default, in the
 Step 0 question:
 
-- **Other computer** — the survey found models another of the user's computers
-  serves: this machine uses them through **Forge: Connect to my desktop**
-  (Step 12), so a small GPU here does not matter. CLI models are added beside
-  them when `claude` or `codex` is installed.
+- **Other computer** — the user said yes to the question above and another
+  of their computers serves models: this machine uses them through
+  **Forge: Connect to my desktop** (Step 12), so a small GPU here does not
+  matter. CLI models are added beside them when `claude` or `codex` is
+  installed.
 - **llama.cpp** — fastest and the most control; needs a GGUF that fits.
 - **Ollama** — simplest if it is already installed and has models.
 - **Cloud / CLI only** — no suitable GPU: an OpenAI-compatible provider, or
@@ -673,8 +682,9 @@ Run it right after Step 6's reload and before Step 6's checks: Forge registers
 **Connect to my desktop** only once it has loaded a config, and its models must
 be in the config when Step 6 checks it.
 
-When the survey already read the other computer's list, skip items 1-3: that
-computer is shared and its access rule already lets this one in.
+When Step 0 already read the other computer's list after the user's yes, skip
+items 1-3: that computer is shared and its access rule already lets this one
+in.
 
 1. Tell the user to install Tailscale on both computers and sign in to the same
    account. Wait, then run `tailscale status` and report both machines' names.
