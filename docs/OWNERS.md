@@ -116,6 +116,7 @@ overlaps with an existing owner, extend the owner instead.
 | Recycle-bin refusal diagnosis + short-lived path cache | `src/tools/trashRefusal.ts`             |
 | Argument names a model reached for that a tool does not declare (rewrites + refusal hints) | `src/tools/argumentAliases.ts` |
 | Tool call execution + result formatting              | `src/sidebar/ToolDispatch.ts`            |
+| The one file's diff card after a write (before/after content, hunks, new/deleted) | `src/sidebar/postFileDiff.ts` |
 | Early refusals that stop a tool call before approval (cancelled, bad args, unknown/withheld tool, budget) | `src/sidebar/toolCallPreflight.ts` |
 | Approval gate inputs and verdict for one tool call (shared by serial dispatch and parallel-read preflight) | `src/sidebar/toolApprovalEvaluation.ts` |
 | Tool dispatch context and result-message types/helpers | `src/sidebar/toolDispatchTypes.ts`       |
