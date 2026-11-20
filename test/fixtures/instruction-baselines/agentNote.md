@@ -1,5 +1,7 @@
 ## Forge agent bus
 
+If `__FORGE_BUS_DIR__/forge.sh` does not exist, ignore this section.
+
 Workspace memories are editable files in `~/.forge/memories/<workspace-folder>-<workspace-id>/`; changes take effect on the next read.
 
 Forge LLM is installed in this machine's VS Code, and its agent mesh is on: a local

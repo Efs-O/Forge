@@ -14,7 +14,10 @@
  * on a fresh folder are testable without VS Code: created when absent, added
  * beside existing text without touching that text, and never duplicated by a
  * second run. `src/vscode/agentMeshNoteSetup.ts` decides *which* files and
- * *when*; this module owns the section and its markers.
+ * *when*; this module owns the section and its markers. The user-wide copy
+ * (`src/vscode/agentUserNote.ts`) is the same template without its
+ * "Who does what" delegation policy, because that copy reaches sessions
+ * outside any Forge workspace, where the policy does not apply.
  */
 
 import agentNoteText from './agentNote.md';
@@ -55,9 +58,45 @@ const MESH_STATE_TOKEN = '__FORGE_MESH_STATE__';
  */
 export const AGENT_NOTE_TEMPLATE = agentNoteText;
 
-/** The note as it should appear in a file: markers, body, markers. */
-export function buildAgentMeshNote(facts: AgentMeshNoteFacts): string {
-  const body = AGENT_NOTE_TEMPLATE.replaceAll(BUS_DIR_TOKEN, facts.busDir)
+/** Which copy of the note is being built. `workspace` is the marked section in
+ *  a workspace's `AGENTS.md` / `CLAUDE.md`; `user` is the copy in the owner's
+ *  own `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`, which reaches agent
+ *  sessions in folders Forge never bootstrapped. */
+export type AgentMeshNoteScope = 'workspace' | 'user';
+
+/** The two lines the user-wide cut runs between, as anchors rather than
+ *  offsets: editing the note moves the text, not the anchors, and an anchor
+ *  that has gone is a thrown error instead of a silently truncated note.
+ *  `test/unit/AgentMeshNote.test.ts` pins that the template still has both. */
+export const WHO_DOES_WHAT_ANCHOR = '**Who does what.**';
+export const NOTE_STATE_ANCHOR = '**State, as Forge recorded it when this section was written:**';
+
+/** The template with the delegation policy cut out, for the user-wide copy.
+ *  The cut runs from the start of the `**Who does what.**` line up to (not
+ *  including) the line that starts the recorded-state paragraph, so the blank
+ *  line that separated the two is what now separates the preceding paragraph
+ *  from the state line: no gap, no joined lines, nothing else untouched. */
+function withoutDelegationPolicy(template: string): string {
+  const policy = template.indexOf(WHO_DOES_WHAT_ANCHOR);
+  const state = template.indexOf(NOTE_STATE_ANCHOR);
+  if (policy < 0 || state < 0 || state < policy) {
+    throw new Error('agent note template lost its "Who does what" or "State" anchor');
+  }
+  const policyLineStart = template.lastIndexOf('\n', policy) + 1;
+  const stateLineStart = template.lastIndexOf('\n', state) + 1;
+  return template.slice(0, policyLineStart) + template.slice(stateLineStart);
+}
+
+/** The note as it should appear in a file: markers, body, markers. The
+ *  user-wide copy is that body with the delegation policy cut out. */
+export function buildAgentMeshNote(
+  facts: AgentMeshNoteFacts,
+  scope: AgentMeshNoteScope = 'workspace',
+): string {
+  const template =
+    scope === 'user' ? withoutDelegationPolicy(AGENT_NOTE_TEMPLATE) : AGENT_NOTE_TEMPLATE;
+  const body = template
+    .replaceAll(BUS_DIR_TOKEN, facts.busDir)
     .replaceAll(CONFIG_PATH_TOKEN, facts.configPath)
     .replaceAll(MESH_STATE_TOKEN, facts.meshState);
   return `${AGENT_NOTE_START}\n${body.trimEnd()}\n${AGENT_NOTE_END}`;

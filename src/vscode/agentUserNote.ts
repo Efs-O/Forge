@@ -84,7 +84,7 @@ export function installUserNote(
   homeDir: string,
   facts: AgentMeshNoteFacts,
 ): AgentMeshNoteFileResult[] {
-  const note = buildAgentMeshNote(facts);
+  const note = buildAgentMeshNote(facts, 'user');
   return userNoteFiles(homeDir).map((filePath) => {
     const failed = ensureFolder(path.dirname(filePath));
     if (failed) return { path: filePath, status: 'error', reason: failed };
@@ -103,7 +103,7 @@ export function refreshUserNote(
   homeDir: string,
   facts: AgentMeshNoteFacts,
 ): AgentMeshNoteFileResult[] {
-  const note = buildAgentMeshNote(facts);
+  const note = buildAgentMeshNote(facts, 'user');
   return userNoteFiles(homeDir).map((filePath) => refreshIntoOneFile(filePath, note));
 }
 

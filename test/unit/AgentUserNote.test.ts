@@ -32,7 +32,9 @@ import {
 
 const busDir = 'C:/Users/tester/.forge/agent-bus';
 const facts = userNoteFacts(busDir);
-const note = buildAgentMeshNote(facts);
+// The user scope: this copy reaches sessions outside every Forge workspace, so
+// it is built without the "Who does what" delegation policy.
+const note = buildAgentMeshNote(facts, 'user');
 const stale = `${AGENT_NOTE_START}\nthe note an older build wrote\n${AGENT_NOTE_END}`;
 
 const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'user-note-'));
@@ -112,6 +114,24 @@ describe('the note text is workspace-neutral', () => {
     expect(note).toContain(
       'Config: `<workspace>/.forge/config.yaml`, else `~/.forge/config.yaml`.',
     );
+  });
+
+  it('carries no delegation policy into either user file', () => {
+    // Both copies are read by every Claude Code / Codex session on the machine,
+    // so neither may hold this owner's local-lane delegation rules.
+    const home = freshHome('no-policy');
+    installUserNote(home, facts);
+    for (const filePath of userNoteFiles(home)) {
+      const content = read(filePath);
+      expect(countAgentMeshSections(content)).toBe(1);
+      expect(content).toContain(AGENT_NOTE_START);
+      expect(content).toContain(AGENT_NOTE_END);
+      expect(content).toContain('does not exist, ignore this section.');
+      expect(content).not.toContain('Who does what');
+      expect(content).not.toContain('delegate the implementing');
+      expect(content).not.toContain('fresh Forge chat per');
+      expect(content).toContain('**State, as Forge recorded it when this section was written:**');
+    }
   });
 });
 

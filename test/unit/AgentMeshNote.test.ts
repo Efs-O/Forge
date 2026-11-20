@@ -14,11 +14,14 @@ import {
   AGENT_NOTE_END,
   AGENT_NOTE_START,
   AGENT_INSTRUCTION_FILE_NAMES,
+  AGENT_NOTE_TEMPLATE,
   agentNoteTargetFiles,
   applyAgentMeshNote,
   buildAgentMeshNote,
   countAgentMeshSections,
   hasAgentsMdImportLine,
+  NOTE_STATE_ANCHOR,
+  WHO_DOES_WHAT_ANCHOR,
   type AgentMeshNoteFacts,
 } from '../../src/agentBus/agentMeshNote';
 
@@ -74,6 +77,64 @@ describe('the agent note body', () => {
     expect(note).toContain('Who does what');
     expect(note).toContain('delegate the implementing');
     expect(note).toContain('fresh Forge chat per');
+  });
+
+  it('starts every copy with the guard line', () => {
+    // A note left behind when Forge is uninstalled used to send every agent to
+    // a `forge.sh` that is gone. The first body line of every copy, in both
+    // scopes, names that copy's own path and tells the agent to skip the rest.
+    const guardFacts: AgentMeshNoteFacts = { ...facts, busDir: 'C:/Users/t/.forge/agent-bus' };
+    for (const scope of ['workspace', 'user'] as const) {
+      const lines = buildAgentMeshNote(guardFacts, scope).split('\n');
+      expect(lines[0]).toBe(AGENT_NOTE_START);
+      expect(lines[1]).toBe('## Forge agent bus');
+      expect(lines[2]).toBe('');
+      expect(lines[3]).toBe(
+        'If `C:/Users/t/.forge/agent-bus/forge.sh` does not exist, ignore this section.',
+      );
+    }
+  });
+
+  it('leaves Who does what out of the user-wide copy only', () => {
+    // The user-wide copy is read by every Claude Code / Codex session on the
+    // machine, including ones in folders Forge never touched, where a
+    // delegation policy for this owner's local lanes is not the reader's call.
+    const user = buildAgentMeshNote(facts, 'user');
+    expect(user).not.toContain('Who does what');
+    expect(user).not.toContain('delegate the implementing');
+    expect(user).toContain(NOTE_STATE_ANCHOR);
+    expect(user).toContain('**Windows.**');
+    // The workspace copy keeps the policy and everything around it.
+    expect(note).toContain('Who does what');
+    expect(note).toContain('delegate the implementing');
+    expect(note).toContain(NOTE_STATE_ANCHOR);
+    expect(note).toContain('**Windows.**');
+  });
+
+  it('refuses a user copy that kept any line of the delegation list', () => {
+    // Not just the heading: a single surviving bullet would still read as a
+    // standing instruction to hand the work to a Forge chat.
+    expect(buildAgentMeshNote(facts, 'user')).not.toContain('fresh Forge chat per');
+  });
+
+  it('keeps every verb in the user-wide copy: cutting the policy cuts no commands', () => {
+    const user = buildAgentMeshNote(facts, 'user');
+    for (const verb of [
+      'say <your-name>',
+      'send <your-name>',
+      'reply <id>',
+      'steer <your-name>',
+      'stop <your-name>',
+    ]) {
+      expect(user).toContain(verb);
+    }
+  });
+
+  it('still carries both anchors the user-wide cut runs between', () => {
+    // Without them the cut cannot find its own bounds: buildAgentMeshNote
+    // throws rather than write a note with a chunk of it missing.
+    expect(AGENT_NOTE_TEMPLATE).toContain(WHO_DOES_WHAT_ANCHOR);
+    expect(AGENT_NOTE_TEMPLATE).toContain(NOTE_STATE_ANCHOR);
   });
 });
 
