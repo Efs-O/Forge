@@ -48,7 +48,7 @@
 3. `git log --since/--until` after a rebase → committer dates were rewritten, so the window matches old commits. filter `%ad` (author date) instead
 
 ## EDIT
-1. a multi-line string edit that drops the `+` between two literals → the parse error names a later line, not the missing one. after editing a joined description, re-read the block
+1. a multi-line string edit that drops the `+` between two literals → in `new_str` the parse error names a later line, not the missing one; in `old_str` the edit is refused: not found. copy both from the newest read
 2. deleting entries from a numbered list by replacing a block → the renumbering duplicated one entry and dropped another. rewrite the section's whole tail, then read it back
 3. new text inside a `String.raw` template literal containing a backtick → the template ends early and the parse error names a later line. no backticks in prose inside a template literal
 4. repairing a mangled line from memory instead of rereading it → the fix re-adds what survived: `describe('x', () => { () => {`. read the line back, then fix it once
@@ -77,6 +77,7 @@
 16. a "the stale read must not publish" test asserting a snapshot count → fails on macOS: `fs.watch` reports the fixture's own writes. make the stale result distinguishable (`[]`) and assert none is it
 17. a fake that picks "the first call is the slow one" after `await super.x()` → two concurrent calls race to that check and the wrong one goes slow. read and clear the flag before the first await
 18. a function with a default parameter, tested for "no value" by calling it with an explicit `undefined` → the default takes it, so the test proves nothing. omit the argument, or pass a value that means none
+19. a `toContain` failure whose received value is a whole document (AI_SETUP.md, README) → the log holds the entire text (40 KB). grep the log for `- Expected` and the `test/…:NN:` line, never read the log whole
 
 ## PATHS
 1. `~/.forge/sessions/<short-id>.jsonl` → no such file: logs carry the full 8-4-4-4-12 chat id. resolve a short id with a prefix glob

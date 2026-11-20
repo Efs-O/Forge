@@ -20,7 +20,7 @@
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green and the tree stood still: never run `record-ci-pass.mjs` by hand — the `ci:steps` chain writes it
-2. `git add AI SETUP.md` → `fatal: pathspec 'AI' did not match any files`: the underscore became a space. the file is `AI_SETUP.md`
+2. `git add AI SETUP.md` or `read_file "AI SETUP.md"` → `fatal: pathspec 'AI' did not match any files` / `nothing exists there`: the underscore I typed arrived as a space. the file is `AI_SETUP.md`
 
 ## EDIT
 1. a rename lengthens an identifier, a call takes several arguments on one line, or I hand-split a `.then()` chain → the `prettier/prettier` gate fails at `.prettierrc` printWidth 100. fix: `npx prettier --write <src file>` before the gate

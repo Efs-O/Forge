@@ -820,6 +820,7 @@ overlaps with an existing owner, extend the owner instead.
 | Groups migration orchestration + resolved-diff verifier | `src/config/ConfigMigrator.ts`       |
 | Groups migration clustering/lifting heuristic           | `src/config/ConfigGroupHeuristic.ts` |
 | Schema-valid starter config generation                  | `src/config/StarterConfig.ts`        |
+| Setup trust switches (Step 0 labels, config keys they turn on) | `src/config/trustSwitches.ts` |
 | User-facing config example                              | `config/config.example.yaml`         |
 
 ## VS Code Integration

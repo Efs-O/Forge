@@ -7,9 +7,9 @@ and the two places Forge looks for its config.
 
 Work through the steps in order, run each **Check**, and continue without asking
 between steps. Set up an optional section only when the user's setup request
-named it or the user said yes to it in Step 0; offer only the optional items
-listed in Step 0, in that one question. The agent mesh is part of the core
-setup.
+named it or the user said yes to it in Step 0; offer only the extras listed in
+Step 0 question 6. The agent mesh is set up when the user picks "Talk to Forge"
+there.
 
 ## Ground rules
 
@@ -17,9 +17,9 @@ setup.
    `config.yaml`, in git, or in your reply. Forge keeps them in VS Code
    SecretStorage; the user enters them with the Forge command this file names.
 2. **One confirmation, then proceed.** After Step 0, show the one-time plan
-   summary described there, with its optional items, and wait for one answer:
-   yes or no to the plan, and yes or no to each optional item. After yes, do
-   not ask again about anything in that summary.
+   summary described there and ask its questions, then wait for the answers.
+   They are the one confirmation: after it, do not ask again about anything in
+   that summary.
 3. **Human-only stops:** required logins (`claude`, `codex login`,
    `ollama auth login`); API keys and bot tokens entered through Forge's own
    commands; Windows UAC or SmartScreen prompts; and the first VS Code window
@@ -112,46 +112,71 @@ After the survey and backend choice, show one concise summary containing:
   CLI and its prerequisites, and on Windows only when Git Bash is missing,
   `winget install --id Git.Git -e`; include the exact install method and
   release details;
-- each trust switch already on and each one to turn on:
-  `control_server`, `agent_bus`, `permissions.agents.delegate`, and
-  `crossSessionInbound` in `~/.claude/settings.json` when Claude Code uses
-  bypass-permissions mode;
+- that every trust switch starts off in the new config and is turned on only
+  when the user picks it in the questions below; `control_server` is always on
+  (loopback only, token-protected);
 - the exact config file path to write, plus which optional sections were named
   in the user's request; and whether it will create `FORGE.md` because the
   workspace has no project instruction file.
 - the default model (`active_model`): your recommendation and up to three
   alternatives, chosen from the models the survey found here and on the other
   computer;
-- these optional items, each answered yes or no in the same reply (an item the
-  user's request already named is part of the plan, not an offer):
-  - Telegram: control Forge from your phone over Telegram (needs your own bot
-    from @BotFather; a second computer needs its own bot).
-  - Other computer: use models from another computer of yours, or share this
-    one's (Tailscale).
-  - Daily chat retitle: rename idle chats each morning to titles that say what
-    they were about.
-  - Web search: let Forge search the web through DuckDuckGo (no key, no
-    account).
-  - User files: put Forge's agent note in your own `~/.claude/CLAUDE.md` and
-    `~/.codex/AGENTS.md` too, so Claude Code and Codex reach Forge from any folder.
-  - Git identity, only when the survey found `user.name` or `user.email` empty:
-    the name and email to put on your commits (leave it blank to skip).
 
-Ask **“Proceed with this setup plan? Answer yes/no, name the default model, and
-yes/no for each optional item.”** and wait. A no means stop without changing
-files, installing software, or downloading models. After yes, do not ask again
-about a listed download, install, switch, config path, optional section, or
-optional item. If an unlisted dependency becomes necessary, skip that part and
-explain why in **Finish** instead of asking for another plan confirmation.
+Write the plan summary in your reply first, and add this line to it: "Reverse
+image search uploads your image to litterbox.catbox.moe for one hour, and asks
+you every time." Then ask the questions below. Together they are the one
+confirmation: after it, do not ask again about a listed download, install,
+switch, config path, optional section or extra. If an unlisted dependency
+becomes necessary, skip that part and explain why in **Finish** instead of
+asking again.
 
-Write the plan summary in your reply first. Then, if your harness has a
-multiple-choice question tool (Claude Code: `AskUserQuestion`), ask the question
-with it in one call: the plan as yes or no, the default model as one choice
-(your recommendation first; the user can type any other listed name), the
-optional items as one multi-select, and the git identity as a skip choice the
-user can answer with `Name <email>` instead (only when the survey found it
-empty). Without such a tool, ask it in text as written above. A default model
-from the other computer means yes to "Other computer".
+With a multiple-choice question tool (Claude Code: `AskUserQuestion`, at most
+four questions per call and four choices per question), ask questions 1-4 in
+one call and 5-7 in a second call straight after it. Without such a tool, ask
+the same questions in one text message, in the same order and with the same
+wording. "No, change nothing" means stop without changing files, installing
+software, or downloading models. Offer "Run Forge's messages without asking"
+only when Claude Code uses bypass-permissions mode. Ask question 7 only when
+the survey found `user.name` or `user.email` empty.
+
+1. **Plan** (one choice): "Proceed with this setup plan?" with "Yes, proceed"
+   and "No, change nothing".
+2. **Default model** (one choice): "Which model should Forge use by default?"
+   Your recommendation first, marked (Recommended), plus up to three
+   alternatives the survey found here or on the other computer; the user can
+   type any other listed name. With only one model found, offer "Use <model>"
+   and "Pick another (type its name)". A default model from the other computer
+   means yes to "Other computer".
+3. **Coding agents** (multi-select): "What may Claude Code and Codex do with
+   Forge?"
+   - **Talk to Forge**: Your coding agents on this PC can message Forge chats and read the replies (local only, password-protected). The next two need this one.
+   - **Run Forge's messages without asking**: Messages from Forge and other sessions can start work in Claude Code with no approval prompt.
+   - **Global note**: Add Forge's note to your global CLAUDE.md / AGENTS.md so your agents can reach Forge from any folder.
+   - **Hand tasks over**: Forge's model can start Claude Code or Codex on a task. Uses your subscription.
+4. **PC control** (multi-select): "What may Forge control on this PC?"
+   - **Browser**: Open pages in a separate Chrome/Edge window and click and type. Asks before each new website.
+   - **Desktop**: Take screenshots and use the mouse and keyboard.
+   - **Scheduled jobs**: Run tasks on a schedule, including waking the PC.
+   - **Jobs may run Claude Code / Codex**: A scheduled job can start your coding agent. Picking this also turns scheduled jobs on.
+5. **File actions** (multi-select, both marked (Recommended)): "Which file
+   actions may Forge take in your workspace?"
+   - **Delete files**: Each delete still shows an approval card.
+   - **Git commit**: Each commit still shows an approval card.
+6. **Extras** (multi-select): "Set up any of these now?"
+   - **Web search**: DuckDuckGo, no key, no account.
+   - **Telegram**: chat with Forge from your phone. Needs your own bot from
+     @BotFather; pairing code required.
+   - **Other computer**: use models from another computer of yours, or share
+     this one's (Tailscale).
+   - **Daily chat retitle**: rename idle chats each morning to say what they
+     were about.
+7. **Git name and email** (one choice): "Name and email for your commits?"
+   with "Skip" and "Set it now (type `Name <email>` in Other)".
+
+Each pick turns on exactly what Step 5 lists for it; a switch the user did not
+pick stays off. "Run Forge's messages without asking" and "Global note" need
+"Talk to Forge"; "Jobs may run Claude Code / Codex" also turns scheduled jobs
+on.
 
 ## Step 1 — Choose the config location
 
@@ -235,9 +260,9 @@ daemon; Forge sends no key.
   `claude` or `codex login`, wait, then verify the CLI. Add
   `{ name: claude-code, provider: cli, cli: claude }` (same for `codex`) under
   `models:`. `cli` is a bare name, or a full path to the executable. A `.cmd`
-  shim is run through its launcher, which needs Node on PATH. For delegation
-  from Forge also set `permissions.agents.delegate: true` when the mesh is
-  enabled.
+  shim is run through its launcher, which needs Node on PATH. Set
+  `permissions.agents.delegate: true` only when the user picked "Hand tasks
+  over" in Step 0.
 
 ## Step 5 — Configure the control server and agent mesh
 
@@ -254,11 +279,24 @@ control_server:
 ```
 
 Use the configured port, or keep the starter's loopback default when adding the
-block. Also ensure `agent_bus.enabled: true`. Set
-`permissions.agents.delegate: true` when a supported CLI agent is available.
-If Claude Code uses bypass-permissions mode, merge
-`"crossSessionInbound": "accept"` into `~/.claude/settings.json`, preserving
-other settings. These switches were listed in the one plan confirmation.
+block. The control server is always on. Then write the Step 0 picks, and only
+those:
+
+- "Talk to Forge": `agent_bus.enabled: true`.
+- "Run Forge's messages without asking": merge
+  `"crossSessionInbound": "accept"` into `~/.claude/settings.json`, preserving
+  other settings.
+- "Global note": done in Step 7.
+- "Hand tasks over": `permissions.agents.delegate: true`.
+- "Browser": `permissions.browser.enabled: true`.
+- "Desktop": `permissions.desktop.enabled: true`.
+- "Scheduled jobs": `jobs.enabled: true`.
+- "Jobs may run Claude Code / Codex": `jobs.enabled: true` and
+  `jobs.allow_cli_agents: true`.
+- "Delete files": `permissions.fs.delete: true`.
+- "Git commit": `permissions.git.write: true`.
+
+Leave every switch the user did not pick off.
 
 ## Step 6 — First reload, then verify
 
@@ -304,14 +342,15 @@ shows the validation error in a VS Code notification; there is no control API
 or readable log file for that startup error, so ask the user to copy the exact
 notification. Do not claim setup passed until the checks succeed.
 
-## Step 7 — Agent mesh (Forge ⇄ Claude Code ⇄ Codex): core, not optional
+## Step 7 — Agent mesh (Forge ⇄ Claude Code ⇄ Codex)
+
+Skip this step when the user did not pick "Talk to Forge" in Step 0, and say in **Finish** that `agent_bus: { enabled: true }` turns it on later.
 
 Workspace memories are editable files in `~/.forge/memories/<workspace-folder>-<workspace-id>/`; changes take effect on the next read.
 
 The mesh is how Claude Code, Codex and Copilot message, steer and stop Forge
-chats, and every new starter config ships it on. Do not skip this step the way
-you may skip something the user did not ask for. Forge installs its message
-client at `~/.forge/agent-bus/forge.sh` and its own notes in
+chats, and is on only when the user picked "Talk to Forge". Forge installs its
+message client at `~/.forge/agent-bus/forge.sh` and its own notes in
 `~/.forge/agent-bus/README.md`; read that README rather than this section for
 the command set.
 
@@ -322,8 +361,7 @@ the command set.
 confirmed; turn on only those listed in the plan. The mesh is *inbound* — it
 lets other agents act on this workspace's Forge chats. Requirements:
 
-- the control server from step 5, and the bus itself (enabled in new starter
-  configs; add it to older configs if absent):
+- the control server from step 5, and the bus itself (Step 5 turned it on):
 
   ```yaml
   # partial: the agent_bus block only, not a whole config
@@ -345,9 +383,9 @@ lets other agents act on this workspace's Forge chats. Requirements:
   is unavailable, skip the mesh client and report why. Never fall back to bare `bash`: on
   Windows it may be WSL, and WSL's `$HOME` is not the Windows profile that
   holds `~/.forge/agent-bus`, so the client is not where that shell looks;
-- if the user runs Claude Code in bypass-permissions mode, add
-  `"crossSessionInbound": "accept"` to `~/.claude/settings.json`, or messages
-  from Forge wait for approval there. This was included in the plan summary.
+- if the user picked "Run Forge's messages without asking", Step 5 added
+  `"crossSessionInbound": "accept"` to `~/.claude/settings.json`; without it,
+  messages from Forge wait for approval in Claude Code.
 
 Forge writes the agent note itself, so you do not have to. On the first start in
 a workspace whose mesh is on, Forge adds one marked section
@@ -364,7 +402,7 @@ message, steer and stop this workspace's Forge chats; `agent_bus:
 { enabled: false }` turns that off; deleting everything between the two comment
 lines removes the note.
 
-When the user said yes to "User files" in Step 0, tell the user to run **Forge:
+When the user picked "Global note" in Step 0, tell the user to run **Forge:
 Add Agent Note to My User Files** (`forge.agentMesh.installUserNote`) and paste
 the message it shows. You do not write those files yourself. **Check:** the
 message names `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`, each created,
@@ -412,7 +450,8 @@ end-to-end check yourself: send a prompt on stdin with
 chat id from the command result or `forge.sh who`, and read the finished answer
 with `forge.sh view <name> --to <conversationId>`. A session that cannot find
 the bridge from the file Forge wrote means the note is not doing its job —
-report it without explaining the bridge to that session. After the first reload,
+report it, and do not explain the bridge to that session: the check is whether
+the note works on its own, and explaining it would hide a broken note. After the first reload,
 reload any Forge window with
 `forge.sh reload <name> --to <conversationId>`; get the id from `who` or the
 chat opened by `say --new`.
@@ -696,7 +735,7 @@ Report to the user:
   - Video or music — not requested or declined; name it to follow Step 11.
   - Other computer — not requested or declined; name it to follow Step 12.
   - Daily chat retitle — not requested or declined; name it to follow Step 13.
-  - User files — not requested or declined; name it to follow Step 7.
+  - Global note — not picked in Step 0; name it to follow Step 7.
 - any requested section skipped because a prerequisite was missing;
 - each remaining human action and why: plan confirmation, required login or
   secret entry (including Telegram authentication), Windows prompt, first
@@ -710,7 +749,7 @@ extension (hf-download, music-track, office-files, video-clip), updated with
 Forge; their own skills go in `~/.forge/skills/<name>/`. Memories start empty
 and fill as agents save them. `FORGE.md` is theirs to edit.
 `docs/CODING_TIPS.md` appears when an agent records its first lesson. The
-browser tool and desktop control start on (each new website is approved once
-per session, and VS Code's own window stays off limits); set
-`permissions.browser.enabled` or `permissions.desktop.enabled` to `false` to
-turn either off.
+browser tool and desktop control are on only if the user picked them in
+Step 0 (each new website is approved once per session, and VS Code's own window
+stays off limits); `permissions.browser.enabled` and
+`permissions.desktop.enabled` change either.

@@ -10,12 +10,13 @@ export interface StarterLlamaCppModel {
 }
 
 // A coding agent needs to run builds and tests, so a new install can; every
-// such action still goes through the confirmation gate. Browser, desktop,
-// fetch and delegation are on for a new install (owner's call, 0.17.5): each
-// new browser origin is still approved per session, and desktop control of VS
-// Code itself stays off (`allow_vscode`). Search stays off until setup adds it, as
-// do the visible terminal and shell scripts. Existing configs are unchanged:
-// an absent key still means off.
+// such action still goes through the confirmation gate. Every trust switch is
+// off until the user picks it in setup (owner's call, 2026-11-20; the browser,
+// desktop control, delegation, deletes and git commits shipped on from 0.17.5):
+// `trustSwitches.ts` holds each switch's label and the config keys it turns on,
+// and AI_SETUP.md Step 0 asks for them one by one. Search stays off until setup
+// adds it, as do the visible terminal and shell scripts. Existing configs are
+// unchanged: an absent key still means off.
 // Chat-to-chat new-chat and steer actions also stay off until opted in.
 // `approval_timeout_minutes` ships ON (owner, 0.17.171): a card nobody answers
 // is declined after 10 minutes instead of holding the turn open forever. A new
@@ -26,14 +27,14 @@ export interface StarterLlamaCppModel {
 const APPROVAL_TIMEOUT_MINUTES_FOR_NEW_INSTALLS = 10;
 const DEFAULT_PERMISSIONS: NonNullable<ForgeConfig['permissions']> = {
   approval_timeout_minutes: APPROVAL_TIMEOUT_MINUTES_FOR_NEW_INSTALLS,
-  fs: { read: true, write: true, delete: true },
+  fs: { read: true, write: true, delete: false },
   net: { search: false, fetch: true },
   exec: { headless: true },
-  git: { read: true, write: true },
-  agents: { delegate: true },
+  git: { read: true, write: false },
+  agents: { delegate: false },
   chats: { new_chat: false, steer: false, new_chats_per_hour: 100 },
-  browser: { enabled: true },
-  desktop: { enabled: true },
+  browser: { enabled: false },
+  desktop: { enabled: false },
 };
 
 /**
@@ -42,7 +43,7 @@ const DEFAULT_PERMISSIONS: NonNullable<ForgeConfig['permissions']> = {
  * not admit under exactOptionalPropertyTypes, so it is kept only when set.
  */
 function starterRemote(): NonNullable<ForgeConfig['remote']> {
-  const { wake_relay, ...remote } = RemoteConfigSchema.unwrap().parse({ enabled: true });
+  const { wake_relay, ...remote } = RemoteConfigSchema.unwrap().parse({ enabled: false });
   return wake_relay ? { ...remote, wake_relay } : remote;
 }
 
@@ -59,15 +60,17 @@ const STARTER_AGENT_SETTINGS = {
     panel_live_timeout_ms: 20_000,
     codex_liveness_timeout_ms: 15_000,
   },
-  // On for a new install (owner's call, 0.17.5). The config types are the
-  // parsed shapes, so agent_bus and remote take their schema defaults here and
-  // the starter file spells them out. Remote is enabled with no transport:
-  // Telegram/WhatsApp still need a bot token and pairing. Jobs with none
-  // defined are inert.
+  // Off until setup turns them on: the agent bus, remote control and scheduled
+  // jobs. The list of switches is `trustSwitches.ts`; the control server stays
+  // on, because it is loopback only and the setup checks use it. The config
+  // types are the parsed shapes, so agent_bus and remote take their schema
+  // defaults here and the starter file spells them out. Remote is disabled with
+  // no transport: Telegram/WhatsApp still need a bot token and pairing. Jobs
+  // with none defined are inert.
   control_server: { enabled: true },
-  agent_bus: AgentBusConfigSchema.unwrap().parse({ enabled: true }),
+  agent_bus: AgentBusConfigSchema.unwrap().parse({ enabled: false }),
   remote: starterRemote(),
-  jobs: { enabled: true, allowed_hosts: [], max_concurrent: 2, allow_cli_agents: true },
+  jobs: { enabled: false, allowed_hosts: [], max_concurrent: 2, allow_cli_agents: false },
   forge_instructions: { auto_create: true },
   auto_compact: { enabled: true, at: 0.85, resume: true },
   defaults: {

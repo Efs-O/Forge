@@ -23,7 +23,7 @@ describe('AI_SETUP.md', () => {
   it('requests one plan confirmation and automates the rest of the chosen setup', () => {
     const text = doc.replace(/\s+/gu, ' ');
     expect(doc.match(/Proceed with this setup plan/g)).toHaveLength(1);
-    expect(text).toContain('offer only the optional items listed in Step 0, in that one question');
+    expect(text).toContain('offer only the extras listed in Step 0 question 6');
     expect(text).toContain('do not ask the user to choose');
     expect(text).toContain('every model file and release archive');
     expect(text).toContain('the selected llama.cpp build');
@@ -43,47 +43,52 @@ describe('AI_SETUP.md', () => {
     expect(text).toContain('If `LOCALAPPDATA` is unset');
   });
 
-  // Step 0 is the only place the user can say yes to an optional section, so
-  // the offers have to be in that one question: an agent that cannot ask a
-  // second question would otherwise set up only what the user happened to name
-  // in their first message.
-  // A picker is easier to answer than a typed "yes, no, yes...", and it still
-  // counts as the one question: everything goes in a single call.
-  it('asks the Step 0 question with a picker when the harness has one', () => {
+  // The Step 0 questions are the one confirmation, so they have to be asked in
+  // a fixed order and a fixed wording: an agent that cannot ask a second
+  // question would otherwise set up only what the user happened to name in
+  // their first message. A picker is easier to answer than a typed
+  // "yes, no, yes...", and two calls of four questions keep the tool's cap
+  // without dropping any of the seven.
+  it('asks the Step 0 questions with a picker when the harness has one', () => {
     const text = doc.replace(/\s+/gu, ' ');
     expect(text).toContain(
-      'Write the plan summary in your reply first. Then, if your harness has a ' +
-        'multiple-choice question tool (Claude Code: `AskUserQuestion`), ask the question ' +
-        'with it in one call: the plan as yes or no, the default model as one choice ' +
-        '(your recommendation first; the user can type any other listed name), the ' +
-        'optional items as one multi-select, and the git identity as a skip choice the ' +
-        'user can answer with `Name <email>` instead (only when the survey found it ' +
-        'empty). Without such a tool, ask it in text as written above. A default model ' +
-        'from the other computer means yes to "Other computer".',
+      'Write the plan summary in your reply first, and add this line to it: "Reverse ' +
+        'image search uploads your image to litterbox.catbox.moe for one hour, and asks ' +
+        'you every time." Then ask the questions below. Together they are the one ' +
+        'confirmation: after it, do not ask again about a listed download, install, ' +
+        'switch, config path, optional section or extra.',
+    );
+    expect(text).toContain(
+      'With a multiple-choice question tool (Claude Code: `AskUserQuestion`, at most four ' +
+        'questions per call and four choices per question), ask questions 1-4 in one call ' +
+        'and 5-7 in a second call straight after it. Without such a tool, ask the same ' +
+        'questions in one text message, in the same order and with the same wording. ' +
+        '"No, change nothing" means stop without changing files, installing software, or ' +
+        'downloading models.',
     );
   });
 
-  it('offers the five optional items in the one Step 0 question', () => {
+  // Step 0 question 6 is the only place the user can say yes to an extra, so
+  // the offers have to be in that one question: an agent that cannot ask a
+  // second question would otherwise set up only what the user happened to name
+  // in their first message.
+  it('offers the four extras in the Step 0 question', () => {
     const text = doc.replace(/\s+/gu, ' ');
     expect(text).toContain(
-      'Proceed with this setup plan? Answer yes/no, name the default model, and ' +
-        'yes/no for each optional item.',
+      '1. **Plan** (one choice): "Proceed with this setup plan?" with "Yes, proceed" and ' +
+        '"No, change nothing".',
     );
     expect(text).toContain(
-      'Telegram: control Forge from your phone over Telegram (needs your own bot ' +
-        'from @BotFather; a second computer needs its own bot).',
-    );
-    expect(text).toContain(
-      "Other computer: use models from another computer of yours, or share this one's (Tailscale).",
-    );
-    expect(text).toContain(
-      'Daily chat retitle: rename idle chats each morning to titles that say what they were about.',
+      '6. **Extras** (multi-select): "Set up any of these now?" - **Web search**: ' +
+        'DuckDuckGo, no key, no account. - **Telegram**: chat with Forge from your phone. ' +
+        'Needs your own bot from @BotFather; pairing code required. - **Other computer**: ' +
+        "use models from another computer of yours, or share this one's (Tailscale). - " +
+        '**Daily chat retitle**: rename idle chats each morning to say what they were ' +
+        'about.',
     );
     // Web search was never offered, so a fresh install had none (laptop run 3,
     // 0.17.192), though DuckDuckGo needs no key.
-    expect(text).toContain(
-      'Web search: let Forge search the web through DuckDuckGo (no key, no account).',
-    );
+    expect(text).toContain('- **Web search**: DuckDuckGo, no key, no account.');
     expect(text).toContain(
       'Run this section only when the user\'s setup request names web search or the ' +
         'user said yes to "Web search" in Step 0. Add this block to the config and set ' +
@@ -105,9 +110,10 @@ describe('AI_SETUP.md', () => {
         '`net: { search: true, … }` line to add to `policy.yaml` themselves, then have ' +
         'them run **Developer: Reload Window**.',
     );
+    // The switch that replaced the old "User files" optional item.
     expect(text).toContain(
-      "User files: put Forge's agent note in your own `~/.claude/CLAUDE.md` and " +
-        '`~/.codex/AGENTS.md` too, so Claude Code and Codex reach Forge from any folder.',
+      "- **Global note**: Add Forge's note to your global CLAUDE.md / AGENTS.md so your " +
+        'agents can reach Forge from any folder.',
     );
     expect(text).toContain(
       'tell the user to run **Forge: Add Agent Note to My User Files** ' +
@@ -117,8 +123,8 @@ describe('AI_SETUP.md', () => {
       'a missing `CLAUDE.md` is created holding only that import line',
     );
     expect(text).toContain(
-      'Git identity, only when the survey found `user.name` or `user.email` empty: ' +
-        'the name and email to put on your commits (leave it blank to skip).',
+      '7. **Git name and email** (one choice): "Name and email for your commits?" with ' +
+        '"Skip" and "Set it now (type `Name <email>` in Other)".',
     );
   });
 
@@ -228,17 +234,19 @@ describe('AI_SETUP.md', () => {
     expect(text).not.toContain('Send this to the chat Step 7 opened');
   });
 
-  // The starter config turns both switches on, so "stays off until they turn it
-  // on" told the user to go looking for a setting that was already on.
+  // The control server is the only switch the starter turns on; the browser and
+  // desktop tools follow the user's Step 0 picks, so Finish has to say which
+  // ones are on rather than promise they all were.
   it('tells the truth about the browser and desktop tools in Finish', () => {
     const text = doc.replace(/\s+/gu, ' ');
     expect(text).toContain(
-      'The browser tool and desktop control start on (each new website is approved once ' +
-        "per session, and VS Code's own window stays off limits); set " +
-        '`permissions.browser.enabled` or `permissions.desktop.enabled` to `false` to ' +
-        'turn either off.',
+      'The browser tool and desktop control are on only if the user picked them in Step 0 ' +
+        "(each new website is approved once per session, and VS Code's own window stays " +
+        'off limits); `permissions.browser.enabled` and `permissions.desktop.enabled` ' +
+        'change either.',
     );
     expect(text).not.toContain('browser tool stays off');
+    expect(text).not.toContain('desktop control start on');
   });
 
   it('gates each optional step on the Step 0 answer and keeps the agent out of the user\u2019s network', () => {
