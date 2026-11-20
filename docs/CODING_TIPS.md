@@ -18,7 +18,6 @@
 5. editing `src/` while `npm run ci` runs → its `build` step bundles the half-edited tree: `No matching export in "src/util/powershellScratchDir.ts" for import "powershellScratchEnv"` and `ci exit: 1` on a tree that is fine. finish the edits, then run the gate
 6. `npm run type-check` in a shared tree → dies on the other lane's half-edited file (`undeliveredTells.ts(77,30): error TS6133`) and its chained `&&` skips the webview pass. grep the log for your own paths, then run `npx tsc -p webview-ui/tsconfig.json --noEmit` yourself
 7. `test/unit/ToolSchemaBudget.test.ts` red mid-run (`expected 68161 to be 68029`) → another lane's tool-description edit landed while my `npm run ci` was reading the schema, so that number is theirs: rerun the file alone, green, and report it as theirs
-8. `tail -5 a.log b.log` in Git Bash → `tail: option used in invalid context -- 5`: the old `-N` form takes one file only. write `tail -n 5`
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green and the tree stood still: never run `record-ci-pass.mjs` by hand — the `ci:steps` chain writes it
@@ -54,6 +53,7 @@
 ## PATHS
 1. `zipfile.ZipFile('test/fixtures/sample.xlsx')` in a scan → FileNotFoundError: that is not where the fixture lives. read the test's `fixture()` helper for the real path first
 2. `wc -l test/unit/BusContent.test.ts` → no such file: busContent's tests live in `test/unit/AgentBus.test.ts`. `ls test/unit | grep -i <topic>` before naming a test file
+3. `git rev-parse --show-toplevel` + `path.relative` to build a `.git/info/exclude` pattern → `os.tmpdir()` hands back the 8.3 short form (`EFSOOF~1`), git answers the long one, so the pattern is `../../..`. ask git: `rev-parse --show-prefix`
 
 ## FORENSICS
 1. a Canon print job parked in `Printing`, `PrinterStatus 4` → it waits in Canon IJ Preview (Start Printing); `Get-PrintJob` is not installed here: use `Get-CimInstance Win32_PrintJob` / `Win32_Printer`
