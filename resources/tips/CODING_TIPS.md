@@ -57,7 +57,7 @@
 7. a one-line method `{ return x; }` written to fit a line cap → prettier expands it into three lines. keep it one line as an arrow property: `undo = (): Promise<string[]> => this.actions.undo();`
 8. a maybe-undefined value passed into an optional interface field → TS2379 with `exactOptionalPropertyTypes`. declare the field `?: T | undefined`, not just `?: T`
 9. `old_str` for a line inside a template literal, typed with bare backticks → refused: not found. the file has them escaped: `\``. copy the physical line from the newest read, escapes and all
-9. `sed -i 'A,Bd'` with B on a block's closing brace → the blank line after the block stays, so its neighbours end up two blank lines apart. delete through B+1, or re-read the seam after the delete
+10. `sed -i 'A,Bd'` with B on a block's closing brace → the blank line after the block stays, so its neighbours end up two blank lines apart. delete through B+1, or re-read the seam after the delete
 
 ## TEST
 1. a harness that only emits calls, or a threshold measured by a script whose pair list differs from the gate's → the number certifies neither. dispatch the calls; measure with the gate's own list
