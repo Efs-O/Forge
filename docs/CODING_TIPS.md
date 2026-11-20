@@ -22,6 +22,7 @@
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green and the tree stood still: never run `record-ci-pass.mjs` by hand — the `ci:steps` chain writes it
 2. `git add AI SETUP.md` or `read_file "AI SETUP.md"` → `fatal: pathspec 'AI' did not match any files` / `nothing exists there`: the underscore I typed arrived as a space. the file is `AI_SETUP.md`
 3. `git status` showing `M docs/CODING_TIPS.md` after a tips edit → it is tracked (re-admitted in .gitignore), not a local file: only docs/plans and docs/reports are untracked. Name it in the report or it rides along uncommitted
+4. another lane has package.json dirty and you edit the same file → their `git commit -- package.json` commits the worktree copy, so your line lands in THEIR commit (f994b9d4). Check `git status` before editing a shared manifest, or land yours first
 
 ## EDIT
 1. a rename lengthens an identifier, a call takes several arguments on one line, or I hand-split a `.then()` chain → the `prettier/prettier` gate fails at `.prettierrc` printWidth 100. fix: `npx prettier --write <src file>` before the gate
