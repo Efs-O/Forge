@@ -15,7 +15,7 @@ import {
   makeLlamaCppStarterConfig,
   makeOllamaStarterConfig,
 } from '../../src/config/StarterConfig';
-import { STARTER_OFF_KEYS, TRUST_SWITCHES } from '../../src/config/trustSwitches';
+import { STARTER_OFF_KEYS, TRUST_SWITCHES, applyTrustPicks, wizardSwitchQuestions } from '../../src/config/trustSwitches';
 
 const root = path.resolve(__dirname, '..', '..');
 
@@ -30,29 +30,29 @@ const readKey = (config: unknown, dotted: string): unknown =>
 
 const STARTER_FILES = ['llama-cpp.yaml', 'ollama.yaml', 'openai-compatible.yaml'];
 
-const wizardConfigs = (): [string, ForgeConfig][] => [
-  [
-    'StarterConfig.ts llama.cpp',
-    makeLlamaCppStarterConfig(
-      [
-        {
-          ggufPath: 'C:/models/a.gguf',
-          modelName: 'a',
-          suggestion: {
-            family: 'unknown',
-            suggestedName: 'a',
-            numCtx: 16384,
-            nBatch: 512,
-            flashAttn: true,
-            temperature: 0.7,
-            topP: 0.9,
-            topK: 40,
-          },
+const llamaCppStarter = (): ForgeConfig =>
+  makeLlamaCppStarterConfig(
+    [
+      {
+        ggufPath: 'C:/models/a.gguf',
+        modelName: 'a',
+        suggestion: {
+          family: 'unknown',
+          suggestedName: 'a',
+          numCtx: 16384,
+          nBatch: 512,
+          flashAttn: true,
+          temperature: 0.7,
+          topP: 0.9,
+          topK: 40,
         },
-      ],
-      'llama-server',
-    ),
-  ],
+      },
+    ],
+    'llama-server',
+  );
+
+const wizardConfigs = (): [string, ForgeConfig][] => [
+  ['StarterConfig.ts llama.cpp', llamaCppStarter()],
   ['StarterConfig.ts ollama', makeOllamaStarterConfig('http://127.0.0.1:11434', ['m'])],
 ];
 
@@ -203,5 +203,66 @@ describe('an existing config keeps the switches its owner turned on', () => {
     });
     expect(parsed.permissions?.browser?.enabled).toBe(true);
     expect(parsed.agent_bus?.enabled).toBe(true);
+  });
+});
+
+// The fallback wizard (`src/sidebar/FirstRunWizard.ts`) asks these questions
+// itself now that every switch ships off, so its question list and its write
+// are pinned here beside the table they come from.
+describe('the wizard asks the switches it can write', () => {
+  it('asks no coding-agent question when no coding agent was found', () => {
+    expect(wizardSwitchQuestions({ claude: false, codex: false }).map((q) => q.question)).toEqual(
+      [4, 5],
+    );
+  });
+
+  it('with a coding agent: only the Q3 switches a config can hold, all of the rest', () => {
+    const questions = wizardSwitchQuestions({ claude: true, codex: false });
+    expect(questions.map((q) => q.question)).toEqual([3, 4, 5]);
+    expect(questions.map((q) => q.title)).toEqual([
+      'What may Claude Code and Codex do with Forge?',
+      'What may Forge control on this PC?',
+      'Which file actions may Forge take in your workspace?',
+    ]);
+    expect(questions[0].switches.map((switch_) => switch_.label)).toEqual([
+      'Talk to Forge',
+      'Hand tasks over',
+    ]);
+    expect(questions[1].switches.map((switch_) => switch_.label)).toEqual([
+      'Browser',
+      'Desktop',
+      'Scheduled jobs',
+      'Jobs may run Claude Code / Codex',
+    ]);
+    expect(questions[2].switches.map((switch_) => switch_.label)).toEqual([
+      'Delete files',
+      'Git commit',
+    ]);
+  });
+});
+
+describe('applyTrustPicks', () => {
+  it('turns on every key of the picked switches and nothing else', () => {
+    const config = llamaCppStarter();
+    const before = structuredClone(config);
+    const picked = applyTrustPicks(config, ['browser', 'jobsCliAgents']);
+    const turnedOn = [
+      'permissions.browser.enabled',
+      'jobs.enabled',
+      'jobs.allow_cli_agents',
+    ];
+    for (const key of turnedOn) expect(readKey(picked, key), key).toBe(true);
+    for (const key of STARTER_OFF_KEYS) {
+      if (turnedOn.includes(key)) continue;
+      expect(readKey(picked, key), key).toBe(false);
+    }
+    // The input is untouched: a caller can still read what it passed in.
+    expect(config).toEqual(before);
+  });
+
+  it('refuses an id the table does not hold, instead of dropping the pick', () => {
+    expect(() => applyTrustPicks(llamaCppStarter(), ['nope'])).toThrow(
+      'unknown trust switch: nope',
+    );
   });
 });

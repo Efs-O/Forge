@@ -91,7 +91,10 @@ async function defaultWhich(
  */
 export async function resolveCliExecutable(
   cli: string,
-  cliName: CliAgentName,
+  /** Names the caller in the "not found at configured path" message. Only the
+   *  absolute-path branch reads it, so a PATH lookup for a non-agent binary
+   *  (`llama-server`, from the first-run wizard) can pass its own name. */
+  cliName: CliAgentName | 'llama-server',
   deps: ResolveCliExecutableDeps = {},
 ): Promise<string> {
   const exists = deps.exists ?? fs.existsSync;

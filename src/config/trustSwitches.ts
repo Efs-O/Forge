@@ -14,11 +14,15 @@
  * they are not config keys — they write `~/.claude/settings.json` and
  * `~/.claude/CLAUDE.md`.
  *
- * `test/unit/TrustSwitches.test.ts` pins this table whole, checks every key in
+ * `wizardSwitchQuestions` and `applyTrustPicks` are the same questions for the
+ * fallback wizard (`src/sidebar/FirstRunWizard.ts`, for a user with no coding
+ * agent): the same wording, the same keys, minus the switches no config file
+ * can hold. `test/unit/TrustSwitches.test.ts` pins this table whole, checks every key in
  * `STARTER_OFF_KEYS` really is false in every starter, and checks each
  * `- **label**: description` line appears verbatim in `AI_SETUP.md`, so the
  * guide and the data cannot drift apart.
  */
+import type { ForgeConfig } from './types';
 
 export type TrustSwitch = {
   id: string;
@@ -118,3 +122,72 @@ export const STARTER_OFF_KEYS: readonly string[] = [
     'remote.enabled',
   ]),
 ];
+
+/** The Step 0 heading for each question, so the wizard asks in the setup
+ *  agent's words instead of writing its own. */
+const QUESTION_TITLES: Record<TrustSwitch['question'], string> = {
+  3: 'What may Claude Code and Codex do with Forge?',
+  4: 'What may Forge control on this PC?',
+  5: 'Which file actions may Forge take in your workspace?',
+};
+
+/**
+ * The switches the fallback wizard can turn on itself: those with config keys.
+ * Q3's coding-agent switches are offered only when a coding agent was found.
+ * `crossSessionInbound` and `globalNote` are missing on purpose — they write
+ * `~/.claude/settings.json` and `~/.claude/CLAUDE.md`, which only the setup
+ * agent does. A question left with nothing to offer is left out entirely.
+ */
+export function wizardSwitchQuestions(found: {
+  claude: boolean;
+  codex: boolean;
+}): Array<{ question: TrustSwitch['question']; title: string; switches: TrustSwitch[] }> {
+  const asked: TrustSwitch['question'][] = found.claude || found.codex ? [3, 4, 5] : [4, 5];
+  const questions: Array<{
+    question: TrustSwitch['question'];
+    title: string;
+    switches: TrustSwitch[];
+  }> = [];
+  for (const question of asked) {
+    const switches = TRUST_SWITCHES.filter(
+      (switch_) => switch_.question === question && switch_.configKeys.length > 0,
+    );
+    if (switches.length > 0)
+      questions.push({ question, title: QUESTION_TITLES[question], switches });
+  }
+  return questions;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** Copy of `node` with `keys` set `true`: every object on the path is copied,
+ *  every object off it is shared with the input, and a missing intermediate
+ *  becomes `{}`. The input is never touched. */
+function withKeyTrue(
+  node: Record<string, unknown>,
+  keys: readonly string[],
+): Record<string, unknown> {
+  const [first, ...rest] = keys;
+  if (first === undefined) return node;
+  if (rest.length === 0) return { ...node, [first]: true };
+  const child = node[first];
+  return { ...node, [first]: withKeyTrue(isRecord(child) ? child : {}, rest) };
+}
+
+/**
+ * Turn on every config key of the picked switches; nothing else changes. The
+ * input config is not mutated: each object the result changes is a copy, so a
+ * caller can still read the config it passed in. An id the table does not hold
+ * is refused rather than ignored — a silently dropped pick is a switch the
+ * user asked for and never got.
+ */
+export function applyTrustPicks(config: ForgeConfig, pickedIds: readonly string[]): ForgeConfig {
+  let next = { ...config } as unknown as Record<string, unknown>;
+  for (const id of pickedIds) {
+    const switch_ = TRUST_SWITCHES.find((entry) => entry.id === id);
+    if (!switch_) throw new Error(`unknown trust switch: ${id}`);
+    for (const key of switch_.configKeys) next = withKeyTrue(next, key.split('.'));
+  }
+  return next as unknown as ForgeConfig;
+}
