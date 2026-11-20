@@ -95,9 +95,10 @@ export function enterSetupMode(
       SidebarProvider.viewId,
       new SetupPlaceholderProvider(agent),
     ),
+    // The wizard offers the reload itself, after its setup check: reloading here
+    // too would fire after "Open config" or a dismissed warning as well.
     vscode.commands.registerCommand('forge.setupWizard', async () => {
-      const done = await runFirstRunWizard(context);
-      if (done) void vscode.commands.executeCommand('workbench.action.reloadWindow');
+      await runFirstRunWizard(context);
     }),
   );
   void agent.then(async (found) => {
