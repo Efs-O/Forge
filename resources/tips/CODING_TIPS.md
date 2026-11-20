@@ -76,10 +76,12 @@
 15. a python heredoc writing a file that holds `'\n'` escapes → Python turns them into real newlines (vitest: `PARSE_ERROR`). write the escape as `chr(92)+"n"`, or use the edit tool
 16. a "the stale read must not publish" test asserting a snapshot count → fails on macOS: `fs.watch` reports the fixture's own writes. make the stale result distinguishable (`[]`) and assert none is it
 17. a fake that picks "the first call is the slow one" after `await super.x()` → two concurrent calls race to that check and the wrong one goes slow. read and clear the flag before the first await
+18. a function with a default parameter, tested for "no value" by calling it with an explicit `undefined` → the default takes it, so the test proves nothing. omit the argument, or pass a value that means none
 
 ## PATHS
 1. `~/.forge/sessions/<short-id>.jsonl` → no such file: logs carry the full 8-4-4-4-12 chat id. resolve a short id with a prefix glob
 2. comparing a resolved path with a root in a test on Windows → `fs.realpathSync` keeps the 8.3 short form (`ABCDEF~1`), `fs/promises` `realpath` expands it. use one resolver for both
+3. `fs.realpathSync.native` on a path that was deleted after it was read → throws ENOENT rather than handing the path back. catch it and carry on with the path as it came in
 
 ## FORENSICS
 1. pairing calls with results → pair the `tool_calls` row with the `tool` rows that follow it, positionally; the rendered chat hides tool failures entirely
@@ -94,6 +96,7 @@
 10. a tool-result string quoted from a staging file → it is the build that run used, not the current one. read the source before filing it as a live defect
 11. `gh run view <number>` → HTTP 404: view wants the `databaseId` from `gh run list --json databaseId`; `elapsed`/`title` are not fields — duration is startedAt minus createdAt
 12. a session-log call with arguments `{}` whose result says "was cut off after 47 bytes of arguments" → Forge logs `{}` in place of cut-off arguments. read the byte count, not the arguments
+13. a `gh run list` run seconds after `git push` → only the older runs: the new one registers 20-40 s later. wait, then pick it with `--json headSha`, never from the top row
 
 ## FORGE_TOOLS
 1. `read_file` · a guessed `end_line` → refused: start_line is past end_line. read whole, or take the range from a search hit, never from memory
