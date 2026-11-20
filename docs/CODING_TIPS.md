@@ -49,6 +49,7 @@
 15. any text inside a tool schema (a provider name in `test/unit/ToolSchemaBudget.test.ts`'s own fixture) → that file goes red at `expected 68164 to be 68161`: set `MEASURED_CHARS` to the number the failure prints
 16. a yaml placeholder in an `AI_SETUP.md` block, e.g. `voice_en: <voice file name without .onnx>` → `AiSetupDoc.test.ts` red: a `# partial:` block is parsed against that key's own schema and `voice_en` is `^[A-Za-z0-9_-]+$`. write a real value (`en_US-amy-medium`) and put the note in a `#` comment
 17. a config.yaml + policy.yaml fixture pair for a writer test → `test/unit/ConfigWriter.test.ts` has none. copy `pair()` from `test/unit/PolicyLoader.test.ts:35` and pass `{ policyPath }` so the real `~/.forge` is never read
+18. a settings read added to the model-turn path → `AgentLoop.test.ts` and `VisionHistoryStrip.test.ts` go red with `sent` empty: their `vi.mock('vscode')` factory has no `workspace`, so the throw is swallowed. guard the read to fail closed
 
 ## PATHS
 1. `zipfile.ZipFile('test/fixtures/sample.xlsx')` in a scan → FileNotFoundError: that is not where the fixture lives. read the test's `fixture()` helper for the real path first
