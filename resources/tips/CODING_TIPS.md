@@ -58,6 +58,7 @@
 8. a maybe-undefined value passed into an optional interface field → TS2379 with `exactOptionalPropertyTypes`. declare the field `?: T | undefined`, not just `?: T`
 9. `old_str` for a line inside a template literal, typed with bare backticks → refused: not found. the file has them escaped: `\``. copy the physical line from the newest read, escapes and all
 10. `sed -i 'A,Bd'` with B on a block's closing brace → the blank line after the block stays, so its neighbours end up two blank lines apart. delete through B+1, or re-read the seam after the delete
+11. an `old_str` that ends in a trailing comma and a `new_str` that does not → the object or array literal loses its separator and the file stops compiling. end both on the same character
 
 ## TEST
 1. a harness that only emits calls, or a threshold measured by a script whose pair list differs from the gate's → the number certifies neither. dispatch the calls; measure with the gate's own list
@@ -109,7 +110,7 @@
 6. `code_intel` · first call of a session → `No symbol provider answered ... may still be starting`: the file has symbols. retry once; do not fall back to whole-file reads
 7. `grep_search` · a query holding a newline or `\n` → refused before the search: a regex cannot span lines. match one line, or list the alternatives without the newline
 8. `grep_search` · `path`, `glob` or `output_mode` → refused as unknown arguments. it takes `include` (a folder or glob goes inside it) and `output`
-9. `grep_search` · query `constructor(` → `rg: regex parse error: ... unclosed group`: the query is ripgrep regex. escape every paren (`constructor\(\)`) or set `literal: true`
+9. `grep_search` · query `constructor(` → `rg: regex parse error: ... unclosed group`; a balanced `(a, b)` is a valid group and silently finds nothing. the query is ripgrep regex: escape every paren or set `literal: true`
 10. `find_files` · `path:` or an absolute, `~` or `..` pattern → refused, or opens nothing outside the workspace. put the folder in the pattern: `{"pattern":"src/**/*.ts"}`; outside it, `list_directory` the absolute path
 11. `shell` · `cd "<dir>" && …`, or `cwd` inside `~/.forge/sessions` → refused: writes are judged from the start folder. pass `cwd:` and the command alone; scan sessions from the workspace
 12. `shell` · `wc`/`sed`/`grep -o` in a `shell: pwsh` call → "The term 'wc' is not recognized"; `2>/dev/null` → `Out-File: Could not find a part of the path`. rerun with `shell: "bash"`, or write `2>$null`
