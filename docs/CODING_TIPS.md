@@ -8,6 +8,7 @@
 1. `rg -n x .` → `dist/`, `coverage/`, `docs/reports/**` and one-line `test/fixtures/*.json` drown the answer. exclude them: `rg -n x --glob '!dist/**' --glob '!coverage/**' --glob '!docs/reports/**'`
 2. `grep_search` query `toolName:` over `test/**/*.ts` → 30 files of unrelated AppMessage fixtures bury the answer. "does any test pin this text?" greps the exact phrase the code emits
 3. `grep_search` `include:"eslint.config.*"` → no matches: this repo's ESLint config is the dotfile `.eslintrc.json` (prettier: `.prettierrc`). glob the dotfile's real name
+4. `grep_search` for a phrase copied from a lane brief → hits the brief itself in `.forge/tmp/lanes/*.md` plus all of `coverage/`. anchor it: `include: "src/**"`
 
 ## RUN
 1. `npx eslint test/unit/x.test.ts` → "none of those TSConfigs include this file": the lint script is `eslint src webview-ui`, so tests have no typed-lint config. lint `src` only
