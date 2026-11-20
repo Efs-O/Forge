@@ -3,6 +3,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { ToolPermission, ToolRegistry, RegisteredTool } from './ToolRegistry';
 import type { McpServerConfig } from '../config/types';
+import type { ToolApprovalMetadata } from './toolContract';
+import { hasConversationReadSecret, secretReadCardReason } from './exfilTaint';
 import { DEFAULT_MAX_RESULT_CHARS, capResultText } from './resultCap';
 import { lazyGroupForServer, recordLazyGroupTool } from './lazyToolGroups';
 import { forgeMcpToolName, mcpSchemaGaps, type McpToolName } from './mcpProviderContract';
@@ -44,7 +46,9 @@ export function extractTextContent(content: McpCallToolResult['content']): strin
  * told and what the registry dispatches, while `callTool` receives the name the
  * server itself used. `tool_permissions` is keyed by the server's own name,
  * because that is the name the user writes in their config; the advertised name
- * is accepted too, so a mapping never silently drops a permission.
+ * is accepted too, so a mapping never silently drops a permission. A tool that
+ * is not listed there asks before each call, and any MCP call in a chat that has
+ * read a secret asks the owner, as `web_fetch` does.
  */
 export function mcpToolToRegisteredTool(
   serverName: string,
@@ -54,6 +58,7 @@ export function mcpToolToRegisteredTool(
   toolPermissions: Record<string, ToolPermission> = {},
   maxResultChars: number = DEFAULT_MAX_RESULT_CHARS,
 ): RegisteredTool {
+  const listed = toolPermissions[name.external] ?? toolPermissions[name.advertised];
   return {
     definition: {
       type: 'function',
@@ -63,7 +68,7 @@ export function mcpToolToRegisteredTool(
         parameters: (tool.inputSchema ?? {}) as Record<string, unknown>,
       },
     },
-    permission: toolPermissions[name.external] ?? toolPermissions[name.advertised] ?? 'read',
+    permission: listed ?? 'read',
     /** Every MCP server is a program Forge did not write, and its reply is its
      *  own text — often fetched from the internet by that program — so a bridged
      *  tool's result counts as outside content whatever its name is. Declared
@@ -71,6 +76,10 @@ export function mcpToolToRegisteredTool(
      *  and cannot be spelled in advance (`exfilTaint.ts` derives the flag from the
      *  transcript through this same declaration). */
     untrustedResult: true,
+    /** Whether this call has to ask, decided by `mcpApprovalFor` below: a tool the
+     *  user never listed, or any call in a chat that has read a secret. */
+    approval: (_args, context) =>
+      mcpApprovalFor(serverName, name, listed !== undefined, context?.conversationId),
     handler: async (args) => {
       const result = await callTool(args);
       const text = extractTextContent(result.content);
@@ -82,6 +91,55 @@ export function mcpToolToRegisteredTool(
       return capResultText(text, maxResultChars);
     },
   };
+}
+
+/**
+ * The card one MCP call must ask for, in the same order `web_fetch` uses
+ * (`fetchHostApprovals.ts`): the secret read first, then the rule the user's
+ * config did not already cover.
+ *
+ * An MCP server is a program Forge did not write, and it may send what it is
+ * given anywhere — so a tool the user never named in `tool_permissions` no
+ * longer runs on the read tier alone, it asks. It carries no `approvalKey` of
+ * its own: `approvalKeysFor` step 4 gives a non-dangerous, kindless tool gate the
+ * key `tool:<advertised name>`, so "Allow for this chat" answers it, Clanker may
+ * answer it, and an unattended job refuses it until the owner lists that key.
+ *
+ * A chat that has read a secret pays the owner-only card whatever the tool is,
+ * listed or not, and deliberately gets no key: `approvalKeysFor` step 4 fails a
+ * dangerous gate with no key closed to the owner every time, and
+ * `approvalCallOptions.ts` turns `secretReadTaint` into the Clanker stop that
+ * keeps an automated run from answering a secret read on the owner's behalf.
+ */
+export function mcpApprovalFor(
+  serverName: string,
+  name: McpToolName,
+  listed: boolean,
+  conversationId: string | undefined,
+): ToolApprovalMetadata | undefined {
+  const detail = `MCP server "${serverName}", tool "${name.external}"`;
+  if (hasConversationReadSecret(conversationId)) {
+    return {
+      detail,
+      dangerous: true,
+      cardReason: secretReadCardReason(conversationId),
+      declineHint:
+        'tell the owner what you need from this MCP tool; a secret read taints the whole chat',
+      gateKind: 'taintGate',
+      secretReadTaint: true,
+      reachesOut: 'network',
+    };
+  }
+  if (!listed) {
+    return {
+      detail,
+      cardReason: `"${name.external}" is not listed under this server's tool_permissions, so it asks before each call`,
+      declineHint: `ask the owner to list "${name.external}" under tool_permissions for MCP server "${serverName}" in config.yaml`,
+    };
+  }
+  // Listed and nothing tainted in this chat: the permission tier decides, exactly
+  // as it did before this gate existed.
+  return undefined;
 }
 
 /**

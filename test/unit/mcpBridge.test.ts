@@ -1,13 +1,20 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { resolve } from 'node:path';
 import { ForgeConfigSchema } from '../../src/config/schema';
 import {
   connectMcpServers,
   extractTextContent,
+  mcpApprovalFor,
   mcpToolToRegisteredTool,
 } from '../../src/tools/mcpBridge';
 import { ToolRegistry } from '../../src/tools/ToolRegistry';
 import type { McpToolName } from '../../src/tools/mcpProviderContract';
+import {
+  clearConversationExfilState,
+  markConversationReadSecret,
+  markConversationReadUntrusted,
+  secretReadCardReason,
+} from '../../src/tools/exfilTaint';
 
 /** The bridge's provider-facing pair for a name that needs no mapping. */
 function pair(name: string): McpToolName {
@@ -209,6 +216,89 @@ describe('mcpToolToRegisteredTool', () => {
     } finally {
       connection.dispose();
     }
+  });
+});
+
+describe('mcpApprovalFor', () => {
+  afterEach(() => {
+    clearConversationExfilState('c1');
+  });
+
+  /** The owner-only card a secret read puts on any MCP call, listed or not. */
+  const secretCard = (): Record<string, unknown> => ({
+    detail: 'MCP server "files", tool "delete_all"',
+    dangerous: true,
+    cardReason: secretReadCardReason('c1'),
+    declineHint: 'tell the owner what you need from this MCP tool; a secret read taints the whole chat',
+    gateKind: 'taintGate',
+    secretReadTaint: true,
+    reachesOut: 'network',
+  });
+
+  it('asks for an unlisted tool in a clean chat, with no key of its own', () => {
+    expect(mcpApprovalFor('files', pair('delete_all'), false, 'c1')).toEqual({
+      detail: 'MCP server "files", tool "delete_all"',
+      cardReason:
+        '"delete_all" is not listed under this server\'s tool_permissions, so it asks before each call',
+      declineHint:
+        'ask the owner to list "delete_all" under tool_permissions for MCP server "files" in config.yaml',
+    });
+  });
+
+  it('asks nothing of a listed tool in a clean chat', () => {
+    expect(mcpApprovalFor('files', pair('search'), true, 'c1')).toBeUndefined();
+  });
+
+  it('asks nothing of a listed tool in a chat that read web pages but no secret', () => {
+    markConversationReadUntrusted('c1');
+    expect(mcpApprovalFor('files', pair('search'), true, 'c1')).toBeUndefined();
+  });
+
+  it('asks the owner for a listed tool once this chat has read a secret', () => {
+    markConversationReadSecret('c1', '.env', 'cat .env');
+    expect(mcpApprovalFor('files', pair('delete_all'), true, 'c1')).toEqual(secretCard());
+  });
+
+  it('raises the secret card, not the unlisted one, when both apply', () => {
+    markConversationReadSecret('c1', '.env', 'cat .env');
+    expect(mcpApprovalFor('files', pair('delete_all'), false, 'c1')).toEqual(secretCard());
+  });
+
+  it('still asks an unlisted tool with no conversation to judge', () => {
+    expect(mcpApprovalFor('files', pair('delete_all'), false, undefined)).toEqual({
+      detail: 'MCP server "files", tool "delete_all"',
+      cardReason:
+        '"delete_all" is not listed under this server\'s tool_permissions, so it asks before each call',
+      declineHint:
+        'ask the owner to list "delete_all" under tool_permissions for MCP server "files" in config.yaml',
+    });
+  });
+
+  it('reads tool_permissions by the advertised name through a mapped name, and asks when that tool is unlisted', () => {
+    const mapped: McpToolName = { advertised: 'my_tool', external: 'my.tool', mapped: true };
+    const listed = mcpToolToRegisteredTool(
+      'files',
+      mapped,
+      { name: 'my.tool', inputSchema: {} },
+      async () => ({ content: [] }),
+      { my_tool: 'read' },
+    );
+    expect(listed.approval!({}, { conversationId: 'c1' })).toBeUndefined();
+
+    const unlisted = mcpToolToRegisteredTool(
+      'files',
+      mapped,
+      { name: 'my.tool', inputSchema: {} },
+      async () => ({ content: [] }),
+      {},
+    );
+    expect(unlisted.approval!({}, { conversationId: 'c1' })).toEqual({
+      detail: 'MCP server "files", tool "my.tool"',
+      cardReason:
+        '"my.tool" is not listed under this server\'s tool_permissions, so it asks before each call',
+      declineHint:
+        'ask the owner to list "my.tool" under tool_permissions for MCP server "files" in config.yaml',
+    });
   });
 });
 
