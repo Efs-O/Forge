@@ -35,8 +35,10 @@ Forge" there.
    to `config.yaml.bak` first, and keep its comments when editing — users
    record VRAM measurements in them.
 6. **Stay in scope.** Write the Forge config, the llama.cpp install folder,
-   `~/.claude/settings.json` only for the stated mesh setting, and `FORGE.md`
-   only when the workspace has none, and the global git `user.name` and
+   `~/.claude/settings.json` only for the stated mesh setting, VS Code's user
+   `settings.json` only for `forge.terminal.watchUserCommands` when the user
+   said yes in question 10, and `FORGE.md` only when the workspace has none,
+   and the global git `user.name` and
    `user.email` only with the values the user gave in Step 0. Forge writes the
    workspace agent note; leave `AGENTS.md` and `CLAUDE.md` alone and verify the
    marked section. Kill
@@ -85,6 +87,9 @@ Collect and show the user in a short table:
 - Is Tailscale installed? Check only that the `tailscale` command exists
   (`tailscale version`); do not run `tailscale status` and do not contact
   any other machine during the survey.
+- Does an existing Forge config list servers under `mcp_servers`? Note each
+  server's `name`, whether it has `eager: true`, and whether
+  `~/.forge/policy.yaml` exists. Read only; do not start a server.
 
 **Other computer, asked first.** When Tailscale is installed, ask one
 question before you choose the backend: "Use models from another of your
@@ -158,15 +163,16 @@ asking again.
 
 With a multiple-choice question tool (Claude Code: `AskUserQuestion`, at most
 four questions per call and four choices per question), ask questions 1-4 in
-one call, 5-8 in a second call straight after it, and 9 in a third call.
+one call, 5-8 in a second call straight after it, and 9-11 in a third call.
 Without such a tool, ask the same questions in one text message, in the same
 order and with the same wording. "No, change nothing" means stop without
 changing files, installing software, or downloading models. Offer "Run Forge's
 messages without asking" only when Claude Code uses bypass-permissions mode.
 Ask question 9 only when the survey found `user.name` or `user.email` empty.
-In questions 7 and 8, mark a feature (Recommended) when the survey found all
-of its files, and leave out a feature the Features table marks "not possible
-here".
+Ask question 11 only when the survey found servers under `mcp_servers` and no
+`~/.forge/policy.yaml`. In questions 7 and 8, mark a feature (Recommended) when
+the survey found all of its files, and leave out a feature the Features table
+marks "not possible here".
 
 1. **Plan** (one choice): "Proceed with this setup plan?" with "Yes, proceed"
    and "No, change nothing".
@@ -211,6 +217,16 @@ here".
    - **Chats may start chats**: A chat may open a new chat or interrupt a running one (`message_chat` new / steer).
 9. **Git name and email** (one choice): "Name and email for your commits?"
    with "Skip" and "Set it now (type `Name <email>` in Other)".
+10. **Your terminal** (one choice): "Should Forge's agent see the commands you
+    run in your own VS Code terminals, and their output? That text goes to the
+    model you chat with, which may be a cloud model." with "No, keep my
+    terminal private (Recommended)" and "Yes, let it see them".
+11. **MCP tools** (multi-select): "Which MCP servers do you trust to run their
+    tools without asking each time?" One choice per server the survey found
+    (its `name`), up to four; the user can type more names in Other. Each
+    choice's description: "Its tools run without a card, except in a chat
+    that has read a secret file." Picking none keeps every MCP tool asking
+    before each call.
 
 Each pick turns on exactly what Step 5 lists for it; a switch the user did not
 pick stays off. "Run Forge's messages without asking" and "Global note" need
@@ -354,6 +370,14 @@ those:
 - "Cloud models": Step 4.
 - "Chats may start chats": `permissions.chats.new_chat: true` and
   `permissions.chats.steer: true`.
+- "Yes, let it see them" (question 10): merge
+  `"forge.terminal.watchUserCommands": true` into VS Code's user
+  `settings.json` (Windows `%APPDATA%\Code\User\settings.json`, macOS
+  `~/Library/Application Support/Code/User/settings.json`, Linux
+  `~/.config/Code/User/settings.json`; `Code - Insiders` in place of `Code`
+  for VS Code Insiders), keeping its other settings and comments. "No"
+  changes nothing: the setting is off by default.
+- Each server picked in question 11: Step 7a.
 
 Leave every switch the user did not pick off.
 
@@ -524,6 +548,42 @@ the note works on its own, and explaining it would hide a broken note. After the
 reload any Forge window with
 `forge.sh reload <name> --to <conversationId>`; get the id from `who` or the
 chat opened by `say --new`.
+
+## Step 7a — Trusted MCP tools
+
+Skip this step when the user picked no server in question 11. Without the
+mesh (no "Talk to Forge"), skip it and say in **Finish** how to list the
+tools by hand.
+
+For each picked server without `eager: true`, ask a new Forge chat to load
+its tools and name them:
+`printf 'Run load_tool_group with group "<server name>" and reply with its result only.' | forge.sh say <name> --new`,
+then read the answer with `forge.sh view <name> --to <conversationId>`. It
+reads `<server name> tools enabled for this conversation: <tool>, <tool>.`
+followed by one more sentence. A server with `eager: true` has no group: skip
+it and name it in **Finish**.
+
+Write each named tool under that server's `tool_permissions` with the `read`
+tier, keeping every entry already there. For example, for a server named
+`files` whose answer named `search` and `read_page`:
+
+```yaml
+# partial: one mcp_servers entry only, not a whole config
+mcp_servers:
+  - name: files
+    command: C:/tools/files-mcp.exe
+    tool_permissions:
+      search: read
+      read_page: read
+```
+
+Then reload the Forge window with `forge.sh reload <name> --to <conversationId>`
+so the servers reconnect with the new list. A listed tool runs without a
+card; in a chat that has read a secret file, every MCP call still asks the
+owner.
+
+**Check:** after the reload, `GET /healthz` from Step 6 answers
+`{"ok":true}`.
 
 ## Step 8 — Optional: Telegram remote control
 
@@ -916,6 +976,8 @@ Report to the user:
   - Other computer — not requested or declined; name it to follow Step 12.
   - Daily chat retitle — not requested or declined; name it to follow Step 13.
   - Global note — not picked in Step 0; name it to follow Step 7.
+  - Terminal capture — not picked in question 10; set `forge.terminal.watchUserCommands` to `true` in VS Code's settings to turn it on.
+  - MCP tools — a server not picked in question 11, an `eager: true` server, or every server when the mesh is off: its unlisted tools ask before each call; list a tool under that server's `tool_permissions` (for example `search: read`) in `config.yaml`, or in `~/.forge/policy.yaml` once Step 14 has run, to let it run without asking.
 - any requested section skipped because a prerequisite was missing;
 - each remaining human action and why: plan confirmation, required login or
   secret entry (including Telegram authentication), Windows prompt, first

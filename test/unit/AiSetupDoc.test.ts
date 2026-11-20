@@ -47,8 +47,8 @@ describe('AI_SETUP.md', () => {
   // a fixed order and a fixed wording: an agent that cannot ask a second
   // question would otherwise set up only what the user happened to name in
   // their first message. A picker is easier to answer than a typed
-  // "yes, no, yes...", and three calls (1-4, 5-8, then 9 only when it applies)
-  // keep the tool's cap without dropping any of the nine.
+  // "yes, no, yes...", and three calls (1-4, 5-8, then 9-11)
+  // keep the tool's cap without dropping any of the eleven.
   it('asks the Step 0 questions with a picker when the harness has one', () => {
     const text = doc.replace(/\s+/gu, ' ');
     expect(text).toContain(
@@ -61,18 +61,55 @@ describe('AI_SETUP.md', () => {
     expect(text).toContain(
       'With a multiple-choice question tool (Claude Code: `AskUserQuestion`, at most four ' +
         'questions per call and four choices per question), ask questions 1-4 in one call, ' +
-        '5-8 in a second call straight after it, and 9 in a third call. Without such a ' +
+        '5-8 in a second call straight after it, and 9-11 in a third call. Without such a ' +
         'tool, ask the same questions in one text message, in the same order and with the ' +
         'same wording. "No, change nothing" means stop without changing files, installing ' +
         'software, or downloading models.',
     );
-    // The Git question is alone in a third call, and a feature whose files are
-    // all on disk gets the (Recommended) mark while an impossible one is cut.
+    // The Git question and the two new ones share a third call, and a feature
+    // whose files are all on disk gets the (Recommended) mark while an
+    // impossible one is cut.
     expect(text).toContain(
       'Ask question 9 only when the survey found `user.name` or `user.email` empty. ' +
-        'In questions 7 and 8, mark a feature (Recommended) when the survey found all of ' +
-        'its files, and leave out a feature the Features table marks "not possible here".',
+        'Ask question 11 only when the survey found servers under `mcp_servers` and no ' +
+        '`~/.forge/policy.yaml`. In questions 7 and 8, mark a feature (Recommended) when ' +
+        'the survey found all of its files, and leave out a feature the Features table ' +
+        'marks "not possible here".',
     );
+  });
+
+  // The code defaults are the safe ones: terminal capture is off, and an MCP
+  // tool missing from its server's `tool_permissions` asks before each call.
+  // So this setup is the only place a user turns either one on, and both
+  // questions plus what a yes writes are pinned here — including that the
+  // trusted-MCP step sits between Step 7 (which it needs) and Step 8.
+  it('asks about terminal capture and trusted MCP tools, and writes only what was picked', () => {
+    const text = doc.replace(/\s+/gu, ' ');
+    expect(text).toContain(
+      '10. **Your terminal** (one choice): "Should Forge\'s agent see the commands you run ' +
+        'in your own VS Code terminals, and their output? That text goes to the model you ' +
+        'chat with, which may be a cloud model." with "No, keep my terminal private ' +
+        '(Recommended)" and "Yes, let it see them".',
+    );
+    expect(text).toContain(
+      '11. **MCP tools** (multi-select): "Which MCP servers do you trust to run their tools ' +
+        'without asking each time?" One choice per server the survey found (its `name`), up ' +
+        'to four; the user can type more names in Other. Each choice\'s description: "Its ' +
+        'tools run without a card, except in a chat that has read a secret file." Picking ' +
+        'none keeps every MCP tool asking before each call.',
+    );
+    expect(text).toContain(
+      '- "Yes, let it see them" (question 10): merge ' +
+        '`"forge.terminal.watchUserCommands": true` into VS Code\'s user ' +
+        '`settings.json` (Windows `%APPDATA%\\Code\\User\\settings.json`, macOS ' +
+        '`~/Library/Application Support/Code/User/settings.json`, Linux ' +
+        '`~/.config/Code/User/settings.json`; `Code - Insiders` in place of `Code` ' +
+        'for VS Code Insiders), keeping its other settings and comments. "No" changes ' +
+        'nothing: the setting is off by default.',
+    );
+    expect(text).toContain('## Step 7a — Trusted MCP tools');
+    expect(text.indexOf('## Step 7a')).toBeGreaterThan(text.indexOf('## Step 7 '));
+    expect(text.indexOf('## Step 7a')).toBeLessThan(text.indexOf('## Step 8 '));
   });
 
   // Step 0 questions 6-8 are the only place the user can say yes to an extra,
