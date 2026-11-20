@@ -1,4 +1,5 @@
 import * as http from 'http';
+import { randomBytes } from 'crypto';
 import type * as vscode from 'vscode';
 import type { IBackendPool } from './BackendPool';
 import type { ForgeConfig } from '../config/types';
@@ -14,7 +15,15 @@ import { createControlStatsBuilder, type ControlStatsBuilder } from './controlSt
 import { perSlotContext } from '../util/contextBudget';
 import { sessionsDirectory } from '../sidebar/SessionLogger';
 // prettier-ignore
-import { sendJson, requireModel, readJson, handleChat, CHAT_BODY_BYTES } from './controlHttp';
+import {
+  sendJson,
+  requireModel,
+  readJson,
+  handleChat,
+  CHAT_BODY_BYTES,
+  bearerTokenMatches,
+} from './controlHttp';
+import { isJsonContentType, loopbackHostAllowed, originRefused } from './TailnetListener';
 import type { ChatProxyFn } from '../llm/ControlChatProxy';
 import { getLogger } from '../util/logger';
 import type { IControlServerRegistry } from './ControlServerRegistry';
@@ -35,6 +44,14 @@ const READINESS_TIMEOUT_MS = 60_000;
 const READINESS_INTERVAL_MS = 500;
 /** A model acquired within this window is never LRU-evicted to make room. */
 const EVICTION_GRACE_MS = 2_000;
+/** The six model routes that demand the control token (GET /healthz is open;
+ *  /agent/* carries its own per-window bearer, checked in agentRoutes.ts). */
+const MODEL_ROUTES = new Set(['/stats', '/models', '/ensure', '/release', '/unload', '/chat']);
+/** The subset of the model routes that take a JSON body on a POST. */
+const MODEL_POST_ROUTES = new Set(['/ensure', '/release', '/unload', '/chat']);
+/** The 401 a model route returns when the bearer token is absent or wrong. */
+const MISSING_TOKEN_ERROR =
+  'missing or stale token: read it from control-server.json (it changes when Forge restarts)';
 
 /** Injectable knobs — defaults are production values; tests override them. */
 export interface ControlServerDeps {
@@ -106,6 +123,9 @@ export class ControlServer implements vscode.Disposable {
   private readonly stats: ControlStatsBuilder;
   private readonly agentRoutes?: AgentRoutes;
   private listeningPort: number | undefined;
+  /** Bearer token this instance demands on the model routes and publishes in
+   *  the discovery record; a fresh random value per server instance. */
+  private readonly controlToken = randomBytes(32).toString('hex');
 
   constructor(
     private readonly pool: IBackendPool,
@@ -193,6 +213,7 @@ export class ControlServer implements vscode.Disposable {
             pid: process.pid,
             startedAt: new Date().toISOString(),
             version: this.version,
+            token: this.controlToken,
           });
         if (this.registry && !fallback)
           log.info(`[ControlServer] published discovery record for ${url}`);
@@ -261,12 +282,33 @@ export class ControlServer implements vscode.Disposable {
     };
   }
 
+  /** The bearer token this instance demands on the model routes and publishes
+   *  in the discovery record. Tests read it here; consumers read the record. */
+  get token(): string {
+    return this.controlToken;
+  }
+
   // ── request routing ─────────────────────────────────────────────────────────
 
   private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     try {
       const method = req.method ?? 'GET';
       const path = (req.url ?? '/').split('?')[0];
+
+      // Every route, /agent/* included: refuse a Host that is not this exact
+      // loopback listener (DNS rebinding), then a browser request — an Origin
+      // header, or a Sec-Fetch-Site that is present and not "none". A plain
+      // non-browser client (curl, forge.sh, another extension) sends neither.
+      if (!loopbackHostAllowed(req.headers.host, this.listeningPort ?? this.port)) {
+        return sendJson(res, 403, { error: 'forbidden host' });
+      }
+      const secFetchSite = req.headers['sec-fetch-site'];
+      if (
+        originRefused(req.headers.origin) ||
+        (secFetchSite !== undefined && secFetchSite !== 'none')
+      ) {
+        return sendJson(res, 403, { error: 'browser requests are refused' });
+      }
 
       if (path.startsWith('/agent/')) {
         if (!this.agentRoutes)
@@ -275,6 +317,23 @@ export class ControlServer implements vscode.Disposable {
       }
       if (method === 'GET' && path === '/healthz') {
         return sendJson(res, 200, { ok: true });
+      }
+      // The six model routes demand the control token.
+      if (
+        MODEL_ROUTES.has(path) &&
+        !bearerTokenMatches(req.headers.authorization, this.controlToken)
+      ) {
+        return sendJson(res, 401, { error: MISSING_TOKEN_ERROR });
+      }
+      // Model POSTs must be application/json — a forced CORS preflight a
+      // cross-origin page cannot complete. /agent/* is exempt: forge.sh posts
+      // text/plain and form-urlencoded and must keep working.
+      if (
+        method === 'POST' &&
+        MODEL_POST_ROUTES.has(path) &&
+        !isJsonContentType(req.headers['content-type'])
+      ) {
+        return sendJson(res, 415, { error: 'Content-Type must be application/json' });
       }
       if (method === 'GET' && path === '/stats') {
         return sendJson(res, 200, this.stats.build());

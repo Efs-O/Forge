@@ -64,6 +64,18 @@ export function hostAllowed(header: string | undefined): boolean {
   return net.isIP(withoutPort) !== 0;
 }
 
+/**
+ * Accept only this listener's own loopback Host at the exact port it is bound
+ * to. Stricter than `hostAllowed` (which any IP literal passes): a foreign name
+ * or a port that is not ours is refused, so a web page cannot read the control
+ * API through a DNS rebinding to `evil.example`. Case-insensitive on the host.
+ */
+export function loopbackHostAllowed(header: string | undefined, port: number): boolean {
+  if (!header) return false;
+  const host = header.toLowerCase();
+  return host === `127.0.0.1:${port}` || host === `localhost:${port}`;
+}
+
 export function originRefused(header: string | undefined): boolean {
   return header !== undefined;
 }

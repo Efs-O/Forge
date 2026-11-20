@@ -1,10 +1,9 @@
 import * as fs from 'fs';
 import type * as http from 'http';
 import * as path from 'path';
-import { timingSafeEqual } from 'crypto';
 import { MAX_INBOUND_CHARS, forgeInboundPrompt } from '../agentBus/busContent';
 import type { AgentInbox, InboxMessageOptions } from '../agentBus/agentInbox';
-import { sendJson, sendText } from './controlHttp';
+import { sendJson, sendText, bearerTokenMatches } from './controlHttp';
 import { formatWhoText } from './agentWhoText';
 import { handleAgentFileRoute } from './agentFileRoute';
 import { handleVerdictAck, handleVerdictRead } from './agentVerdictRoute';
@@ -493,8 +492,6 @@ export class AgentRoutes {
   }
 
   private authorized(header: string | undefined): boolean {
-    const given = Buffer.from((header ?? '').replace(/^Bearer\s+/i, ''));
-    const want = Buffer.from(this.token);
-    return given.length === want.length && timingSafeEqual(given, want);
+    return bearerTokenMatches(header, this.token);
   }
 }

@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'crypto';
 import type * as http from 'http';
 
 export function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
@@ -36,4 +37,15 @@ export function readJson(
     });
     req.on('error', reject);
   });
+}
+
+/**
+ * Constant-time compare an `Authorization: Bearer <token>` header against an
+ * expected token. Shared by the control server's model routes and the
+ * `/agent/*` routes (agentRoutes.ts) so the compare lives in exactly one place.
+ * A missing or malformed header never matches. */
+export function bearerTokenMatches(header: string | undefined, expected: string): boolean {
+  const given = Buffer.from((header ?? '').replace(/^Bearer\s+/i, ''));
+  const want = Buffer.from(expected);
+  return given.length === want.length && timingSafeEqual(given, want);
 }

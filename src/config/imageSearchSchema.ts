@@ -16,10 +16,10 @@ export const ImageSearchConfigSchema = z
     /** Matches per section returned to the model. The raw response is ~400 KB. */
     max_results: z.number().int().min(1).max(20).default(8),
     /**
-     * Ask before a LOCAL image (attachment) leaves the machine. Off by default;
+     * Ask before a LOCAL image (attachment) leaves the machine. On by default;
      * a public `image_url` search never asks, since nothing private is sent.
      */
-    confirm_upload: z.boolean().default(false),
+    confirm_upload: z.boolean().default(true),
     /**
      * Top match thumbnails saved under .forge/image-search, shown in the sidebar
      * tool row and sent as photos to a remote chat watching the turn. 0 = none.

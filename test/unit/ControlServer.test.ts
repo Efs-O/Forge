@@ -125,11 +125,16 @@ const testDeps = (over: ControlServerDeps = {}): ControlServerDeps => ({
   ...over,
 });
 
+let currentToken = '';
+
 async function waitReady(server: ControlServer): Promise<string> {
   for (let i = 0; i < 50; i++) {
     const base = `http://127.0.0.1:${server.status().port}`;
     try {
-      if ((await fetch(`${base}/healthz`)).ok) return base;
+      if ((await fetch(`${base}/healthz`)).ok) {
+        currentToken = server.token;
+        return base;
+      }
     } catch {
       /* not up yet */
     }
@@ -139,7 +144,14 @@ async function waitReady(server: ControlServer): Promise<string> {
 }
 
 const post = (base: string, model: string, route = 'ensure'): Promise<Response> =>
-  fetch(`${base}/${route}`, { method: 'POST', body: JSON.stringify({ model }) });
+  fetch(`${base}/${route}`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${currentToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ model }),
+  });
+
+const get = (base: string, path: string): Promise<Response> =>
+  fetch(`${base}/${path}`, { headers: { authorization: `Bearer ${currentToken}` } });
 
 describe('ControlServer', () => {
   let server: ControlServer | undefined;
@@ -291,7 +303,7 @@ describe('ControlServer', () => {
     server.start();
     base = await waitReady(server!);
 
-    const { models } = await (await fetch(`${base}/models`)).json();
+    const { models } = await (await get(base, 'models')).json();
     const a = models.find((m: { name: string }) => m.name === 'A');
     expect(a.profiles.sort()).toEqual(['main', 'worker']);
     expect(a.capabilities).toContain('vision');
@@ -446,7 +458,7 @@ describe('ControlServer', () => {
     server.start();
     base = await waitReady(server!);
 
-    const catalog = await (await fetch(`${base}/models`)).json();
+    const catalog = await (await get(base, 'models')).json();
     expect(catalog.contractVersion).toBe(1);
     expect(typeof catalog.catalogVersion).toBe('string');
     const { models } = catalog;
@@ -531,7 +543,7 @@ describe('ControlServer', () => {
     server.start();
     base = await waitReady(server!);
 
-    const catalog = await (await fetch(`${base}/models`)).json();
+    const catalog = await (await get(base, 'models')).json();
     expect(catalog.contractVersion).toBe(1);
     expect(catalog.catalogVersion).toMatch(/^[a-f0-9]{16}$/);
     const { models } = catalog;
@@ -562,7 +574,7 @@ describe('ControlServer', () => {
     server.start();
     base = await waitReady(server!);
 
-    const catalog = await (await fetch(`${base}/models`)).json();
+    const catalog = await (await get(base, 'models')).json();
     const byName = Object.fromEntries(catalog.models.map((m: { name: string }) => [m.name, m]));
     expect(byName['local-ollama']).toMatchObject({
       backend: 'ollama',
@@ -601,7 +613,7 @@ describe('ControlServer', () => {
     server.start();
     base = await waitReady(server!);
 
-    const catalog = await (await fetch(`${base}/models`)).json();
+    const catalog = await (await get(base, 'models')).json();
     const byName = Object.fromEntries(catalog.models.map((m: { name: string }) => [m.name, m]));
     expect(byName.codex).toMatchObject({
       backend: 'cli',
@@ -619,9 +631,9 @@ describe('ControlServer', () => {
     server.start();
     base = await waitReady(server!);
 
-    const initial = await (await fetch(`${base}/models`)).json();
+    const initial = await (await get(base, 'models')).json();
     expect((await post(base, 'A')).status).toBe(200);
-    const held = await (await fetch(`${base}/models`)).json();
+    const held = await (await get(base, 'models')).json();
     expect(held.catalogVersion).not.toBe(initial.catalogVersion);
     expect(held.models.find((m: { name: string }) => m.name === 'A')).toMatchObject({
       availability: 'ready',
@@ -635,7 +647,7 @@ describe('ControlServer', () => {
     });
 
     expect((await (await post(base, 'A', 'release')).json()).released).toBe(true);
-    const released = await (await fetch(`${base}/models`)).json();
+    const released = await (await get(base, 'models')).json();
     expect(released.catalogVersion).not.toBe(held.catalogVersion);
     expect(released.models.find((m: { name: string }) => m.name === 'B')).toMatchObject({
       availability: 'loadable',
@@ -654,7 +666,7 @@ describe('ControlServer', () => {
 
     const pending = post(base, 'A');
     await new Promise((resolve) => setTimeout(resolve, 20));
-    const catalog = await (await fetch(`${base}/models`)).json();
+    const catalog = await (await get(base, 'models')).json();
     expect(catalog.models.find((m: { name: string }) => m.name === 'A')).toMatchObject({
       availability: 'loading',
       action: 'wait',
@@ -671,7 +683,7 @@ describe('ControlServer', () => {
     server.start();
     base = await waitReady(server!);
 
-    const catalog = await (await fetch(`${base}/models`)).json();
+    const catalog = await (await get(base, 'models')).json();
     expect(catalog.models.find((m: { name: string }) => m.name === 'grok')).toMatchObject({
       route: 'chat',
       availability: 'ready',
@@ -737,14 +749,18 @@ describe('ControlServer', () => {
     base = await waitReady(server!);
 
     await post(base, 'A');
-    const { models } = await (await fetch(`${base}/models`)).json();
+    const { models } = await (await get(base, 'models')).json();
     const a = models.find((m: { name: string }) => m.name === 'A');
     expect(a.holds).toBe(1);
     expect(a.loaded).toBe(true);
   });
 
   const chat = (base: string, body: unknown): Promise<Response> =>
-    fetch(`${base}/chat`, { method: 'POST', body: JSON.stringify(body) });
+    fetch(`${base}/chat`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${currentToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
 
   it('POST /chat 501s when no chatProxy is wired', async () => {
     const port = await findFreeLoopbackPort();

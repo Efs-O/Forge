@@ -164,12 +164,12 @@ const messages = [
 ];
 
 describe('ImageSearchConfigSchema', () => {
-  it('fills the documented defaults: gate off, 8 results, 90 s', () => {
+  it('fills the documented defaults: gate on, 8 results, 90 s', () => {
     expect(config()).toEqual({
       provider: 'serpapi_lens',
       secret_key_name: 'serpapi',
       max_results: 8,
-      confirm_upload: false,
+      confirm_upload: true,
       thumbnails: 4,
       timeout_ms: 90_000,
     });
@@ -277,7 +277,8 @@ describe('image_search tool', () => {
   });
 
   it('gates only local uploads, and only when confirm_upload is on', () => {
-    expect(makeTool().tool.approval?.({})).toBeUndefined();
+    // confirm_upload now defaults on, so a local attachment is gated by default.
+    expect(makeTool().tool.approval?.({})).toMatchObject({ dangerous: false });
     const gated = makeTool({ cfg: config({ confirm_upload: true }) }).tool;
     expect(gated.approval?.({})).toMatchObject({ dangerous: false });
     expect(gated.approval?.({ image_url: 'https://example.com/a.jpg' })).toBeUndefined();

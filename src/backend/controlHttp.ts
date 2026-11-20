@@ -2,7 +2,7 @@ import type * as http from 'http';
 import type { ChatMessage, ToolDefinition } from '../llm/types';
 import { ProxyError, type ChatProxyFn } from '../llm/ControlChatProxy';
 import { errText } from './httpJson';
-export { errText, readJson, sendJson } from './httpJson';
+export { errText, readJson, sendJson, bearerTokenMatches } from './httpJson';
 
 /** Small HTTP/serialization helpers for the control server (kept out of
  *  ControlServer.ts so the route/lifecycle logic stays within the file budget). */

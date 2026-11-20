@@ -23,6 +23,7 @@ const record = (pid: number): ControlServerRecord => ({
   pid,
   startedAt: '2026-07-11T18:00:00.000Z',
   version: '0.12.27',
+  token: 'a'.repeat(64),
 });
 
 describe('ControlServerRegistry', () => {
@@ -30,11 +31,18 @@ describe('ControlServerRegistry', () => {
     for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('uses the shared LocalAppData contract path', () => {
+  it('uses the shared LocalAppData contract path, and the home path when unset', () => {
     expect(controlServerRegistryPath('C:\\Users\\test\\AppData\\Local')).toBe(
       path.join('C:\\Users\\test\\AppData\\Local', 'forge-llm', 'control-server.json'),
     );
-    expect(controlServerRegistryPath('')).toBeNull();
+    // An empty LOCALAPPDATA is "unset" (macOS/Linux): the record goes under
+    // home so a consumer can still read the token there. `home` is injected so
+    // the assertion is platform-independent.
+    expect(controlServerRegistryPath('', '/home/forge')).toBe(
+      path.join('/home/forge', '.forge', 'control-server.json'),
+    );
+    // Neither LOCALAPPDATA nor a home directory → no record.
+    expect(controlServerRegistryPath('', '')).toBeNull();
   });
 
   it('publishes atomically and replaces a stale owner record', () => {

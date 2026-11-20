@@ -53,7 +53,9 @@ describe('ControlServer GET /stats', () => {
     // Pick a free, Fetch-safe port, so nothing else can hold or answer it.
     await vi.waitFor(() => expect(server?.status().port).toBeGreaterThan(0));
     const base = `http://127.0.0.1:${server.status().port}`;
-    const response = await fetch(`${base}/stats`);
+    const response = await fetch(`${base}/stats`, {
+      headers: { authorization: `Bearer ${server.token}` },
+    });
     expect(response.status).toBe(200);
     expect(controlStatsSchema.parse(await response.json())).toMatchObject({
       forge_version: 'test-version',

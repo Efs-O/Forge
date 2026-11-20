@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { writeFileAtomicSync } from '../util/atomicWrite';
 
@@ -7,6 +8,9 @@ export interface ControlServerRecord {
   pid: number;
   startedAt: string;
   version: string;
+  /** Bearer token every model route demands; regenerated on each server start,
+   *  so a consumer must re-read this file after a Forge restart. */
+  token: string;
 }
 
 export interface IControlServerRegistry {
@@ -14,8 +18,18 @@ export interface IControlServerRegistry {
   removeIfOwned(pid: number): void;
 }
 
-export function controlServerRegistryPath(localAppData = process.env.LOCALAPPDATA): string | null {
-  return localAppData ? path.join(localAppData, 'forge-llm', 'control-server.json') : null;
+/** Where the discovery record lives. Windows: `%LOCALAPPDATA%\forge-llm\…`;
+ *  anywhere LOCALAPPDATA is unset (macOS/Linux) `~/.forge/…`, so a consumer can
+ *  read the token there too. `home` is injectable for tests. Treat an empty
+ *  `localAppData` as unset: an explicit `undefined` re-applies the env default,
+ *  so a non-Windows test must pass `''`, not `undefined`. Returns null only
+ *  when neither LOCALAPPDATA nor a home directory is available. */
+export function controlServerRegistryPath(
+  localAppData = process.env.LOCALAPPDATA,
+  home = os.homedir(),
+): string | null {
+  if (localAppData) return path.join(localAppData, 'forge-llm', 'control-server.json');
+  return home ? path.join(home, '.forge', 'control-server.json') : null;
 }
 
 /** Atomic localhost control-server discovery record for external Forge clients. */
