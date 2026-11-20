@@ -15,19 +15,22 @@
       const renderError = (message) => {
         const app = document.getElementById('app');
         if (!app) return;
-        app.innerHTML =
-          '<div style="padding:12px;font-family:var(--vscode-font-family, monospace);color:var(--vscode-errorForeground, #f48771);white-space:pre-wrap;">' +
-          message +
-          '</div>';
+        const box = document.createElement('div');
+        box.style.padding = '12px';
+        box.style.fontFamily = 'var(--vscode-font-family, monospace)';
+        box.style.color = 'var(--vscode-errorForeground, #f48771)';
+        box.style.whiteSpace = 'pre-wrap';
+        box.textContent = message;
+        app.replaceChildren(box);
       };
 
       window.addEventListener('error', (event) => {
-        renderError('Forge Model Manager failed to load:\\n' + (event.error?.stack || event.message || 'Unknown error'));
+        renderError('Forge Model Manager failed to load:\n' + (event.error?.stack || event.message || 'Unknown error'));
       });
 
       window.addEventListener('unhandledrejection', (event) => {
         const reason = event.reason;
-        renderError('Forge Model Manager failed to load:\\n' + (reason?.stack || reason?.message || String(reason)));
+        renderError('Forge Model Manager failed to load:\n' + (reason?.stack || reason?.message || String(reason)));
       });
 
       window.setTimeout(() => {
