@@ -85,6 +85,14 @@ Codex, Copilot), your job here is planning, advice and review; delegate the impl
 - Verify a brief before you send it: check every claim against the code, write out any
   exact text the result must produce, list what a changed check must still allow, and
   ask for pasted output rather than a description. Each vague direction costs a round.
+- Give every brief the same shape, in this order: a `# title` line; Role (it does the
+  task itself and asks you before it messages chats, starts agents or touches models);
+  Where (the only files it may write); Task; Read-only access; Gate (the exact command,
+  and whether it may escalate to the full suite); Commit (files, message, no push);
+  Report (the commit sha and pasted gate output). Run the gate yourself first: it must
+  pass on the untouched tree, or fail only for the defect the task fixes. When a lane
+  comes back wrong, check whether your brief allowed that reading before you blame
+  the model.
 - Local models implement well but plan and recall less well, so plans, reviews and
   design questions stay with you. Advise a Forge chat when it asks.
 - A local engine serves only so many chats at full speed — the number is the engine's
