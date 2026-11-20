@@ -412,8 +412,9 @@ a workspace whose mesh is on, Forge adds one marked section
 `AGENTS.md`, creating it when missing, and to an existing `CLAUDE.md` unless that
 file already imports `AGENTS.md` with an `@AGENTS.md` line; a missing `CLAUDE.md`
 is created holding only that import line, so Claude Code reads the section once. It never touches text outside the
-markers, never adds the section twice, and never deletes anything when the mesh
-is later turned off. **Verify it instead of writing it:** read the file, confirm
+markers and never adds the section twice. When the mesh is later turned off it
+removes only its own section, and deletes a file only when Forge created it and
+nothing else is left in it. **Verify it instead of writing it:** read the file, confirm
 exactly one marked section is there and that the user's own lines are untouched.
 If it is missing after startup, use the running mesh to reload the Forge
 window and check again. Say plainly what the section allows: local coding agents can now
