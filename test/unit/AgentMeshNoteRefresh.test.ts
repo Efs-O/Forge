@@ -55,6 +55,11 @@ const changedNote = renderAgentMeshNote(changedFacts);
 const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mesh-refresh-'));
 afterAll(() => fs.rmSync(runDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
 
+/** A registry of its own, never the operator's `~/.forge`. These roots sit
+ *  outside any git repository, so nothing here consults it; the parameter is
+ *  still required, so the answer has to come from somewhere test-owned. */
+const registry = path.join(runDir, 'note-files.json');
+
 const makeRoot = (name: string, files: Record<string, string>): string => {
   const root = path.join(runDir, name);
   fs.mkdirSync(path.join(root, '.forge'), { recursive: true });
@@ -104,7 +109,7 @@ describe('the refresh replaces a section that is already there (criterion 8a)', 
   });
 
   it('writes the new note into both files and leaves the owner text alone', () => {
-    const results = refreshAgentMeshNote([root], changedFacts);
+    const results = refreshAgentMeshNote([root], changedFacts, registry);
     expect(results.map((result) => result.status)).toEqual(['replaced', 'replaced']);
     for (const file of ['AGENTS.md', 'CLAUDE.md']) {
       const content = readNoteFile(root, file);
@@ -116,7 +121,7 @@ describe('the refresh replaces a section that is already there (criterion 8a)', 
   });
 
   it('is idempotent: a second refresh with the same note writes nothing', () => {
-    const results = refreshAgentMeshNote([root], changedFacts);
+    const results = refreshAgentMeshNote([root], changedFacts, registry);
     expect(results.map((result) => result.status)).toEqual(['unchanged', 'unchanged']);
   });
 });
@@ -125,7 +130,7 @@ describe('a refresh never creates or appends (criterion 8b)', () => {
   it('leaves a file whose section the owner deleted exactly as it was', () => {
     const deleted = 'Keep your own rules here.\n\nDeploy with `npm run ship`.\n';
     const root = makeRoot('owner-deleted', { 'AGENTS.md': deleted });
-    const results = refreshAgentMeshNote([root], changedFacts);
+    const results = refreshAgentMeshNote([root], changedFacts, registry);
     const agents = results.find((result) => result.path.endsWith('AGENTS.md'));
     const claude = results.find((result) => result.path.endsWith('CLAUDE.md'));
     expect(agents?.status).toBe('skipped');
@@ -137,7 +142,7 @@ describe('a refresh never creates or appends (criterion 8b)', () => {
 
   it('leaves a workspace with no instruction files at all untouched', () => {
     const root = makeRoot('no-files', {});
-    const results = refreshAgentMeshNote([root], changedFacts);
+    const results = refreshAgentMeshNote([root], changedFacts, registry);
     expect(results.every((result) => result.status === 'skipped')).toBe(true);
     expect(fs.existsSync(path.join(root, 'AGENTS.md'))).toBe(false);
   });
@@ -150,7 +155,7 @@ describe('a first install behaves as it always did (criterion 8d)', () => {
 
   it('creates AGENTS.md with the section and CLAUDE.md as the @AGENTS.md import', () => {
     const root = makeRoot('first-install', {});
-    const results = installAgentMeshNote([root], facts);
+    const results = installAgentMeshNote([root], facts, registry);
     expect(statuses(results)).toEqual([
       ['AGENTS.md', 'created'],
       ['CLAUDE.md', 'created'],
@@ -166,7 +171,7 @@ describe('a first install behaves as it always did (criterion 8d)', () => {
 
   it('adds the section beside existing text, and creates the file that is missing', () => {
     const root = makeRoot('first-install-claude', { 'CLAUDE.md': '# Mine\n\nMy rules.\n' });
-    const results = installAgentMeshNote([root], facts);
+    const results = installAgentMeshNote([root], facts, registry);
     // Both files, because that is what each agent reads: a Claude Code session
     // reads `CLAUDE.md` and ignores `AGENTS.md` when it exists, and Codex reads
     // only `AGENTS.md`, so the section has to be in whichever one is opened.
@@ -184,7 +189,7 @@ describe('a first install behaves as it always did (criterion 8d)', () => {
 
   it('leaves a CLAUDE.md that already imports AGENTS.md exactly as the owner wrote it', () => {
     const root = makeRoot('first-install-import', { 'CLAUDE.md': '# Mine\n\n@AGENTS.md\n' });
-    const results = installAgentMeshNote([root], facts);
+    const results = installAgentMeshNote([root], facts, registry);
     expect(statuses(results)).toEqual([['AGENTS.md', 'created']]);
     expect(readNoteFile(root, 'AGENTS.md')).toContain(note.trimEnd());
     expect(readNoteFile(root, 'CLAUDE.md')).toBe('# Mine\n\n@AGENTS.md\n');
@@ -192,7 +197,7 @@ describe('a first install behaves as it always did (criterion 8d)', () => {
 
   it('a refresh creates nothing, in a root that never had the install', () => {
     const root = makeRoot('refresh-creates-nothing', { 'CLAUDE.md': '@AGENTS.md\n' });
-    const results = refreshAgentMeshNote([root], facts);
+    const results = refreshAgentMeshNote([root], facts, registry);
     expect(statuses(results)).toEqual([
       ['AGENTS.md', 'skipped'],
       ['CLAUDE.md', 'skipped'],

@@ -37,12 +37,15 @@ import {
   AGENT_INSTRUCTION_FILE_NAMES,
   removeAgentMeshSections,
 } from './agentMeshNote';
+import { removeExcludeLine, type NoteExcludeTarget } from './agentNoteGit';
 import { writeFileAtomicSync } from '../util/atomicWrite';
 
-/** One recorded file: where it is, and whether Forge created it. */
+/** One recorded file: where it is, whether Forge created it, and — when Forge
+ *  made git ignore it — the exclude line to take back out with it. */
 export interface NoteFileRecord {
   path: string;
   created: boolean;
+  exclude?: NoteExcludeTarget;
 }
 
 const REGISTRY_VERSION = 1;
@@ -67,9 +70,21 @@ function parseRegistry(raw: string): NoteFileRecord[] | undefined {
     if (parsed.version !== REGISTRY_VERSION || !Array.isArray(parsed.files)) return undefined;
     const files: NoteFileRecord[] = [];
     for (const entry of parsed.files) {
-      const record = entry as { path?: unknown; created?: unknown };
+      const record = entry as {
+        path?: unknown;
+        created?: unknown;
+        exclude?: { file?: unknown; line?: unknown } | null;
+      };
       if (typeof record.path !== 'string' || typeof record.created !== 'boolean') return undefined;
-      files.push({ path: record.path, created: record.created });
+      if (record.exclude === undefined || record.exclude === null) {
+        files.push({ path: record.path, created: record.created });
+        continue;
+      }
+      // A half-written `exclude` is as much a foreign shape as a half-written
+      // `created`: the whole file is unreadable, and the next install rebuilds it.
+      const { file, line } = record.exclude;
+      if (typeof file !== 'string' || typeof line !== 'string') return undefined;
+      files.push({ path: record.path, created: record.created, exclude: { file, line } });
     }
     return files;
   } catch {
@@ -98,23 +113,31 @@ const RECORDED_STATUSES = new Set(['created', 'appended', 'replaced', 'unchanged
  * `created` is what a later removal is allowed to act on, and it is only ever
  * set by the run that made the file: a later `appended`/`replaced`/`unchanged`
  * for the same path keeps the `created: true` already recorded, so an
- * `AGENTS.md` Forge created is still deletable after a refresh touched it.
+ * `AGENTS.md` Forge created is still deletable after a refresh touched it. The
+ * same holds for `exclude`: a run that did not need to write the line (because
+ * git already ignores the file) keeps the line the earlier run recorded, so
+ * there is always exactly one owner of the pattern to take it out again.
  */
 export function recordNoteFiles(
   registryPath: string,
-  results: readonly { path: string; status: string }[],
+  results: readonly { path: string; status: string; exclude?: NoteExcludeTarget }[],
 ): void {
   const existing = readNoteFiles(registryPath);
-  const byPath = new Map(existing.map((record) => [record.path, record.created]));
+  const byPath = new Map(existing.map((record) => [record.path, record]));
   for (const result of results) {
     if (!RECORDED_STATUSES.has(result.status)) continue;
     const filePath = path.resolve(result.path);
-    const created = result.status === 'created';
-    if (byPath.get(filePath) !== true) byPath.set(filePath, created);
+    const previous = byPath.get(filePath);
+    const created = previous?.created === true || result.status === 'created';
+    const exclude = result.exclude ?? previous?.exclude;
+    byPath.set(
+      filePath,
+      exclude ? { path: filePath, created, exclude } : { path: filePath, created },
+    );
   }
-  const files = [...byPath.entries()]
-    .sort((left, right) => (left[0] === right[0] ? 0 : left[0] < right[0] ? -1 : 1))
-    .map(([filePath, created]) => ({ path: filePath, created }));
+  const files = [...byPath.values()].sort((left, right) =>
+    left.path === right.path ? 0 : left.path < right.path ? -1 : 1,
+  );
   const before = existing
     .slice()
     .sort((left, right) => (left.path === right.path ? 0 : left.path < right.path ? -1 : 1));
@@ -219,6 +242,34 @@ function remainingRecords(
 }
 
 /**
+ * Take Forge's exclude line out of the exclude file for every record this run
+ * spent, and report a failure to do so on the note result it belongs to.
+ *
+ * No git is asked: the pattern and the file it lives in were recorded when the
+ * line was written, so an uninstall cleans up after itself even with no git on
+ * PATH. A leftover line is not worth failing the uninstall for — the note, which
+ * is the part agents read, is already gone — but it is named, because an exclude
+ * file the owner opens should not hold a mystery. This never throws.
+ */
+function withExcludeRemovals(
+  results: readonly NoteRemovalResult[],
+  records: readonly NoteFileRecord[],
+): NoteRemovalResult[] {
+  const excludes = new Map<string, NoteExcludeTarget>();
+  for (const record of records) if (record.exclude) excludes.set(record.path, record.exclude);
+  return results.map((result) => {
+    const exclude = SPENT_STATUSES.has(result.status) ? excludes.get(result.path) : undefined;
+    if (exclude === undefined) return result;
+    try {
+      removeExcludeLine(exclude);
+    } catch (error) {
+      return { ...result, reason: `exclude: ${(error as Error).message}` };
+    }
+    return result;
+  });
+}
+
+/**
  * Remove Forge's section from the instruction files of these workspace roots.
  *
  * `created` comes from the registry, so an unrecorded file — one written by an
@@ -232,13 +283,15 @@ export function removeWorkspaceAgentNotes(
 ): NoteRemovalResult[] {
   const records = readNoteFiles(registryPath);
   const createdByPath = new Map(records.map((record) => [record.path, record.created]));
-  const results: NoteRemovalResult[] = [];
-  for (const root of roots) {
-    for (const name of AGENT_INSTRUCTION_FILE_NAMES) {
-      const filePath = path.resolve(root, name);
-      results.push(removeNoteFromFile(filePath, createdByPath.get(filePath) === true));
-    }
-  }
+  const results = withExcludeRemovals(
+    roots.flatMap((root) =>
+      AGENT_INSTRUCTION_FILE_NAMES.map((name) => {
+        const filePath = path.resolve(root, name);
+        return removeNoteFromFile(filePath, createdByPath.get(filePath) === true);
+      }),
+    ),
+    records,
+  );
   rewriteRegistry(registryPath, remainingRecords(records, results));
   return results;
 }
@@ -253,7 +306,10 @@ export function removeWorkspaceAgentNotes(
  */
 export function removeRecordedAgentNotes(registryPath: string): NoteRemovalResult[] {
   const records = readNoteFiles(registryPath);
-  const results = records.map((record) => removeNoteFromFile(record.path, record.created));
+  const results = withExcludeRemovals(
+    records.map((record) => removeNoteFromFile(record.path, record.created)),
+    records,
+  );
   rewriteRegistry(registryPath, remainingRecords(records, results));
   return results;
 }

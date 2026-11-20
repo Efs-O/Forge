@@ -178,7 +178,7 @@ here".
    means yes to "Other computer".
 3. **Coding agents** (multi-select): "What may Claude Code and Codex do with
    Forge?"
-   - **Talk to Forge**: Your coding agents on this PC can message Forge chats and read the replies (local only, password-protected). Forge adds a short section about this to AGENTS.md / CLAUDE.md in every workspace you open, and removes it when you turn this off or uninstall Forge. The next two need this one.
+   - **Talk to Forge**: Your coding agents on this PC can message Forge chats and read the replies (local only, password-protected). Forge adds a short section about this to AGENTS.md / CLAUDE.md in every workspace you open, never to a file your git repository commits, and removes it when you turn this off or uninstall Forge. The next two need this one.
    - **Run Forge's messages without asking**: Messages from Forge and other sessions can start work in Claude Code with no approval prompt.
    - **Global note**: Add Forge's note to your global CLAUDE.md / AGENTS.md so your agents can reach Forge from any folder.
    - **Hand tasks over**: Forge's model can start Claude Code or Codex on a task. Uses your subscription.

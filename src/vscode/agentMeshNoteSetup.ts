@@ -15,9 +15,16 @@ import {
 import { busPaths } from '../agentBus/agentBus';
 import {
   noteFilesRegistryPath,
+  readNoteFiles,
   recordNoteFiles,
   removeWorkspaceAgentNotes,
 } from '../agentBus/agentNoteRemoval';
+import {
+  addExcludeLine,
+  decideNoteWrite,
+  NOTE_SKIP_IMPORT_PARENT,
+  type NoteExcludeTarget,
+} from '../agentBus/agentNoteGit';
 import { discoverWorkspaceRepositoryRoots } from '../llm/ForgeInstructionsLoader';
 import type { ForgeConfig } from '../config/types';
 import { writeFileAtomicSync } from '../util/atomicWrite';
@@ -114,6 +121,10 @@ export interface AgentMeshNoteFileResult {
   path: string;
   status: 'created' | 'appended' | 'replaced' | 'unchanged' | 'skipped' | 'error';
   reason?: string;
+  /** The exclude pattern Forge added for this file, when it added (or found)
+   *  one. The registry keeps it so the line can be taken out again with the
+   *  note, without asking git anything at uninstall time. */
+  exclude?: NoteExcludeTarget;
 }
 
 /** One line stating what is enabled, as the note should record it (F6: the
@@ -219,6 +230,44 @@ function writeAgentNoteImportFile(filePath: string): AgentMeshNoteFileResult {
   return { path: filePath, status: 'created' };
 }
 
+/** Is this path a file the note could go into? The one existence question the
+ *  writer asks twice (which files exist, and whether an untracked file is
+ *  already here), and the answer that decides "create it" versus "leave it". */
+function isNoteFilePresent(filePath: string): boolean {
+  try {
+    return fs.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** One file's answer to "may Forge write its note into this file?", kept in
+ *  `agentNoteGit.ts` with the rest of the git rule. This is the one question it
+ *  cannot answer for itself: whether the registry says Forge created the file.
+ *  Paths are compared the way the registry stores them — resolved. */
+function wasCreatedNoteFile(registryPath: string, filePath: string): boolean {
+  const resolved = path.resolve(filePath);
+  return readNoteFiles(registryPath).some((record) => record.created && record.path === resolved);
+}
+
+/** Add Forge's exclude line before the file it names is created or written, so a
+ *  crash in between leaves an ignored path that does not exist yet rather than a
+ *  note file git could commit. Failing to add the line is a refusal to write:
+ *  without it, the write is exactly what the rule forbids. */
+function writeWithExclude(
+  filePath: string,
+  exclude: NoteExcludeTarget | undefined,
+  write: () => AgentMeshNoteFileResult,
+): AgentMeshNoteFileResult {
+  if (exclude === undefined) return write();
+  try {
+    addExcludeLine(exclude);
+  } catch (error) {
+    return { path: filePath, status: 'error', reason: `exclude: ${(error as Error).message}` };
+  }
+  return { ...write(), exclude };
+}
+
 /**
  * Installs the note in every repository root of the workspace.
  *
@@ -228,28 +277,49 @@ function writeAgentNoteImportFile(filePath: string): AgentMeshNoteFileResult {
  * too, because that is the file Claude Code reads, unless it already imports
  * `AGENTS.md`, in which case it is left alone; a missing `CLAUDE.md` is created
  * holding only the import line, so Claude sees the section once, not twice.
+ *
+ * Inside a git repository, `decideNoteWrite` gates every one of those writes: a
+ * file the repository commits, or one it could commit, does not get the note.
+ * When `AGENTS.md` is skipped for that reason, a missing `CLAUDE.md` is not
+ * created either — an import of a file that carries no note brings nothing.
  */
 export function installAgentMeshNote(
   roots: readonly string[],
   facts: AgentMeshNoteFacts,
+  registryPath: string,
 ): AgentMeshNoteFileResult[] {
   const results: AgentMeshNoteFileResult[] = [];
   const note = buildAgentMeshNote(facts);
   for (const root of roots) {
-    const existing = AGENT_INSTRUCTION_FILE_NAMES.filter((name) => {
-      try {
-        return fs.statSync(path.join(root, name)).isFile();
-      } catch {
-        return false;
-      }
-    });
+    const existing = AGENT_INSTRUCTION_FILE_NAMES.filter((name) =>
+      isNoteFilePresent(path.join(root, name)),
+    );
     const plan = agentNoteTargetFiles(existing, claudeImportsAgentsMd(root));
+    let agentsSkipped = false;
     for (const target of plan) {
       const filePath = path.join(root, target.name);
+      if (target.write === 'import' && agentsSkipped) {
+        results.push({ path: filePath, status: 'skipped', reason: NOTE_SKIP_IMPORT_PARENT });
+        continue;
+      }
+      const decision = decideNoteWrite(root, target.name, (candidate) =>
+        wasCreatedNoteFile(registryPath, candidate),
+      );
+      if (!decision.write) {
+        results.push({ path: filePath, status: 'skipped', reason: decision.reason });
+        // A `CLAUDE.md` that would be an import of the skipped `AGENTS.md` is
+        // worth creating only while that file is getting the note. When git
+        // itself would not answer, this file's own answer says nothing about
+        // `CLAUDE.md`, so the loop asks git again instead of guessing here.
+        if (target.name === 'AGENTS.md' && decision.gitUnreachable !== true) agentsSkipped = true;
+        continue;
+      }
       results.push(
-        target.write === 'import'
-          ? writeAgentNoteImportFile(filePath)
-          : installIntoOneFile(filePath, note),
+        writeWithExclude(filePath, decision.exclude, () =>
+          target.write === 'import'
+            ? writeAgentNoteImportFile(filePath)
+            : installIntoOneFile(filePath, note),
+        ),
       );
     }
   }
@@ -293,16 +363,38 @@ export function refreshIntoOneFile(filePath: string, note: string): AgentMeshNot
  * case (b). So a file that is absent, or that holds no complete marked section,
  * is skipped with the reason the log and the toast show; only a file that
  * already holds the section gets the new text.
+ *
+ * The git rule applies here too: a tracked file, or an untracked one Forge did
+ * not create, is skipped rather than rewritten, and a file Forge created before
+ * that rule existed gets its exclude line and then the refreshed text.
  */
 export function refreshAgentMeshNote(
   roots: readonly string[],
   facts: AgentMeshNoteFacts,
+  registryPath: string,
 ): AgentMeshNoteFileResult[] {
   const note = buildAgentMeshNote(facts);
   const results: AgentMeshNoteFileResult[] = [];
   for (const root of roots) {
     for (const name of AGENT_INSTRUCTION_FILE_NAMES) {
-      results.push(refreshIntoOneFile(path.join(root, name), note));
+      const filePath = path.join(root, name);
+      // A refresh never creates a file, so git is not asked about one that is
+      // not here: the answer would only cost a spawn, since an absent file is
+      // skipped whichever way it went.
+      if (!isNoteFilePresent(filePath)) {
+        results.push(refreshIntoOneFile(filePath, note));
+        continue;
+      }
+      const decision = decideNoteWrite(root, name, (candidate) =>
+        wasCreatedNoteFile(registryPath, candidate),
+      );
+      if (!decision.write) {
+        results.push({ path: filePath, status: 'skipped', reason: decision.reason });
+        continue;
+      }
+      results.push(
+        writeWithExclude(filePath, decision.exclude, () => refreshIntoOneFile(filePath, note)),
+      );
     }
   }
   return results;
@@ -369,7 +461,11 @@ export function registerAgentMeshNoteCommand(
         }
         return;
       }
-      const results = installAgentMeshNote(roots, agentMeshNoteFacts(config, deps.getConfigPath()));
+      const results = installAgentMeshNote(
+        roots,
+        agentMeshNoteFacts(config, deps.getConfigPath()),
+        noteFilesRegistryPath(),
+      );
       recordNoteFiles(noteFilesRegistryPath(), results);
       const message = describeAgentMeshNoteInstall(results);
       const failures = results.filter((r) => r.status === 'error');

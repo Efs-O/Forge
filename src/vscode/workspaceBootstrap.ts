@@ -154,8 +154,8 @@ export async function bootstrapWorkspace(
     // it deleted (phase B row C9, criterion 8b).
     const results =
       noteAction === 'install'
-        ? installAgentMeshNote(repositoryRoots, noteFacts)
-        : refreshAgentMeshNote(repositoryRoots, noteFacts);
+        ? installAgentMeshNote(repositoryRoots, noteFacts, noteFilesRegistryPath())
+        : refreshAgentMeshNote(repositoryRoots, noteFacts, noteFilesRegistryPath());
     // Which files Forge wrote, so a later mesh-off start or an uninstall can
     // find them again — including the ones this run only found already there.
     recordNoteFiles(noteFilesRegistryPath(), results);

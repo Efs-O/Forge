@@ -965,6 +965,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Which file the agent note goes into, the one-time disclosure, `forge.agentMesh.installNote` | `src/vscode/agentMeshNoteSetup.ts` |
 | User-wide agent note (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`) | `src/vscode/agentUserNote.ts` |
 | Which files Forge wrote the agent note into (`~/.forge/agent-bus/note-files.json`), and removing its marked sections from them | `src/agentBus/agentNoteRemoval.ts` |
+| Whether an agent-note file is committed by git, and Forge's block in .git/info/exclude | `src/agentBus/agentNoteGit.ts` |
 | The `vscode:uninstall` entry: takes the agent note out of every recorded file when Forge is uninstalled | `src/uninstall.ts` |
 | Agent-bus client script (`~/.forge/agent-bus/forge.sh`)    | `src/agentBus/forge.sh` (bundled as text by busContent.ts)     |
 | Claude session registry + peer-pipe delivery, transcript existence, liveness check | `src/agentBus/claudePeer.ts` |
