@@ -35,6 +35,7 @@ import {
   unloadModel,
   type ModelLifecycleContext,
 } from './ControlModelLifecycle';
+import { DEFAULT_RECLAIM_INTERVAL_MS, startPortReclaim } from './controlPortReclaim';
 
 const log = getLogger();
 const DEFAULT_PORT = 8799;
@@ -60,6 +61,8 @@ export interface ControlServerDeps {
   readinessTimeoutMs?: number;
   readinessIntervalMs?: number;
   evictionGraceMs?: number;
+  /** How often a window that lost the configured port retries it. Default 5000 ms. */
+  reclaimIntervalMs?: number;
   /** Runs a buffered cloud-provider completion inside the extension host (where
    *  SecretStorage is readable). Absent ⇒ POST /chat returns 501. */
   chatProxy?: ChatProxyFn;
@@ -116,6 +119,7 @@ export class ControlServer implements vscode.Disposable {
   private readonly probe: (baseUrl: string) => Promise<boolean>;
   private readonly readinessTimeoutMs: number;
   private readonly readinessIntervalMs: number;
+  private readonly reclaimIntervalMs: number;
   private readonly evictionGraceMs: number;
   private readonly chatProxy?: ChatProxyFn;
   private readonly registry?: IControlServerRegistry;
@@ -123,6 +127,8 @@ export class ControlServer implements vscode.Disposable {
   private readonly stats: ControlStatsBuilder;
   private readonly agentRoutes?: AgentRoutes;
   private listeningPort: number | undefined;
+  /** Stop function for the configured-port retry, while another process holds it. */
+  private stopReclaim: (() => void) | undefined;
   /** Bearer token this instance demands on the model routes and publishes in
    *  the discovery record; a fresh random value per server instance. */
   private readonly controlToken = randomBytes(32).toString('hex');
@@ -136,6 +142,7 @@ export class ControlServer implements vscode.Disposable {
     this.probe = deps.probe ?? probeHealthy;
     this.readinessTimeoutMs = deps.readinessTimeoutMs ?? READINESS_TIMEOUT_MS;
     this.readinessIntervalMs = deps.readinessIntervalMs ?? READINESS_INTERVAL_MS;
+    this.reclaimIntervalMs = deps.reclaimIntervalMs ?? DEFAULT_RECLAIM_INTERVAL_MS;
     this.evictionGraceMs = deps.evictionGraceMs ?? EVICTION_GRACE_MS;
     if (deps.chatProxy) this.chatProxy = deps.chatProxy;
     if (deps.registry) this.registry = deps.registry;
@@ -191,8 +198,11 @@ export class ControlServer implements vscode.Disposable {
           `[ControlServer] port ${port} in use — starting this window's agent bus on an available localhost port.`,
         );
         this.listenOn(0, true);
+        this.scheduleReclaim();
       } else if (err.code === 'EADDRINUSE') {
-        log.warn(`[ControlServer] port ${port} in use — could not start.`);
+        const retrySeconds = this.reclaimIntervalMs / 1000;
+        log.warn(`[ControlServer] port ${port} in use — retrying every ${retrySeconds}s.`);
+        if (!fallback) this.scheduleReclaim();
       } else {
         log.error(`[ControlServer] ${err.message}`);
       }
@@ -200,31 +210,62 @@ export class ControlServer implements vscode.Disposable {
     // 127.0.0.1 only — never expose beyond localhost.
     server.listen(port, '127.0.0.1', () => {
       if (this.server !== server) return;
-      const address = server.address();
-      if (!address || typeof address === 'string') return;
-      this.listeningPort = address.port;
-      const url = `http://127.0.0.1:${address.port}`;
-      log.info(`[ControlServer] listening on ${url}`);
-      this.agentRoutes?.onListening(url);
-      try {
-        if (!fallback)
-          this.registry?.publish({
-            url,
-            pid: process.pid,
-            startedAt: new Date().toISOString(),
-            version: this.version,
-            token: this.controlToken,
-          });
-        if (this.registry && !fallback)
-          log.info(`[ControlServer] published discovery record for ${url}`);
-      } catch (err) {
-        log.error('[ControlServer] failed to publish discovery record', err);
-      }
+      this.onBound(server, fallback);
     });
     this.server = server;
   }
 
+  /** Everything a listener does once it has bound: record the port, hand the
+   *  URL to agentRoutes, and publish the discovery record (a fallback listener
+   *  publishes nothing, so consumers keep finding the window that owns the port). */
+  private onBound(server: http.Server, fallback: boolean): void {
+    const address = server.address();
+    if (!address || typeof address === 'string') return;
+    this.listeningPort = address.port;
+    const url = `http://127.0.0.1:${address.port}`;
+    log.info(`[ControlServer] listening on ${url}`);
+    this.agentRoutes?.onListening(url);
+    try {
+      if (!fallback)
+        this.registry?.publish({
+          url,
+          pid: process.pid,
+          startedAt: new Date().toISOString(),
+          version: this.version,
+          token: this.controlToken,
+        });
+      if (this.registry && !fallback)
+        log.info(`[ControlServer] published discovery record for ${url}`);
+    } catch (err) {
+      log.error('[ControlServer] failed to publish discovery record', err);
+    }
+  }
+
+  private scheduleReclaim(): void {
+    this.stopReclaim ??= startPortReclaim({
+      port: this.port,
+      intervalMs: this.reclaimIntervalMs,
+      createServer: () => http.createServer((req, res) => void this.handle(req, res)),
+      onBound: (server) => this.adoptReclaimed(server),
+    });
+  }
+
+  /** Adopt the listener that won the configured port: it replaces the fallback
+   *  (or absent) listener and publishes the discovery record, which overwrites
+   *  a record left by a dead window. */
+  private adoptReclaimed(server: http.Server): void {
+    this.stopReclaim = undefined;
+    const previous = this.server;
+    this.server = server;
+    previous?.close();
+    server.on('error', (err: NodeJS.ErrnoException) => log.error(`[ControlServer] ${err.message}`));
+    log.info(`[ControlServer] took back port ${this.port}`);
+    this.onBound(server, false);
+  }
+
   dispose(): void {
+    this.stopReclaim?.();
+    this.stopReclaim = undefined;
     this.server?.close();
     this.server = null;
     this.listeningPort = undefined;

@@ -1,7 +1,9 @@
 import * as http from 'http';
+import * as net from 'net';
 import type { AddressInfo } from 'net';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ControlServer, type ControlServerDeps } from '../../src/backend/ControlServer';
+import { startPortReclaim } from '../../src/backend/controlPortReclaim';
 import type { AgentRoutes } from '../../src/backend/agentRoutes';
 import {
   buildControlChatProxy,
@@ -153,6 +155,38 @@ const post = (base: string, model: string, route = 'ensure'): Promise<Response> 
 const get = (base: string, path: string): Promise<Response> =>
   fetch(`${base}/${path}`, { headers: { authorization: `Bearer ${currentToken}` } });
 
+/** A listener squatting on a fresh loopback port, so the control server's
+ *  first bind of that port loses with EADDRINUSE. `release` frees it again. */
+async function occupyPort(): Promise<{ port: number; release: () => Promise<void> }> {
+  const blocker = http.createServer();
+  await new Promise<void>((resolve) => blocker.listen(0, '127.0.0.1', resolve));
+  return {
+    port: (blocker.address() as AddressInfo).port,
+    release: () => new Promise<void>((resolve) => blocker.close(() => resolve())),
+  };
+}
+
+/** True while something on this TCP port accepts a connection. */
+const acceptsConnection = (port: number): Promise<boolean> =>
+  new Promise((resolve) => {
+    const socket = net.connect(port, '127.0.0.1');
+    socket.once('connect', () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once('error', () => resolve(false));
+  });
+
+/** True while an HTTP listener at this URL answers GET /healthz. */
+const answersHealthz = (url: string): Promise<boolean> =>
+  new Promise((resolve) => {
+    const request = http.get(`${url}/healthz`, (response) => {
+      response.resume();
+      response.once('end', () => resolve(true));
+    });
+    request.once('error', () => resolve(false));
+  });
+
 describe('ControlServer', () => {
   let server: ControlServer | undefined;
   afterEach(() => {
@@ -222,6 +256,183 @@ describe('ControlServer', () => {
     } finally {
       await new Promise<void>((resolve) => blocker.close(() => resolve()));
     }
+  });
+
+  it('takes the configured port back once it frees up, with no agent bus', async () => {
+    const blocker = await occupyPort();
+    const port = blocker.port;
+    try {
+      const registry: IControlServerRegistry = { publish: vi.fn(), removeIfOwned: vi.fn() };
+      const control = new ControlServer(
+        new FakePool(),
+        makeConfig(port),
+        testDeps({ registry, reclaimIntervalMs: 20 }),
+      );
+      server = control;
+      control.start();
+      // The losing bind is reported asynchronously, so the listener is gone once
+      // the error lands: with the agent bus off there is no fallback at all.
+      await vi.waitFor(() => expect(control.status().listening).toBe(false));
+
+      await blocker.release();
+      await vi.waitFor(() =>
+        expect(registry.publish).toHaveBeenCalledWith(
+          expect.objectContaining({
+            url: `http://127.0.0.1:${port}`,
+            pid: process.pid,
+            token: control.token,
+          }),
+        ),
+      );
+      expect(control.status().listening).toBe(true);
+      expect(control.status().port).toBe(port);
+      expect(await answersHealthz(`http://127.0.0.1:${port}`)).toBe(true);
+    } finally {
+      await blocker.release();
+    }
+  });
+
+  it('moves from the fallback port to the configured port and republishes', async () => {
+    const blocker = await occupyPort();
+    const port = blocker.port;
+    try {
+      const config = makeConfig(port);
+      config.agent_bus = { enabled: true };
+      const onListening = vi.fn();
+      const registry: IControlServerRegistry = { publish: vi.fn(), removeIfOwned: vi.fn() };
+      const routes = {
+        setEnabled: vi.fn(),
+        onListening,
+        dispose: vi.fn(),
+      } as unknown as AgentRoutes;
+      const control = new ControlServer(
+        new FakePool(),
+        config,
+        testDeps({ agentRoutes: routes, registry, reclaimIntervalMs: 20 }),
+      );
+      server = control;
+      control.start();
+      await vi.waitFor(() => expect(onListening).toHaveBeenCalledOnce());
+      const fallbackUrl = onListening.mock.calls[0]?.[0] as string;
+      expect(fallbackUrl).not.toBe(`http://127.0.0.1:${port}`);
+      expect(control.status().port).not.toBe(port);
+
+      await blocker.release();
+      await vi.waitFor(() =>
+        expect(onListening).toHaveBeenCalledWith(`http://127.0.0.1:${port}`),
+      );
+      expect(onListening).toHaveBeenCalledTimes(2);
+      expect(control.status().port).toBe(port);
+      expect(registry.publish).toHaveBeenCalledTimes(1);
+      expect(registry.publish).toHaveBeenCalledWith(
+        expect.objectContaining({ url: `http://127.0.0.1:${port}`, pid: process.pid }),
+      );
+      // The fallback listener is closed, so its port no longer answers.
+      expect(await answersHealthz(fallbackUrl)).toBe(false);
+      expect(await answersHealthz(`http://127.0.0.1:${port}`)).toBe(true);
+    } finally {
+      await blocker.release();
+    }
+  });
+
+  it('never shares the configured port with the window that holds it', async () => {
+    const blocker = await occupyPort();
+    const port = blocker.port;
+    try {
+      const registry: IControlServerRegistry = { publish: vi.fn(), removeIfOwned: vi.fn() };
+      const control = new ControlServer(
+        new FakePool(),
+        makeConfig(port),
+        testDeps({ registry, reclaimIntervalMs: 20 }),
+      );
+      server = control;
+      control.start();
+      await vi.waitFor(() => expect(control.status().listening).toBe(false));
+      // Well past five retry ticks: every one of them is refused by the OS.
+      await new Promise((r) => setTimeout(r, 150));
+      expect(registry.publish).not.toHaveBeenCalled();
+      expect(control.status().listening).toBe(false);
+      expect(await acceptsConnection(port)).toBe(true);
+    } finally {
+      await blocker.release();
+    }
+  });
+
+  it('a second window stays on its fallback port while the first owns the configured port', async () => {
+    const blocker = await occupyPort();
+    const port = blocker.port;
+    try {
+      const config = makeConfig(port);
+      config.agent_bus = { enabled: true };
+      const onListening = vi.fn();
+      const routes = {
+        setEnabled: vi.fn(),
+        onListening,
+        dispose: vi.fn(),
+      } as unknown as AgentRoutes;
+      const control = new ControlServer(
+        new FakePool(),
+        config,
+        testDeps({ agentRoutes: routes, reclaimIntervalMs: 20 }),
+      );
+      server = control;
+      control.start();
+      await vi.waitFor(() => expect(onListening).toHaveBeenCalledOnce());
+      // Past several retry ticks, with the other window still holding the port.
+      await new Promise((r) => setTimeout(r, 150));
+      expect(onListening).toHaveBeenCalledTimes(1);
+      const url = onListening.mock.calls[0]?.[0] as string;
+      expect(url).not.toBe(`http://127.0.0.1:${port}`);
+      expect(await answersHealthz(url)).toBe(true);
+    } finally {
+      await blocker.release();
+    }
+  });
+
+  it('dispose stops the retry', async () => {
+    const blocker = await occupyPort();
+    const port = blocker.port;
+    try {
+      const registry: IControlServerRegistry = { publish: vi.fn(), removeIfOwned: vi.fn() };
+      const control = new ControlServer(
+        new FakePool(),
+        makeConfig(port),
+        testDeps({ registry, reclaimIntervalMs: 20 }),
+      );
+      server = control;
+      control.start();
+      await vi.waitFor(() => expect(control.status().listening).toBe(false));
+
+      control.dispose();
+      await blocker.release();
+      await new Promise((r) => setTimeout(r, 150));
+      expect(registry.publish).not.toHaveBeenCalled();
+      expect(await answersHealthz(`http://127.0.0.1:${port}`)).toBe(false);
+    } finally {
+      await blocker.release();
+    }
+  });
+
+  it('a bind that lands after dispose is closed', async () => {
+    const blocker = await occupyPort();
+    const port = blocker.port;
+    await blocker.release();
+    const onBound = vi.fn();
+    const stop = startPortReclaim({
+      port,
+      intervalMs: 5,
+      // Stopping inside createServer leaves this tick's bind in flight, so the
+      // listener only arrives after the caller has already stopped.
+      createServer: () => {
+        stop();
+        return http.createServer();
+      },
+      onBound,
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(onBound).not.toHaveBeenCalled();
+    expect(await acceptsConnection(port)).toBe(false);
+    stop();
   });
 
   it('ensures a model, ref-counts holders, and guards capacity against in-use eviction', async () => {

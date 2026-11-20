@@ -472,6 +472,7 @@ overlaps with an existing owner, extend the owner instead.
 | Managed external server residency classification (`/v1/models` and stale `/v1/status` claims) | `src/backend/ExternalModelResidencyProbe.ts` |
 | Deferred `stop_on_exit` watcher (reload vs close) | `src/backend/deferredStop.ts` |
 | Localhost model-control HTTP API                  | `src/backend/ControlServer.ts`         |
+| Retry binding the control server's configured port after EADDRINUSE | `src/backend/controlPortReclaim.ts` |
 | Localhost control-server session statistics (`GET /stats`) | `src/backend/controlStats.ts`          |
 | Control-server load/capacity/unload               | `src/backend/ControlModelLifecycle.ts` |
 | Control-server HTTP/serialization helpers         | `src/backend/controlHttp.ts`           |
