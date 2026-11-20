@@ -27,7 +27,11 @@ export interface RedirectTarget {
 
 export interface ParsedCommand {
   statements: string[][];
-  separators: Array<'pipe' | 'other'>;
+  /** One kind per join between two statements. `'and'` marks a top-level `&&`:
+   *  the policy classifier only ever asks for `'pipe'`, but `&&` is the one join
+   *  that makes a line stop early — every step after a non-zero exit is skipped
+   *  — and the shell result hint needs to tell the model that. */
+  separators: Array<'pipe' | 'and' | 'other'>;
   redirection: boolean;
   /**
    * The files a `>` or `>>` writes into, recorded apart from `redirection`
@@ -42,7 +46,7 @@ export interface ParsedCommand {
 
 export function parseCommand(command: string, shell: ShellKind): ParsedCommand {
   const statements: string[][] = [[]];
-  const separators: Array<'pipe' | 'other'> = [];
+  const separators: Array<'pipe' | 'and' | 'other'> = [];
   let token = '';
   let quote: 'single' | 'double' | 'backtick' | undefined;
   let escaped = false;
@@ -102,7 +106,7 @@ export function parseCommand(command: string, shell: ShellKind): ParsedCommand {
     statements[statements.length - 1]?.push(token);
     token = '';
   };
-  const pushStatement = (separator: 'pipe' | 'other'): void => {
+  const pushStatement = (separator: 'pipe' | 'and' | 'other'): void => {
     // Push first: in `echo x > f; ls` the `;` ends the word `f`, and clearing the
     // flag before that push lost `f` as a write target (2026-11-02 red-team).
     pushToken();
@@ -203,7 +207,9 @@ export function parseCommand(command: string, shell: ShellKind): ParsedCommand {
           i += 1;
           continue;
         }
-        pushStatement('other');
+        // A top-level `&&` is a conditional join, not a plain one: the shell skips
+        // every later step when one exits non-zero, and `andChainHint` says so.
+        pushStatement('and');
         i += 1;
         continue;
       }

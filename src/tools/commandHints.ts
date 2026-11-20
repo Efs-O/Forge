@@ -9,6 +9,7 @@
  */
 
 import type { ShellKind } from './shellCommandTokens';
+import { parseCommand } from './shellCommandParse';
 
 const POSIX_ONLY = new Set([
   'head',
@@ -45,6 +46,26 @@ export function pwshHint(shell: ShellKind, code: number | null, command: string)
   const idioms = posixIdioms(command);
   if (!idioms.length) return '';
   return `\nThis ran in PowerShell, but the command uses POSIX syntax (${idioms.join(', ')}). Rerun it with shell: "bash".`;
+}
+
+/**
+ * The `&&` note. A probe line joined with `&&` stops at the first step that exits
+ * non-zero, and a grep/rg/diff that finds nothing exits 1 on its own: the model
+ * saw 133 such exits in one week's logs and read each one as "the rest of the
+ * probe ran", when in fact every later step never ran. Only a real top-level `&&`
+ * counts — `parseCommand` leaves a `&&` inside `[[ … ]]`, quotes or after a
+ * backslash inside its own word — and a timed-out or cancelled run is not a chain
+ * stopping, so it stays silent there.
+ */
+export function andChainHint(
+  shell: ShellKind,
+  code: number | null,
+  timedOut: boolean,
+  command: string,
+): string {
+  if (typeof code !== 'number' || code === 0 || timedOut) return '';
+  if (!parseCommand(command, shell).separators.includes('and')) return '';
+  return `\nThis line joins steps with &&, which skips every step after one that exits non-zero, so the output above may stop before the last step. grep, rg, findstr and diff exit 1 for "no match" or "files differ", which is an answer, not a fault. Join checks that do not depend on each other with ; so each one runs.`;
 }
 
 export const GIT_IDENTITY_HINT =

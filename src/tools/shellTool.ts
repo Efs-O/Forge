@@ -25,7 +25,7 @@ import type { RegisteredTool } from './ToolRegistry';
 import { markConversationReadSecret } from './exfilTaint';
 import { shellTimeoutError, TIMEOUT_HINT } from './shellToolTimeout';
 import { appendElevationResultNote } from './shellScriptFiles';
-import { gitIdentityHint, pwshHint } from './commandHints';
+import { andChainHint, gitIdentityHint, pwshHint } from './commandHints';
 
 export { posixIdioms } from './commandHints';
 
@@ -450,6 +450,7 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
         return appendElevationResultNote(
           formatResult(result.code, result.seconds, result.timedOut, capped.text) +
             pwshHint(shell, result.code, command) +
+            andChainHint(shell, result.code, result.timedOut, command) +
             gitIdentityHint(capped.text),
           classified.elevatedProcess,
         );

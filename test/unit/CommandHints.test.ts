@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
+  andChainHint,
   GIT_IDENTITY_HINT,
   gitIdentityHint,
   posixIdioms,
   pwshHint,
 } from '../../src/tools/commandHints';
+
+/** The whole `&&` note, pinned word for word: the plan's CI-enforceable row says a
+ *  later change to this wording fails CI. */
+const AND_CHAIN_NOTE =
+  '\nThis line joins steps with &&, which skips every step after one that exits non-zero, so the output above may stop before the last step. grep, rg, findstr and diff exit 1 for "no match" or "files differ", which is an answer, not a fault. Join checks that do not depend on each other with ; so each one runs.';
 
 /** Git's own words, copied from a run on a machine with no identity set. */
 const AUTHOR_IDENTITY_UNKNOWN = `Author identity unknown
@@ -63,5 +69,35 @@ describe('pwshHint', () => {
 describe('posixIdioms', () => {
   it('lists the POSIX idioms in a command', () => {
     expect(posixIdioms('head -1 f && sort -rn x')).toEqual(['head', 'sort -rn']);
+  });
+});
+
+describe('andChainHint', () => {
+  it('names the exact note it appends to a failed && chain', () => {
+    expect(andChainHint('bash', 1, false, 'cd a && grep x f')).toBe(AND_CHAIN_NOTE);
+  });
+
+  it('adds the note for a pwsh && chain too', () => {
+    expect(andChainHint('pwsh', 1, false, 'Get-Item a && Get-Item b')).toBe(AND_CHAIN_NOTE);
+  });
+
+  it('stays silent when the chain exited 0', () => {
+    expect(andChainHint('bash', 0, false, 'cd a && grep x f')).toBe('');
+  });
+
+  it('stays silent for joins that do not skip later steps', () => {
+    expect(andChainHint('bash', 1, false, 'grep x f; ls')).toBe('');
+    expect(andChainHint('bash', 1, false, 'grep x f || ls')).toBe('');
+    expect(andChainHint('bash', 1, false, 'grep x f & ls')).toBe('');
+  });
+
+  it('stays silent when the && is quoted or an operand of a bash test', () => {
+    expect(andChainHint('bash', 1, false, 'echo "a && b"')).toBe('');
+    expect(andChainHint('bash', 1, false, '[[ -f a && -f b ]]')).toBe('');
+  });
+
+  it('stays silent when the run timed out or never reported an exit code', () => {
+    expect(andChainHint('bash', 1, true, 'cd a && grep x f')).toBe('');
+    expect(andChainHint('bash', null, false, 'cd a && grep x f')).toBe('');
   });
 });
