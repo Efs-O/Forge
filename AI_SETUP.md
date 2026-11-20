@@ -295,6 +295,7 @@ those:
   `jobs.allow_cli_agents: true`.
 - "Delete files": `permissions.fs.delete: true`.
 - "Git commit": `permissions.git.write: true`.
+- "Daily chat retitle" (question 6): `jobs.enabled: true`; Step 13 creates the job.
 
 Leave every switch the user did not pick off.
 
@@ -309,21 +310,30 @@ validate the active config.
 When the user said yes to "Other computer" in Step 0, run Step 12 now, after
 this reload and before the checks below.
 
-On Windows, read `%LOCALAPPDATA%\forge-llm\control-server.json`. Its
-`ControlServerRecord.url` field contains the selected loopback URL; parse its
-port from that URL instead of assuming the configured port or asking. If
-`LOCALAPPDATA` is unset, the registry path is `null` and no cross-platform
-record is available: say so and ask which port Forge selected.
+Read the control server's discovery record:
+`%LOCALAPPDATA%\forge-llm\control-server.json` on Windows,
+`~/.forge/control-server.json` where `LOCALAPPDATA` is unset. Take the port
+from its `url` field instead of assuming the configured port or asking, and
+its `token` field for the `Authorization: Bearer <token>` header that every
+check below except `/healthz` needs. The token changes each time Forge
+starts, so read the file again after a reload. Never print the token or write
+it to a file.
 
-**Check**, from your shell (on Windows PowerShell use `curl.exe`, not `curl`):
-use the port parsed from `ControlServerRecord.url`:
+**Check**, from your shell (on Windows PowerShell use `curl.exe`, not `curl`),
+with `Authorization: Bearer <token>` on every request but `/healthz`, and
+`Content-Type: application/json` on every POST:
 
 ```text
-GET  http://127.0.0.1:<control_server.port>/healthz        → {"ok":true}
-GET  http://127.0.0.1:<control_server.port>/models         → lists the configured models
-POST http://127.0.0.1:<control_server.port>/ensure  {"model":"<active_model>"}   → 200 once loaded
-POST http://127.0.0.1:<control_server.port>/chat    {"model":"<active_model>","messages":[{"role":"user","content":"Reply with the word ready."}]}
+GET  http://127.0.0.1:<port>/healthz        → {"ok":true}, no token needed
+GET  http://127.0.0.1:<port>/models         → lists the configured models
+POST http://127.0.0.1:<port>/ensure  {"model":"<active_model>"}   → 200 once loaded
+POST http://127.0.0.1:<port>/chat    {"model":"<active_model>","messages":[{"role":"user","content":"Reply with the word ready."}]}
+POST http://127.0.0.1:<port>/release {"model":"<active_model>"}   → after /chat, only when /ensure ran
 ```
+
+A 401 means the token is missing or stale: read the file again and retry
+once. `/ensure` holds the model loaded until `/release` lets it go, so always
+send the `/release` after an `/ensure`, also when `/chat` failed.
 
 Run `/ensure` only when `/models` lists the active model with
 `"servable": true`. Run `/chat` when the row has `"servable": true`, or
@@ -690,9 +700,12 @@ first broken link and the step above that fixes it.
 ## Step 13 — Optional: daily chat retitle
 
 Run this section only when the user said yes to "Daily chat retitle" in Step 0,
-after Step 7's check passed. A `provider: cli` model in a Forge chat has no
+after Step 6's checks passed (and Step 7's, when it ran). A `provider: cli` model in a Forge chat has no
 `manage_jobs`, so open a new chat on a model that is not `provider: cli` with
 `forge.sh say <name> --new --model <that model>` and the message on stdin.
+When the user did not pick "Talk to Forge", `forge.sh` cannot reach Forge:
+give the user the message below to paste into a new Forge chat on such a
+model, and ask them for the job name and id it reports.
 When every configured model is `provider: cli`, skip this step and say so in
 **Finish**.
 
@@ -700,7 +713,7 @@ When every configured model is `provider: cli`, skip this step and say so in
 
 **Check:** read the answer with
 `forge.sh view <name> --to <the new chat's conversationId>`; it names the
-created job and its id.
+created job and its id. Without the mesh, the user reports them.
 
 ## Step 14 — Move the security settings into policy.yaml
 
@@ -739,8 +752,7 @@ Report to the user:
 - any requested section skipped because a prerequisite was missing;
 - each remaining human action and why: plan confirmation, required login or
   secret entry (including Telegram authentication), Windows prompt, first
-  reload, the port question when `LOCALAPPDATA` is unset, or a VS Code-only
-  startup error;
+  reload, or a VS Code-only startup error;
 - these owner-only choices, unchanged: `~/.forge/policy.yaml`, **Always in this
   project**, and Clanker for ordinary chats.
 

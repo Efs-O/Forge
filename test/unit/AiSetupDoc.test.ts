@@ -39,8 +39,8 @@ describe('AI_SETUP.md', () => {
     expect(text).toContain('`FORGE.md` files are left untouched.');
     expect(text).toContain('not ask them to run **Forge: Validate Config**');
     expect(text).toContain('do not ask the user to send one');
-    expect(text).toContain('ControlServerRecord.url');
-    expect(text).toContain('If `LOCALAPPDATA` is unset');
+    expect(text).toContain('Take the port from its `url` field');
+    expect(text).toContain('`~/.forge/control-server.json` where `LOCALAPPDATA` is unset');
   });
 
   // The Step 0 questions are the one confirmation, so they have to be asked in
@@ -191,6 +191,38 @@ describe('AI_SETUP.md', () => {
     );
   });
 
+  // Commit 2de15180: every model route refuses a request without the bearer
+  // token that sits in the discovery record, and that record is written on every
+  // platform. /ensure holds the model until /release drops its ref count, so the
+  // checks have to release what they held.
+  it('checks the control server with its token and releases the hold', () => {
+    const text = doc.replace(/\s+/gu, ' ');
+    expect(text).toContain(
+      "Read the control server's discovery record: " +
+        '`%LOCALAPPDATA%\\forge-llm\\control-server.json` on Windows, ' +
+        '`~/.forge/control-server.json` where `LOCALAPPDATA` is unset. Take the port ' +
+        'from its `url` field instead of assuming the configured port or asking, and ' +
+        'its `token` field for the `Authorization: Bearer <token>` header that every ' +
+        'check below except `/healthz` needs. The token changes each time Forge ' +
+        'starts, so read the file again after a reload. Never print the token or write ' +
+        'it to a file.',
+    );
+    expect(text).toContain('GET http://127.0.0.1:<port>/healthz → {"ok":true}, no token needed');
+    expect(text).toContain(
+      'POST http://127.0.0.1:<port>/release {"model":"<active_model>"} → after /chat, only when /ensure ran',
+    );
+    expect(text).toContain(
+      'A 401 means the token is missing or stale: read the file again and retry once. ' +
+        '`/ensure` holds the model loaded until `/release` lets it go, so always send ' +
+        'the `/release` after an `/ensure`, also when `/chat` failed.',
+    );
+    // A doc that still tells the agent the record may be missing asks for a port
+    // it can just read, so the old wording has to stay out.
+    expect(text).not.toContain('the registry path is `null`');
+    expect(text).not.toContain('port question');
+    expect(text).not.toContain('ask which port');
+  });
+
   // Connect is registered only once a config is loaded, so it runs right after
   // the first reload and before Step 6's checks, for the chosen default to exist
   // when Step 6 checks it; and a survey that already read the list means the
@@ -226,12 +258,37 @@ describe('AI_SETUP.md', () => {
     expect(text).toContain(
       'A `provider: cli` model in a Forge chat has no `manage_jobs`, so open a new ' +
         'chat on a model that is not `provider: cli` with ' +
-        '`forge.sh say <name> --new --model <that model>` and the message on stdin. ' +
-        'When every configured model is `provider: cli`, skip this step and say so in ' +
+        '`forge.sh say <name> --new --model <that model>` and the message on stdin.',
+    );
+    expect(text).toContain(
+      'When every configured model is `provider: cli`, skip this step and say so in ' +
         '**Finish**.',
     );
     expect(text).toContain("`forge.sh view <name> --to <the new chat's conversationId>`");
     expect(text).not.toContain('Send this to the chat Step 7 opened');
+  });
+
+  // The mesh is off by default (commit 2d663a06), so the step that used to
+  // depend on Step 7 and on `forge.sh` has to work without either: it turns
+  // scheduled jobs on in Step 5, and hands the request to the user to paste.
+  it('creates the retitle job without the mesh when Talk to Forge was not picked', () => {
+    const text = doc.replace(/\s+/gu, ' ');
+    expect(text).toContain(
+      '- "Daily chat retitle" (question 6): `jobs.enabled: true`; Step 13 creates the job.',
+    );
+    expect(text).toContain(
+      'Run this section only when the user said yes to "Daily chat retitle" in Step 0, ' +
+        "after Step 6's checks passed (and Step 7's, when it ran).",
+    );
+    expect(text).toContain(
+      'When the user did not pick "Talk to Forge", `forge.sh` cannot reach Forge: ' +
+        'give the user the message below to paste into a new Forge chat on such a ' +
+        'model, and ask them for the job name and id it reports.',
+    );
+    expect(text).toContain(
+      "`forge.sh view <name> --to <the new chat's conversationId>`; it names the " +
+        'created job and its id. Without the mesh, the user reports them.',
+    );
   });
 
   // The control server is the only switch the starter turns on; the browser and
