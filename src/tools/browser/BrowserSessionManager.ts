@@ -1,7 +1,8 @@
-import type { Browser, BrowserContext, Page } from 'playwright-core';
+import type { BrowserContext, Page } from 'playwright-core';
 import { InspectionStore } from './browserInspectionStore';
 import type { BrowserElement, IndexTarget } from './browserInspect';
-import { getPlaywright, pngDimensions } from './browserPrimitives';
+import { pngDimensions } from './browserPrimitives';
+import { launchSeededBrowser, type SeededBrowser } from './seededBrowser';
 import {
   LOCATOR_ACTION_TIMEOUT_MS,
   requireViewportPoint,
@@ -58,7 +59,7 @@ const MAX_SCREENSHOT_BYTES = 10 * 1024 * 1024;
  * plain node, where `vscode` is not provided.
  */
 export class BrowserSessionManager {
-  private browser: Browser | null = null;
+  private session: SeededBrowser | null = null;
   private context: BrowserContext | null = null;
   private readonly tabIds = new Map<Page, string>();
   private nextTab = 1;
@@ -80,7 +81,7 @@ export class BrowserSessionManager {
   }
 
   isLaunched(): boolean {
-    return this.browser !== null;
+    return this.session !== null;
   }
 
   /** Origins already approved this session (for the approval() closures). */
@@ -94,18 +95,25 @@ export class BrowserSessionManager {
   }
 
   /**
-   * Launch the configured system browser and create the fresh ephemeral
-   * context. Returns the browser version. Throws a message naming the
-   * alternative when the channel is absent (no silent fallback).
+   * Launch the configured system browser on a throwaway profile, which is also
+   * the fresh ephemeral context (a persistent context IS its own context).
+   * Returns the browser version. Throws a message naming the alternative when
+   * the channel is absent (no silent fallback).
    */
   async launch(opts: BrowserSessionOptions): Promise<{ version: string }> {
-    if (this.browser) {
+    if (this.session) {
       throw new Error('BrowserSessionManager: already launched; call close() first');
     }
-    const { chromium } = getPlaywright();
-    let browser: Browser;
+    let session: SeededBrowser;
     try {
-      browser = await chromium.launch({ channel: opts.channel, headless: opts.headless });
+      session = await launchSeededBrowser({
+        channel: opts.channel,
+        headless: opts.headless,
+        context: {
+          viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
+          deviceScaleFactor: 1,
+        },
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(
@@ -113,41 +121,27 @@ export class BrowserSessionManager {
           `Set browser.channel to an installed browser (chrome | msedge). No silent fallback.`,
       );
     }
-    let context: BrowserContext;
-    try {
-      context = await browser.newContext({
-        viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
-        deviceScaleFactor: 1,
-      });
-    } catch (err) {
-      try {
-        await browser.close();
-      } catch (closeError) {
-        throw new AggregateError(
-          [err, closeError],
-          'browser_open: context creation failed and the browser could not be closed.',
-        );
-      }
-      throw err;
-    }
-    this.browser = browser;
-    this.context = context;
+    this.session = session;
+    this.context = session.context;
     this.context.on('page', (page) => this.adoptPage(page));
-    return { version: browser.version() };
+    // A persistent context opens with one blank page already in `pages()`:
+    // adopt it, or the tab the user can see would be invisible to every tool.
+    for (const page of this.context.pages()) this.adoptPage(page);
+    return { version: session.version };
   }
 
-  /** Close the browser (throwaway profile gone). Idempotent. */
+  /** Close the browser (throwaway profile gone, its seed kept). Idempotent. */
   async close(): Promise<void> {
-    if (!this.browser) return;
-    const browser = this.browser;
-    this.browser = null;
+    if (!this.session) return;
+    const session = this.session;
+    this.session = null;
     this.context = null;
     this.activePage = null;
     this.tabIds.clear();
     this.nextTab = 1;
     this.inspections.dropAll();
     this.approvedOrigins.clear();
-    await browser.close();
+    await session.close();
   }
 
   private adoptPage(page: Page): void {

@@ -48,8 +48,8 @@ export interface RenderFake {
   /** Resolve this to let a blocked screenshot proceed. */
   screenshotGate: null | (() => Promise<void>);
   /**
-   * Resolve this to let a blocked `browser.close()` proceed. The engine closes
-   * the browser in its `finally`, which is an await — the one window where an
+   * Resolve this to let a blocked engine-side close proceed. The engine closes
+   * the profile in its `finally`, which is an await — the one window where an
    * abort can land AFTER the PNG came back but BEFORE the tool writes it.
    */
   closeGate: null | (() => Promise<void>);
@@ -131,123 +131,139 @@ export function resetRenderFake(): void {
 /** The stub module `getPlaywright()` is mocked to return. */
 export function fakePlaywright(): {
   chromium: {
-    launch: (options: { channel: string; headless: boolean; args: string[] }) => Promise<unknown>;
+    launchPersistentContext: (
+      userDataDir: string,
+      options: { channel: string; headless: boolean; args: string[] } & Record<string, unknown>,
+    ) => Promise<unknown>;
   };
 } {
   return {
     chromium: {
-      launch: async (options: { channel: string; headless: boolean; args: string[] }) => {
-        renderFake.launchCalls.push(options);
+      // A persistent context: the throwaway profile dir, the launch options and
+      // the context options arrive as ONE call, so `launchCalls` keeps the
+      // launch fields and `contextCalls` records the whole options object.
+      launchPersistentContext: async (
+        _userDataDir: string,
+        options: { channel: string; headless: boolean; args: string[] } & Record<string, unknown>,
+      ) => {
+        renderFake.launchCalls.push({
+          channel: options.channel,
+          headless: options.headless,
+          args: options.args,
+        });
+        renderFake.contextCalls.push(options);
         if (renderFake.launchError) throw new Error(renderFake.launchError);
         if (renderFake.launchGate) await renderFake.launchGate();
         const instance = { closed: false };
+        const listeners = new Map<string, Array<(payload: unknown) => void>>();
+        const emit = (event: string, payload: unknown): void => {
+          for (const listener of listeners.get(event) ?? []) listener(payload);
+        };
         return {
-          version: () => 'fake',
-          newContext: async (contextOptions: Record<string, unknown>) => {
-            renderFake.contextCalls.push(contextOptions);
-            const listeners = new Map<string, Array<(payload: unknown) => void>>();
-            const emit = (event: string, payload: unknown): void => {
-              for (const listener of listeners.get(event) ?? []) listener(payload);
-            };
-            return {
-              addInitScript: async (script: string) => {
-                renderFake.initScripts.push(script);
-              },
-              route: async (
-                selector: string,
-                handler?: (route: FakeRoute) => void | Promise<void>,
-              ) => {
-                renderFake.routeSelectors.push(selector);
-                if (handler) renderFake.routeHandlers.push(handler);
-              },
-              routeWebSocket: async () => undefined,
-              newPage: async () => ({
-                on: (event: string, listener: (payload: unknown) => void) => {
-                  listeners.set(event, [...(listeners.get(event) ?? []), listener]);
-                },
-                setContent: async (html: string) => {
-                  renderFake.setContentCalls.push(html);
-                  await runRequests(renderFake.pageRequests);
-                  emitPageMessages(emit);
-                },
-                waitForTimeout: async (ms: number) => {
-                  renderFake.waitCalls.push(ms);
-                },
-                keyboard: {
-                  press: async (key: string, options: { delay: number }) => {
-                    renderFake.keyPresses.push({ key, delay: options.delay });
-                  },
-                },
-                evaluate: async () => {
-                  renderFake.evaluateCalls += 1;
-                  return renderFake.contentHeight;
-                },
-                screenshot: async (screenshotOptions: Record<string, unknown>) => {
-                  renderFake.screenshotCalls.push(screenshotOptions);
-                  if (renderFake.screenshotError) throw new Error(renderFake.screenshotError);
-                  if (renderFake.screenshotGate) await renderFake.screenshotGate();
-                  if (instance.closed) {
-                    throw new Error('Target page, context or browser has been closed');
-                  }
-                  return renderFake.png;
-                },
-                goto: async (url: string) => {
-                  renderFake.gotoCalls += 1;
-                  await runRequests([{ url, method: 'GET' }, ...renderFake.pageRequests]);
-                  emitPageMessages(emit);
-                },
-              }),
-              close: async () => {
-                renderFake.contextCloseCount += 1;
-              },
-            };
-
-            async function runRequests(
-              requests: Array<{ url: string; method: string }>,
-            ): Promise<void> {
-              for (const request of requests) {
-                for (const handler of renderFake.routeHandlers) {
-                  await handler({
-                    request: () => ({
-                      url: () => request.url,
-                      method: () => request.method,
-                      postDataBuffer: () => null,
-                      headers: () => ({}),
-                    }),
-                    continue: async () => {
-                      renderFake.routeOutcomes.push({ url: request.url, outcome: 'continue' });
-                    },
-                    abort: async () => {
-                      renderFake.routeOutcomes.push({ url: request.url, outcome: 'abort' });
-                    },
-                    fulfill: async (response) => {
-                      renderFake.routeOutcomes.push({ url: request.url, outcome: 'fulfill' });
-                      renderFake.fulfillments.push(response);
-                    },
-                  });
-                }
-              }
-            }
-
-            function emitPageMessages(emit: (event: string, payload: unknown) => void): void {
-              for (const message of renderFake.pageErrors) emit('pageerror', new Error(message));
-              for (const text of renderFake.consoleErrors) {
-                emit('console', { type: () => 'error', text: () => text });
-              }
-              for (const message of renderFake.consoleMessages) {
-                emit('console', { type: () => message.type, text: () => message.text });
-              }
-              if (renderFake.consoleMessages.length === 0) {
-                emit('console', { type: () => 'log', text: () => 'scene ready' });
-              }
-            }
+          browser: () => ({ version: () => 'fake' }),
+          addInitScript: async (script: string) => {
+            renderFake.initScripts.push(script);
           },
+          route: async (
+            selector: string,
+            handler?: (route: FakeRoute) => void | Promise<void>,
+          ) => {
+            renderFake.routeSelectors.push(selector);
+            if (handler) renderFake.routeHandlers.push(handler);
+          },
+          routeWebSocket: async () => undefined,
+          newPage: async () => ({
+            on: (event: string, listener: (payload: unknown) => void) => {
+              listeners.set(event, [...(listeners.get(event) ?? []), listener]);
+            },
+            setContent: async (html: string) => {
+              renderFake.setContentCalls.push(html);
+              await runRequests(renderFake.pageRequests);
+              emitPageMessages(emit);
+            },
+            waitForTimeout: async (ms: number) => {
+              renderFake.waitCalls.push(ms);
+            },
+            keyboard: {
+              press: async (key: string, options: { delay: number }) => {
+                renderFake.keyPresses.push({ key, delay: options.delay });
+              },
+            },
+            evaluate: async () => {
+              renderFake.evaluateCalls += 1;
+              return renderFake.contentHeight;
+            },
+            screenshot: async (screenshotOptions: Record<string, unknown>) => {
+              renderFake.screenshotCalls.push(screenshotOptions);
+              if (renderFake.screenshotError) throw new Error(renderFake.screenshotError);
+              if (renderFake.screenshotGate) await renderFake.screenshotGate();
+              if (instance.closed) {
+                throw new Error('Target page, context or browser has been closed');
+              }
+              return renderFake.png;
+            },
+            goto: async (url: string) => {
+              renderFake.gotoCalls += 1;
+              await runRequests([{ url, method: 'GET' }, ...renderFake.pageRequests]);
+              emitPageMessages(emit);
+            },
+          }),
+          // A persistent context IS the browser: the first close closes the
+          // process, and a second one (the render engine's cleanup after the
+          // leg already closed the context) closes nothing — so the counters
+          // stay at one close each, exactly as they read before. The gate is on
+          // that engine-side close, which is the await an abort can still land
+          // inside after the PNG came back.
           close: async () => {
+            if (!instance.closed) {
+              instance.closed = true;
+              renderFake.contextCloseCount += 1;
+              renderFake.closeCount += 1;
+              return;
+            }
             if (renderFake.closeGate) await renderFake.closeGate();
-            renderFake.closeCount += 1;
-            instance.closed = true;
           },
         };
+
+        async function runRequests(
+          requests: Array<{ url: string; method: string }>,
+        ): Promise<void> {
+          for (const request of requests) {
+            for (const handler of renderFake.routeHandlers) {
+              await handler({
+                request: () => ({
+                  url: () => request.url,
+                  method: () => request.method,
+                  postDataBuffer: () => null,
+                  headers: () => ({}),
+                }),
+                continue: async () => {
+                  renderFake.routeOutcomes.push({ url: request.url, outcome: 'continue' });
+                },
+                abort: async () => {
+                  renderFake.routeOutcomes.push({ url: request.url, outcome: 'abort' });
+                },
+                fulfill: async (response) => {
+                  renderFake.routeOutcomes.push({ url: request.url, outcome: 'fulfill' });
+                  renderFake.fulfillments.push(response);
+                },
+              });
+            }
+          }
+        }
+
+        function emitPageMessages(emit: (event: string, payload: unknown) => void): void {
+          for (const message of renderFake.pageErrors) emit('pageerror', new Error(message));
+          for (const text of renderFake.consoleErrors) {
+            emit('console', { type: () => 'error', text: () => text });
+          }
+          for (const message of renderFake.consoleMessages) {
+            emit('console', { type: () => message.type, text: () => message.text });
+          }
+          if (renderFake.consoleMessages.length === 0) {
+            emit('console', { type: () => 'log', text: () => 'scene ready' });
+          }
+        }
       },
     },
   };

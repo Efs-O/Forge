@@ -51,6 +51,10 @@
 16. a yaml placeholder in an `AI_SETUP.md` block, e.g. `voice_en: <voice file name without .onnx>` → `AiSetupDoc.test.ts` red: a `# partial:` block is parsed against that key's own schema and `voice_en` is `^[A-Za-z0-9_-]+$`. write a real value (`en_US-amy-medium`) and put the note in a `#` comment
 17. a config.yaml + policy.yaml fixture pair for a writer test → `test/unit/ConfigWriter.test.ts` has none. copy `pair()` from `test/unit/PolicyLoader.test.ts:35` and pass `{ policyPath }` so the real `~/.forge` is never read
 18. a settings read added to the model-turn path → `AgentLoop.test.ts` and `VisionHistoryStrip.test.ts` go red with `sent` empty: their `vi.mock('vscode')` factory has no `workspace`, so the throw is swallowed. guard the read to fail closed
+19. a launch moved out of `BrowserSessionManager` into a shared helper → the render suites mock `getPlaywright` on `BrowserSessionManager` only, so the helper launches a real Chrome. pass the caller's `chromium` into `launchSeededBrowser`
+20. `closeGate` in `test/support/renderHtmlHarness.ts` gating every `context.close()` → the render leg closes the persistent context first, so the abort lands inside `use` and the engine's rejection wins. gate the engine's second close only
+21. from `src/tools/browser/*.ts` `require('../util/logger')` → TS2307 inside the `typeof import()`: the logger is `../../util/logger`. keep the require lazy, a top-level import drags `vscode` into the browser graph the smoke runs under node
+22. a fire-and-forget `void closeQuietly()` in an abort path → the profile `fs.rm` is still in flight when the test file ends, so tempGuard fails `temp leak: … forge-browser-XXXX`. an exit that finds the close taken must await it, not return at once
 
 ## PATHS
 1. `zipfile.ZipFile('test/fixtures/sample.xlsx')` in a scan → FileNotFoundError: that is not where the fixture lives. read the test's `fixture()` helper for the real path first

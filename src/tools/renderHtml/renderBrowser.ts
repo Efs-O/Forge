@@ -1,4 +1,10 @@
+import type { BrowserContext, BrowserContextOptions } from 'playwright-core';
 import { getPlaywright, type BrowserChannel } from '../browser/BrowserSessionManager';
+import {
+  defaultSeededBrowserDeps,
+  launchSeededBrowser,
+  type SeededBrowser,
+} from '../browser/seededBrowser';
 
 /**
  * Chrome's own outbound traffic, not the page's. `context.route` blocks page
@@ -28,7 +34,16 @@ export const PREVIEW_LAUNCH_ARGS = [
 
 export const PREVIEW_ORIGIN = 'https://forge-preview.invalid';
 
-type RenderBrowser = Awaited<ReturnType<ReturnType<typeof getPlaywright>['chromium']['launch']>>;
+/**
+ * What `use` gets: one context per render. Every caller asks for exactly one
+ * (`renderPng`, `renderPreview`, `compileBatch`, `printHtmlToPdf`,
+ * `renderPdfPages`), so the launch that backs it happens inside `newContext`
+ * — which is already inside the deadline and abort race below, so a stalled
+ * launch still times out and an aborted turn still returns at once.
+ */
+export interface RenderBrowser {
+  newContext(options?: BrowserContextOptions): Promise<BrowserContext>;
+}
 
 /**
  * Launch, run `use`, kill — the machinery both modes share — one browser per call, no persistent
@@ -36,13 +51,13 @@ type RenderBrowser = Awaited<ReturnType<ReturnType<typeof getPlaywright>['chromi
  *
  * The hard part is not the render, it is never leaving a browser behind. Three
  * exits close it: the `finally` after a normal or failed render, the timeout
- * path (where `chromium.launch` may still RESOLVE afterwards and must close the
- * browser it just got), and an aborted turn. `launched` is written the instant
- * launch resolves and `giveUp` is set the instant the deadline fires, so
- * whichever happens second sees the other and closes the process. A headless
- * Chrome with no GPU is cheap to leak but not free, and nothing else reaps it.
- * An abort is additionally RACED, so cancelling during a stalled launch returns
- * at once instead of waiting for the deadline.
+ * path (where the launch inside `newContext` may still RESOLVE afterwards and
+ * must close the profile it just got), and an aborted turn. `browser` is
+ * written the instant the launch resolves and `giveUp` is set the instant the
+ * deadline fires, so whichever happens second sees the other and closes the
+ * process. A headless Chrome with no GPU is cheap to leak but not free, and
+ * nothing else reaps it. An abort is additionally RACED, so cancelling during a
+ * stalled launch returns at once instead of waiting for the deadline.
  */
 export async function withRenderBrowser<T>(
   launch: { channel: BrowserChannel; timeoutMs: number; args: readonly string[] },
@@ -50,21 +65,33 @@ export async function withRenderBrowser<T>(
   use: (handle: RenderBrowser) => Promise<T>,
 ): Promise<T> {
   const { chromium } = getPlaywright();
-  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+  let browser: SeededBrowser | undefined;
   let giveUp = false;
+  let contextAsked = false;
+  /** The close currently in flight, so a second exit can wait for it. */
+  let closing: Promise<void> | undefined;
 
   const closeQuietly = async (): Promise<void> => {
     // Take the handle before awaiting, so three exits (finally, timeout,
     // abort) can race and still close exactly once. Never throws: cleanup must
-    // not mask the error the caller is about to see.
+    // not mask the error the caller is about to see. An exit that finds no
+    // handle still WAITS for the close someone else started: the profile
+    // directory is removed at the end of that close, and a caller that returns
+    // before it lands leaves a throwaway profile behind.
     const handle = browser;
     browser = undefined;
-    if (!handle) return;
-    try {
-      await handle.close();
-    } catch {
-      // Already gone (pipe closed) — nothing to do.
+    if (!handle) {
+      await closing;
+      return;
     }
+    closing = (async () => {
+      try {
+        await handle.close();
+      } catch {
+        // Already gone (pipe closed) — nothing to do.
+      }
+    })();
+    await closing;
   };
 
   // One handler for both add and remove. An anonymous wrapper here would never
@@ -91,19 +118,32 @@ export async function withRenderBrowser<T>(
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const launched = chromium
-      .launch({
-        channel: launch.channel,
-        headless: true,
-        args: [...launch.args],
-      })
-      .then((handle) => {
-        browser = handle;
-        // launch won the race against the deadline or the abort: close now,
-        // because whoever set `giveUp` had no handle to close at the time.
-        if (giveUp) void closeQuietly();
-        return handle;
-      });
+    const handle: RenderBrowser = {
+      newContext: async (options?: BrowserContextOptions) => {
+        if (contextAsked)
+          throw new Error('render browser: newContext may be called once per render');
+        contextAsked = true;
+        const launched = launchSeededBrowser(
+          {
+            channel: launch.channel,
+            headless: true,
+            args: launch.args,
+            ...(options ? { context: options } : {}),
+          },
+          // The render suites swap Playwright through this module's
+          // `getPlaywright` (their `vi.mock` seam), so the launch takes its
+          // browser type from here, not from the default deps.
+          { ...defaultSeededBrowserDeps(), chromium },
+        ).then((session) => {
+          browser = session;
+          // launch won the race against the deadline or the abort: close now,
+          // because whoever set `giveUp` had no handle to close at the time.
+          if (giveUp) void closeQuietly();
+          return session;
+        });
+        return (await launched).context;
+      },
+    };
 
     const deadline = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
@@ -118,7 +158,7 @@ export async function withRenderBrowser<T>(
       }, launch.timeoutMs);
     });
 
-    const rendered = launched.then(use);
+    const rendered = use(handle);
 
     return await Promise.race([rendered, deadline, aborted]);
   } catch (err) {

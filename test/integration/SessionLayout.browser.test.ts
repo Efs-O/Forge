@@ -1,8 +1,8 @@
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import * as path from 'node:path';
-import { chromium, type Browser } from 'playwright-core';
 import * as esbuild from 'esbuild';
 import { describe, expect, it } from 'vitest';
+import { launchSeededBrowser, type SeededBrowser } from '../../src/tools/browser/seededBrowser';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
 
@@ -17,12 +17,13 @@ describe('session layout rendering in Edge', () => {
     const cache = path.join(ROOT, 'node_modules/.cache');
     await mkdir(cache, { recursive: true });
     const temp = await mkdtemp(path.join(cache, 'forge-session-layout-'));
-    let browser: Browser;
+    let session: SeededBrowser;
     try {
-      browser = await chromium.launch({
+      session = await launchSeededBrowser({
         channel: 'msedge',
         headless: true,
         env: { ...process.env, TEMP: temp, TMP: temp, TMPDIR: temp },
+        context: { viewport: { width: 900, height: 800 } },
       });
     } catch (error) {
       await rm(temp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -49,7 +50,7 @@ describe('session layout rendering in Edge', () => {
           (name) => readFile(path.join(ROOT, 'webview-ui/styles', name), 'utf8'),
         ),
       );
-      const page = await browser.newPage({ viewport: { width: 900, height: 800 } });
+      const page = await session.context.newPage();
       page.setDefaultTimeout(5000);
       page.on('pageerror', (error) => {
         throw new Error(`session layout fixture failed: ${error.message}`);
@@ -264,7 +265,7 @@ describe('session layout rendering in Edge', () => {
         ]),
       );
     } finally {
-      await browser.close();
+      await session.close();
       await rm(temp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   }, 30000);

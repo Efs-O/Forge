@@ -735,6 +735,7 @@ overlaps with an existing owner, extend the owner instead.
 | ffmpeg probe + frame extraction            | `src/tools/videoExtract.ts`           |
 | ffmpeg/ffprobe executable discovery        | `src/tools/ffmpegLocate.ts`           |
 | Browser session lifecycle (system channel, lazy playwright-core) | `src/tools/browser/BrowserSessionManager.ts` |
+| Throwaway Chromium profile + per-channel blank-password seed (`%LOCALAPPDATA%\forge-llm\browser-seed\<channel>.json`) | `src/tools/browser/seededBrowser.ts` |
 | Browser input-action guards (coordinate bounds, locator timeout, failure naming) | `src/tools/browser/browserActionGuards.ts` |
 | Browser text-input mode for an inspected node (fill vs dropdown option) | `src/tools/browser/browserTextInput.ts` |
 | Screenshot root, per-chat capture folder, `FORGE_SCREENSHOT_DIR` override, delete-with-owner | `src/tools/browser/screenshotPaths.ts` |

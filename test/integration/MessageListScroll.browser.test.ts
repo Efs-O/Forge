@@ -1,8 +1,8 @@
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import * as path from 'node:path';
-import { chromium, type Browser } from 'playwright-core';
 import * as esbuild from 'esbuild';
 import { describe, expect, it } from 'vitest';
+import { launchSeededBrowser, type SeededBrowser } from '../../src/tools/browser/seededBrowser';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
 
@@ -14,15 +14,16 @@ function missingEdge(error: unknown): boolean {
 
 describe('MessageList scroll behavior in Edge', () => {
   it('follows real content reflow, honors wheel-up, then resumes at the bottom', async (ctx) => {
-    let browser: Browser;
+    let session: SeededBrowser;
     const browserTempRoot = path.join(ROOT, 'node_modules/.cache');
     await mkdir(browserTempRoot, { recursive: true });
     const browserTemp = await mkdtemp(path.join(browserTempRoot, 'forge-edge-'));
     try {
-      browser = await chromium.launch({
+      session = await launchSeededBrowser({
         channel: 'msedge',
         headless: true,
         env: { ...process.env, TEMP: browserTemp, TMP: browserTemp, TMPDIR: browserTemp },
+        context: { viewport: { width: 1200, height: 800 } },
       });
     } catch (error) {
       await rm(browserTemp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -49,7 +50,7 @@ describe('MessageList scroll behavior in Edge', () => {
           readFile(path.join(ROOT, 'webview-ui/styles', name), 'utf8'),
         ),
       );
-      const page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
+      const page = await session.context.newPage();
       page.setDefaultTimeout(5000);
       const pageErrors: string[] = [];
       page.on('pageerror', (error) => pageErrors.push(error.message));
@@ -171,7 +172,7 @@ describe('MessageList scroll behavior in Edge', () => {
       expect(pageErrors).toEqual([]);
       await page.close();
     } finally {
-      await browser.close();
+      await session.close();
       await rm(browserTemp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   }, 30000);
