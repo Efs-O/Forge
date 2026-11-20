@@ -7,9 +7,7 @@ import {
 } from '../llm/ForgeInstructionsLoader';
 import {
   NOTE_INSTALLED_MARKER,
-  NOTE_OFF_NOTICE_MARKER,
   agentMeshNoteFacts,
-  findWorkspaceAgentNotes,
   hasAgentNoteFile,
   installAgentMeshNote,
   refreshAgentMeshNote,
@@ -20,6 +18,11 @@ import {
   registerAgentMeshNoteCommand,
   describeAgentMeshNoteInstall,
 } from './agentMeshNoteSetup';
+import {
+  noteFilesRegistryPath,
+  recordNoteFiles,
+  removeWorkspaceAgentNotes,
+} from '../agentBus/agentNoteRemoval';
 import { registerDesktopConnectCommands } from './desktopConnect';
 import { registerDesktopShareCommands } from './desktopShare';
 import { registerDesktopCheckConnectionCommands } from './desktopCheckConnection';
@@ -41,7 +44,9 @@ import { getLogger } from '../util/logger';
  * read (laptop audit F9). It is written once per workspace and never again
  * unless `forge.agentMesh.installNote` is run: a user who deletes the marked
  * section has said they do not want it, and re-adding it on every start would
- * be Forge arguing with that.
+ * be Forge arguing with that. Turning the mesh off takes it back out again — a
+ * note that tells agents to message chats whose Forge is not listening is
+ * worse than no note, and it is Forge's text to remove.
  *
  * `config` is the activation-time snapshot, and it is the right thing for
  * everything this function itself does. `getConfig` is the live getter, and it
@@ -136,6 +141,7 @@ export async function bootstrapWorkspace(
   // be told about on every start.
   if (meshOn) {
     const userResults = refreshUserNote(os.homedir(), userNoteFacts(noteFacts.busDir));
+    recordNoteFiles(noteFilesRegistryPath(), userResults);
     const refreshed = userResults.filter((result) => result.status === 'replaced');
     if (refreshed.length) log.info(describeAgentMeshNoteInstall(refreshed));
     for (const failure of userResults.filter((result) => result.status === 'error')) {
@@ -150,6 +156,9 @@ export async function bootstrapWorkspace(
       noteAction === 'install'
         ? installAgentMeshNote(repositoryRoots, noteFacts)
         : refreshAgentMeshNote(repositoryRoots, noteFacts);
+    // Which files Forge wrote, so a later mesh-off start or an uninstall can
+    // find them again — including the ones this run only found already there.
+    recordNoteFiles(noteFilesRegistryPath(), results);
     const failures = results.filter((r) => r.status === 'error');
     for (const failure of failures) log.warn(`agent note: ${failure.path} — ${failure.reason}`);
     // Only mark it done when something was actually written or found: an all-
@@ -209,15 +218,31 @@ export async function bootstrapWorkspace(
       );
     }
   } else if (!meshOn && repositoryRoots.length) {
-    const held = findWorkspaceAgentNotes(repositoryRoots);
-    if (held.length && !context.workspaceState.get(NOTE_OFF_NOTICE_MARKER)) {
-      await context.workspaceState.update(NOTE_OFF_NOTICE_MARKER, true);
+    // The mesh is off, so the note is Forge's to remove: it instructs agents to
+    // message chats that no longer listen. Everything outside the markers stays
+    // byte for byte, and a file Forge did not create keeps its file.
+    const removed = removeWorkspaceAgentNotes(repositoryRoots, noteFilesRegistryPath());
+    const gone = removed.filter((r) => r.status === 'removed' || r.status === 'deleted');
+    if (gone.length) {
+      // Both markers go: the note is not here any more, so the next mesh-on
+      // start installs it again instead of reading the removal as the owner's
+      // own deletion and leaving it out forever.
+      await context.workspaceState.update(NOTE_INSTALLED_MARKER, undefined);
+      await context.workspaceState.update(NOTE_HASH_MARKER, undefined);
+      const names = [...new Set(gone.map((r) => path.basename(r.path)))].join(' and ');
       const message =
-        `The agent mesh is off, so agents cannot message this workspace's Forge chats. ` +
-        `The note Forge left in ${held.map((p) => path.basename(p)).join(', ')} can be deleted ` +
-        `(everything between the two forge-agent-mesh comment lines).`;
+        `Forge removed its agent note from ${names} because the agent mesh is off ` +
+        '(agent_bus: { enabled: false }).';
       log.info(message);
       void vscode.window.showInformationMessage(message);
+    }
+    const stuck = removed.filter((r) => r.status === 'error' || r.status === 'skipped');
+    for (const failure of stuck) log.warn(`agent note: ${failure.path} — ${failure.reason}`);
+    if (stuck.length) {
+      const names = stuck.map((f) => `${path.basename(f.path)} (${f.reason})`).join('; ');
+      void vscode.window.showWarningMessage(
+        `Forge could not remove its agent note from ${names}. The mesh is off, so agents are still told to message a Forge that does not listen.`,
+      );
     }
   }
 }

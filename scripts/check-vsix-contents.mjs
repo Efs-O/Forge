@@ -21,6 +21,7 @@ const ALLOW_LIST = [
   'config/starter/**',
   'config/templates/**',
   'dist/extension.js',
+  'dist/uninstall.js',
   'dist/node_modules/**',
   'dist/pdfjs/pdf.mjs',
   'dist/pdfjs/pdf.worker.mjs',

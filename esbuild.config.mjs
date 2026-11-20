@@ -28,6 +28,18 @@ const extensionConfig = {
   minify: release,
 };
 
+// The `vscode:uninstall` script (src/uninstall.ts): runs after the extension
+// folder is gone, so it gets no `vscode` module. `external: []` overrides the
+// extension's externals on purpose — an accidental `import * as vscode` in that
+// dependency tree then fails the build here instead of failing the uninstall on
+// the owner's machine, where nothing is left to report an error to.
+const uninstallConfig = {
+  ...extensionConfig,
+  entryPoints: ['src/uninstall.ts'],
+  outfile: 'dist/uninstall.js',
+  external: [],
+};
+
 const webviewConfig = {
   entryPoints: ['webview-ui/src/index.tsx'],
   bundle: true,
@@ -140,6 +152,8 @@ async function build() {
 
   await esbuild.build(extensionConfig);
   console.log('Extension built.');
+  await esbuild.build(uninstallConfig);
+  console.log('Uninstall script built.');
   copyPlaywrightCore();
   copyPdfJs();
 

@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { buildAgentMeshNote, type AgentMeshNoteFacts } from '../agentBus/agentMeshNote';
+import { noteFilesRegistryPath, recordNoteFiles } from '../agentBus/agentNoteRemoval';
 import {
   describeAgentMeshNoteInstall,
   installIntoOneFile,
@@ -124,6 +125,9 @@ export function registerAgentUserNoteCommand(
   context.subscriptions.push(
     vscode.commands.registerCommand(USER_NOTE_COMMAND, async () => {
       const results = installUserNote(os.homedir(), userNoteFacts(deps.getBusDir()));
+      // Recorded so an uninstall can take the note out of the owner's own files:
+      // no workspace start may do it, because another workspace's mesh may be on.
+      recordNoteFiles(noteFilesRegistryPath(), results);
       const message = `${describeAgentMeshNoteInstall(results)} Files: ${results
         .map(
           (result) =>

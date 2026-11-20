@@ -13,6 +13,11 @@ import {
   type AgentMeshNoteFacts,
 } from '../agentBus/agentMeshNote';
 import { busPaths } from '../agentBus/agentBus';
+import {
+  noteFilesRegistryPath,
+  recordNoteFiles,
+  removeWorkspaceAgentNotes,
+} from '../agentBus/agentNoteRemoval';
 import { discoverWorkspaceRepositoryRoots } from '../llm/ForgeInstructionsLoader';
 import type { ForgeConfig } from '../config/types';
 import { writeFileAtomicSync } from '../util/atomicWrite';
@@ -31,6 +36,11 @@ import { writeFileAtomicSync } from '../util/atomicWrite';
  * instead of writing it: the three guarantees (created when absent, added
  * beside existing text, never duplicated) are what code can test, and a fresh
  * install that never runs the AI setup still gets the note.
+ *
+ * The mesh going off is the reverse of that trigger, here and in the bootstrap:
+ * the note is removed, because it tells agents to message chats that are no
+ * longer listening. `src/agentBus/agentNoteRemoval.ts` owns that removal, and
+ * `src/uninstall.ts` runs it over every recorded file when Forge is uninstalled.
  */
 
 /** Re-runs the install on demand. Registered from `workspaceBootstrap.ts`,
@@ -40,8 +50,6 @@ export const AGENT_NOTE_COMMAND = 'forge.agentMesh.installNote';
 /** workspaceState markers. `.v1` so a changed rule starts fresh rather than
  *  inheriting a decision made under an older one. */
 export const NOTE_INSTALLED_MARKER = 'forge.agentMesh.noteInstalled.v1';
-/** The mesh-off notice: shown once per workspace, not once per start. */
-export const NOTE_OFF_NOTICE_MARKER = 'forge.agentMesh.noteOffNotice.v1';
 /** The hash of the note this workspace was last given (phase B row C9 of
  *  `docs/plans/AGENT_DOCS_GAP_AUDIT_PLAN.md`). It is what makes a template
  *  change reach a workspace that already has a note: the install runs once per
@@ -300,22 +308,6 @@ export function refreshAgentMeshNote(
   return results;
 }
 
-/** Files in these roots that hold a section, whether or not Forge wrote it. */
-export function findWorkspaceAgentNotes(roots: readonly string[]): string[] {
-  const found: string[] = [];
-  for (const root of roots) {
-    for (const name of AGENT_INSTRUCTION_FILE_NAMES) {
-      const filePath = path.join(root, name);
-      try {
-        if (countAgentMeshSections(fs.readFileSync(filePath, 'utf8')) > 0) found.push(filePath);
-      } catch {
-        // Absent or unreadable: nothing to report.
-      }
-    }
-  }
-  return found;
-}
-
 /** The sentence for the log or the toast: what changed, in the user's words. */
 export function describeAgentMeshNoteInstall(results: readonly AgentMeshNoteFileResult[]): string {
   const changed = results.filter((r) => r.status === 'created' || r.status === 'appended');
@@ -358,15 +350,27 @@ export function registerAgentMeshNoteCommand(
         return;
       }
       if (config.agent_bus?.enabled !== true) {
-        const held = findWorkspaceAgentNotes(roots);
-        void vscode.window.showInformationMessage(
-          held.length
-            ? `The agent mesh is off (\`agent_bus: { enabled: false }\`), so Forge left the existing note in place: ${held.map((p) => path.basename(p)).join(', ')}. Delete the marked section to remove it.`
-            : 'The agent mesh is off, so there is nothing for the note to say. Set `agent_bus: { enabled: true }` first.',
-        );
+        // Off is the note's way out, the same removal `bootstrapWorkspace` runs
+        // on a start: the note instructs agents to message chats that no longer
+        // listen, so leaving it behind is the defect, not the fallback.
+        const removed = removeWorkspaceAgentNotes(roots, noteFilesRegistryPath());
+        const gone = removed.filter((r) => r.status === 'removed' || r.status === 'deleted');
+        if (gone.length) {
+          await context.workspaceState.update(NOTE_INSTALLED_MARKER, undefined);
+          await context.workspaceState.update(NOTE_HASH_MARKER, undefined);
+          const names = [...new Set(gone.map((r) => path.basename(r.path)))].join(' and ');
+          void vscode.window.showInformationMessage(
+            `Forge removed its agent note from ${names} because the agent mesh is off (agent_bus: { enabled: false }).`,
+          );
+        } else {
+          void vscode.window.showInformationMessage(
+            'The agent mesh is off and this workspace holds no Forge agent note. Set `agent_bus: { enabled: true }` first.',
+          );
+        }
         return;
       }
       const results = installAgentMeshNote(roots, agentMeshNoteFacts(config, deps.getConfigPath()));
+      recordNoteFiles(noteFilesRegistryPath(), results);
       const message = describeAgentMeshNoteInstall(results);
       const failures = results.filter((r) => r.status === 'error');
       if (failures.length) {

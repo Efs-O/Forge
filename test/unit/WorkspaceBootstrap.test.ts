@@ -55,8 +55,10 @@ vi.mock('../../src/llm/ForgeInstructionsLoader', () => ({
 }));
 
 const { bootstrapWorkspace } = await import('../../src/vscode/workspaceBootstrap');
-const { NOTE_INSTALLED_MARKER, NOTE_OFF_NOTICE_MARKER } =
+const { NOTE_INSTALLED_MARKER, NOTE_HASH_MARKER } =
   await import('../../src/vscode/agentMeshNoteSetup');
+const { readNoteFiles, noteFilesRegistryPath } =
+  await import('../../src/agentBus/agentNoteRemoval');
 const { countAgentMeshSections, buildAgentMeshNote } =
   await import('../../src/agentBus/agentMeshNote');
 const { SESSION_KEY_V1 } = await import('../../src/sidebar/sessionTypes');
@@ -275,7 +277,7 @@ describe('the agent note on workspace bootstrap', () => {
     expect(workspace.get(NOTE_INSTALLED_MARKER)).toBeUndefined();
   });
 
-  it('a section left behind with the mesh off is reported once, not deleted', async () => {
+  it('mesh off removes the note Forge wrote and leaves the rest byte-identical', async () => {
     fs.writeFileSync(
       path.join(scratch, 'AGENTS.md'),
       `own\n\n${buildAgentMeshNote({
@@ -288,12 +290,33 @@ describe('the agent note on workspace bootstrap', () => {
     // which is what "once" has to mean here.
     const { workspace, context } = fakeContext();
     workspace.set(NOTE_INSTALLED_MARKER, true); // Forge wrote it in an earlier session
+    workspace.set(NOTE_HASH_MARKER, 'the hash of the note it wrote');
     await bootstrapWorkspace(context, scratch, meshOff as never, 'config.yaml', getMeshOff);
-    expect(countAgentMeshSections(read('AGENTS.md'))).toBe(1);
-    expect(workspace.get(NOTE_OFF_NOTICE_MARKER)).toBe(true);
+    expect(read('AGENTS.md')).toBe('own\n');
+    // Both markers go: the next mesh-on start installs again rather than reading
+    // this removal as the owner's own deletion and leaving it out forever.
+    expect(workspace.get(NOTE_INSTALLED_MARKER)).toBeUndefined();
+    expect(workspace.get(NOTE_HASH_MARKER)).toBeUndefined();
+    expect(infoMock().mock.calls.map((call) => String(call[0]))).toEqual([
+      'Forge removed its agent note from AGENTS.md because the agent mesh is off (agent_bus: { enabled: false }).',
+    ]);
+    // Nothing left to remove, so the next start says nothing more.
     await bootstrapWorkspace(context, scratch, meshOff as never, 'config.yaml', getMeshOff);
     expect(infoMock()).toHaveBeenCalledTimes(1);
-    expect(countAgentMeshSections(read('AGENTS.md'))).toBe(1);
+    expect(read('AGENTS.md')).toBe('own\n');
+  });
+
+  it('mesh on records the files it wrote', async () => {
+    const { context } = fakeContext();
+    await bootstrapWorkspace(context, scratch, meshOn as never, 'C:/Users/x/config.yaml', getMeshOn);
+    // Which files Forge wrote, so a mesh-off start or an uninstall can find them
+    // again — under the fake home, never the operator's own `~/.forge`.
+    expect(readNoteFiles(noteFilesRegistryPath(fakeHome.dir))).toEqual(
+      expect.arrayContaining([
+        { path: path.resolve(scratch, 'AGENTS.md'), created: true },
+        { path: path.resolve(scratch, 'CLAUDE.md'), created: true },
+      ]),
+    );
   });
 
   it('refreshes the user-wide note where its markers already are, and creates nothing elsewhere', async () => {

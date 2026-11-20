@@ -20,6 +20,7 @@ import {
   buildAgentMeshNote,
   countAgentMeshSections,
   hasAgentsMdImportLine,
+  removeAgentMeshSections,
   NOTE_STATE_ANCHOR,
   WHO_DOES_WHAT_ANCHOR,
   type AgentMeshNoteFacts,
@@ -219,6 +220,75 @@ describe('putting the note into a file', () => {
     const existing = `Rules.\r\n\r\n${note.split('\n').join('\r\n')}\r\n`;
     const applied = applyAgentMeshNote(existing, fakeNote('NOTE'));
     expect(applied.content).toBe(`Rules.\r\n\r\n${fakeNote('NOTE').split('\n').join('\r\n')}\r\n`);
+  });
+});
+
+/**
+ * Taking the note out again — the mesh-off path and the uninstall both call
+ * this, and the guarantee they are judged by is that it gives back exactly the
+ * file as it was before the note went in: nothing the owner wrote is touched,
+ * and the blank line Forge added when it appended goes with the section.
+ */
+describe('taking the note back out of a file', () => {
+  const noteCrlf = note.split('\n').join('\r\n');
+
+  it('removes a section appended below the owner text, and the blank line above it', () => {
+    const result = removeAgentMeshSections(`own\n\n${note}\n`);
+    expect(result.status).toBe('removed');
+    expect(result.content).toBe('own\n');
+  });
+
+  it('empties a file that held nothing but the section', () => {
+    const result = removeAgentMeshSections(`${note}\n`);
+    expect(result.status).toBe('removed');
+    expect(result.content).toBe('');
+  });
+
+  it('keeps text on both sides of the section, with one blank line between them', () => {
+    const result = removeAgentMeshSections(`a\n\n${note}\n\nb\n`);
+    expect(result.status).toBe('removed');
+    expect(result.content).toBe('a\n\nb\n');
+  });
+
+  it('removes a section from a CRLF file without rewriting its line endings', () => {
+    const result = removeAgentMeshSections(`own\r\n\r\n${noteCrlf}\r\n`);
+    expect(result.status).toBe('removed');
+    expect(result.content).toBe('own\r\n');
+  });
+
+  it('gives back exactly what applyAgentMeshNote started from', () => {
+    for (const original of ['own\n', 'a\n\nb\n', 'own\r\n']) {
+      const applied = applyAgentMeshNote(original, note).content;
+      expect(removeAgentMeshSections(applied).content).toBe(original);
+    }
+  });
+
+  it('reports a file that never held a marker and does not touch it', () => {
+    const content = '# Mine\nNo Forge text here.\n';
+    const result = removeAgentMeshSections(content);
+    expect(result.status).toBe('none');
+    expect(result.content).toBe(content);
+  });
+
+  it('refuses to guess where a torn section ends: a start with no end', () => {
+    const content = `own\n\n${AGENT_NOTE_START}\nleftover text to the end`;
+    const result = removeAgentMeshSections(content);
+    expect(result.status).toBe('lone-marker');
+    expect(result.content).toBe(content);
+  });
+
+  it('refuses to guess past an end marker that is outside every section', () => {
+    for (const content of [`${AGENT_NOTE_END}\n`, `${note}\n\n${AGENT_NOTE_END}\n`]) {
+      const result = removeAgentMeshSections(content);
+      expect(result.status).toBe('lone-marker');
+      expect(result.content).toBe(content);
+    }
+  });
+
+  it('removes every copy when the owner pasted the section twice', () => {
+    const result = removeAgentMeshSections(`own\n\n${note}\n\n${note}\n`);
+    expect(result.status).toBe('removed');
+    expect(result.content).toBe('own\n');
   });
 });
 

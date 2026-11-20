@@ -189,6 +189,75 @@ export function applyAgentMeshNote(
   };
 }
 
+/** What taking the note out did. `none` means the file never had a marker; `lone-marker`
+ *  means it holds one Forge cannot trust, so nothing was touched. */
+export type AgentMeshNoteRemoveStatus = 'removed' | 'none' | 'lone-marker';
+
+/** Every index of `marker`, ascending. */
+function allIndicesOf(content: string, marker: string): number[] {
+  const found: number[] = [];
+  for (let from = 0; ; ) {
+    const at = content.indexOf(marker, from);
+    if (at < 0) return found;
+    found.push(at);
+    from = at + marker.length;
+  }
+}
+
+/** Drop the blank line `applyAgentMeshNote` inserted before an appended section:
+ *  exactly one EOL, and only when the text really ends with two of them. */
+function dropSeparatorBlankLine(text: string): string {
+  if (!/(?:\r?\n){2}$/u.test(text)) return text;
+  return text.endsWith('\r\n') ? text.slice(0, -2) : text.slice(0, -1);
+}
+
+/**
+ * Take Forge's section (or every copy of it) out of a file, leaving everything
+ * outside the markers byte-for-byte as it was, in the file's own line endings.
+ *
+ * Unlike `locateSections`, this refuses to guess: a start marker with no end
+ * after it, or an end marker outside every start…end pair, answers
+ * `lone-marker` and hands the content back untouched. A half-deleted section
+ * may have taken the end of the user's text with it, and a removal that
+ * swallowed the rest of the file on that guess would destroy content Forge was
+ * never given — so the owner gets the lone marker and decides.
+ *
+ * Each section goes with the one EOL that follows it, and with the blank line
+ * `applyAgentMeshNote` added before it when it appended. That is what makes
+ * `removeAgentMeshSections(applyAgentMeshNote(x, note).content).content` give
+ * `x` back exactly, which is the guarantee the mesh-off removal is judged by.
+ */
+export function removeAgentMeshSections(content: string): {
+  status: AgentMeshNoteRemoveStatus;
+  content: string;
+} {
+  const starts = allIndicesOf(content, AGENT_NOTE_START);
+  const ends = allIndicesOf(content, AGENT_NOTE_END);
+  if (!starts.length && !ends.length) return { status: 'none', content };
+  // Pair each start with the next end in the file. A start whose next end lies
+  // before it, or a start with no end left, is a torn section; so is an end
+  // still standing once every start has been paired.
+  const spans: Span[] = [];
+  let nextEnd = 0;
+  for (const start of starts) {
+    if (nextEnd >= ends.length || ends[nextEnd] < start) return { status: 'lone-marker', content };
+    spans.push({ start, end: ends[nextEnd] + AGENT_NOTE_END.length });
+    nextEnd += 1;
+  }
+  if (nextEnd !== ends.length) return { status: 'lone-marker', content };
+
+  let kept = '';
+  let cursor = 0;
+  for (const span of spans) {
+    let stop = span.end;
+    if (content.startsWith('\r\n', stop)) stop += 2;
+    else if (content.startsWith('\n', stop)) stop += 1;
+    kept = dropSeparatorBlankLine(kept + content.slice(cursor, span.start));
+    cursor = stop;
+  }
+  return { status: 'removed', content: kept + content.slice(cursor) };
+}
+
 /** The two file names agent CLIs read, in the order the note should consider them. */
 export const AGENT_INSTRUCTION_FILE_NAMES = ['AGENTS.md', 'CLAUDE.md'] as const;
 

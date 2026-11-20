@@ -1,7 +1,7 @@
 {
   "name": "forge-llm",
   "displayName": "Forge LLM",
-  "description": "Run your own models in VS Code: full llama.cpp/GGUF control, 80+ agent tools, undo any turn, no telemetry.",
+  "description": "Run your own models in VS Code: full llama.cpp/GGUF control, 80+ agent tools, undo any turn, Forge itself sends no telemetry.",
   "version": "0.17.205",
   "publisher": "Efsoo",
   "icon": "assets/publisher-logo.png",
@@ -553,7 +553,8 @@
     "check:push": "node scripts/check-push.mjs",
     "canary": "node scripts/canary.mjs",
     "ab:compaction": "node scripts/compaction-ab.mjs",
-    "ab:tool-result-context": "node scripts/tool-result-context-ab.mjs"
+    "ab:tool-result-context": "node scripts/tool-result-context-ab.mjs",
+    "vscode:uninstall": "node ./dist/uninstall.js"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",
