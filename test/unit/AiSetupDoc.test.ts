@@ -270,6 +270,46 @@ describe('AI_SETUP.md', () => {
     );
   });
 
+  // Laptop setup run 4 (2026-11-20): GitHub's "latest" llama.cpp and
+  // whisper.cpp releases carried no binaries, Piper's last release publishes no
+  // `digest` at all so its install could not be checked, and image generation
+  // was marked "not possible here" on a laptop whose desktop renders images
+  // over the relay. The Piper rows and the yaml slot are pinned on the raw doc
+  // (one line each); the rest is pinned after collapsing line wraps, as the
+  // other pins here do. The source needle keeps the doc's quote of Connect's
+  // message and `desktopConnectPlan.ts` from drifting apart.
+  it('pins the run-4 setup fixes', () => {
+    const text = doc.replace(/\s+/gu, ' ');
+    expect(text).toContain(
+      'take the newest one that carries the asset you need, not ' +
+        '`/releases/latest`: a project\'s "latest" release can carry no binaries at all. ' +
+        'This applies to every GitHub download in this file.',
+    );
+    for (const row of [
+      '| `piper_windows_amd64.zip` | 22477236 | `f3c58906402b24f3a96d92145f58acba6d86c9b5db896d207f78dc80811efcea` |',
+      '| `piper_linux_x86_64.tar.gz` | 26460462 | `a50cb45f355b7af1f6d758c1b360717877ba0a398cc8cbe6d2a7a3a26e225992` |',
+      '| `piper_linux_aarch64.tar.gz` | 26004717 | `fea0fd2d87c54dbc7078d0f878289f404bd4d6eea6e7444a77835d1537ab88eb` |',
+      '| `piper_macos_x64.tar.gz` | 19146927 | `ced85c0a3df13945b1e623b878a48fdc2854d5c485b4b67f62857cf551deaf8b` |',
+      '| `piper_macos_aarch64.tar.gz` | 19146957 | `6b1eb03b3735946cb35216e063e7eebcc33a6bbf5dd96ec0217959bf1cdcb0cc` |',
+    ])
+      expect(doc, row).toContain(row);
+    expect(doc).toContain('voice_el: el_GR-rapunzelina-low');
+    expect(text).toContain(
+      'Image generation is "not possible here" only when this machine has no suitable GPU, ' +
+        'no cloud image provider is configured, and "Other computer" is not in the plan.',
+    );
+    expect(text).toContain(
+      '"turned on remote_media, so this laptop asks the desktop to render images"',
+    );
+    const connectSource = fs.readFileSync(
+      path.join(root, 'src', 'vscode', 'desktopConnectPlan.ts'),
+      'utf8',
+    );
+    expect(connectSource).toContain(
+      'turned on remote_media, so this laptop asks the desktop to render images',
+    );
+  });
+
   // `servable: false` is what GET /models reports for a `provider: cli` or cloud
   // model (src/backend/ControlModelCatalog.ts), and /ensure and /chat refuse it.
   it('keeps the control-server model checks away from a model they cannot serve', () => {

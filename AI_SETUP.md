@@ -142,7 +142,11 @@ After the survey and backend choice, show one concise summary containing:
   already on disk (paths), what is missing (exact filenames and sizes), and
   "not possible here: <reason>" when this machine cannot run it (for
   example, no GPU with enough free VRAM for video). A feature's downloads
-  and installs are part of the plan, and picking it confirms them.
+  and installs are part of the plan, and picking it confirms them. Image
+  generation is "not possible here" only when this machine has no suitable
+  GPU, no cloud image provider is configured, and "Other computer" is not in
+  the plan. With "Other computer", its row reads "through <that computer's
+  name>: nothing to download here", and it is offered in question 7.
 
 Write the plan summary in your reply first, and add this line to it: "Reverse
 image search uploads your image to litterbox.catbox.moe for one hour, and asks
@@ -252,6 +256,12 @@ the build selected for this machine and listed in the plan summary:
 - **macOS**: `brew install llama.cpp`.
 - **Linux**: the release's Linux asset for the hardware, or build with
   `cmake -B build -DGGML_CUDA=ON && cmake --build build -j` for NVIDIA.
+
+Find the newest release with
+`GET https://api.github.com/repos/<owner>/<repo>/releases?per_page=10` and
+take the newest one that carries the asset you need, not
+`/releases/latest`: a project's "latest" release can carry no binaries at
+all. This applies to every GitHub download in this file.
 
 Check each downloaded archive's size and SHA-256 against the official release
 metadata before extracting it. Stop that install if a digest is missing or
@@ -553,14 +563,31 @@ Run this section when the user picked "Voice notes" in Step 0 or the setup
 request names voice, after Step 8: voice notes arrive over Telegram. Use what
 the survey found, and download only what the confirmed plan listed.
 
-1. **Speech to text.** `whisper-cli` from whisper.cpp's official release (a
-   CUDA build on an NVIDIA GPU), and one model from the official
+1. **Speech to text.** `whisper-cli` from the newest `ggml-org/whisper.cpp`
+   release that carries a Windows, macOS or Linux build for this machine
+   (Step 2's rule: not `/releases/latest`; a CUDA build on an NVIDIA GPU),
+   and one model from the official
    `ggerganov/whisper.cpp` model repository: `ggml-large-v3-turbo.bin` with
    a GPU, `ggml-base.bin` without one.
-2. **Spoken replies.** Piper from its official release, and one voice for
-   the user's language (the `.onnx` file and its `.onnx.json`, from the
-   official `rhasspy/piper-voices` repository), both in one folder. Forge
-   has two voice slots: `voice_en` for English and `voice_el` for Greek.
+2. **Spoken replies.** Piper `2023.11.14-2`, the last `rhasspy/piper`
+   release with prebuilt binaries. Its release reports no `digest`, so
+   check the file against this table instead, and stop that install on any
+   difference:
+
+   | File | Bytes | SHA-256 |
+   |---|---|---|
+   | `piper_windows_amd64.zip` | 22477236 | `f3c58906402b24f3a96d92145f58acba6d86c9b5db896d207f78dc80811efcea` |
+   | `piper_linux_x86_64.tar.gz` | 26460462 | `a50cb45f355b7af1f6d758c1b360717877ba0a398cc8cbe6d2a7a3a26e225992` |
+   | `piper_linux_aarch64.tar.gz` | 26004717 | `fea0fd2d87c54dbc7078d0f878289f404bd4d6eea6e7444a77835d1537ab88eb` |
+   | `piper_macos_x64.tar.gz` | 19146927 | `ced85c0a3df13945b1e623b878a48fdc2854d5c485b4b67f62857cf551deaf8b` |
+   | `piper_macos_aarch64.tar.gz` | 19146957 | `6b1eb03b3735946cb35216e063e7eebcc33a6bbf5dd96ec0217959bf1cdcb0cc` |
+
+   Voices come from the official `rhasspy/piper-voices` repository: each
+   voice's `.onnx` file and its `.onnx.json`, all in one folder. Forge has
+   two voice slots, and setup fills both: `voice_en` with
+   `en_US-amy-medium`, and `voice_el` with the Greek
+   `el_GR-rapunzelina-low`. The plan summary lists both voices with their
+   sizes.
 3. Add, with absolute paths:
 
    ```yaml
@@ -575,6 +602,7 @@ the survey found, and download only what the confirmed plan listed.
        piper_binary: <piper path>
        voices_dir: <folder holding the voice files>
        voice_en: en_US-amy-medium   # the voice file's name without .onnx
+       voice_el: el_GR-rapunzelina-low
    ```
 
    Leave `voice.output.enabled` off: the user turns spoken replies on with
@@ -655,7 +683,13 @@ Run this section when the user picked "Image generation" in Step 0 question 7,
 or the setup request names it. Do not ask which route to use: choose the local
 backend when the surveyed hardware has a suitable unused GPU; otherwise use an
 already configured cloud provider.
-If neither route is available, skip it and state the missing requirement in
+With "Other computer" in the plan and neither of those routes here, the
+other computer renders the images: write no `image_generation:` block.
+Step 12's **Connect to my desktop** turns this on, and its message then
+says "turned on remote_media, so this laptop asks the desktop to render
+images". When it does not say so, the other computer does not share media
+yet; say in **Finish** that its owner turns on `cloud_relay.media` there.
+If no route is available, skip it and state the missing requirement in
 **Finish**. `generate_image` appears only when an `image_generation:` block
 exists, and it needs `permissions.net.fetch: true` (a local backend is fetched
 over localhost too). Include all model and server downloads and sizes in the
