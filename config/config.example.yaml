@@ -1199,6 +1199,12 @@ agent_links:
 # `/checkin` writes this key; removing the block stops the note mid-task.
 # elapsed_time_note: { after_minutes: 20 }
 
+# Forge's own short notes at the point of decision — a file you edited by hand
+# after the agent read it is the one it names today. ON unless switched off:
+# `file_changed: false` (or the whole block) turns the note off.
+# event_reminders:
+#   file_changed: true
+
 # Keep the exact agent-loop request bodies on disk for debugging. Off unless
 # this block is present (max_mb 1-10000, keep_hours 1-720).
 # record_requests: { enabled: true, max_mb: 200, keep_hours: 24 }

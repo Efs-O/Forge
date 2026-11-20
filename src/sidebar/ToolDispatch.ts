@@ -33,6 +33,7 @@ import {
 import { toolErrorText } from '../tools/toolErrorText';
 import { approvalCallOptions } from './approvalCallOptions';
 import { markConversationReadUntrusted } from '../tools/exfilTaint';
+import { noteToolCall } from '../agent/fileChangeReminder';
 import { unattendedConversations } from './unattendedConversations';
 import {
   dispatchWithParallelReads,
@@ -227,10 +228,14 @@ export class ToolDispatch {
 
         this.snapshotPaths(mutationPaths, checkpoint);
         const callBase = reg.mutation?.showDiff ? readCallDiffBase(mutationPaths) : undefined;
+        // Paths a tool reports at run time, on top of the `mutation.paths` the
+        // evaluation already resolved. The file-change reminder needs both.
+        const reportedMutationPaths: string[] = [];
 
         result = await this.toolRegistry.dispatch(tc.function.name, args, allowed, {
           beforeMutate: (paths) => {
             const resolved = paths.map((p) => resolveToolPath(p));
+            reportedMutationPaths.push(...resolved);
             this.snapshotPaths(resolved, checkpoint);
           },
           ...(signal !== undefined ? { abortSignal: signal } : {}),
@@ -306,6 +311,19 @@ export class ToolDispatch {
           // the row that brought the content in, so the next save keeps both.
           if (modelContext?.conversation) modelContext.conversation.untrusted_since_ms = Date.now();
         }
+        // What this call did to the files this chat has read, for the "changed on
+        // disk since you read it" reminder (`fileChangeReminder.ts`). Only a call
+        // that ran is reported: a declined or refused call wrote nothing, and a
+        // reminder that is wrong is worse than none.
+        if (convId !== undefined)
+          noteToolCall(convId, {
+            toolName: tc.function.name,
+            permission: reg.permission,
+            hasMutation: reg.mutation !== undefined,
+            args: handlerArgs,
+            resultFailed: isFailureResult(toolResultText(result)),
+            touchedPaths: [...mutationPaths, ...reportedMutationPaths],
+          });
       } catch (err) {
         const policyDenied = err instanceof ToolApprovalPolicyDenied;
         const approvalRefused = err instanceof ToolApprovalRefusal;

@@ -3,6 +3,7 @@ import type { ElapsedTimeNote } from '../agent/elapsedTimeNote';
 import type { MidTurnInbox } from '../agent/MidTurnInbox';
 import type { MidTurnTellDrain } from '../agent/MidTurnTellDrain';
 import type { MidTurnTellServices } from './turnServices';
+import { fileChangeSource } from '../agent/fileChangeReminder';
 
 /** Compose the sidebar inbox and elapsed-time notes into AgentLoop's tell path. */
 export function wireMidTurnTells(options: {
@@ -23,6 +24,10 @@ export function wireMidTurnTells(options: {
     (conversationId, callback) => midTurnInbox.onAdded(conversationId, callback),
   );
   tellDrain.registerSource('elapsed-time', elapsedTimeNote.source);
+  // The file-change reminder, always registered: the source itself reads the
+  // config at every drain, so switching the setting on or off takes effect on the
+  // next round without a reload or a re-registration.
+  tellDrain.registerSource('file-change', fileChangeSource);
   setMidTurnTells({
     onTaskStart: (conversationId) => elapsedTimeNote.taskStarted(conversationId),
     // `set_checkin`'s route to the clock. Bound per conversation by ModelTurn,

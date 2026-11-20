@@ -236,6 +236,7 @@ export const ForgeConfigShape = {
       after_minutes: z.number().int().min(5).max(240),
     })
     .optional(),
+  event_reminders: z.object({ file_changed: z.boolean().optional() }).optional(),
   record_requests: z
     .object({
       enabled: z.boolean(),

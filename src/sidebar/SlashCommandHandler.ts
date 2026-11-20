@@ -32,6 +32,7 @@ import {
 } from './approvalSlashCommands';
 import { clearChatClanker } from './chatClanker';
 import { clearConversationExfilState } from '../tools/exfilTaint';
+import { clearConversationFileReads } from '../agent/fileChangeReminder';
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -196,17 +197,16 @@ export class SlashCommandHandler {
 
       case 'clearChat':
         {
-          // Conversation-scoped: only the chats bound to this conversation just
-          // lost their history, and only they need to know why it is empty.
+          // Conversation-scoped: only the chats bound here just lost their history.
           const conversationId = deps.getActiveConv().id;
           deps.clearMessages();
-          // The "this chat has read a secret" flag, the hosts this chat approved and
-          // phase 4's untrusted-content flag are conversation-scoped like the
-          // history: a cleared chat starts clean, or its next fetch would be gated
-          // for a read that is no longer even in the transcript. `/clear` is one of
-          // the only two things that clears the flag — the other is a new chat.
+          // The secret flag, the approved hosts, the untrusted-content flag and the
+          // reminder's record of what this chat read are conversation-scoped like
+          // the history: `/clear` and a new chat are the only two things that clear
+          // them, and a cleared chat must not stay gated for a read it no longer has.
           resetChatApprovals(deps.getActiveConv());
           clearConversationExfilState(conversationId);
+          clearConversationFileReads(conversationId);
           // Approval rules and Clanker go with that history too; the tab must see
           // Clanker drop, so the flag is posted like any other queue change.
           clearChatClanker(deps.getActiveConv());

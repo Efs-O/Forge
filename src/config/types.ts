@@ -250,6 +250,12 @@ export interface ForgeConfig {
    *  none. Absent block = off: no tool, no note, no schema tokens. 5–240;
    *  read live at every drain, so removing it stops the note mid-task. */
   elapsed_time_note?: { after_minutes: number };
+  /** Forge's own event reminders (phase 1: "the file changed on disk since you
+   *  read it", `src/agent/fileChangeReminder.ts`). ON by default: an absent
+   *  block or an absent key means on, and only `file_changed: false` turns it
+   *  off. Read live at every record and every drain, so switching it off mid-task
+   *  takes effect on the next tool round with no reload. */
+  event_reminders?: { file_changed?: boolean };
   /** Exact agent-loop request bodies, retained only when explicitly enabled. */
   record_requests?: { enabled: boolean; max_mb: number; keep_hours: number };
   /** Optional localhost model-control API so an external orchestrator can ask

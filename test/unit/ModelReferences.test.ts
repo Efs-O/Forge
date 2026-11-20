@@ -63,6 +63,8 @@ const NON_MODEL_REF_FIELDS = [
   'ollama',
   'auto_compact',
   'elapsed_time_note',
+  // `event_reminders:` holds one boolean per event; none can name a model.
+  'event_reminders',
   'record_requests',
   'control_server',
   'remote',

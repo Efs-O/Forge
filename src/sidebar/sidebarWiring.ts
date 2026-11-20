@@ -49,6 +49,10 @@ import { RequestChainLifecycle } from './RequestChainLifecycle';
 import { MidTurnInbox } from '../agent/MidTurnInbox';
 import { MidTurnTellDrain } from '../agent/MidTurnTellDrain';
 import { ElapsedTimeNote } from '../agent/elapsedTimeNote';
+import {
+  setFileChangeReminderEnabled,
+  fileChangedReminderEnabledFor,
+} from '../agent/fileChangeReminder';
 import { randomUUID } from 'crypto';
 import { createSidebarPromptRouter, type SidebarPromptRouter } from './backgroundExitNotice';
 import { registerWorkerChatWake } from './workerChatWake';
@@ -152,6 +156,10 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
   const elapsedTimeNote = new ElapsedTimeNote(
     () => host.getConfig().elapsed_time_note?.after_minutes,
   );
+  // Forge's other mid-turn tell: a file this chat read that changed on disk
+  // since. On unless the owner writes `file_changed: false` — an opt-in would
+  // simply never get turned on (owner, 2026-11-20).
+  setFileChangeReminderEnabled(() => fileChangedReminderEnabledFor(host.getConfig()));
 
   const agentLoop = new AgentLoop(
     pool,

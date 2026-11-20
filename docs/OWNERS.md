@@ -533,6 +533,7 @@ overlaps with an existing owner, extend the owner instead.
 | Mid-turn tell composer (sidebar + remote)    | `src/agent/MidTurnTellDrain.ts`              |
 | Undelivered tells at turn end (batch, restore, Send now) | `src/sidebar/undeliveredTells.ts`     |
 | Elapsed-time note (mid-turn tell source)     | `src/agent/elapsedTimeNote.ts`               |
+| File-change reminder: what this chat read, and the note when it changed on disk | `src/agent/fileChangeReminder.ts` |
 | Tool-calling stream helpers                  | `src/agent/toolCallingStream.ts`             |
 | Truncated tool call: detection + recovery    | `src/agent/truncationRecovery.ts`            |
 | Repeated identical tool call detection       | `src/agent/ToolLoopGuard.ts`                 |

@@ -1,6 +1,7 @@
 import type { CliSessionRegistry } from '../agents/CliSessionRegistry';
 import { clearConversationHostApprovals } from '../tools/fetchHostApprovals';
 import { clearConversationExfilState } from '../tools/exfilTaint';
+import { clearConversationFileReads } from '../agent/fileChangeReminder';
 import type { ToolApprovalService } from './ToolApprovalService';
 import { clearChatRules } from './chatApprovalRules';
 import type { LiveStreamMeter } from './LiveStreamMeter';
@@ -25,6 +26,10 @@ export function disposeAgentConversation(
   // its chat would gate the next one for a page it never read.
   clearConversationHostApprovals(id);
   clearConversationExfilState(id);
+  // What this chat had read, for the file-change reminder, is chat-scoped the same
+  // way: a new chat has read nothing, and a record outliving its chat would blame
+  // the next one's writer for a read it never made.
+  clearConversationFileReads(id);
   const conversation = deps.lookup(id);
   if (conversation) {
     // Session-only: the peer's last-writer hint must not survive this runtime's disposal.
