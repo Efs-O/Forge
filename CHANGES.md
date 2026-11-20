@@ -1,5 +1,29 @@
 # Forge — Recent Changes
 
+## 0.17.205
+
+**Forge tells the model when a file it read has changed.** In the 2026-11-20 session scan, 41 failed
+edits were `old_str not found`. Each time, the model had read a file, something else changed that file
+(another lane, a formatter, the owner), and the edit copied text that was no longer there. Forge now
+remembers the size and modification time of every file the agent reads. If one of those files changes
+on disk afterwards, the next tool round carries a short note that names it and asks the model to read
+it again before it edits. The agent's own edits do not count. The note is on by default;
+`event_reminders: { file_changed: false }` in `.forge/config.yaml` turns it off.
+
+**A shell line that stopped at a failing `&&` step says so.** Most of the 133 non-zero shell exits in
+the same scan were long probe chains joined by `&&` that stopped at one `grep` finding nothing, so
+every later probe was lost. The result now explains that the steps after the failing one did not run.
+It also says that `grep`, `rg`, `findstr` and `diff` exit 1 for "no match" or "files differ", and
+suggests joining independent checks with `;`.
+
+**`monitor_execution` asks for the right argument.** Its description told the model to "reuse
+suggested_next_wait_ms", and models then sent that name as an argument and were refused. The
+description now says to pass the value as `wait_ms`. A call that still sends
+`suggested_next_wait_ms` is refused with `did you mean "wait_ms"?`.
+
+**New shipped tip:** a tool call refused by a scheduled job's allow list should not be retried; the
+job reports the denied key to the owner.
+
 ## 0.17.204
 
 **Your "Send now" runs first.** Pressing "Send now" did interrupt the turn, but the words you typed
