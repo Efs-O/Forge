@@ -18,6 +18,8 @@ the owner's one-off report still builds from those.
 | `--out DIR` | **Required.** Where every output file goes; created if missing. |
 | `--sessions DIR` | Folder of `*.jsonl` logs. Default: `~/.forge/sessions`. |
 | `--since YYYY-MM-DD` | Window start, local midnight. Default: 7 days before now. |
+| `--since-cutoff FILE` | Window start instead of `--since`: the epoch seconds stored in a file, normally the previous run's `scan_cutoff.txt`. Two runs then neither overlap nor leave a gap between them. Cannot be combined with `--since` (the run exits `use --since or --since-cutoff, not both`); an unreadable file exits `--since-cutoff: cannot read <path>`. |
+| `--min-version X.Y.Z` | Leave out every tool row that ran on an older Forge build, so the numbers measure one build instead of a mix. Compared as dotted integers (`0.17.204` passes, `0.17.196` does not); a row whose version is `?` or unparseable counts as older. Default: count every build. |
 | `--exclude FILE` | Chat-id prefixes to leave out of the production counts, one per line (`#` comments and blank lines allowed). No flag excludes nothing. |
 
 ## What each script reads and writes
@@ -27,7 +29,12 @@ every line — they share the raw rows and the frozen cutoff.
 
 1. `scan_logs.py` — reads the logs. Writes `failed_tools_raw.txt` (one tab-separated
    row per failed call), `failed_tools_sig.txt` (failure signatures, most common
-   first), `scan_summary.txt` (the counts), and `scan_cutoff.txt`.
+   first), `failed_tools_rate.txt` (per tool: `tool`, `calls`, `failures`, `rate%`,
+   tab-separated — the tools with at least 10 calls first, worst rate on top, ties
+   broken by name, then the rare ones in the same order; this is what answers "which
+   tool fails more than a third of its calls"), `scan_summary.txt` (the counts, plus
+   `WINDOW_START` so the next run can start where this one ended and `MIN_VERSION`
+   so the build the numbers measure is on the record), and `scan_cutoff.txt`.
 2. `recovery_check.py` — reads `failed_tools_raw.txt`, `scan_summary.txt`,
    `scan_cutoff.txt` and the logs. Writes `recovery.txt`: of the failures that are
    not a non-zero shell exit, how many were followed by the same tool succeeding
@@ -73,6 +80,9 @@ python scripts/session-scan/tips_repeats.py --out .forge/tmp/scan-p4-lane --sinc
 `<out>/scan_cutoff.txt`; every later run reuses that value instead of drifting
 forward, so one number means one thing across re-runs. Nothing outside
 `[--since, cutoff]` is counted.
+
+A run twice a week starts its window at the previous run's end instead of guessing
+a week back: `--since-cutoff <previous folder>/scan_cutoff.txt`.
 
 **That means a weekly job must use a new `--out` folder each week.** Reusing one
 folder reports the week it first ran, not the current one. A dated folder does

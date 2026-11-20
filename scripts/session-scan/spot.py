@@ -1,18 +1,26 @@
 """Up to three full examples of each recurring tool-call error.
 
 Reads the session logs; writes <out>/failed_tools_spot.txt. Takes --sessions,
---out, --since and --exclude like the others; --exclude is unused here, since
-this script quotes examples rather than counting them.
+--out, --since, --since-cutoff, --min-version and --exclude like the others;
+--exclude is unused here, since this script quotes examples rather than counting
+them.
 
 Shared argument handling is in session_scan_common.py.
 """
 
 import json, collections, os, time
-from session_scan_common import parse, need_sessions, session_files, start_epoch, writer
+from session_scan_common import (
+    parse,
+    need_sessions,
+    session_files,
+    start_epoch,
+    version_ok,
+    writer,
+)
 
 opts = parse('collect example failures for each recurring tool error')
 need_sessions(opts.sessions)
-CUT_S = start_epoch(opts.since)
+CUT_S = start_epoch(opts.since, opts.since_cutoff)
 KEYS = {
     'EPERM': 'EPERM',
     'timeout_ms must': 'TIMEOUT_LIMIT',
@@ -38,6 +46,7 @@ for path in session_files(opts.sessions):
     sid = os.path.basename(path)[:8]
     calls = {}
     title = ''
+    cur_ver = '?'
     for line in open(path, encoding='utf-8', errors='replace'):
         try:
             r = json.loads(line)
@@ -47,10 +56,14 @@ for path in session_files(opts.sessions):
         if ts < CUT_S * 1000:
             if (r.get('type') or '') == 'session_start':
                 title = (r.get('title') or '')[:38]
+                # Read before the window on purpose, as in scan_logs.py: a chat that
+                # started on an old build is still on it for the rows that follow.
+                cur_ver = r.get('forge_version') or '?'
             continue
         t = r.get('type') or r.get('role')
         if t == 'session_start':
             title = (r.get('title') or '')[:38]
+            cur_ver = r.get('forge_version') or '?'
             continue
         if t == 'assistant':
             for c in (r.get('tool_calls') or []):
@@ -60,6 +73,10 @@ for path in session_files(opts.sessions):
                 calls[c.get('id')] = (c.get('name') or '', a)
             continue
         if t != 'tool':
+            continue
+        if not version_ok(cur_ver, opts.min_version):
+            # An example from a build this report is not measuring; the same filter
+            # scan_logs.py applies, so the two files can be read side by side.
             continue
         body = r.get('content')
         if isinstance(body, list):

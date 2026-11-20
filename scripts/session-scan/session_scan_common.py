@@ -33,6 +33,7 @@ OUT_FILES = {
     'spot': 'failed_tools_spot.txt',
     'versions': 'failed_tools_versions.txt',
     'repeats': 'tips_repeats.txt',
+    'rate': 'failed_tools_rate.txt',
 }
 
 
@@ -56,13 +57,32 @@ def parse(description):
         help='window start; default is 7 days before now',
     )
     p.add_argument(
+        '--since-cutoff',
+        metavar='FILE',
+        help='file holding the epoch seconds to start the window at: a previous run\'s '
+        'scan_cutoff.txt; cannot be combined with --since',
+    )
+    p.add_argument(
+        '--min-version',
+        metavar='X.Y.Z',
+        help='leave out every tool row that ran on an older Forge build; '
+        'default is to count every build',
+    )
+    p.add_argument(
         '--exclude',
         type=Path,
         metavar='FILE',
         help='chat-id prefixes to leave out of the production counts, one per line; '
         'default is to exclude nothing',
     )
-    return p.parse_args()
+    args = p.parse_args()
+    if args.since and args.since_cutoff:
+        sys.exit('use --since or --since-cutoff, not both')
+    if args.since_cutoff:
+        # Checked here as well as in start_epoch, so a bad path is refused before
+        # any script has read a thousand logs looking for nothing.
+        read_since_cutoff(args.since_cutoff)
+    return args
 
 
 def need_sessions(sessions):
@@ -75,8 +95,60 @@ def session_files(sessions):
     return sorted(str(p) for p in Path(sessions).glob('*.jsonl'))
 
 
-def start_epoch(since):
-    """--since as epoch seconds; default 7 days before now, at local midnight."""
+def read_since_cutoff(path):
+    """The window start stored in a previous run's scan_cutoff.txt: one float.
+
+    The job runs twice a week, and each run should count only what happened since
+    the previous one. A run saves its frozen end in scan_cutoff.txt, so the next
+    run starts the window at that same moment: no gap, no overlap.
+    """
+    try:
+        return float(Path(path).read_text(encoding='utf-8').strip())
+    except Exception:
+        sys.exit(f'--since-cutoff: cannot read {path}')
+
+
+def _ver_tuple(v):
+    """'0.17.204' -> (0, 17, 204); None when it is not dotted integers."""
+    if not isinstance(v, str):
+        return None
+    parts = v.strip().lstrip('vV').split('.')
+    if parts == ['']:
+        return None
+    out = []
+    for part in parts:
+        if not part.isdigit():
+            return None
+        out.append(int(part))
+    return tuple(out)
+
+
+def version_ok(version, min_version):
+    """True when this Forge build is one the run should count.
+
+    No minimum means every build counts. Otherwise the two dotted versions compare
+    as integer tuples, so 0.17.204 passes a minimum of 0.17.204 and 0.17.196 does
+    not. A version of '?' — what every script here uses for a missing one — or one
+    that does not parse answers False: an unknown build is left out rather than
+    folded into the current one.
+    """
+    if not min_version:
+        return True
+    have = _ver_tuple(version)
+    want = _ver_tuple(min_version)
+    if have is None or want is None:
+        return False
+    return have >= want
+
+
+def start_epoch(since, since_cutoff=None):
+    """--since-cutoff's stored value, else --since, else 7 days before now.
+
+    --since means local midnight on that day; --since-cutoff is an exact moment, so
+    two runs never count the same call or miss one between them.
+    """
+    if since_cutoff:
+        return read_since_cutoff(since_cutoff)
     if since:
         try:
             return time.mktime(time.strptime(since + ' 00:00:00', '%Y-%m-%d %H:%M:%S'))
@@ -111,7 +183,7 @@ def freeze_cutoff(out_dir, end):
 
 def window(args):
     """(start_epoch, frozen_end_epoch) for this run."""
-    return start_epoch(args.since), read_cutoff(args.out)
+    return start_epoch(args.since, args.since_cutoff), read_cutoff(args.out)
 
 
 def exclude_set(exclude_file):

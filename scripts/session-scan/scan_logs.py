@@ -16,6 +16,7 @@ from session_scan_common import (
     freeze_cutoff,
     exclude_set,
     excluded,
+    version_ok,
     writer,
 )
 
@@ -95,6 +96,7 @@ for path in session_files(opts.sessions):
     sid = os.path.basename(path)[:8]
     chats.add(sid)
     title = ''
+    cur_ver = '?'
     calls = {}
     for line in open(path, encoding='utf-8', errors='replace'):
         try:
@@ -105,11 +107,15 @@ for path in session_files(opts.sessions):
         if ts < CUT:
             if r.get('type') == 'session_start':
                 title = (r.get('title') or '')[:40]
+                # Read before the window on purpose: a chat that started on the old
+                # build is still on it for every tool row that follows.
+                cur_ver = r.get('forge_version') or '?'
             continue
         recs_scanned += 1
         t = r.get('type') or r.get('role')
         if t == 'session_start':
             title = (r.get('title') or '')[:40]
+            cur_ver = r.get('forge_version') or '?'
         elif t == 'assistant':
             for c in (r.get('tool_calls') or []):
                 if not calls and len(rows) < 1:
@@ -127,6 +133,11 @@ for path in session_files(opts.sessions):
             if ts > CUT_E_MS:
                 # Nothing outside the window is counted, so a re-run cannot quietly
                 # move the rates this report calls frozen.
+                continue
+            if not version_ok(cur_ver, opts.min_version):
+                # A row from a build this report is not measuring: skipped whole, so
+                # it lands in no total and writes no raw row. The per-tool rate in
+                # failed_tools_rate.txt is then the current build's, not a mix.
                 continue
             nm = r.get('name') or '?'
             mdl = r.get('model') or '?'
@@ -180,8 +191,32 @@ with writer(opts.out, 'raw') as f:
         f.write('\t'.join([r['ts'], r['bucket'], r['tool'], r['model'], r['sid'], r['title'],
                           'ARGS: ' + r['args'], 'ERR: ' + r['err'], r['cid']]) + '\n')
 
+# Per-tool failure rate. The job asks which tool fails more than a third of its
+# calls, and nothing else here wrote calls per tool, so the question could not be
+# answered. 'calls' is every tool result counted above (already window- and
+# version-filtered); 'failures' is the raw rows just written, keyed by the same
+# name the raw file shows. The tools worth reading come first: 10 calls or more,
+# worst rate on top, ties broken by name; the rare ones follow in the same order.
+fails_by_tool = collections.Counter()
+for r in rows:
+    fails_by_tool[r['tool']] += 1
+rate_rows = []
+for nm in set(toolres_total) | set(fails_by_tool):
+    calls_n = toolres_total[nm]
+    fails_n = fails_by_tool[nm]
+    rate_rows.append((nm, calls_n, fails_n, fails_n * 100.0 / calls_n if calls_n else 0.0))
+rate_rows.sort(key=lambda x: (0 if x[1] >= 10 else 1, -x[3], x[0]))
+with writer(opts.out, 'rate') as rf:
+    rf.write('tool\tcalls\tfailures\trate%\n')
+    for nm, calls_n, fails_n, rate in rate_rows:
+        rf.write('%s\t%d\t%d\t%.1f\n' % (nm, calls_n, fails_n, rate))
+
 with writer(opts.out, 'summary') as sf:
     sf.write('CUTOFF %s\n' % time.strftime('%Y-%m-%d %H:%M', time.localtime(CUT_E)))
+    # The two facts that make the numbers reproducible: where this window began
+    # (so the next run can start where this one ended) and which builds counted.
+    sf.write('WINDOW_START %s\n' % CUT_S)
+    sf.write('MIN_VERSION %s\n' % (opts.min_version or 'none'))
     sf.write('CHATS %d\n' % len(chats))
     sf.write('TOOL_RESULTS %d\n' % sum(toolres_total.values()))
     sf.write('TOOL_RESULTS_PROD %d\n' % sum(toolres_prod.values()))
