@@ -37,6 +37,8 @@ const ARG_HINTS: Readonly<Record<string, Readonly<Record<string, readonly string
   // range, so both ends are named. A hint that reads as one quoted key is one
   // a weak model sends back verbatim, and the round is spent again.
   read_file: { max_chars: ['start_line', 'end_line'] },
+  // The result returns suggested_next_wait_ms and a model echoes that name back as an argument.
+  monitor_execution: { suggested_next_wait_ms: ['wait_ms'] },
 };
 
 /** `"a"`, or `"a" or "b"` — the arguments a refusal points at, quoted. */

@@ -185,7 +185,11 @@ import {
 // shell description is 518 chars shorter — so the ubuntu and macOS runners measured
 // 67,511 for the same tree. Naming the shell makes bash-on-Windows the measured case
 // everywhere, which is the worst case this gate says it prices.
-const MEASURED_CHARS = 68_029;
+// 2026-11-20: 68,161 (+132) after monitor_execution named the argument each returned value
+// goes back as. "Reuse the returned cursors and suggested_next_wait_ms" was being read as
+// "send suggested_next_wait_ms back as an argument", and the week's scan counted 6 refusals
+// of exactly that unknown key (docs/plans/SESSION_SCAN_CAUSE_FIXES_PLAN.md Phase 2).
+const MEASURED_CHARS = 68_161;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.

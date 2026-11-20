@@ -12,6 +12,8 @@ import { makeAskUserTool } from '../../src/tools/askUserTool';
 import { UserQuestionService } from '../../src/sidebar/UserQuestionService';
 import { makeShellTool } from '../../src/tools/shellTool';
 import { makeStageTool } from '../../src/tools/gitTools';
+import { unknownArgumentRefusal } from '../../src/tools/argumentAliases';
+import { makeMonitorExecutionTool } from '../../src/tools/backgroundExecutionTools';
 
 vi.mock('vscode', () => ({
   workspace: { workspaceFolders: [{ uri: { fsPath: process.cwd() } }] },
@@ -450,6 +452,82 @@ describe('ToolRegistry.invalidArgs unknown-argument refusal', () => {
     const args: Record<string, unknown> = { enabled: 'true' };
     expect(registry.invalidArgs(tool, args)).toBeUndefined();
     expect(args.enabled).toBe(true);
+  });
+});
+
+/**
+ * Measured 2026-11-20: 6 refusals reading `unknown argument
+ * "suggested_next_wait_ms"` in one week's session scan. `monitor_execution`
+ * returns that field, and a model echoes the name back as an input — the same
+ * shape as the `shell command_names` case above, and treated the same way: the
+ * refusal names `wait_ms`, but nothing is rewritten, so the habit stays
+ * measurable in the session log. See docs/plans/SESSION_SCAN_CAUSE_FIXES_PLAN.md
+ * Phase 2.
+ */
+describe('monitor_execution suggested_next_wait_ms refusal', () => {
+  const registry = new ToolRegistry();
+  const monitor = makeMonitorExecutionTool();
+  const parameters = monitor.definition.function.parameters as {
+    properties: Record<string, unknown>;
+  };
+  const declaredKeys = Object.keys(parameters.properties);
+
+  // The list the refusal quotes, pinned so a schema change cannot leave the
+  // expected text below describing arguments that no longer exist.
+  it('advertises exactly the six arguments the refusal lists', () => {
+    expect(declaredKeys).toEqual([
+      'execution_id',
+      'wait_ms',
+      'stdout_cursor',
+      'stderr_cursor',
+      'max_output_chars',
+      'output_stream',
+    ]);
+  });
+
+  it('names wait_ms when the result field arrives on its own', () => {
+    expect(
+      unknownArgumentRefusal(
+        'monitor_execution',
+        ['suggested_next_wait_ms'],
+        declaredKeys,
+        parameters.properties,
+        { execution_id: 'x', suggested_next_wait_ms: 20000 },
+      ),
+    ).toBe(
+      'Error: monitor_execution: unknown argument "suggested_next_wait_ms"; did you mean "wait_ms"? ' +
+        'this tool takes: execution_id, wait_ms, stdout_cursor, stderr_cursor, max_output_chars, output_stream. ' +
+        'Nothing ran. Resend the call with "wait_ms" instead.',
+    );
+  });
+
+  // The standing `intendedArguments` rule: when the argument the hint points at
+  // is already in the call, the hint would only repeat what the model can see.
+  it('gives the generic refusal with no did-you-mean when wait_ms is already present', () => {
+    expect(
+      unknownArgumentRefusal(
+        'monitor_execution',
+        ['suggested_next_wait_ms'],
+        declaredKeys,
+        parameters.properties,
+        { execution_id: 'x', wait_ms: 5000, suggested_next_wait_ms: 20000 },
+      ),
+    ).toBe(
+      'Error: monitor_execution: unknown argument "suggested_next_wait_ms"; ' +
+        'this tool takes: execution_id, wait_ms, stdout_cursor, stderr_cursor, max_output_chars, output_stream. ' +
+        'Nothing ran. Resend the call without it, or use the argument that means what you intended.',
+    );
+  });
+
+  // The live path, so the hint is proven to fire for the real tool name and not
+  // just for the arguments typed into the two cases above.
+  it('refuses the same way through the registry, without running or rewriting', () => {
+    expect(
+      registry.invalidArgs(monitor, { execution_id: 'x', suggested_next_wait_ms: 20000 }),
+    ).toContain('did you mean "wait_ms"');
+    const both = { execution_id: 'x', wait_ms: 5000, suggested_next_wait_ms: 20000 };
+    expect(registry.invalidArgs(monitor, both)).not.toContain('did you mean');
+    expect(both).toEqual({ execution_id: 'x', wait_ms: 5000, suggested_next_wait_ms: 20000 });
   });
 });
 

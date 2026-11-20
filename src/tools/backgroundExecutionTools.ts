@@ -44,7 +44,7 @@ export function makeMonitorExecutionTool(): RegisteredTool {
       function: {
         name: 'monitor_execution',
         description:
-          'Wait for a background shell command and return new output plus status when this turn must see the output: a background job wakes the chat on its own when it ends, so watching one does not have to hold a turn open. Reuse the returned cursors and suggested_next_wait_ms; *_dropped_chars means that output is gone. A running job with no output may be silent: inspect its artifact, including nearby or nested .part/.tmp files, instead of polling rapidly.',
+          'Wait for a background shell command and return new output plus status when this turn must see the output: a background job wakes the chat on its own when it ends, so watching one does not have to hold a turn open. Send the returned next_stdout_cursor and next_stderr_cursor back as stdout_cursor and stderr_cursor, and the returned suggested_next_wait_ms value as wait_ms; *_dropped_chars means that output is gone. A running job with no output may be silent: inspect its artifact, including nearby or nested .part/.tmp files, instead of polling rapidly.',
         parameters: {
           type: 'object',
           properties: {
@@ -57,7 +57,7 @@ export function makeMonitorExecutionTool(): RegisteredTool {
               minimum: 0,
               maximum: 60000,
               description:
-                'Max wait in ms (0 to 60000, default 10000). Reuse suggested_next_wait_ms.',
+                "Max wait in ms (0 to 60000, default 10000). Set it to the last result's suggested_next_wait_ms value.",
             },
             stdout_cursor: {
               type: 'integer',
@@ -308,8 +308,8 @@ function formatBackgroundObservation(
     if (!sawNewOutput && suggested > DEFAULT_MONITOR_WAIT_MS) {
       result['silence_note'] =
         'No new output while still running. Silence is not evidence the job is stuck — many ' +
-        'programs draw progress with a carriage return, which never reaches a pipe. Pass ' +
-        `suggested_next_wait_ms (${String(suggested)}) as your next wait_ms, and check progress ` +
+        'programs draw progress with a carriage return, which never reaches a pipe. ' +
+        `Pass ${String(suggested)} as wait_ms on your next call, and check progress ` +
         'by listing the destination directory recursively and watching a file GROW: downloads ' +
         'and archives write to a .part / .incomplete / .tmp file below the destination, not to ' +
         'the final path.';
