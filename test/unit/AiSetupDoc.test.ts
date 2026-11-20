@@ -23,7 +23,7 @@ describe('AI_SETUP.md', () => {
   it('requests one plan confirmation and automates the rest of the chosen setup', () => {
     const text = doc.replace(/\s+/gu, ' ');
     expect(doc.match(/Proceed with this setup plan/g)).toHaveLength(1);
-    expect(text).toContain('offer only the extras listed in Step 0 question 6');
+    expect(text).toContain('offer only the features listed in Step 0 questions 6-8');
     expect(text).toContain('do not ask the user to choose');
     expect(text).toContain('every model file and release archive');
     expect(text).toContain('the selected llama.cpp build');
@@ -47,8 +47,8 @@ describe('AI_SETUP.md', () => {
   // a fixed order and a fixed wording: an agent that cannot ask a second
   // question would otherwise set up only what the user happened to name in
   // their first message. A picker is easier to answer than a typed
-  // "yes, no, yes...", and two calls of four questions keep the tool's cap
-  // without dropping any of the seven.
+  // "yes, no, yes...", and three calls (1-4, 5-8, then 9 only when it applies)
+  // keep the tool's cap without dropping any of the nine.
   it('asks the Step 0 questions with a picker when the harness has one', () => {
     const text = doc.replace(/\s+/gu, ' ');
     expect(text).toContain(
@@ -60,16 +60,23 @@ describe('AI_SETUP.md', () => {
     );
     expect(text).toContain(
       'With a multiple-choice question tool (Claude Code: `AskUserQuestion`, at most four ' +
-        'questions per call and four choices per question), ask questions 1-4 in one call ' +
-        'and 5-7 in a second call straight after it. Without such a tool, ask the same ' +
-        'questions in one text message, in the same order and with the same wording. ' +
-        '"No, change nothing" means stop without changing files, installing software, or ' +
-        'downloading models.',
+        'questions per call and four choices per question), ask questions 1-4 in one call, ' +
+        '5-8 in a second call straight after it, and 9 in a third call. Without such a ' +
+        'tool, ask the same questions in one text message, in the same order and with the ' +
+        'same wording. "No, change nothing" means stop without changing files, installing ' +
+        'software, or downloading models.',
+    );
+    // The Git question is alone in a third call, and a feature whose files are
+    // all on disk gets the (Recommended) mark while an impossible one is cut.
+    expect(text).toContain(
+      'Ask question 9 only when the survey found `user.name` or `user.email` empty. ' +
+        'In questions 7 and 8, mark a feature (Recommended) when the survey found all of ' +
+        'its files, and leave out a feature the Features table marks "not possible here".',
     );
   });
 
-  // Step 0 question 6 is the only place the user can say yes to an extra, so
-  // the offers have to be in that one question: an agent that cannot ask a
+  // Step 0 questions 6-8 are the only place the user can say yes to an extra,
+  // so the offers have to be in those questions: an agent that cannot ask a
   // second question would otherwise set up only what the user happened to name
   // in their first message.
   it('offers the four extras in the Step 0 question', () => {
@@ -123,8 +130,58 @@ describe('AI_SETUP.md', () => {
       'a missing `CLAUDE.md` is created holding only that import line',
     );
     expect(text).toContain(
-      '7. **Git name and email** (one choice): "Name and email for your commits?" with ' +
+      '9. **Git name and email** (one choice): "Name and email for your commits?" with ' +
         '"Skip" and "Set it now (type `Name <email>` in Other)".',
+    );
+  });
+
+  // A fresh setup on the owner's laptop never offered image, video or music
+  // generation at all: Steps 10-11 ran only when the first message named them,
+  // and Step 0's questions never mentioned them. Every feature Forge can set up
+  // now has a label line in question 7 or 8. Each line is pinned whole against
+  // the raw doc, so it stays on one line the way a picker copies it (the same
+  // rule `TrustSwitches.test.ts` holds the switch table to).
+  it('offers every optional feature in Step 0 questions 7 and 8', () => {
+    const labels = [
+      '- **Image generation**: Make and edit pictures: locally with stable-diffusion.cpp (free, needs a GPU) or with a cloud key (billed per image).',
+      '- **Video**: Short clips with LTX-2.5 through ComfyUI. Needs a large GPU.',
+      '- **Music**: Songs with ACE-Step 1.5 through ComfyUI.',
+      '- **Voice notes**: Talk to Forge on Telegram: voice notes are transcribed on this PC with whisper.cpp, and `/voice` reads replies aloud with Piper. Needs Telegram.',
+      '- **Codebase index**: Search your code by meaning (`search_codebase`). A small embedding model runs on the CPU.',
+      '- **Reverse image search**: Find where a picture appears online (Google Lens through SerpApi). Needs a SerpApi key; each search uploads the image to litterbox.catbox.moe for one hour.',
+      '- **Cloud models**: Add OpenRouter or OpenAI models next to the local ones. Needs your key; the provider bills you.',
+      '- **Chats may start chats**: A chat may open a new chat or interrupt a running one (`message_chat` new / steer).',
+    ];
+    for (const line of labels) expect(doc, line).toContain(line);
+    expect(doc).toContain('7. **Media** (multi-select): "Set up media generation?"');
+    expect(doc).toContain('8. **More tools** (multi-select): "Add any of these?"');
+    // "Voice notes" reaches Forge only over Telegram, so the pick has to say so.
+    expect(doc.replace(/\s+/gu, ' ')).toContain(
+      '"Voice notes" needs Telegram: picking it runs Step 8 too, and the plan summary ' +
+        'says so.',
+    );
+  });
+
+  // The two media steps used to open only for a request that named them, and
+  // Step 11 told the agent not to ask. A Step 0 pick now opens them too, and
+  // the survey lists what each would download before anything is fetched.
+  it('runs the media steps on a pick, not only when named', () => {
+    const text = doc.replace(/\s+/gu, ' ');
+    expect(text).not.toContain('Do not ask whether to add it');
+    expect(text).not.toContain(
+      'Run this section only when the user\'s setup request names image generation',
+    );
+    expect(text).toContain(
+      'Run this section when the user picked "Image generation" in Step 0 question 7, or ' +
+        'the setup request names it.',
+    );
+    expect(text).toContain(
+      'Run this section when the user picked "Video" or "Music" in Step 0 question 7, or ' +
+        'the setup request names them.',
+    );
+    expect(text).toContain(
+      'a **Features** table, one row per feature in questions 7 and 8: what is already on ' +
+        'disk (paths), what is missing (exact filenames and sizes)',
     );
   });
 

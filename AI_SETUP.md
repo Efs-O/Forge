@@ -7,9 +7,9 @@ and the two places Forge looks for its config.
 
 Work through the steps in order, run each **Check**, and continue without asking
 between steps. Set up an optional section only when the user's setup request
-named it or the user said yes to it in Step 0; offer only the extras listed in
-Step 0 question 6. The agent mesh is set up when the user picks "Talk to Forge"
-there.
+named it or the user picked it in Step 0; offer only the features listed in
+Step 0 questions 6-8. The agent mesh is set up when the user picks "Talk to
+Forge" there.
 
 ## Ground rules
 
@@ -61,9 +61,17 @@ Collect and show the user in a short table:
   `~/.cache/huggingface/hub`, `~/.cache/lm-studio`, other drives) for `*.gguf`,
   excluding `mmproj-*` projector files. Note size and quantization from the
   filename.
-- If the request names image, video, or music generation, inventory those
-  engines' model and companion files, disk space, runtimes, and GPU needs too.
-  Include the exact sizes of any missing files in the plan summary.
+- Every optional feature's engine and files, whatever the request names,
+  read-only, in the same folders as the model files:
+  - image generation: `sd-server` and the model files Step 10 lists;
+  - video and music: a ComfyUI checkout and its Python, the LTX-2.5 and
+    ACE-Step 1.5 files Step 11 lists, and `ffmpeg` / `ffprobe`;
+  - voice notes: whisper.cpp's `whisper-cli` or `whisper-server`,
+    `ggml-*.bin` models, `piper`, and Piper voices (`*.onnx` with their
+    `.onnx.json`);
+  - codebase index: an embedding GGUF (EmbeddingGemma, nomic-embed, bge and
+    the like), which is not a chat model.
+  Note free disk space, and which GPU each feature could use.
 - Is Ollama running? `curl http://127.0.0.1:11434/api/tags`
 - Are `llama-server`, `claude`, `codex` on PATH, and is `pwsh` available if
   Codex is selected on Windows? Is there an existing Forge config at either
@@ -130,6 +138,11 @@ After the survey and backend choice, show one concise summary containing:
 - the default model (`active_model`): your recommendation and up to three
   alternatives, chosen from the models the survey found here and on the other
   computer;
+- a **Features** table, one row per feature in questions 7 and 8: what is
+  already on disk (paths), what is missing (exact filenames and sizes), and
+  "not possible here: <reason>" when this machine cannot run it (for
+  example, no GPU with enough free VRAM for video). A feature's downloads
+  and installs are part of the plan, and picking it confirms them.
 
 Write the plan summary in your reply first, and add this line to it: "Reverse
 image search uploads your image to litterbox.catbox.moe for one hour, and asks
@@ -141,12 +154,15 @@ asking again.
 
 With a multiple-choice question tool (Claude Code: `AskUserQuestion`, at most
 four questions per call and four choices per question), ask questions 1-4 in
-one call and 5-7 in a second call straight after it. Without such a tool, ask
-the same questions in one text message, in the same order and with the same
-wording. "No, change nothing" means stop without changing files, installing
-software, or downloading models. Offer "Run Forge's messages without asking"
-only when Claude Code uses bypass-permissions mode. Ask question 7 only when
-the survey found `user.name` or `user.email` empty.
+one call, 5-8 in a second call straight after it, and 9 in a third call.
+Without such a tool, ask the same questions in one text message, in the same
+order and with the same wording. "No, change nothing" means stop without
+changing files, installing software, or downloading models. Offer "Run Forge's
+messages without asking" only when Claude Code uses bypass-permissions mode.
+Ask question 9 only when the survey found `user.name` or `user.email` empty.
+In questions 7 and 8, mark a feature (Recommended) when the survey found all
+of its files, and leave out a feature the Features table marks "not possible
+here".
 
 1. **Plan** (one choice): "Proceed with this setup plan?" with "Yes, proceed"
    and "No, change nothing".
@@ -179,13 +195,24 @@ the survey found `user.name` or `user.email` empty.
      this one's (Tailscale).
    - **Daily chat retitle**: rename idle chats each morning to say what they
      were about.
-7. **Git name and email** (one choice): "Name and email for your commits?"
+7. **Media** (multi-select): "Set up media generation?"
+   - **Image generation**: Make and edit pictures: locally with stable-diffusion.cpp (free, needs a GPU) or with a cloud key (billed per image).
+   - **Video**: Short clips with LTX-2.5 through ComfyUI. Needs a large GPU.
+   - **Music**: Songs with ACE-Step 1.5 through ComfyUI.
+   - **Voice notes**: Talk to Forge on Telegram: voice notes are transcribed on this PC with whisper.cpp, and `/voice` reads replies aloud with Piper. Needs Telegram.
+8. **More tools** (multi-select): "Add any of these?"
+   - **Codebase index**: Search your code by meaning (`search_codebase`). A small embedding model runs on the CPU.
+   - **Reverse image search**: Find where a picture appears online (Google Lens through SerpApi). Needs a SerpApi key; each search uploads the image to litterbox.catbox.moe for one hour.
+   - **Cloud models**: Add OpenRouter or OpenAI models next to the local ones. Needs your key; the provider bills you.
+   - **Chats may start chats**: A chat may open a new chat or interrupt a running one (`message_chat` new / steer).
+9. **Git name and email** (one choice): "Name and email for your commits?"
    with "Skip" and "Set it now (type `Name <email>` in Other)".
 
 Each pick turns on exactly what Step 5 lists for it; a switch the user did not
 pick stays off. "Run Forge's messages without asking" and "Global note" need
 "Talk to Forge"; "Jobs may run Claude Code / Codex" also turns scheduled jobs
-on.
+on. "Voice notes" needs Telegram: picking it runs Step 8 too, and the plan
+summary says so.
 
 ## Step 1 — Choose the config location
 
@@ -253,13 +280,18 @@ plan, then run `ollama pull <tag>` after confirmation. For Ollama cloud, stop
 for the user's `ollama auth login`, then verify the tag through the local
 daemon; Forge sends no key.
 
-## Step 4 — Cloud or CLI models (when selected from the survey)
+## Step 4 — Cloud or CLI models (when selected from the survey, or picked as "Cloud models")
 
 - OpenAI-compatible providers (`openrouter`, `openai`,
   `openai-compatible`): start from `config/starter/openai-compatible.yaml`.
   If a key is needed, tell the user to run **Forge: Set Cloud Provider Token**
   (`forge.setCloudToken`) in VS Code, enter it there, and wait. Never request,
   read, or repeat the key. Verify the selected provider with the Step 6 check.
+
+  For a "Cloud models" pick, add them beside the local models rather than
+  instead of them: use OpenRouter unless the setup request names OpenAI, and
+  add the provider's current general coding model from its official model
+  list. The user adds more later.
 - Claude Code / Codex as a model: if the selected CLI is missing, install it
   from the vendor's current official instructions after the one plan
   confirmation; include the exact install method and required prerequisites in
@@ -305,6 +337,13 @@ those:
 - "Delete files": `permissions.fs.delete: true`.
 - "Git commit": `permissions.git.write: true`.
 - "Daily chat retitle" (question 6): `jobs.enabled: true`; Step 13 creates the job.
+- "Image generation" (question 7): Step 10. "Video" and "Music": Step 11.
+- "Voice notes": Step 8a, after Step 8.
+- "Codebase index" (question 8): Step 9a.
+- "Reverse image search": Step 9b.
+- "Cloud models": Step 4.
+- "Chats may start chats": `permissions.chats.new_chat: true` and
+  `permissions.chats.steer: true`.
 
 Leave every switch the user did not pick off.
 
@@ -508,6 +547,44 @@ config and checks.
 confirms that the authenticator enrollment succeeded. These results are part
 of the Telegram authentication stop; do not ask for another command.
 
+## Step 8a — Optional: voice notes
+
+Run this section when the user picked "Voice notes" in Step 0 or the setup
+request names voice, after Step 8: voice notes arrive over Telegram. Use what
+the survey found, and download only what the confirmed plan listed.
+
+1. **Speech to text.** `whisper-cli` from whisper.cpp's official release (a
+   CUDA build on an NVIDIA GPU), and one model from the official
+   `ggerganov/whisper.cpp` model repository: `ggml-large-v3-turbo.bin` with
+   a GPU, `ggml-base.bin` without one.
+2. **Spoken replies.** Piper from its official release, and one voice for
+   the user's language (the `.onnx` file and its `.onnx.json`, from the
+   official `rhasspy/piper-voices` repository), both in one folder. Forge
+   has two voice slots: `voice_en` for English and `voice_el` for Greek.
+3. Add, with absolute paths:
+
+   ```yaml
+   # partial: the voice block only, not a whole config
+   voice:
+     enabled: true
+     whisper_binary: <whisper-cli path>
+     whisper_model: <ggml .bin path>
+     compute:
+       gpu: true          # false without an NVIDIA GPU
+     output:
+       piper_binary: <piper path>
+       voices_dir: <folder holding the voice files>
+       voice_en: en_US-amy-medium   # the voice file's name without .onnx
+   ```
+
+   Leave `voice.output.enabled` off: the user turns spoken replies on with
+   `/voice on` in Telegram. With more than one GPU, set `compute.device` to
+   the one with the most free VRAM (whisper.cpp's CUDA ordinal).
+
+**Check:** `whisper-cli --help` and `piper --help` print their usage, and
+after the reload the config loads with no `voice.` error. A real voice note
+can be tested only after Telegram is paired; say so in **Finish**.
+
 ## Step 9 — Optional: web search
 
 Run this section only when the user's setup request names web search or the
@@ -533,11 +610,51 @@ that file is the user's to edit: show the user the block and the
 `net: { search: true, … }` line to add to `policy.yaml` themselves, then have
 them run **Developer: Reload Window**.
 
+## Step 9a — Optional: codebase index
+
+Run this section when the user picked "Codebase index" in Step 0 or the setup
+request names it. It needs `llama_server.binary`: on a machine that uses
+another computer's models and has no llama.cpp yet, install the CPU build
+the way Step 2 does, and list it in the plan. Use an embedding GGUF the
+survey found, or download an EmbeddingGemma 300M GGUF (Q8_0 or Q4_0) from an
+official repository, with its exact filename and size in the plan. Add:
+
+```yaml
+# partial: the embeddings block only, not a whole config
+embeddings:
+  enabled: true
+  model_path: <embedding GGUF path>
+  device: none          # CPU, which keeps GPU memory free
+  prompt_style: gemma   # EmbeddingGemma only; none for nomic-embed, bge and others
+```
+
+**Check:** after the reload the config loads with no `embeddings.` error.
+Forge builds the index on the first `search_codebase` call and asks before
+starting the embedding server; tell the user to allow it.
+
+## Step 9b — Optional: reverse image search
+
+Run this section when the user picked "Reverse image search" in Step 0 or the
+setup request names it. Tell the user to get a key at serpapi.com, then run
+**Forge: Set Cloud Provider Token** (`forge.setCloudToken`) in VS Code with
+the key name `serpapi` and enter the key there. Wait; never request, read or
+repeat it. Add:
+
+```yaml
+# partial: the image_search block only, not a whole config
+image_search:
+  provider: serpapi_lens
+  secret_key_name: serpapi
+```
+
+**Check:** after the reload the config loads with no `image_search.` error.
+
 ## Step 10 — Optional: image generation
 
-Run this section only when the user's setup request names image generation. Do
-not ask which route to use: choose the local backend when the surveyed hardware
-has a suitable unused GPU; otherwise use an already configured cloud provider.
+Run this section when the user picked "Image generation" in Step 0 question 7,
+or the setup request names it. Do not ask which route to use: choose the local
+backend when the surveyed hardware has a suitable unused GPU; otherwise use an
+already configured cloud provider.
 If neither route is available, skip it and state the missing requirement in
 **Finish**. `generate_image` appears only when an `image_generation:` block
 exists, and it needs `permissions.net.fetch: true` (a local backend is fetched
@@ -618,10 +735,10 @@ error text.
 
 ## Step 11 — Optional: local video and music generation
 
-Run this section only when the user's setup request names video or music
-generation. Do not ask whether to add it. It is off by default; configure only
-the named engines and include every required download and exact size in the
-single plan summary.
+Run this section when the user picked "Video" or "Music" in Step 0 question 7,
+or the setup request names them. It is off by default; configure only the
+picked or named engines and include every required download and exact size in
+the single plan summary.
 
 When requested:
 
@@ -654,10 +771,10 @@ When requested:
    plus its ComfyUI text encoder from
    [Comfy-Org/stable-audio-3](https://huggingface.co/Comfy-Org/stable-audio-3).
    Check each model's license and required files before the plan confirmation.
-   The user's request names the media section; the one plan confirmation
-   authorizes the listed downloads. Download only files needed for the named
-   engine; use LTX-2.5 for video by default and ACE-Step 1.5 for music unless
-   the user's request names a different engine.
+   The user picked or named the media section; the one plan confirmation
+   authorizes the listed downloads. Download only files needed for the picked
+   or named engine; use LTX-2.5 for video by default and ACE-Step 1.5 for
+   music unless the user's request names a different engine.
 4. Back up the existing config, then fill only the needed `media:` engine
    entries in `config.yaml`. Set the ComfyUI root, interpreter, model paths,
    `cuda_devices`, and the output directory. Enable only the requested engines
@@ -756,8 +873,12 @@ Report to the user:
   how to add it later:
   - Telegram — not requested or declined; name it to follow Step 8 and enter a bot token.
   - Web search — not requested or declined; name it to follow Step 9 (DuckDuckGo, no key).
-  - Image generation — not requested or declined; name it to follow Step 10.
-  - Video or music — not requested or declined; name it to follow Step 11.
+  - Image generation — not picked or named; pick it next time, or name it to follow Step 10.
+  - Video or music — not picked or named; pick it next time, or name it to follow Step 11.
+  - Voice notes — not picked or named; name it to follow Step 8a.
+  - Codebase index — not picked or named; name it to follow Step 9a.
+  - Reverse image search — not picked or named; name it to follow Step 9b.
+  - Cloud models — not picked or named; name it to follow Step 4.
   - Other computer — not requested or declined; name it to follow Step 12.
   - Daily chat retitle — not requested or declined; name it to follow Step 13.
   - Global note — not picked in Step 0; name it to follow Step 7.
