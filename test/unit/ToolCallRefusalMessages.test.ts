@@ -1210,7 +1210,9 @@ describe("a value that matches none of a union's shapes", () => {
 
   it('still tells the model where to look when the union says nothing', () => {
     const Loose = z.object({
-      schedule: z.discriminatedUnion('kind', [z.object({ kind: z.literal('daily') })]),
+      // A union of shapes with no literal to name: zod 4.6 names the value a
+      // discriminatedUnion expects, but this still reports a bare "Invalid input".
+      schedule: z.union([z.object({ at: z.string() }), z.object({ every: z.number() })]),
     });
     const [issues, args] = refused(Loose, { schedule: { kind: 'hourly' } });
     const line = firstLine(issues, args);
