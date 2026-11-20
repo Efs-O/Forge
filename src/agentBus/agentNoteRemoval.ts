@@ -147,8 +147,21 @@ export interface NoteRemovalResult {
 export function removeNoteFromFile(filePath: string, created: boolean): NoteRemovalResult {
   try {
     const stats = fs.lstatSync(filePath);
-    if (stats.isSymbolicLink() || !stats.isFile())
+    if (stats.isSymbolicLink() || !stats.isFile()) {
+      // A link or a folder named AGENTS.md may hold no note at all, and the
+      // mesh-off start warns on every `skipped`: read through it first, so only
+      // a note behind the link is worth warning about. Nothing is written here.
+      let linked: string;
+      try {
+        linked = fs.readFileSync(filePath, 'utf8');
+      } catch {
+        // A folder, a junction, a dangling link: no content, so no note.
+        return { path: filePath, status: 'none' };
+      }
+      if (removeAgentMeshSections(linked).status === 'none')
+        return { path: filePath, status: 'none' };
       return { path: filePath, status: 'skipped', reason: 'not a regular file' };
+    }
     const content = fs.readFileSync(filePath, 'utf8');
     if (created && content === AGENTS_MD_IMPORT_FILE_CONTENT) {
       // A `CLAUDE.md` Forge created holds nothing but the `@AGENTS.md` line.

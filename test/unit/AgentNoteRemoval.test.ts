@@ -157,15 +157,9 @@ describe('taking the note out of one file', () => {
       fs.symlinkSync(target, link);
       madeLink = true;
     } catch {
-      // Windows without developer mode: a junction is a link too, and reaches
-      // the same refusal by the other branch of the regular-file check.
-      try {
-        fs.mkdirSync(path.join(home, 'linked'), { recursive: true });
-        fs.symlinkSync(path.join(home, 'linked'), link, 'junction');
-        madeLink = true;
-      } catch {
-        return;
-      }
+      // Windows without developer mode: a junction cannot point at a file, so
+      // only a real symlink can carry the note — skip instead of substituting.
+      return;
     }
     expect(madeLink).toBe(true);
     recordNoteFiles(registry, [{ path: link, status: 'unchanged' }]);
@@ -175,6 +169,26 @@ describe('taking the note out of one file', () => {
     expect(fs.readFileSync(target, 'utf8')).toBe(`own\n\n${note}\n`);
     // The entry stays: a file Forge could not clean up is still owed a removal.
     expect(readNoteFiles(registry)).toEqual([{ path: link, created: false }]);
+  });
+
+  it('answers nothing to do for a link whose target holds no note', () => {
+    const target = write(path.join(home, 'shared.md'), 'own\n');
+    const link = path.join(home, 'AGENTS.md');
+    try {
+      fs.symlinkSync(target, link);
+    } catch {
+      return; // Windows without developer mode: no symlink to test with.
+    }
+    expect(removeNoteFromFile(link, false)).toEqual({ path: link, status: 'none' });
+    // Nothing is written, so the target keeps its text.
+    expect(fs.readFileSync(target, 'utf8')).toBe('own\n');
+  });
+
+  it('answers nothing to do when the instruction name is a folder, not a file', () => {
+    const dir = path.join(home, 'AGENTS.md');
+    fs.mkdirSync(dir);
+    expect(removeNoteFromFile(dir, false)).toEqual({ path: dir, status: 'none' });
+    expect(fs.existsSync(dir)).toBe(true);
   });
 });
 
