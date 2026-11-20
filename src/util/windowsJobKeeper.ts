@@ -1,7 +1,5 @@
 import { ChildProcess, spawn } from 'child_process';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
+import { powershellScratch, type PowershellScratch } from './powershellScratchDir';
 import { KEEPER_SCRIPT } from './windowsJobKeeperScript';
 
 /**
@@ -70,49 +68,13 @@ function keeperCommand(): { file: string; args: string[] } | undefined {
  *  command-line file and the compiled assembly in the process temp folder: five
  *  files per keeper, named like `cug3etsd.0.cs`. Left in the system temp they
  *  pile up there for the life of the machine, and they trip the test suite's
- *  temp guard — `StopExecutionNote.test.ts` failed on exactly those names.
- *  So the keeper gets a folder of its own under `~/.forge/job-keeper/`, in the
- *  spirit of `~/.forge/tool-usage/`, and every keeper start prunes folders this
- *  module left more than a day ago: what we put there is ours to remove. */
-const KEEPER_TMP_STALE_MS = 24 * 60 * 60 * 1000;
-
-function pruneStaleKeeperTemps(root: string): void {
-  const now = Date.now();
-  let names: string[];
-  try {
-    names = fs.readdirSync(root);
-  } catch {
-    return;
-  }
-  for (const name of names) {
-    if (!name.startsWith('ps-')) continue;
-    const full = path.join(root, name);
-    try {
-      // A live keeper writes here as it compiles, so its mtime keeps it alive.
-      if (now - fs.statSync(full).mtimeMs > KEEPER_TMP_STALE_MS) {
-        fs.rmSync(full, { recursive: true, force: true });
-      }
-    } catch {
-      // Another window may have removed it between the stat and the unlink.
-    }
-  }
-}
-
-function keeperTempEnv(): Record<string, string> | undefined {
-  try {
-    const root = path.join(os.homedir(), '.forge', 'job-keeper');
-    fs.mkdirSync(root, { recursive: true });
-    pruneStaleKeeperTemps(root);
-    const dir = path.join(root, `ps-${String(process.pid)}-${Date.now().toString(36)}`);
-    fs.mkdirSync(dir, { recursive: true });
-    // TMP and TEMP are what .NET's Path.GetTempPath reads on Windows; TMPDIR is
-    // the POSIX spelling, harmless to set and correct if a test keeper runs here.
-    return { TMP: dir, TEMP: dir, TMPDIR: dir };
-  } catch {
-    // No folder of our own: PowerShell writes where it always wrote, and the
-    // keeper still works.
-    return undefined;
-  }
+ *  temp guard — `StopExecutionNote.test.ts` failed on exactly those names. So
+ *  the keeper compiles into a folder of its own under `~/.forge/job-keeper/`,
+ *  in the spirit of `~/.forge/tool-usage/`: `powershellScratchDir` owns that
+ *  folder and the day-old pruning. The folder is removed when the keeper exits
+ *  — while it runs, the assembly inside is loaded and locked. */
+function keeperScratch(): PowershellScratch {
+  return powershellScratch('job-keeper');
 }
 
 const jobs = new Map<number, string>();
@@ -210,15 +172,16 @@ function ensureKeeper(): ChildProcess | undefined {
   const command = keeperCommand();
   if (!command) return undefined;
   let child: ChildProcess;
-  const keeperTemp = keeperTempEnv();
+  const keeperTemp = keeperScratch();
   try {
     child = spawn(command.file, command.args, {
       stdio: ['pipe', 'pipe', 'ignore'],
       windowsHide: true,
       shell: false,
-      ...(keeperTemp ? { env: { ...process.env, ...keeperTemp } } : {}),
+      env: { ...process.env, ...keeperTemp.env },
     });
   } catch {
+    keeperTemp.dispose();
     return undefined;
   }
   keeper = child;
@@ -239,6 +202,9 @@ function ensureKeeper(): ChildProcess | undefined {
     for (const line of lines) handleKeeperLine(child, line);
   });
   const forget = (): void => {
+    // The keeper is out, so the assembly it had loaded is unlocked and its
+    // compile folder can go. Idempotent, because both `error` and `exit` land.
+    keeperTemp.dispose();
     if (keeper !== child) return;
     keeper = undefined;
     keeperReady = false;

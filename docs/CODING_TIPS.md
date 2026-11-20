@@ -14,6 +14,7 @@
 2. `npx tsc --noEmit` → checks `src` only: the root tsconfig excludes `webview-ui` and `test`. a webview-ui change needs `npx tsc --noEmit -p webview-ui/tsconfig.json`
 3. `npm run check:changed -- src/tools/webFetchSsrf.ts test/unit/WebFetchSsrf.test.ts` → imports cannot lead to the affected tests, so it runs the FULL suite and the known load class goes red on an unrelated commit. rerun those files alone and report it as contention
 4. `cwd: "n:/vs code/apps/Forge"` → `does not exist`: this workspace root has a space, `N:/vs code apps/Forge`. a typo'd cwd refuses the whole call, and a background one loses the job it was starting
+5. editing `src/` while `npm run ci` runs → its `build` step bundles the half-edited tree: `No matching export in "src/util/powershellScratchDir.ts" for import "powershellScratchEnv"` and `ci exit: 1` on a tree that is fine. finish the edits, then run the gate
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green and the tree stood still: never run `record-ci-pass.mjs` by hand — the `ci:steps` chain writes it

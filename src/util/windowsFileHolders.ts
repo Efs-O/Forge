@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'child_process';
+import { powershellScratch } from './powershellScratchDir';
 
 const RESTART_MANAGER_SCRIPT = String.raw`
 Add-Type -TypeDefinition @'
@@ -52,9 +53,21 @@ function powershellEncodedCommand(script: string): string {
   return Buffer.from(script, 'utf16le').toString('base64');
 }
 
-/** Best-effort Restart Manager lookup. It runs only after a Windows rename budget is spent. */
+/**
+ * Best-effort Restart Manager lookup. It runs only after a Windows rename budget
+ * is spent.
+ *
+ * Both forms compile with `Add-Type`, so both get a scratch folder of their own:
+ * CodeDom writes five files into the child's temp, a three-second timeout kills
+ * the child before CodeDom can clean them up, and the survivors used to land in
+ * whoever's temp folder the save happened to be running in - the test suite's
+ * per-file folder, which its temp guard then fails for the whole file. The
+ * folder is removed as soon as the child is gone; the helper's own prune is only
+ * the backstop for a process that died mid-probe.
+ */
 export function windowsFileHolders(target: string): string | undefined {
   if (process.platform !== 'win32') return undefined;
+  const scratch = powershellScratch('rm-probe');
   const result = spawnSync(
     'powershell.exe',
     [
@@ -68,9 +81,12 @@ export function windowsFileHolders(target: string): string | undefined {
       encoding: 'utf8',
       timeout: 3_000,
       windowsHide: true,
-      env: { ...process.env, FORGE_RM_TARGET: target },
+      env: { ...process.env, ...scratch.env, FORGE_RM_TARGET: target },
     },
   );
+  // spawnSync returned, timeout kill included, so the child is gone and nothing
+  // holds CodeDom's files any more.
+  scratch.dispose();
   if (result.error || result.status !== 0) return undefined;
   const holders = result.stdout.trim();
   return holders || undefined;
@@ -80,6 +96,7 @@ export function windowsFileHolders(target: string): string | undefined {
 export function windowsFileHoldersAsync(target: string): Promise<string | undefined> {
   if (process.platform !== 'win32') return Promise.resolve(undefined);
   return new Promise((resolve) => {
+    const scratch = powershellScratch('rm-probe');
     const child = spawn(
       'powershell.exe',
       [
@@ -89,7 +106,10 @@ export function windowsFileHoldersAsync(target: string): Promise<string | undefi
         '-EncodedCommand',
         powershellEncodedCommand(RESTART_MANAGER_SCRIPT),
       ],
-      { windowsHide: true, env: { ...process.env, FORGE_RM_TARGET: target } },
+      {
+        windowsHide: true,
+        env: { ...process.env, ...scratch.env, FORGE_RM_TARGET: target },
+      },
     );
     let stdout = '';
     let settled = false;
@@ -107,7 +127,15 @@ export function windowsFileHoldersAsync(target: string): Promise<string | undefi
     child.stdout?.on('data', (chunk: string) => {
       stdout += chunk;
     });
-    child.on('error', () => finish(undefined));
-    child.on('close', (code) => finish(code === 0 ? stdout.trim() || undefined : undefined));
+    child.on('error', () => {
+      scratch.dispose();
+      finish(undefined);
+    });
+    // `close` also lands after the timeout kill, which is what makes this safe:
+    // by then the child is out, so its compiled assembly is unlocked.
+    child.on('close', (code) => {
+      scratch.dispose();
+      finish(code === 0 ? stdout.trim() || undefined : undefined);
+    });
   });
 }

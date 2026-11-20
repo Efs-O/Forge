@@ -112,7 +112,7 @@
 14. `shell` · `query:`/`include:` or another tool's field → refused: unknown argument. fields are `command`/`cwd`/`timeout_ms`/`background`/…
 15. `stop_execution` · on a background `npm run ci` → the wrapper dies, the child tree may live and hold its lock: `MSYS_NO_PATHCONV=1 taskkill /PID <top> /T /F`; with NO_PATHCONV `//PID` → `Invalid argument/option - '//PID'`
 16. `monitor_execution` · `wait_ms: 90000` remembered from `wait`'s 900 s → refused: must be within 0 to 60000. re-read the advertised bounds instead of recalling them
-17. `monitor_execution` · `suggested_next_wait_ms` echoed back as an argument → `unknown argument "suggested_next_wait_ms"`: it is a returned field. pass its value as `wait_ms`
+17. `monitor_execution` · `suggested_next_wait_ms` echoed back as an argument, or `output_stream: "none"` → `unknown argument "suggested_next_wait_ms"` / `output_stream must be "both", "stdout", or "stderr"`: the first is a returned field — pass its value as `wait_ms`; never invent an enum value
 18. `edit_file` · `old_str` rebuilt from wrapped prose, retyped (`diver` for `diverge`), or read before a formatter pass → refused: not found. copy the physical lines verbatim from the newest read
 19. `edit_file` · `new_str` that leaves out part of what `old_str` covers (a heading, a trailing line) → that text is deleted or the next line glues on. end both at the same point; re-include anchored lines
 20. `edit_file` · `new_str` equal to the current text → alone it reports Applied and changes nothing; in a batch → refused: not found. diff the file, not the reply; drop the no-op edit
