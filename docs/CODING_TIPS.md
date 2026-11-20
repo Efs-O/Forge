@@ -48,6 +48,7 @@
 13. a timing probe in `.forge/tmp/` → `npx vitest run` runs nothing: both projects include `test/**/*.test.ts`. give the probe its own config with `resolve.alias` vscode → `test/support/vscode.ts` and `setupFiles: ['test/support/tempGuard.setup.ts']`
 14. a `test/unit/ControlServer.test.ts` assertion that `status().listening` is false right after `start()` on a busy port → it is true: `listenOn` assigns `this.server` before the async EADDRINUSE error lands. `vi.waitFor` it
 15. any text inside a tool schema (a provider name in `test/unit/ToolSchemaBudget.test.ts`'s own fixture) → that file goes red at `expected 68164 to be 68161`: set `MEASURED_CHARS` to the number the failure prints
+16. a yaml placeholder in an `AI_SETUP.md` block, e.g. `voice_en: <voice file name without .onnx>` → `AiSetupDoc.test.ts` red: a `# partial:` block is parsed against that key's own schema and `voice_en` is `^[A-Za-z0-9_-]+$`. write a real value (`en_US-amy-medium`) and put the note in a `#` comment
 
 ## PATHS
 1. `zipfile.ZipFile('test/fixtures/sample.xlsx')` in a scan → FileNotFoundError: that is not where the fixture lives. read the test's `fixture()` helper for the real path first
