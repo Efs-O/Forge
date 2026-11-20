@@ -36,6 +36,7 @@ import {
   WIZARD_EXTRAS,
   type WizardExtra,
 } from './wizardExtras';
+import { markPendingLocalSetup } from './localSetupChat';
 import { resolveCliExecutable } from '../agents/resolveCliExecutable';
 import type { ForgeConfig } from '../config/types';
 
@@ -446,6 +447,10 @@ export async function runFirstRunWizard(context: vscode.ExtensionContext): Promi
     configPath,
     applyWizardExtras(applyTrustPicks(withCliAgents(starter, found), pickedIds), extras),
   );
+  // Telegram and the other computer still have steps only the human can do, and
+  // this wizard has no model to walk them: leave the marker for the first start
+  // that has a config, which opens the chat (`src/sidebar/localSetupChat.ts`).
+  await markPendingLocalSetup(context.globalState, extras);
   await context.globalState.update('forge.firstRun.shown', true);
 
   await reportOutcome(

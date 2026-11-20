@@ -208,6 +208,7 @@ overlaps with an existing owner, extend the owner instead.
 | Session -> webview projections (rows, metas, counts) | `src/sidebar/sessionProjections.ts`      |
 | First-run setup wizard                               | `src/sidebar/FirstRunWizard.ts`          |
 | Wizard Q6 extras (web search, Telegram, other computer) and the blocks they write | `src/sidebar/wizardExtras.ts`            |
+| Post-wizard local-setup chat: its `globalState` marker and seed | `src/sidebar/localSetupChat.ts`          |
 | Add-model setup wizard                               | `src/sidebar/AddModelWizard.ts`          |
 | Missing-config setup mode                            | `src/sidebar/SetupMode.ts`               |
 | AI setup handoff (prompt for Claude Code / Codex)    | `src/vscode/agentSetupCommand.ts` + `AI_SETUP.md` |

@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { SidebarProvider } from './sidebar/SidebarProvider';
+import { openPendingLocalSetup } from './sidebar/localSetupChat';
 import { HistoryArchive } from './sidebar/HistoryArchive';
 import { watchWorkspaceFolders } from './sidebar/workspaceInfo';
 import { buildStatusBarTurnEvents } from './sidebar/statusBarTurnEvents';
@@ -298,6 +299,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   activeRemoteRuntime = remoteRuntime;
   sidebarProvider.startConversationRetention();
+  // The wizard's human-only steps (Telegram pairing, Tailscale sign-in): it
+  // could not open a chat itself, so it left a marker for this start. Setup
+  // mode returns earlier, so a marker is only ever consumed with a config.
+  void openPendingLocalSetup(context.globalState, sidebarProvider.getHostFacade()).catch(
+    (error: unknown) => {
+      const message = `Could not open the setup chat: ${error instanceof Error ? error.message : String(error)}`;
+      log.error(message, error);
+      void vscode.window.showErrorMessage(message);
+    },
+  );
   const sessionTimeBar = new SessionTimeStatusBar((followed) =>
     sidebarProvider.getSessionMetrics(followed),
   );
