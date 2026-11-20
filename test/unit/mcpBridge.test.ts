@@ -229,7 +229,8 @@ describe('mcpApprovalFor', () => {
     detail: 'MCP server "files", tool "delete_all"',
     dangerous: true,
     cardReason: secretReadCardReason('c1'),
-    declineHint: 'tell the owner what you need from this MCP tool; a secret read taints the whole chat',
+    declineHint:
+      'tell the owner what you need from this MCP tool; a secret read taints the whole chat',
     gateKind: 'taintGate',
     secretReadTaint: true,
     reachesOut: 'network',
@@ -241,7 +242,7 @@ describe('mcpApprovalFor', () => {
       cardReason:
         '"delete_all" is not listed under this server\'s tool_permissions, so it asks before each call',
       declineHint:
-        'ask the owner to list "delete_all" under tool_permissions for MCP server "files" in config.yaml',
+        'ask the owner to list "delete_all" under tool_permissions for MCP server "files" in ~/.forge/policy.yaml (config.yaml if the security settings were never moved there)',
     });
   });
 
@@ -270,7 +271,7 @@ describe('mcpApprovalFor', () => {
       cardReason:
         '"delete_all" is not listed under this server\'s tool_permissions, so it asks before each call',
       declineHint:
-        'ask the owner to list "delete_all" under tool_permissions for MCP server "files" in config.yaml',
+        'ask the owner to list "delete_all" under tool_permissions for MCP server "files" in ~/.forge/policy.yaml (config.yaml if the security settings were never moved there)',
     });
   });
 
@@ -297,7 +298,7 @@ describe('mcpApprovalFor', () => {
       cardReason:
         '"my.tool" is not listed under this server\'s tool_permissions, so it asks before each call',
       declineHint:
-        'ask the owner to list "my.tool" under tool_permissions for MCP server "files" in config.yaml',
+        'ask the owner to list "my.tool" under tool_permissions for MCP server "files" in ~/.forge/policy.yaml (config.yaml if the security settings were never moved there)',
     });
   });
 });

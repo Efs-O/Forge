@@ -134,7 +134,7 @@ export function mcpApprovalFor(
     return {
       detail,
       cardReason: `"${name.external}" is not listed under this server's tool_permissions, so it asks before each call`,
-      declineHint: `ask the owner to list "${name.external}" under tool_permissions for MCP server "${serverName}" in config.yaml`,
+      declineHint: `ask the owner to list "${name.external}" under tool_permissions for MCP server "${serverName}" in ~/.forge/policy.yaml (config.yaml if the security settings were never moved there)`,
     };
   }
   // Listed and nothing tainted in this chat: the permission tier decides, exactly
