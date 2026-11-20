@@ -183,17 +183,25 @@ export class MemoryStore {
     memories: StoredMemory[];
     duplicates: StoredMemory[];
     skipped: string[];
+    /** What the write loop asks about the folder, from this scan, not a new read per file. */
+    names: Set<string>;
+    fileKeys: Map<string, string>;
   } {
-    if (!fs.existsSync(this.directory)) return { memories: [], duplicates: [], skipped: [] };
+    const names = new Set<string>();
+    const fileKeys = new Map<string, string>();
+    if (!fs.existsSync(this.directory))
+      return { memories: [], duplicates: [], skipped: [], names, fileKeys };
     const memories: StoredMemory[] = [];
     const skipped: string[] = [];
     for (const fileName of fs.readdirSync(this.directory).sort()) {
+      names.add(fileName);
       if (!fileName.endsWith('.md') || fileName === 'MEMORY.md' || fileName.endsWith('.tmp'))
         continue;
       try {
-        memories.push(
-          parseMemory(fileName, fs.readFileSync(path.join(this.directory, fileName), 'utf8')),
-        );
+        const content = fs.readFileSync(path.join(this.directory, fileName), 'utf8');
+        const memory = parseMemory(fileName, content);
+        fileKeys.set(fileName, memory.key);
+        memories.push(memory);
       } catch (error) {
         skipped.push(
           `Skipped ${fileName}: ${error instanceof Error ? error.message : String(error)}`,
@@ -215,7 +223,7 @@ export class MemoryStore {
       skipped.push(`Skipped ${memory.fileName}: another file has the same name "${memory.key}"`);
       return false;
     });
-    return { memories: kept.sort(compareMemories), duplicates, skipped };
+    return { memories: kept.sort(compareMemories), duplicates, skipped, names, fileKeys };
   }
 
   /**
@@ -228,16 +236,21 @@ export class MemoryStore {
    * `forget` said the key did not exist. Nothing is deleted here: each copy
    * goes through `quarantineCopy` below, which stops it matching the `*.md`
    * scan while keeping the owner's bytes to recover.
+   *
+   * `duplicates` comes from the caller's own scan: nothing but this write can
+   * have changed the folder since, so a second scan re-read every file to ask
+   * one question the first scan already answered.
    */
-  private quarantineCopies(key: string, keep: string): number {
-    const { duplicates } = this.parsedFiles();
-    let moved = 0;
+  private quarantineCopies(
+    duplicates: readonly StoredMemory[],
+    key: string,
+    keep: string,
+    freed: ReadonlySet<string>,
+  ): void {
     for (const copy of duplicates) {
-      if (copy.key !== key || copy.fileName === keep) continue;
+      if (copy.key !== key || copy.fileName === keep || freed.has(copy.fileName)) continue;
       this.quarantineCopy(copy.fileName);
-      moved += 1;
     }
-    return moved;
   }
 
   /**
@@ -254,19 +267,17 @@ export class MemoryStore {
     );
   }
 
-  /** True only when the file already at `fileName` really is this key's file:
-   *  its frontmatter parses and names this key. Anything else - another key's
-   *  note, or bytes that do not parse at all - is not this key's file, so the
-   *  caller moves it aside instead of renaming or writing over it. */
-  private targetCarriesKey(fileName: string, key: string): boolean {
-    try {
-      return (
-        parseMemory(fileName, fs.readFileSync(path.join(this.directory, fileName), 'utf8')).key ===
-        key
-      );
-    } catch {
-      return false;
-    }
+  /** True only when a file sits at `fileName` that is NOT this key's file: the
+   *  scan parsed it and it names another key, or it is there and does not parse
+   *  at all. A name in `freed` was emptied by this write, so it is open. */
+  private targetIsForeign(
+    scan: { names: Set<string>; fileKeys: Map<string, string> },
+    freed: ReadonlySet<string>,
+    fileName: string,
+    key: string,
+  ): boolean {
+    if (freed.has(fileName) || !scan.names.has(fileName)) return false;
+    return scan.fileKeys.get(fileName) !== key;
   }
 
   list(): StoredMemory[] {
@@ -312,8 +323,9 @@ export class MemoryStore {
   ): StoredMemory {
     const desc = descriptionFor(value, description);
     // One scan per write. parsedFiles() has already dropped keys that appear in two files, so
-    // the index rendered below excludes them exactly as a second scan would have.
-    const files = this.parsedFiles().memories;
+    // the index rendered below excludes them exactly as a second scan would have. That scan also
+    // carries the folder's names and keys: all the loop below needs about what is on disk.
+    const { memories: files, duplicates, names, fileKeys } = this.parsedFiles();
     const all = [
       ...files.filter((memory) => memory.key !== key),
       { key, description: desc, value, fileName: '', updated },
@@ -328,6 +340,8 @@ export class MemoryStore {
     for (const group of groups.values())
       if (group.length > 1) group.forEach(({ key: name }) => colliding.add(name));
     const named: StoredMemory[] = [];
+    // Names this write has emptied, so a later iteration moves nothing twice.
+    const freed = new Set<string>();
     let written: StoredMemory | undefined;
     for (const memory of all) {
       const safe =
@@ -341,12 +355,14 @@ export class MemoryStore {
       // treats that exact name as the generated index, not as a memory file.
       if (
         fileName !== 'MEMORY.md' &&
-        fs.existsSync(target) &&
-        !this.targetCarriesKey(fileName, memory.key)
-      )
+        this.targetIsForeign({ names, fileKeys }, freed, fileName, memory.key)
+      ) {
         this.quarantineCopy(fileName);
+        freed.add(fileName);
+      }
       if (memory.key !== key && memory.fileName !== fileName) {
         fs.renameSync(path.join(this.directory, memory.fileName), target);
+        if (memory.fileName) freed.add(memory.fileName);
       }
       const entry: StoredMemory = { ...memory, fileName };
       if (memory.key === key) {
@@ -358,7 +374,7 @@ export class MemoryStore {
       }
       named.push(entry);
     }
-    if (written) this.quarantineCopies(key, written.fileName);
+    if (written) this.quarantineCopies(duplicates, key, written.fileName, freed);
     named.sort(compareMemories);
     this.regenerateIndex(named);
     return written!;
