@@ -18,7 +18,7 @@
 5. editing `src/` while `npm run ci` runs → its `build` step bundles the half-edited tree: `No matching export in "src/util/powershellScratchDir.ts" for import "powershellScratchEnv"` and `ci exit: 1` on a tree that is fine. finish the edits, then run the gate
 6. `npm run type-check` in a shared tree → dies on the other lane's half-edited file (`undeliveredTells.ts(77,30): error TS6133`) and its chained `&&` skips the webview pass. grep the log for your own paths, then run `npx tsc -p webview-ui/tsconfig.json --noEmit` yourself
 7. `test/unit/ToolSchemaBudget.test.ts` red mid-run (`expected 68161 to be 68029`) → another lane's tool-description edit landed while my `npm run ci` was reading the schema, so that number is theirs: rerun the file alone, green, and report it as theirs
-8. `npm run check:changed -- <files>` in a shared tree → it aborts at `type-check` on the other lane's untracked file, so its test step never runs. find the tests that read the changed doc (`rg -l <doc> test`) and run those with vitest yourself
+8. `npm run check:changed -- <files>` (`scripts/check-changed.mjs`) in a shared tree → it aborts at `type-check` on the other lane's untracked file, so its test step never runs. find the tests that read the changed doc (`rg -l <doc> test`) and run those with vitest yourself
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green and the tree stood still: never run `record-ci-pass.mjs` by hand — the `ci:steps` chain writes it
@@ -54,7 +54,7 @@
 19. a launch moved out of `BrowserSessionManager` into a shared helper → the render suites mock `getPlaywright` on `BrowserSessionManager` only, so the helper launches a real Chrome. pass the caller's `chromium` into `launchSeededBrowser`
 20. `closeGate` in `test/support/renderHtmlHarness.ts` gating every `context.close()` → the render leg closes the persistent context first, so the abort lands inside `use` and the engine's rejection wins. gate the engine's second close only
 21. from `src/tools/browser/*.ts` `require('../util/logger')` → TS2307 inside the `typeof import()`: the logger is `../../util/logger`. keep the require lazy, a top-level import drags `vscode` into the browser graph the smoke runs under node
-22. a fire-and-forget `void closeQuietly()` in an abort path → the profile `fs.rm` is still in flight when the test file ends, so tempGuard fails `temp leak: … forge-browser-XXXX`. an exit that finds the close taken must await it, not return at once
+22. a fire-and-forget `void closeQuietly()` in an abort path → the profile `fs.rm` is still in flight when the test file ends, so `test/support/tempGuard.setup.ts` fails `temp leak: … forge-browser-XXXX`. an exit that finds the close taken must await it, not return at once
 
 ## PATHS
 1. `zipfile.ZipFile('test/fixtures/sample.xlsx')` in a scan → FileNotFoundError: that is not where the fixture lives. read the test's `fixture()` helper for the real path first
