@@ -3,10 +3,11 @@
  * agent installed, who therefore cannot run the `AI_SETUP.md` walkthrough.
  *
  * It gets one local model running and asks the same trust-switch questions
- * Step 0 asks, so a wizard user can turn a switch on without editing YAML:
- * one pick over every GGUF and Ollama model it can find, then (for a GGUF)
- * which `llama-server` to run, then the questions, then a check of the file it
- * wrote and the engine it configured before the reload is offered.
+ * Step 0 asks, plus the Step 0 extras (Q6), so a wizard user can turn a switch
+ * on without editing YAML: one pick over every GGUF and Ollama model it can
+ * find, then (for a GGUF) which `llama-server` to run, then the questions, then
+ * a check of the file it wrote and the engine it configured before the reload
+ * is offered.
  *
  * The config always goes to Forge's global storage — the file `bootstrapConfig`
  * reads at activation (`src/extension.ts`), so one setup works in every folder.
@@ -29,6 +30,12 @@ import { writeConfigSafely } from '../config/ConfigWriter';
 import { loadConfig } from '../config/ConfigLoader';
 import { runCommand } from '../jobs/actions/llamacppIo';
 import { applyTrustPicks, wizardSwitchQuestions } from '../config/trustSwitches';
+import {
+  applyWizardExtras,
+  extrasNextSteps,
+  WIZARD_EXTRAS,
+  type WizardExtra,
+} from './wizardExtras';
 import { resolveCliExecutable } from '../agents/resolveCliExecutable';
 import type { ForgeConfig } from '../config/types';
 
@@ -284,6 +291,26 @@ async function askTrustSwitches(found: FoundCliAgents): Promise<string[]> {
   return pickedIds;
 }
 
+/**
+ * Q6: the optional extras, one multi-select after the switch questions. Escape
+ * is "none of these" here too, so a user who wants nothing extra still
+ * finishes the wizard. `wizardExtras.ts` holds the items and what they write.
+ */
+async function askExtras(): Promise<WizardExtra[]> {
+  const items = WIZARD_EXTRAS.map((extra) => ({
+    label: extra.label,
+    detail: extra.description,
+    id: extra.id,
+  }));
+  const chosen = await vscode.window.showQuickPick(items, {
+    title: 'Forge: Set up any of these now?',
+    placeHolder: 'Pick any that apply — Escape means none of these',
+    canPickMany: true,
+    ignoreFocusOut: true,
+  });
+  return (chosen ?? []).map((item) => item.id);
+}
+
 // ── Where the config goes ─────────────────────────────────────────────────────
 
 /** Forge's global storage, always: the path `bootstrapConfig` already reads. */
@@ -358,10 +385,11 @@ async function reportOutcome(
   configPath: string,
   outcome: HealthOutcome,
   cliAgentNote: string,
+  extrasNote: string,
 ): Promise<void> {
   if (outcome.ok) {
     const choice = await vscode.window.showInformationMessage(
-      `Forge: setup check passed: ${outcome.checks.join(', ')}.${cliAgentNote} Reload the window to start.`,
+      `Forge: setup check passed: ${outcome.checks.join(', ')}.${cliAgentNote}${extrasNote} Reload the window to start.`,
       'Reload',
     );
     if (choice === 'Reload') void vscode.commands.executeCommand('workbench.action.reloadWindow');
@@ -405,6 +433,7 @@ export async function runFirstRunWizard(context: vscode.ExtensionContext): Promi
 
   const found = await findCliAgents();
   const pickedIds = await askTrustSwitches(found);
+  const extras = await askExtras();
 
   const configPath = await confirmConfigPath(context);
   if (!configPath) return false;
@@ -413,13 +442,17 @@ export async function runFirstRunWizard(context: vscode.ExtensionContext): Promi
     selection.kind === 'ollama'
       ? makeOllamaStarterConfig(OLLAMA_ENDPOINT, [selection.tag])
       : llamaCppStarter(selection.candidate, selection.binary);
-  writeConfigSafely(configPath, applyTrustPicks(withCliAgents(starter, found), pickedIds));
+  writeConfigSafely(
+    configPath,
+    applyWizardExtras(applyTrustPicks(withCliAgents(starter, found), pickedIds), extras),
+  );
   await context.globalState.update('forge.firstRun.shown', true);
 
   await reportOutcome(
     configPath,
     await checkSetup(configPath, selection),
     describeCliAgents(found),
+    extrasNextSteps(extras),
   );
   return true;
 }
