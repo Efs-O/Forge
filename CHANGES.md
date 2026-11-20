@@ -1,5 +1,60 @@
 # Forge — Recent Changes
 
+## 0.17.207
+
+**Security fixes from an outside audit of 0.17.206.**
+
+**Terminal capture is off by default, and turning it off forgets it.** `forge.terminal.watchUserCommands`
+used to ship on, so the commands you ran in your own VS Code terminals, and their output, went to the
+model you chat with, which may be a cloud model. It now ships off. Turning it off clears what it had
+captured and stops a capture that is still running. `AI_SETUP.md` asks whether to turn it on.
+
+**An MCP tool you have not listed asks before each call.** A tool missing from its server's
+`tool_permissions` used to run under the read-only tier with no card. It now asks before every call
+(**Allow for this chat** works), and in a chat that has read a secret file every MCP call asks you, as
+`web_fetch` does. `AI_SETUP.md` asks which MCP servers you trust and lists their tools for you.
+
+**Chrome and Edge launches no longer cost a failed Windows sign-in.** On Windows, Chromium checks
+whether your account password is blank the first time it starts with a new profile, and Windows logs
+that check as a failed sign-in. Forge's browser tools, HTML renders and PDF exports start a new profile
+every time, so a busy turn or a test run could lock the account after ten launches. Forge now keeps
+Chromium's own answer in `%LOCALAPPDATA%\forge-llm\browser-seed\` and hands it to each new profile,
+which is still thrown away after use.
+
+**Boot errors show as text, and the Marketplace line says what Undo covers.** The sidebar and Model
+Manager put an error's text into the page as HTML; they now show it as plain text. The description no
+longer promises "undo any turn": Keep/Undo covers Forge's own file edits, not CLI chats, delegated runs
+or shell side effects. `npm audit fix` cleared every production advisory (zod, the MCP SDK, sharp,
+undici and others) without a major version change.
+
+**Breaking: `provider: xai` is refused.** The xai provider is gone, together with Forge's use of
+OpenCode's `auth.json` login file. A config that still names `provider: xai` is refused, and the message
+names the replacement: xAI's API is OpenAI-compatible, so use `provider: openai-compatible` with your
+own key in SecretStorage. Nothing is migrated for you.
+
+**The agent note stays out of files git would commit.** Inside a git repository, Forge no longer
+writes its agent-mesh section into an `AGENTS.md` or `CLAUDE.md` that the repository tracks, or into an
+untracked file of yours that is not ignored. A missing note file that Forge creates is first listed in
+`.git/info/exclude`, so `git status` stays clean, and those lines go again when you turn the mesh off
+or uninstall Forge. Outside git nothing changed. The "Talk to Forge" switch says so.
+
+**The setup asks about every feature.** `AI_SETUP.md` now looks for every optional feature on the
+machine and lists what is already there and what is missing. It asks about media (images, video,
+music, Telegram voice notes) and more tools (a codebase index, reverse image search, cloud models,
+chats that start chats). It installs Piper from its last release with prebuilt binaries and checks
+each file against pinned SHA-256s, sets up an English and a Greek voice, and takes the newest GitHub
+release that actually carries binaries instead of `/releases/latest`. A laptop that gets images from
+another computer is no longer told image generation is "not possible here".
+
+**Set Search API Key no longer breaks a moved config.** It appended a `search:` block to config.yaml,
+which the loader refuses once your security settings live in `policy.yaml`. The block now goes to
+whichever file owns it.
+
+**Telegram without a bot token stops retrying.** With Telegram picked but no token stored yet, Forge
+logged an error every 60 s. It now waits for the token, and storing it starts Telegram. The history
+panel's size is no longer refused on a scaled display, and the agent-note log line no longer tells you
+to delete the section by hand.
+
 ## 0.17.206
 
 **The control server needs its token for model routes, and refuses browser requests.** Any web page
