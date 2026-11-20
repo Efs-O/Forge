@@ -1,5 +1,53 @@
 # Forge — Recent Changes
 
+## 0.17.206
+
+**The control server needs its token for model routes, and refuses browser requests.** Any web page
+could send `POST /chat` (a billed cloud call), `/ensure` or `/unload` to `127.0.0.1:8799`, and DNS
+rebinding could read `/models`. The model routes now require the control token that Forge publishes in
+`~/.forge/control-server.json`. Every route refuses a foreign `Host` header or a browser `Origin`, and
+model `POST`s must be JSON. A script that calls these routes must send the token. Forge Relay and the
+model-bench scripts have been updated to send it. `image_search` now asks before it uploads an image, by default.
+
+**After a reload, Forge takes its control port back.** The old extension host still held 8799 while it
+shut down, so the new window fell back to a random port, or ran no control server at all with the agent
+bus off, and never tried again. `control-server.json` then named a dead process, and every consumer saw
+Forge as down. Forge now retries the configured port until it gets it and publishes the record again.
+
+**A fresh install starts with every trust switch off.** The starters used to turn on the browser,
+desktop control, the agent bus, remote control, scheduled jobs that may run coding agents, delegation,
+deletes and git commits without asking. All of them now ship off. Step 0 of `AI_SETUP.md` asks about
+each one in a pop-up and writes exactly what you pick. It also asks before it looks for your other
+computers over Tailscale.
+
+**The setup screen offers the coding agent you have.** With no config, the Forge sidebar looks for
+Claude Code, Codex or GitHub Copilot on PATH. When it finds one, its main button is "Set up with" that
+agent. When it finds none, the setup wizard is the main button.
+
+**The setup wizard sets up a working model and checks it.** One list shows every GGUF and Ollama model
+Forge can find. For a GGUF, the wizard asks which `llama-server` to run, and offers to browse for one or
+open the llama.cpp download page. It asks the same trust-switch questions as `AI_SETUP.md`, then
+optional extras: web search, Telegram, and models from another computer. It writes web search and
+Telegram into the config itself. It checks the file it wrote and the engine before it offers the
+reload. When you picked Telegram or another computer, Forge opens a chat after the reload. That chat
+walks you through the steps only you can do, such as BotFather, pairing, the authenticator app and the
+Tailscale sign-in. It never edits the config, and never asks for a token in the chat.
+
+**Forge's agent note can be removed.** When the agent mesh is turned off, Forge removes its section from
+`AGENTS.md` and `CLAUDE.md`. Uninstalling Forge does the same for every file it recorded writing to.
+Text outside the section is kept byte for byte. A file is deleted only when Forge created it and nothing
+else is left in it. Every copy of the note now starts with a line telling agents to ignore the section
+when `forge.sh` is missing. The user-wide copy no longer carries the workspace delegation policy.
+
+**`remember` is faster with many memories.** One call used to read every stored file several times.
+With 32 memories, one call now does 31 file reads instead of 94 and takes 22.7 ms instead of 47.2 ms.
+
+**README:** it now says plainly that Forge itself sends no telemetry, lists Telegram and WhatsApp under
+Privacy, and explains how to verify a release. The demo GIF is no longer packed into the VSIX.
+
+**Shipped tip:** when an edit is refused with "Its first line WAS found at line N", a later line of
+`old_str` differs, so copy the region the refusal prints.
+
 ## 0.17.205
 
 **Forge tells the model when a file it read has changed.** In the 2026-11-20 session scan, 41 failed
