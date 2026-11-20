@@ -38,7 +38,7 @@ export const TRUST_SWITCHES: readonly TrustSwitch[] = [
     question: 3,
     label: 'Talk to Forge',
     description:
-      'Your coding agents on this PC can message Forge chats and read the replies (local only, password-protected). The next two need this one.',
+      'Your coding agents on this PC can message Forge chats and read the replies (local only, password-protected). Forge adds a short section about this to AGENTS.md / CLAUDE.md in every workspace you open, and removes it when you turn this off or uninstall Forge. The next two need this one.',
     configKeys: ['agent_bus.enabled'],
   },
   {

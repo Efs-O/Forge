@@ -38,14 +38,14 @@ forge_instructions:
 custom_instructions: >-
   Use the repository-specific FORGE.md injected by Forge. Keep it concise and update it only when the user explicitly asks to record durable project instructions.
 
-# WARNING: FULL PERMISSIONS. A config that omits a key leaves it off. The setup
-# wizard turns on file delete, headless commands, git writes, fetch, delegation,
-# browser and desktop for a new install; this example also turns on the
-# terminal and search, so the agent may delete files, run terminal and headless
-# commands, write to git, delegate to other agents, and search/fetch the web.
-# Writes, terminal and git actions still ask for confirmation — unless you turn
-# that off with /clanker. Review this block before your first session and set
-# anything you do not want to false (or delete the line).
+# WARNING: FULL PERMISSIONS. This example turns on far more than a new install
+# gets. A new install starts with file delete, git writes, delegation, web
+# search, browser, desktop, scheduled jobs and remote control off, and the
+# setup (AI_SETUP.md Step 0 or the setup wizard) turns on only what you pick.
+# A config that omits a key leaves it off. Writes, terminal and git actions
+# still ask for confirmation — unless you turn that off with /clanker. Review
+# this block before your first session and set anything you do not want to
+# false (or delete the line).
 permissions:
   # A card nobody answers is declined after this many minutes. New installs get
   # 10; delete the line here (or in config.yaml) to wait forever instead.
@@ -74,9 +74,9 @@ permissions:
   net:
     search: true
     fetch: true
-  # Browser and desktop control. The setup wizard turns both on for a new
-  # install; a config that omits them leaves them off. Each new browser origin
-  # still asks for approval once per session.
+  # Browser and desktop control. A new install ships both off, and the setup
+  # turns them on only when you pick them; a config that omits them leaves
+  # them off. Each new browser origin still asks for approval once per session.
   browser:
     enabled: true
   desktop:
@@ -94,16 +94,17 @@ permissions:
 
 # Owner-only approval policy lives in `~/.forge/policy.yaml`, not config.yaml.
 # approvals:
-# Persistent agent jobs (docs/JOBS.md). The setup wizard turns the scheduler on
-# for a new install; a config without a `jobs:` block has no scheduler. With no
-# jobs defined it is inert.
+# Persistent agent jobs (docs/JOBS.md). A new install ships the scheduler off,
+# and the setup turns it on only when you pick "Scheduled jobs"; a config
+# without a `jobs:` block has no scheduler. With no jobs defined it is inert.
 jobs:
   enabled: true
   # Optional absolute workspace folder whose window schedules jobs and owns
   # the machine-wide wake task. Other windows can still manage jobs.
   # home_workspace: C:/path/to/Forge
   # Let an unattended job drive a CLI agent (Claude Code / Codex) on your own
-  # subscription. The wizard turns this on; set false to require approval.
+  # subscription. Off for a new install unless you pick "Jobs may run Claude
+  # Code / Codex"; set false to require approval.
   allow_cli_agents: true
   # Hosts a job may fetch from.
   allowed_hosts:
@@ -1089,8 +1090,8 @@ voice:
     voice_el: el_GR-joy-medium
     max_chars: 1200
 
-# Remote control. The setup wizard turns this on for a new install, with no
-# transport: Telegram and WhatsApp each still need a bot token and pairing.
+# Remote control. A new install ships it off, and the setup turns it on only
+# when you pick Telegram, which still needs a bot token and pairing.
 remote:
   enabled: true
   queue_limit: 5
