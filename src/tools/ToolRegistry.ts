@@ -3,6 +3,7 @@ import { recordNativeLazyTool } from './lazyToolGroups';
 import { advertisedValues, cutOffArgumentMismatch, missingArgumentError } from './toolErrorText';
 import { repairParameterMarkup } from './toolArgumentMarkup';
 import { applyArgumentRewrites, unknownArgumentRefusal } from './argumentAliases';
+import { editFileStringError } from './editsJsonError';
 /** The declarations live in `toolContract.ts`; re-exported from here so every
  *  consumer that has always imported them from the registry keeps working. */
 export {
@@ -167,23 +168,6 @@ function updatePlanFieldError(args: Record<string, unknown>): string | undefined
   return undefined;
 }
 
-function editFileStringArrayError(args: Record<string, unknown>): string | undefined {
-  if (typeof args['edits'] !== 'string') return undefined;
-  let invalidJson = false;
-  try {
-    JSON.parse(args['edits']);
-  } catch {
-    invalidJson = true;
-  }
-  const pathMissing = args['path'] === undefined;
-  const pathIssue = pathMissing ? 'missing required `path`. ' : '';
-  const jsonIssue = invalidJson ? ' and is not valid JSON' : '';
-  const shape = pathMissing
-    ? ' Accepted shape: { "path": "...", "edits": [{ "old_str": "...", "new_str": "..." }] }.'
-    : ' Send `edits` as a JSON array of { "old_str": "...", "new_str": "..." } objects.';
-  return `Error: ${pathIssue}\`edits\` arrived as a string, not an array${jsonIssue}.${shape}`;
-}
-
 function missingPathError(name: string): string {
   const shape =
     name === 'edit_file'
@@ -265,7 +249,7 @@ export class ToolRegistry {
     const preApproval = tool.refuseBeforeApproval?.(present, context);
     if (preApproval) return preApproval;
     if (name === 'edit_file') {
-      const stringArrayError = editFileStringArrayError(present);
+      const stringArrayError = editFileStringError(present);
       if (stringArrayError) return stringArrayError;
     }
     if (name === 'update_plan') {

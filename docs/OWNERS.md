@@ -581,6 +581,7 @@ overlaps with an existing owner, extend the owner instead.
 | Concern                                    | Owner                                 |
 | ------------------------------------------ | ------------------------------------- |
 | Tool dispatch + capability/permission gate | `src/tools/ToolRegistry.ts`           |
+| edit_file refusal for a string `edits` (broken JSON: position, slip, single-edit form) | `src/tools/editsJsonError.ts` |
 | The wording a refused tool call gets back (missing field, bad shape, schema refusal) | `src/tools/toolErrorText.ts` |
 | Per-model tool output limits               | `src/tools/toolOutputLimits.ts`        |
 | `read_tool_result` tool (re-read a capped tool result or past message by id, query or index) | `src/tools/toolResultTools.ts` |

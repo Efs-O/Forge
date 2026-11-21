@@ -727,8 +727,8 @@ describe('tool argument field locations (PTF F5)', () => {
       edits: '{"old_str"',
     });
     expect(message).toContain('missing required `path`');
-    expect(message).toContain('`edits` arrived as a string, not an array and is not valid JSON');
-    expect(message).toContain('Accepted shape:');
+    expect(message).toContain('`edits` is not valid JSON at character 11:');
+    expect(message).toContain('one edit_file call per edit');
   });
 
   it('rejects valid JSON strings for edits without coercing them into arrays', () => {
