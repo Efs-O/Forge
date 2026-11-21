@@ -309,7 +309,13 @@ export class ToolDispatch {
           markConversationReadUntrusted(convId);
           // The stamp the conversation's record carries, written in the same round as
           // the row that brought the content in, so the next save keeps both.
-          if (modelContext?.conversation) modelContext.conversation.untrusted_since_ms = Date.now();
+          if (modelContext?.conversation) {
+            const now = Date.now();
+            modelContext.conversation.untrusted_since_ms = Math.min(
+              modelContext.conversation.untrusted_since_ms ?? now,
+              now,
+            );
+          }
         }
         // What this call did to the files this chat has read, for the "changed on
         // disk since you read it" reminder (`fileChangeReminder.ts`). Only a call

@@ -121,6 +121,7 @@ overlaps with an existing owner, extend the owner instead.
 | Approval gate inputs and verdict for one tool call (shared by serial dispatch and parallel-read preflight) | `src/sidebar/toolApprovalEvaluation.ts` |
 | Tool dispatch context and result-message types/helpers | `src/sidebar/toolDispatchTypes.ts`       |
 | Ordered batching of independent read-only tool calls | `src/sidebar/ToolDispatchParallel.ts`     |
+| Grouping consecutive web fetches by distinct host    | `src/sidebar/toolDispatchWebGroup.ts`      |
 | Retired + unknown tool-name answers                  | `src/sidebar/retiredTools.ts`            |
 | Delete approval preview and bounded inventory        | `src/sidebar/deletePreview.ts`           |
 | Conversation CRUD pure ops                           | `src/sidebar/ConversationOps.ts`         |

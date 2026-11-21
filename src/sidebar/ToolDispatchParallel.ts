@@ -5,6 +5,7 @@ import type { ToolRegistry } from '../tools/ToolRegistry';
 import type { ToolFailureTracker } from '../tools/StripTools';
 import { isJsonObject, parseJson } from '../tools/jsonInput';
 import { READ_ONLY_PERMISSIONS } from '../tools/toolContract';
+import { buildWebFetchGroup } from './toolDispatchWebGroup';
 import {
   evaluateToolApproval,
   readToolApprovalMetadata,
@@ -283,6 +284,22 @@ export async function dispatchWithParallelReads(
         ? { eligible: false }
         : (pendingCheck ?? (await checkParallelReadCall(call, context, toolRegistry)));
       pendingCheck = undefined;
+      if (
+        !check.eligible &&
+        call.function.name === 'web_fetch' &&
+        canParkForApproval(call, toolRegistry, context)
+      ) {
+        const group = buildWebFetchGroup(calls, callIndex);
+        // The first member waits for earlier work; members in this group start
+        // together and keep their results in the existing held queue.
+        await drainHeld();
+        for (const member of group) {
+          const effects = createBufferedToolDispatchEffects(messages);
+          hold(effects, () => dispatchBuffered(member, undefined, effects));
+        }
+        callIndex += group.length;
+        continue;
+      }
       if (!check.eligible) {
         // A boundary call keeps its position: anything parked ahead of it runs first.
         await drainHeld();
@@ -366,7 +383,8 @@ export async function dispatchWithParallelReads(
  * parking a gated `shell` let a later read answer from BEFORE the command wrote).
  * The call must also be one that can actually raise a card, or parking a plain read
  * would run it early for no reason and reorder every existing round.
- * One parked call at a time: the second gated call in a round keeps today's behaviour.
+ * Up to three consecutive web_fetch calls to different hosts may park together;
+ * other gated calls keep today's behaviour.
  */
 function canParkForApproval(
   call: ToolCall,
