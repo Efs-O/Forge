@@ -1,5 +1,30 @@
 # Forge — Recent Changes
 
+## 0.17.209
+
+**Animation previews capture the exact moment you ask for.** `render_html_to_image` in preview mode
+now holds the page's clock at each `frames` time: a frame at 500 ms shows the page exactly 500 ms in
+(timers, `requestAnimationFrame`, `performance.now`, `Date`), so the same time-driven three.js or
+canvas animation gives the same still every run. Real time still passes between frames, so textures
+and models loading from the network still arrive, and held keys are held in page time. CSS animations,
+video, workers and `Math.random` are not controlled.
+
+**More read tools run in parallel.** `code_intel`, `read_notebook`, `recall`, `list_memories` and
+`get_editor_context` now join a parallel read batch, and up to three back-to-back `web_fetch` calls to
+different hosts run at the same time. Fetches to the same host still run one after another, so a new
+host asks once, and every approval — including the owner-only card after a secret read — is unchanged.
+Six allowlist names that matched no registered tool are gone, and a test now keeps the list to
+registered read-only tools.
+
+**`AI_SETUP.md`: reverse image search and a local llama.cpp.** The reverse image search pick says one
+SerpApi key, on SerpApi's free plan, covers both Yandex (the default) and Google Lens. Question 12 now
+also offers llama.cpp for small GGUF models on this PC when the chosen backend is not llama.cpp.
+
+**Coding tips.** The shipped tips gain general entries on Windows file-age tests, Windows short
+(8.3) temp paths, `gh run view` on a run still in progress, and the Marketplace lag after
+`vsce publish`. The project tips file now carries a review mark, so tips a review kept no longer
+trigger another "Tips review due" ping; `npm run tips:reviewed` writes it.
+
 ## 0.17.208
 
 **Setup fixes from a fresh install of 0.17.207 on a second PC.**
