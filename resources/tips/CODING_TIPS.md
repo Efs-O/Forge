@@ -102,6 +102,7 @@
 11. `gh run view <number>` → HTTP 404: view wants the `databaseId` from `gh run list --json databaseId`; `elapsed`/`title` are not fields — duration is startedAt minus createdAt
 12. a session-log call with arguments `{}` whose result says "was cut off after 47 bytes of arguments" → Forge logs `{}` in place of cut-off arguments. read the byte count, not the arguments
 13. a `gh run list` run seconds after `git push` → only the older runs: the new one registers 20-40 s later. wait, then pick it with `--json headSha`, never from the top row
+14. `gh run view <id> --log` on a run still in progress → prints nothing (1,676 lines once it ends). for live step status poll `gh run view <id> --json jobs --jq '.jobs[] | "\(.name)\t\(.status)\t\(.conclusion)"'`
 
 ## FORGE_TOOLS
 1. `read_file` · a guessed `end_line` → refused: start_line is past end_line. read whole, or take the range from a search hit, never from memory
