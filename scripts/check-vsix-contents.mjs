@@ -13,6 +13,7 @@ const ALLOW_LIST = [
   'LICENSE',
   'NOTICE',
   'AI_SETUP.md',
+  'docs/MEDIA.md',
   'assets/icon.svg',
   'assets/publisher-logo.png',
   'assets/readme/**',

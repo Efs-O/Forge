@@ -51,6 +51,9 @@ vitest.config.*
 !README.md
 # Read by the user's Claude Code / Codex via forge.setupWithAgent.
 !AI_SETUP.md
+# AI_SETUP.md links to this guide, so an installed extension needs its copy;
+# every other file under docs/ stays out of the VSIX.
+!docs/MEDIA.md
 !config/contact-instructions.example.md
 # The shipped skills folder (`resources/skills/`). `**/*.md` below the root strips
 # every `SKILL.md`, and `SKILL.md` IS the skill: without these lines the scripts

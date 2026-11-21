@@ -39,7 +39,7 @@ These commands are currently contributed by the extension.
 | `Forge: Lock policy.yaml` | Make `~/.forge/policy.yaml` read-only for this user, so Forge's own writers and accidental edits are refused (owner-run; Forge never locks on its own, and reports the permissions it read back afterwards). It does not stop a program running as you — you can always unlock it or replace the file |
 | `Forge: Unlock policy.yaml` | Put `~/.forge/policy.yaml` back to the folder's default permissions so the owner's own tools and Forge can write it again (owner-run) |
 | `Forge: Setup Wizard`         | Run the first-run or repair flow     |
-| `Forge: Set Up With Claude Code / Codex` | Copy a prompt that has your Claude Code / Codex set Forge up from the shipped `AI_SETUP.md` |
+| `Forge: Set Up With an AI Agent` | Copy a prompt that has your AI agent (Claude Code, Codex or Copilot) set Forge up from the shipped `AI_SETUP.md` |
 | `Forge: Unload Active Chat's Model` | Release only the active chat's model |
 | `Forge: Unload All Models`    | Stop all backends and release models |
 | `Forge: New Chat`             | Open a new conversation tab          |

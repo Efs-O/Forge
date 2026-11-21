@@ -3,9 +3,9 @@ import * as vscode from 'vscode';
 
 export const SETUP_WITH_AGENT_COMMAND = 'forge.setupWithAgent';
 
-/** The prompt the user pastes into Claude Code or Codex. It names absolute
- *  paths so the agent never has to guess where the extension or the config
- *  lives; AI_SETUP.md carries everything else. */
+/** The prompt the user pastes into their AI agent — Claude Code, Codex or
+ *  Copilot. It names absolute paths so the agent never has to guess where the
+ *  extension or the config lives; AI_SETUP.md carries everything else. */
 export function agentSetupPrompt(
   extensionPath: string,
   globalConfigPath: string,
@@ -36,7 +36,7 @@ export function registerAgentSetupCommand(context: vscode.ExtensionContext): voi
       );
       await vscode.env.clipboard.writeText(prompt);
       const choice = await vscode.window.showInformationMessage(
-        'Forge: setup prompt copied. Paste it into Claude Code or Codex in a terminal on this machine.',
+        'Forge: setup prompt copied. Paste it into your AI agent (Claude Code, Codex or Copilot) in a terminal on this machine.',
         'Show Instructions',
       );
       if (choice === 'Show Instructions') {

@@ -27,14 +27,12 @@ export const WIZARD_EXTRAS: ReadonlyArray<{
   {
     id: 'telegram',
     label: 'Telegram',
-    description:
-      'Chat with Forge from your phone. Needs your own bot from @BotFather; pairing code required.',
+    description: 'Chat with Forge from your phone, through your own @BotFather bot.',
   },
   {
     id: 'other-computer',
     label: 'Other computer',
-    description:
-      'Use models from another computer of yours over Tailscale. You connect after the reload.',
+    description: 'Use models from your other computer over Tailscale; connect after the reload.',
   },
 ];
 

@@ -144,4 +144,12 @@ describe('WIZARD_EXTRAS', () => {
       expect(extra.description.length).toBeGreaterThan(0);
     }
   });
+
+  it('shows the wizard no text longer than the one line it can hold', () => {
+    // The wizard passes `description` as the item's `detail`, and VS Code's
+    // multi-select prints that on one line and cuts the rest.
+    for (const extra of WIZARD_EXTRAS) {
+      expect(extra.description.length, extra.id).toBeLessThanOrEqual(80);
+    }
+  });
 });

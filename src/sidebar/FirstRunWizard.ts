@@ -276,7 +276,7 @@ async function askTrustSwitches(found: FoundCliAgents): Promise<string[]> {
   for (const group of wizardSwitchQuestions(found)) {
     const items = group.switches.map((switch_) => ({
       label: switch_.label,
-      detail: switch_.description,
+      detail: switch_.wizardDetail ?? switch_.description,
       id: switch_.id,
       // Step 0 marks both file actions "(Recommended)", so they start picked.
       ...(group.question === 5 ? { picked: true } : {}),

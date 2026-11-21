@@ -19,7 +19,7 @@ describe('setup placeholder webview', () => {
   it('makes the detected agent the only button, with the wizard as a link', () => {
     const html = setupPlaceholderHtml('claude');
 
-    expect(html).toContain('>Set up with Claude Code</button>');
+    expect(html).toContain('>Set up with an AI agent</button>');
     expect(html).toContain('>Set up without an AI agent</a>');
     expect(html).not.toContain('Run Setup Wizard');
   });
@@ -28,7 +28,7 @@ describe('setup placeholder webview', () => {
     const html = setupPlaceholderHtml(undefined);
 
     expect(html).toContain('>Run Setup Wizard</button>');
-    expect(html).toContain('>Copy the AI setup prompt instead</a>');
+    expect(html).toContain('>Copy the AI agent setup prompt instead</a>');
   });
 
   it('offers no choice at all while the PATH lookup is still running', () => {
@@ -44,7 +44,10 @@ describe('setup placeholder webview', () => {
 
     expect(buttons).toHaveLength(1);
     expect(buttons[0]).toContain("vscode.postMessage({type:'agent'})");
-    expect(buttons[0]).toContain('>Set up with GitHub Copilot</button>');
+    expect(buttons[0]).toContain('>Set up with an AI agent</button>');
+    // The agent it found is still named, in the line under the button: the
+    // button says "an AI agent" because the prompt works in all three.
+    expect(html).toContain('Found GitHub Copilot on this PC.');
   });
 
   it.each(Object.keys(SETUP_AGENT_LABELS))(

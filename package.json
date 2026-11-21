@@ -313,7 +313,7 @@
       },
       {
         "command": "forge.setupWithAgent",
-        "title": "Forge: Set Up With Claude Code / Codex"
+        "title": "Forge: Set Up With an AI Agent"
       },
       {
         "command": "forge.agentMesh.installNote",

@@ -47,14 +47,14 @@ export function setupPlaceholderHtml(agent: CliAgentName | undefined | 'detectin
   } else if (agent !== undefined) {
     const label = SETUP_AGENT_LABELS[agent];
     parts.push(
-      `<button onclick="vscode.postMessage({type:'agent'})" style="${BUTTON_STYLE}">Set up with ${label}</button>`,
-      `<p style="margin-top:12px;font-size:90%;">It copies a setup prompt to paste into ${label}.</p>`,
+      `<button onclick="vscode.postMessage({type:'agent'})" style="${BUTTON_STYLE}">Set up with an AI agent</button>`,
+      `<p style="margin-top:12px;font-size:90%;">Found ${label} on this PC. The button copies a setup prompt to paste into it.</p>`,
       `<a href="#" onclick="vscode.postMessage({type:'wizard'})">Set up without an AI agent</a>`,
     );
   } else {
     parts.push(
       `<button onclick="vscode.postMessage({type:'wizard'})" style="${BUTTON_STYLE}">Run Setup Wizard</button>`,
-      `<a href="#" onclick="vscode.postMessage({type:'agent'})">Copy the AI setup prompt instead</a>`,
+      `<a href="#" onclick="vscode.postMessage({type:'agent'})">Copy the AI agent setup prompt instead</a>`,
     );
   }
   return `<!DOCTYPE html><html><body style="padding:20px;font-family:sans-serif;">
@@ -103,7 +103,7 @@ export function enterSetupMode(
   );
   void agent.then(async (found) => {
     const wizardLabel = 'Setup Wizard';
-    const agentLabel = found ? `Set up with ${SETUP_AGENT_LABELS[found]}` : 'Set Up With AI';
+    const agentLabel = 'Set up with an AI agent';
     const buttons = found ? [agentLabel, wizardLabel] : [wizardLabel, agentLabel];
     const choice = await vscode.window.showInformationMessage(message, ...buttons);
     if (choice === wizardLabel) void vscode.commands.executeCommand('forge.setupWizard');

@@ -68,6 +68,8 @@ describe('trust switch table', () => {
         label: 'Talk to Forge',
         description:
           'Your coding agents on this PC can message Forge chats and read the replies (local only, password-protected). Forge adds a short section about this to AGENTS.md / CLAUDE.md in every workspace you open, never to a file your git repository commits, and removes it when you turn this off or uninstall Forge. The next two need this one.',
+        wizardDetail:
+          'Coding agents can message Forge chats. Adds a note to AGENTS.md / CLAUDE.md.',
         configKeys: ['agent_bus.enabled'],
       },
       {
@@ -100,6 +102,8 @@ describe('trust switch table', () => {
         label: 'Browser',
         description:
           'Open pages in a separate Chrome/Edge window and click and type. Asks before each new website.',
+        wizardDetail:
+          'Open pages in a separate Chrome/Edge window. Asks before each new website.',
         configKeys: ['permissions.browser.enabled'],
       },
       {
@@ -122,6 +126,8 @@ describe('trust switch table', () => {
         label: 'Jobs may run Claude Code / Codex',
         description:
           'A scheduled job can start your coding agent. Picking this also turns scheduled jobs on.',
+        wizardDetail:
+          'A scheduled job can start your coding agent. Also turns scheduled jobs on.',
         configKeys: ['jobs.enabled', 'jobs.allow_cli_agents'],
       },
       {
@@ -153,6 +159,18 @@ describe('trust switch table', () => {
       'permissions.git.write',
       'remote.enabled',
     ]);
+  });
+
+  it('shows the wizard no switch text longer than the one line it can hold', () => {
+    // VS Code's multi-select prints an item's `detail` on one line and cuts the
+    // rest ("…(local only, passwo…" on the owner's screen), so what
+    // FirstRunWizard.ts passes — `wizardDetail`, else `description` — has to fit.
+    for (const group of wizardSwitchQuestions({ claude: true, codex: true })) {
+      for (const switch_ of group.switches) {
+        const shown = switch_.wizardDetail ?? switch_.description;
+        expect(shown.length, switch_.id).toBeLessThanOrEqual(80);
+      }
+    }
   });
 });
 

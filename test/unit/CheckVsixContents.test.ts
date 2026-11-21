@@ -12,6 +12,7 @@ const todaysFiles = [
   'LICENSE',
   'NOTICE',
   'AI_SETUP.md',
+  'docs/MEDIA.md',
   'assets/icon.svg',
   'assets/publisher-logo.png',
   'assets/readme/model-picker.jpg',
@@ -72,5 +73,10 @@ describe('VSIX contents allow-list', () => {
     expect(findUnexpectedVsixFiles(['skills-lab/media-inspect/SKILL.md'])).toEqual([
       'skills-lab/media-inspect/SKILL.md',
     ]);
+  });
+
+  it('ships the media guide AI_SETUP.md links to, and nothing else under docs/', () => {
+    expect(findUnexpectedVsixFiles(['docs/MEDIA.md'])).toEqual([]);
+    expect(findUnexpectedVsixFiles(['docs/OWNERS.md'])).toEqual(['docs/OWNERS.md']);
   });
 });

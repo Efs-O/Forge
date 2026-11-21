@@ -628,8 +628,8 @@ is not the setting for this.
 
 Install Forge from the VS Code Marketplace or Open VSX, or load the packaged VSIX.
 
-**Easiest: let Claude Code or Codex set it up.** Run **Forge: Set Up With
-Claude Code / Codex** from the Command Palette. It copies a prompt that points
+**Easiest: let an AI agent set it up** (Claude Code, Codex or Copilot). Run
+**Forge: Set Up With an AI Agent** from the Command Palette. It copies a prompt that points
 your agent at `AI_SETUP.md`, which ships with the extension. The agent surveys
 your GPU and model files, installs llama.cpp if you need it, writes the config,
 and checks the result against Forge itself. It stops and asks you whenever a
