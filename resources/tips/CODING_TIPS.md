@@ -82,11 +82,13 @@
 17. a fake that picks "the first call is the slow one" after `await super.x()` → two concurrent calls race to that check and the wrong one goes slow. read and clear the flag before the first await
 18. a function with a default parameter, tested for "no value" by calling it with an explicit `undefined` → the default takes it, so the test proves nothing. omit the argument, or pass a value that means none
 19. a `toContain` failure whose received value is a whole document (AI_SETUP.md, README) → the log holds the entire text (40 KB). grep the log for `- Expected` and the `test/…:NN:` line, never read the log whole
+20. a file-age test with `now = Date.now() + threshold + 1` → flaky on Windows: a new file's mtime can be stamped ahead of `Date.now()`, so the age lands under the threshold. give a whole threshold of margin, never 1 ms
 
 ## PATHS
 1. `~/.forge/sessions/<short-id>.jsonl` → no such file: logs carry the full 8-4-4-4-12 chat id. resolve a short id with a prefix glob
 2. comparing a resolved path with a root in a test on Windows → `fs.realpathSync` keeps the 8.3 short form (`ABCDEF~1`), `fs/promises` `realpath` expands it. use one resolver for both
 3. `fs.realpathSync.native` on a path that was deleted after it was read → throws ENOENT rather than handing the path back. catch it and carry on with the path as it came in
+4. `git rev-parse --show-toplevel` + `path.relative` from `os.tmpdir()` on Windows → tmpdir can be the 8.3 short form (`ABCDEF~1`) while git answers the long one, so the relative path is `../../..`. ask git for the relative part: `git rev-parse --show-prefix`
 
 ## FORENSICS
 1. pairing calls with results → pair the `tool_calls` row with the `tool` rows that follow it, positionally; the rendered chat hides tool failures entirely
@@ -103,6 +105,7 @@
 12. a session-log call with arguments `{}` whose result says "was cut off after 47 bytes of arguments" → Forge logs `{}` in place of cut-off arguments. read the byte count, not the arguments
 13. a `gh run list` run seconds after `git push` → only the older runs: the new one registers 20-40 s later. wait, then pick it with `--json headSha`, never from the top row
 14. `gh run view <id> --log` on a run still in progress → prints nothing (1,676 lines once it ends). for live step status poll `gh run view <id> --json jobs --jq '.jobs[] | "\(.name)\t\(.status)\t\(.conclusion)"'`
+15. `vsce publish` prints "Published vN" → the Marketplace index and item page still show v(N-1) for ~11 min. the package is live: proof GET `/publishers/<pub>/vsextensions/<ext>/<ver>/vspackage`, gunzip it (magic `1f 8b`) before `zipfile`, else BadZipFile
 
 ## FORGE_TOOLS
 1. `read_file` · a guessed `end_line` → refused: start_line is past end_line. read whole, or take the range from a search hit, never from memory
