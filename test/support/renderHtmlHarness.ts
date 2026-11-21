@@ -22,8 +22,10 @@ export interface RenderFake {
   routeSelectors: string[];
   /** The handlers registered with each route, so a test can feed it requests. */
   routeHandlers: Array<(route: FakeRoute) => void | Promise<void>>;
-  /** `waitForTimeout` arguments (preview's settle wait). */
+  /** `waitForTimeout` arguments (preview's host-side real-time steps). */
   waitCalls: number[];
+  clockPauseAtCalls: Array<number | string | Date>;
+  clockRunForCalls: number[];
   /** Emitted as `pageerror` / console `error` events during setContent. */
   pageErrors: string[];
   consoleErrors: string[];
@@ -33,7 +35,8 @@ export interface RenderFake {
   /** What the routes decided for each of `pageRequests`. */
   routeOutcomes: Array<{ url: string; outcome: 'continue' | 'abort' | 'fulfill' }>;
   fulfillments: Array<Record<string, unknown>>;
-  keyPresses: Array<{ key: string; delay: number }>;
+  keyDowns: string[];
+  keyUps: string[];
   setContentCalls: string[];
   gotoCalls: number;
   screenshotCalls: Array<Record<string, unknown>>;
@@ -77,13 +80,16 @@ export const renderFake: RenderFake = {
   routeSelectors: [],
   routeHandlers: [],
   waitCalls: [],
+  clockPauseAtCalls: [],
+  clockRunForCalls: [],
   pageErrors: [],
   consoleErrors: [],
   consoleMessages: [],
   pageRequests: [],
   routeOutcomes: [],
   fulfillments: [],
-  keyPresses: [],
+  keyDowns: [],
+  keyUps: [],
   setContentCalls: [],
   gotoCalls: 0,
   screenshotCalls: [],
@@ -106,13 +112,16 @@ export function resetRenderFake(): void {
   renderFake.routeSelectors = [];
   renderFake.routeHandlers = [];
   renderFake.waitCalls = [];
+  renderFake.clockPauseAtCalls = [];
+  renderFake.clockRunForCalls = [];
   renderFake.pageErrors = [];
   renderFake.consoleErrors = [];
   renderFake.consoleMessages = [];
   renderFake.pageRequests = [];
   renderFake.routeOutcomes = [];
   renderFake.fulfillments = [];
-  renderFake.keyPresses = [];
+  renderFake.keyDowns = [];
+  renderFake.keyUps = [];
   renderFake.setContentCalls = [];
   renderFake.gotoCalls = 0;
   renderFake.screenshotCalls = [];
@@ -184,10 +193,17 @@ export function fakePlaywright(): {
             waitForTimeout: async (ms: number) => {
               renderFake.waitCalls.push(ms);
             },
-            keyboard: {
-              press: async (key: string, options: { delay: number }) => {
-                renderFake.keyPresses.push({ key, delay: options.delay });
+            clock: {
+              pauseAt: async (time: number | string | Date) => {
+                renderFake.clockPauseAtCalls.push(time);
               },
+              runFor: async (ticks: number | string) => {
+                renderFake.clockRunForCalls.push(Number(ticks));
+              },
+            },
+            keyboard: {
+              down: async (key: string) => renderFake.keyDowns.push(key),
+              up: async (key: string) => renderFake.keyUps.push(key),
             },
             evaluate: async () => {
               renderFake.evaluateCalls += 1;

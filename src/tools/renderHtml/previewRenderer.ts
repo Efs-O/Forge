@@ -24,6 +24,8 @@ const MAX_PREVIEW_ERROR_CHARS = 300;
 const MAX_PREVIEW_RESPONSE_BYTES = 10 * 1024 * 1024;
 const MAX_PREVIEW_CONSOLE_LINES = 40;
 const MAX_PREVIEW_CONSOLE_CHARS = 4_000;
+const PREVIEW_CLOCK_ORIGIN = new Date('2099-01-01T00:00:00.000Z');
+const PREVIEW_CLOCK_STEP_MS = 16;
 
 export interface PreviewRequest {
   html: string;
@@ -164,19 +166,38 @@ export async function renderPreview(
             }
           }
         });
+        // `pauseAt` installs the clock; while the clock is installed,
+        // `performance.getEntries*()` returns `[]`.
+        await page.clock.pauseAt(PREVIEW_CLOCK_ORIGIN);
         await page.goto(`${PREVIEW_ORIGIN}/`, { waitUntil: 'load' });
+        const stepPageTime = async (durationMs: number): Promise<void> => {
+          let left = durationMs;
+          while (left > 0) {
+            const step = Math.min(PREVIEW_CLOCK_STEP_MS, left);
+            // Playwright's wait is host-side real time; the page clock stays paused here.
+            await page.waitForTimeout(step);
+            await page.clock.runFor(step);
+            left -= step;
+          }
+        };
         // Keys go to the focused element, and after setContent nothing has
         // focus: a game listening on its canvas heard none of them (measured
         // 2026-10-08). Focus what a player would click; window listeners
         // still receive the events as they bubble.
         if (request.keys.length > 0) await page.evaluate(FOCUS_GAME_TARGET);
-        for (const { key, holdMs } of request.keys)
-          await page.keyboard.press(key, { delay: holdMs });
+        for (const { key, holdMs } of request.keys) {
+          await page.keyboard.down(key);
+          try {
+            await stepPageTime(holdMs);
+          } finally {
+            await page.keyboard.up(key);
+          }
+        }
         const frames: PreviewResult['frames'] = [];
         let elapsed = 0;
         for (const timeMs of request.frames) {
           const wait = Math.max(0, timeMs - elapsed);
-          if (wait > 0) await page.waitForTimeout(wait);
+          if (wait > 0) await stepPageTime(wait);
           frames.push({ timeMs, png: await page.screenshot({ type: 'png' }) });
           elapsed = timeMs;
         }

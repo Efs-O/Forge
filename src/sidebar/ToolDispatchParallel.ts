@@ -19,13 +19,12 @@ const PARALLEL_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   'grep_search',
   'list_directory',
   'find_files',
-  '__code_intel_get_diagnostics',
   'git_read',
-  '__git_read_status',
-  '__git_read_log',
-  '__git_read_diff',
-  '__git_read_blame',
-  '__git_read_show',
+  'code_intel',
+  'read_notebook',
+  'recall',
+  'list_memories',
+  'get_editor_context',
 ]);
 
 const MAX_PARALLEL_READ_CALLS = 10;
@@ -64,6 +63,11 @@ type FailureTrackerUpdate =
 
 export function isParallelReadOnlyTool(name: string): boolean {
   return PARALLEL_READ_ONLY_TOOLS.has(name);
+}
+
+/** Sorted names for the CI guard that keeps this allowlist registered and safe. */
+export function parallelReadOnlyToolNames(): readonly string[] {
+  return [...PARALLEL_READ_ONLY_TOOLS].sort();
 }
 
 /**

@@ -122,7 +122,7 @@ export function makeRenderHtmlToImageTool(deps: RenderHtmlDeps): RegisteredTool 
               maxItems: 4,
               items: { type: 'integer', minimum: 0, maximum: MAX_PREVIEW_WAIT_MS },
               description:
-                'Preview only: 1–4 strictly ascending capture times in ms, each 0–30000 ms. If wait_ms is also given, frames sets the capture times and the result says wait_ms was ignored.',
+                'Preview only: 1–4 strictly ascending capture times in ms, each 0–30000 ms, counted from after the last key (or from load). Each frame shows the page at exactly that page time (timers, requestAnimationFrame, performance.now, Date), so the same time-driven animation gives the same still every run; CSS animations, video, workers and Math.random are not controlled. If wait_ms is also given, frames sets the capture times and the result says wait_ms was ignored.',
             },
             keys: {
               type: 'array',

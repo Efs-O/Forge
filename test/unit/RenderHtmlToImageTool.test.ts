@@ -53,6 +53,13 @@ afterEach(async () => {
 });
 
 describe('render_html_to_image input validation', () => {
+  it('describes exact preview page-time frames', () => {
+    const frameSchema = rig().tool.definition.function.parameters.properties?.['frames'];
+    expect(frameSchema?.description).toBe(
+      'Preview only: 1–4 strictly ascending capture times in ms, each 0–30000 ms, counted from after the last key (or from load). Each frame shows the page at exactly that page time (timers, requestAnimationFrame, performance.now, Date), so the same time-driven animation gives the same still every run; CSS animations, video, workers and Math.random are not controlled. If wait_ms is also given, frames sets the capture times and the result says wait_ms was ignored.',
+    );
+  });
+
   it('refuses both html and path, saying what path means', async () => {
     const { tool } = rig();
     const error = await tool

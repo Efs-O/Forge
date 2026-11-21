@@ -43,6 +43,16 @@ import {
 let root: string;
 const PAGE = '<html><head><title>Pagoda</title></head><body><canvas></canvas></body></html>';
 
+function pageTimeSteps(durationMs: number): number[] {
+  const steps: number[] = [];
+  for (let left = durationMs; left > 0; ) {
+    const step = Math.min(16, left);
+    steps.push(step);
+    left -= step;
+  }
+  return steps;
+}
+
 function rig(options: { config?: Partial<ForgeConfig> } = {}) {
   const { deps, deliverFile, remainingFileDeliveries } = rigDeps(options);
   return { tool: makeRenderHtmlToImageTool(deps), deliverFile, remainingFileDeliveries };
@@ -257,7 +267,9 @@ describe('render_html_to_image preview: inputs', () => {
     await tool.handler({ mode: 'preview', path: page, wait_ms: 0 }, context());
     await tool.handler({ mode: 'preview', path: page, wait_ms: 30_000 }, context());
     await tool.handler({ mode: 'preview', path: page, frames: [30_000] }, context());
-    expect(renderFake.waitCalls).toEqual([3_000, 30_000, 30_000]);
+    const expectedSteps = [3_000, 30_000, 30_000].flatMap(pageTimeSteps);
+    expect(renderFake.waitCalls).toEqual(expectedSteps);
+    expect(renderFake.clockRunForCalls).toEqual(expectedSteps);
     await expect(
       tool.handler({ mode: 'preview', path: page, wait_ms: 30_001 }, context()),
     ).rejects.toThrow(/wait_ms is 30001; the range is 0–30000/);
@@ -280,11 +292,12 @@ describe('render_html_to_image preview: inputs', () => {
       },
       context({ isVisionModel: true }),
     );
-    expect(renderFake.waitCalls).toEqual([500, 29_500]);
-    expect(renderFake.keyPresses).toEqual([
-      { key: 'w', delay: 100 },
-      { key: 'Space', delay: 0 },
-    ]);
+    const expectedSteps = [100, 500, 29_500].flatMap(pageTimeSteps);
+    expect(renderFake.clockPauseAtCalls).toEqual([new Date('2099-01-01T00:00:00.000Z')]);
+    expect(renderFake.waitCalls).toEqual(expectedSteps);
+    expect(renderFake.clockRunForCalls).toEqual(expectedSteps);
+    expect(renderFake.keyDowns).toEqual(['w', 'Space']);
+    expect(renderFake.keyUps).toEqual(['w', 'Space']);
     expect(
       (result as MultimodalToolResult).content.filter((part) => part.type === 'image_url'),
     ).toHaveLength(3);
@@ -301,7 +314,8 @@ describe('render_html_to_image preview: inputs', () => {
         context(),
       ),
     );
-    expect(renderFake.waitCalls).toEqual([500]);
+    expect(renderFake.waitCalls).toEqual(pageTimeSteps(500));
+    expect(renderFake.clockRunForCalls).toEqual(pageTimeSteps(500));
     expect(result).toContain('2 frame(s) captured');
     expect(result).toContain('wait_ms ignored: frames sets the capture times.');
   });

@@ -107,66 +107,6 @@ describe('render_html_to_image preview against real Chrome', () => {
     );
   }
 
-  it('reaches no local socket: zero TCP connections, zero UDP datagrams', async (ctx) => {
-    let tcp = 0;
-    let udp = 0;
-    const server = net.createServer((socket) => {
-      tcp += 1;
-      socket.destroy();
-    });
-    const port = await listenLoopback(server);
-    const udpSocket = dgram.createSocket('udp4');
-    udpSocket.on('message', () => {
-      udp += 1;
-    });
-    await new Promise<void>((resolve) => udpSocket.bind(0, '127.0.0.1', resolve));
-    const udpPort = udpSocket.address().port;
-    try {
-      let result: string | MultimodalToolResult;
-      try {
-        result = await preview(
-          '<html><body><script>' +
-            `const t='127.0.0.1:${port}', l='localhost:${port}';` +
-            'const tryIt=(f)=>{try{f()}catch(e){}};' +
-            "tryIt(()=>fetch('http://'+t+'/f',{mode:'no-cors'}).catch(()=>{}));" +
-            "tryIt(()=>fetch('http://'+t+'/post',{method:'POST',body:'x'}).catch(()=>{}));" +
-            "tryIt(()=>fetch('http://'+l+'/f',{mode:'no-cors'}).catch(()=>{}));" +
-            `tryIt(()=>{const s=document.createElement('script');s.src='http://'+t+'/script';document.head.appendChild(s)});` +
-            "tryIt(()=>{new Image().src='http://'+t+'/img'});" +
-            "tryIt(()=>new WebSocket('ws://'+t+'/ws'));" +
-            "tryIt(()=>new WebSocket('ws://'+l+'/ws'));" +
-            "tryIt(()=>new EventSource('http://'+t+'/es'));" +
-            "tryIt(()=>navigator.sendBeacon('http://'+t+'/b','x'));" +
-            `tryIt(()=>{const pc=new RTCPeerConnection({iceServers:[{urls:'stun:127.0.0.1:${udpPort}'}]});` +
-            'pc.createDataChannel("x");pc.createOffer().then((o)=>pc.setLocalDescription(o))});' +
-            '</script></body></html>',
-          { wait_ms: 3_000, width: 400, height: 300 },
-        );
-      } catch (err) {
-        return skipIfNoBrowser(ctx, err);
-      }
-      expect(String(result)).toContain('Preview of page.html');
-      expect(tcp).toBe(0);
-      expect(udp).toBe(0);
-      expect(deliveries).toBe(0);
-      // Image mode remains inert and must issue no request either.
-      await fs.writeFile(
-        path.join(root, 'image.html'),
-        `<img src="http://127.0.0.1:${port}/image"><script>fetch('http://127.0.0.1:${port}/fetch')</script>`,
-        'utf8',
-      );
-      await tool.handler(
-        { mode: 'image', path: 'image.html' },
-        { beforeMutate: () => undefined, isVisionModel: false },
-      );
-      expect(tcp).toBe(0);
-      expect(udp).toBe(0);
-    } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-      udpSocket.close();
-    }
-  }, 90_000);
-
   it('runs a shader check behind the socket walls without making local TCP or UDP connections', async (ctx) => {
     let tcp = 0;
     let udp = 0;

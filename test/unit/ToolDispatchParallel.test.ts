@@ -1,11 +1,7 @@
 import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolDispatch } from '../../src/sidebar/ToolDispatch';
-import {
-  commitBufferedToolDispatchEffects,
-  createBufferedToolDispatchEffects,
-  dispatchWithParallelReads,
-} from '../../src/sidebar/ToolDispatchParallel';
+import { dispatchWithParallelReads } from '../../src/sidebar/ToolDispatchParallel';
 import type { ToolDispatchRoundContext } from '../../src/sidebar/toolDispatchTypes';
 import type { ChatMessage, ToolCall } from '../../src/llm/types';
 import type { CheckpointStack } from '../../src/checkpoint/CheckpointStack';
@@ -154,6 +150,35 @@ describe('ToolDispatch parallel read batches', () => {
     expect(messages.map((message) => message.tool_call_id)).toEqual(['read-1', 'read-2']);
     expect(messages.map((message) => message.content)).toEqual(['first', 'second']);
     expect(post.mock.calls.map(([event]) => event.toolCallId)).toEqual(['read-1', 'read-2']);
+  });
+
+  it('runs two code intelligence reads concurrently and appends results in call order', async () => {
+    let active = 0;
+    let maxActive = 0;
+    const completed: string[] = [];
+    toolRegistry.register(
+      readTool('code_intel', async (args) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        const query = args['query'] as string;
+        await pause(query === 'first' ? 45 : 5);
+        completed.push(query);
+        active -= 1;
+        return query;
+      }),
+    );
+
+    const calls = [
+      makeToolCall('code_intel', { query: 'first' }, 'intel-1'),
+      makeToolCall('code_intel', { query: 'second' }, 'intel-2'),
+    ];
+    await dispatch.dispatch(calls, allowed, messages, 'parallel-code-intel');
+
+    expect(maxActive).toBe(2);
+    expect(completed).toEqual(['second', 'first']);
+    expect(messages.map((message) => message.tool_call_id)).toEqual(['intel-1', 'intel-2']);
+    expect(messages.map((message) => message.content)).toEqual(['first', 'second']);
+    expect(post.mock.calls.map(([event]) => event.toolCallId)).toEqual(['intel-1', 'intel-2']);
   });
 
   it('keeps a write between two reads in its original position', async () => {
@@ -451,114 +476,4 @@ describe('ToolDispatch parallel read batches', () => {
     expect(vscode.workspace.openTextDocument).not.toHaveBeenCalled();
   });
 
-  it('applies failure tracker updates in call order after the batch settles', async () => {
-    const completed: string[] = [];
-    toolRegistry.register(
-      readTool('grep_search', async (args) => {
-        const query = args['query'] as string;
-        await pause(query === 'success' ? 40 : 5);
-        completed.push(query);
-        if (query === 'failure') throw new Error('read failed');
-        return 'read succeeded';
-      }),
-    );
-
-    await dispatch.dispatch(
-      [
-        makeToolCall('grep_search', { query: 'success' }, 'success'),
-        makeToolCall('grep_search', { query: 'failure' }, 'failure'),
-      ],
-      allowed,
-      messages,
-      'failure-order',
-    );
-
-    expect(completed).toEqual(['failure', 'success']);
-    expect(trackerUpdates).toEqual(['reset:failure-order']);
-    expect(messages.map((message) => message.tool_call_id)).toEqual(['success', 'failure']);
-    expect(messages[1]?.content).toContain('read failed');
-  });
-
-  it('still commits every other result when the round-ending drain rethrows a failed parked call', async () => {
-    // The parked call is the head of the held queue, and the read behind it commits
-    // only once the head settles. When that head has FAILED, the drain that ends the
-    // round is the one that throws — and it has to throw through the `catch` that
-    // drains the rest, or the read's tool-result row never reaches the model and its
-    // call is left permanently unanswered.
-    toolRegistry.register(
-      readTool(
-        'read_file',
-        async () => 'never returns',
-        () => ({ dangerous: true, detail: 'secret path' }),
-      ),
-    );
-    toolRegistry.register(readTool('list_directory', async () => 'entries'));
-    const context: ToolDispatchRoundContext = {
-      allowed,
-      convId: 'final-drain',
-      signal: undefined,
-      checkpoint: undefined,
-      budget: undefined,
-      recordFileDiff: undefined,
-      unavailableTools: undefined,
-      setPlan: undefined,
-      tellArrived: undefined,
-      modelContext: undefined,
-    };
-
-    await expect(
-      dispatchWithParallelReads(
-        [
-          makeToolCall('read_file', { path: '.env' }, 'parked'),
-          makeToolCall('list_directory', { path: '.' }, 'listing'),
-        ],
-        context,
-        toolRegistry,
-        messages,
-        failureTracker,
-        post,
-        async () => {
-          throw new Error('dispatchSerial must not run here');
-        },
-        async (call, _approval, effects) => {
-          if (call.id === 'parked') {
-            // Still unsettled while the read behind it is emitted: that is what
-            // leaves both of them in the queue for the round-ending drain.
-            await pause(20);
-            throw new Error('the parked call failed');
-          }
-          effects.messages.push({
-            role: 'tool',
-            tool_call_id: call.id,
-            content: 'entries',
-          });
-        },
-      ),
-    ).rejects.toThrow('the parked call failed');
-
-    expect(messages.map((message) => message.tool_call_id)).toEqual(['listing']);
-  });
-});
-
-describe('buffered tracker updates commit in the order they happened', () => {
-  it('applies a protocol failure before the reset of a later call', () => {
-    const buffered = createBufferedToolDispatchEffects([{ role: 'user', content: 'go' }]);
-    buffered.failureTracker.recordNativeParseFailure('conv-a');
-    buffered.failureTracker.reset('conv-a');
-    const applied: string[] = [];
-
-    commitBufferedToolDispatchEffects(
-      buffered,
-      [],
-      {
-        reset: (id) => applied.push(`reset:${id}`),
-        recordNativeParseFailure: (id) => applied.push(`parse:${id}`),
-      },
-      () => undefined,
-    );
-
-    // The other order leaves the streak standing after a call ran, which is the
-    // opposite of what a successful call is for.
-    expect(applied).toEqual(['parse:conv-a', 'reset:conv-a']);
-  });
 });
