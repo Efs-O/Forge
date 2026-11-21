@@ -33,6 +33,7 @@ import * as path from 'path';
 
 import { clampUtf8 } from './forgeInstructionsChain';
 import { PROJECT_TIPS_ALLOWANCE, SHIPPED_TIPS_ALLOWANCE } from './codingTipsBudget';
+import { withoutReviewedMark } from './tipsReviewed';
 
 // The budget lives in a leaf module so the pin schema can import it without
 // reaching this file's instruction-chain dependency. Re-exported: the allowances
@@ -139,7 +140,7 @@ function readBounded(
   allowance: number,
   displayPath: string,
 ): { text: string; truncated: boolean } | undefined {
-  const raw = fs.readFileSync(file, 'utf8').trim();
+  const raw = withoutReviewedMark(fs.readFileSync(file, 'utf8')).trim();
   if (!raw) return undefined;
   const clamped = clampUtf8(raw, allowance);
   if (!clamped.truncated) return { text: clamped.text, truncated: false };

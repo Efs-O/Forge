@@ -17,6 +17,7 @@
  * move (delete it there, add it here) and never a duplicate that outlives it.
  *
  * The count is "entries this repository has that the shipped table does not",
+ * less the keepers a review marked (`src/llm/tipsReviewed.ts`),
  * recomputed from the two files on every write and never stored: promoting the
  * keepers into the shipped list, or clearing the project file, resets it with no
  * state to keep in sync. Every tenth one asks the agent to put a "Tips review
@@ -38,25 +39,18 @@ import {
   resolveShippedTipsPath,
   workspaceShippedTipsPath,
 } from '../llm/codingTips';
+import {
+  reviewedTipHashes,
+  tipEntryKey,
+  tipEntryKeys,
+  tipHash,
+  TIP_ENTRY,
+} from '../llm/tipsReviewed';
 import { normalizePathForMatch } from './secretPaths';
 import { defaultWorkspaceRoot } from '../util/WorkspacePaths';
 
-/** Numbered tips entries only — prose and headings are not tips. */
-const ENTRY = /^\s*\d+\.\s+\S/;
-
-/**
- * The key that identifies an entry. The number is STRIPPED: entries are numbered
- * per section, so the duplicate an agent actually writes — the same tip appended
- * as `4.` under a section whose copy is `1.` — would otherwise key differently
- * and pass. What survives is the tip text itself, normalised.
- */
-function entryKey(line: string): string {
-  return line
-    .replace(/^\s*\d+\.\s+/, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
-}
+const ENTRY = TIP_ENTRY;
+const entryKey = tipEntryKey;
 
 /**
  * The tips file of the open workspace, and only that one: `<root>/docs/CODING_TIPS.md`.
@@ -98,11 +92,12 @@ export function isShippedTipsPath(
   return normalizePathForMatch(filePath) === normalizePathForMatch(shipped);
 }
 
-function entryKeys(text: string): string[] {
-  return text
-    .split(/\r?\n/)
-    .filter((line) => ENTRY.test(line))
-    .map(entryKey);
+const entryKeys = tipEntryKeys;
+
+/** Tips in `text` that the shipped table lacks and the file's review mark does not cover. */
+function unreviewedKeys(text: string, shippedKeys: Set<string>): Set<string> {
+  const reviewed = reviewedTipHashes(text);
+  return new Set(entryKeys(text).filter((k) => !shippedKeys.has(k) && !reviewed.has(tipHash(k))));
 }
 
 function countBy(entries: string[]): Map<string, number> {
@@ -265,17 +260,15 @@ export function tipsWriteNote(
   const root = workspaceRoot ?? defaultWorkspaceRoot();
   if (!isProjectTipsPath(filePath, root) || !fs.existsSync(filePath)) return '';
   const shippedKeys = new Set(entryKeys(readShipped(shippedPath, root)));
-  const unreviewedNow = new Set(
-    entryKeys(fs.readFileSync(filePath, 'utf8')).filter((k) => !shippedKeys.has(k)),
-  );
+  const unreviewedNow = unreviewedKeys(fs.readFileSync(filePath, 'utf8'), shippedKeys);
   if (unreviewedNow.size === 0) return '';
-  const unreviewedBefore = new Set(entryKeys(previous).filter((k) => !shippedKeys.has(k)));
+  const unreviewedBefore = unreviewedKeys(previous, shippedKeys);
   const review =
     Math.floor(unreviewedNow.size / 10) > Math.floor(unreviewedBefore.size / 10)
       ? ` Tips review due: ${unreviewedNow.size} project tips are not in the shipped table. Put this line in your final report, for your owner or the agent that delegated you; do not sort or move the tips yourself.`
       : '';
   return (
     `\nProject tips: ${unreviewedNow.size} entr${unreviewedNow.size === 1 ? 'y' : 'ies'} in ` +
-    `docs/CODING_TIPS.md ${unreviewedNow.size === 1 ? 'is' : 'are'} not in the shipped table.${review}`
+    `docs/CODING_TIPS.md ${unreviewedNow.size === 1 ? 'is' : 'are'} not in the shipped table and not yet reviewed.${review}`
   );
 }

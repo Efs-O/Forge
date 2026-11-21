@@ -548,6 +548,7 @@ overlaps with an existing owner, extend the owner instead.
 | FORGE.md chain assembly + byte budget        | `src/llm/forgeInstructionsChain.ts`          |
 | Per-chat pinned FORGE.md text + change note  | `src/sidebar/forgeInstructionsPin.ts`        |
 | Coding-tips loading, budgets, shipped/project tables | `src/llm/codingTips.ts` |
+| Coding-tips review mark (which project tips a review kept) | `src/llm/tipsReviewed.ts` |
 | Forge-tool tips split from the table into tool descriptions | `src/llm/toolTips.ts` |
 | Streaming OpenAI-compat client               | `src/llm/OpenAIClient.ts`                    |
 | Provider wire-message filtering and mid-turn text | `src/llm/wireRequest.ts`                  |

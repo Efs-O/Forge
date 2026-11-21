@@ -160,11 +160,11 @@ describe('the count and the every-tenth review ping', () => {
   it('says how many entries the shipped list does not have', () => {
     const one = writeEntries(1);
     expect(tipsWriteNote(file(), one, shippedPath, dir)).toContain(
-      '1 entry in docs/CODING_TIPS.md is not in the shipped table',
+      '1 entry in docs/CODING_TIPS.md is not in the shipped table and not yet reviewed',
     );
     const nine = writeEntries(9);
     expect(tipsWriteNote(file(), nine, shippedPath, dir)).toContain(
-      '9 entries in docs/CODING_TIPS.md are not in the shipped table',
+      '9 entries in docs/CODING_TIPS.md are not in the shipped table and not yet reviewed',
     );
   });
 
@@ -192,7 +192,7 @@ describe('the count and the every-tenth review ping', () => {
     const nine = writeEntries(9);
     writeEntries(10);
     expect(tipsWriteNote(file(), nine, shippedPath, dir)).toBe(
-      '\nProject tips: 10 entries in docs/CODING_TIPS.md are not in the shipped table.' +
+      '\nProject tips: 10 entries in docs/CODING_TIPS.md are not in the shipped table and not yet reviewed.' +
         ' Tips review due: 10 project tips are not in the shipped table. Put this line in your' +
         ' final report, for your owner or the agent that delegated you; do not sort or move' +
         ' the tips yourself.',

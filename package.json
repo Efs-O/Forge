@@ -525,6 +525,7 @@
   },
   "scripts": {
     "svg:png": "node scripts/svg-to-png.mjs",
+    "tips:reviewed": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/mark-tips-reviewed.mjs",
     "ping-ollama-cloud": "node scripts/ping-ollama-cloud-models.mjs",
     "build:ext": "node esbuild.config.mjs",
     "build:webview": "node esbuild.config.mjs --webview",
