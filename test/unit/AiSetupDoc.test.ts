@@ -48,7 +48,7 @@ describe('AI_SETUP.md', () => {
   // question would otherwise set up only what the user happened to name in
   // their first message. A picker is easier to answer than a typed
   // "yes, no, yes...", and three calls (1-4, 5-8, then 9-12)
-  // keep the tool's cap without dropping any of the eleven.
+  // keep the tool's cap without dropping any of the twelve.
   it('asks the Step 0 questions with a picker when the harness has one', () => {
     const text = doc.replace(/\s+/gu, ' ');
     expect(text).toContain(
