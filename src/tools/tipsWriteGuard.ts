@@ -19,9 +19,11 @@
  * The count is "entries this repository has that the shipped table does not",
  * recomputed from the two files on every write and never stored: promoting the
  * keepers into the shipped list, or clearing the project file, resets it with no
- * state to keep in sync. Every tenth one asks the agent to hand the list back to
- * the owner, who reviews it — the ping rides on the write result, so it repeats
- * per recorded tip and not per turn.
+ * state to keep in sync. Every tenth one asks the agent to put a "Tips review
+ * due" line in its final report: the review goes to its owner or delegator,
+ * because the agent recording a tip is often a low-bit lane model, the wrong
+ * judge of which tips every install should get. The ping rides on the write
+ * result, so it repeats per recorded tip and not per turn.
  *
  * Comparison ignores whitespace and case: a re-wrapped or re-cased line is the
  * same tip, and the near-duplicate case is the CI detector's job
@@ -242,7 +244,7 @@ export function guardTipsWrite(
 /**
  * What to tell the agent about the table it just changed: how many entries the
  * shipped list does not have, and — ONCE, when the count crosses a tenth — that
- * the owner wants to be told. `previous` is the file as it was before this write,
+ * a review is due. `previous` is the file as it was before this write,
  * so the ping is a crossing of a tenth, not a hit on one: a re-word while the
  * count sits at 10 stays quiet, and a write that jumps 9 to 11 still fires once.
  * Empty for every other file, and for a project table that holds nothing the
@@ -270,7 +272,7 @@ export function tipsWriteNote(
   const unreviewedBefore = new Set(entryKeys(previous).filter((k) => !shippedKeys.has(k)));
   const review =
     Math.floor(unreviewedNow.size / 10) > Math.floor(unreviewedBefore.size / 10)
-      ? ` ${unreviewedNow.size} recorded since the shipped table: tell the owner now and offer to promote the keepers.`
+      ? ` Tips review due: ${unreviewedNow.size} project tips are not in the shipped table. Put this line in your final report, for your owner or the agent that delegated you; do not sort or move the tips yourself.`
       : '';
   return (
     `\nProject tips: ${unreviewedNow.size} entr${unreviewedNow.size === 1 ? 'y' : 'ies'} in ` +

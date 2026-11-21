@@ -170,22 +170,33 @@ describe('the count and the every-tenth review ping', () => {
 
   it('pings on the crossing of a tenth, once — not on every write that sits at one', () => {
     const nine = writeEntries(9);
-    expect(tipsWriteNote(file(), nine, shippedPath, dir)).not.toContain('tell the owner now');
+    expect(tipsWriteNote(file(), nine, shippedPath, dir)).not.toContain('Tips review due');
     const ten = writeEntries(10);
-    expect(tipsWriteNote(file(), nine, shippedPath, dir)).toContain('tell the owner now');
+    expect(tipsWriteNote(file(), nine, shippedPath, dir)).toContain('Tips review due');
     // A re-word while the count sits at 10 stays quiet: nothing crossed.
-    expect(tipsWriteNote(file(), ten, shippedPath, dir)).not.toContain('tell the owner now');
+    expect(tipsWriteNote(file(), ten, shippedPath, dir)).not.toContain('Tips review due');
     expect(tipsWriteNote(file(), writeEntries(11), shippedPath, dir)).not.toContain(
-      'tell the owner now',
+      'Tips review due',
     );
     // A write that adds two tips across the boundary still fires, exactly once.
     const nineAgain = writeEntries(9);
     writeEntries(11);
-    expect(tipsWriteNote(file(), nineAgain, shippedPath, dir)).toContain('tell the owner now');
+    expect(tipsWriteNote(file(), nineAgain, shippedPath, dir)).toContain('Tips review due');
     const nineteen = writeEntries(19);
     writeEntries(20);
-    expect(tipsWriteNote(file(), nineteen, shippedPath, dir)).toContain('tell the owner now');
+    expect(tipsWriteNote(file(), nineteen, shippedPath, dir)).toContain('Tips review due');
     expect(ten.length).toBeGreaterThan(0);
+  });
+
+  it('words the review ping for the report, not for the recording agent', () => {
+    const nine = writeEntries(9);
+    writeEntries(10);
+    expect(tipsWriteNote(file(), nine, shippedPath, dir)).toBe(
+      '\nProject tips: 10 entries in docs/CODING_TIPS.md are not in the shipped table.' +
+        ' Tips review due: 10 project tips are not in the shipped table. Put this line in your' +
+        ' final report, for your owner or the agent that delegated you; do not sort or move' +
+        ' the tips yourself.',
+    );
   });
 
   it('says nothing when the project table holds nothing the shipped one does not', () => {
