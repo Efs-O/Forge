@@ -47,7 +47,7 @@ describe('AI_SETUP.md', () => {
   // a fixed order and a fixed wording: an agent that cannot ask a second
   // question would otherwise set up only what the user happened to name in
   // their first message. A picker is easier to answer than a typed
-  // "yes, no, yes...", and three calls (1-4, 5-8, then 9-11)
+  // "yes, no, yes...", and three calls (1-4, 5-8, then 9-12)
   // keep the tool's cap without dropping any of the eleven.
   it('asks the Step 0 questions with a picker when the harness has one', () => {
     const text = doc.replace(/\s+/gu, ' ');
@@ -61,7 +61,7 @@ describe('AI_SETUP.md', () => {
     expect(text).toContain(
       'With a multiple-choice question tool (Claude Code: `AskUserQuestion`, at most four ' +
         'questions per call and four choices per question), ask questions 1-4 in one call, ' +
-        '5-8 in a second call straight after it, and 9-11 in a third call. Without such a ' +
+        '5-8 in a second call straight after it, and 9-12 in a third call. Without such a ' +
         'tool, ask the same questions in one text message, in the same order and with the ' +
         'same wording. "No, change nothing" means stop without changing files, installing ' +
         'software, or downloading models.',
@@ -197,6 +197,23 @@ describe('AI_SETUP.md', () => {
       '"Voice notes" needs Telegram: picking it runs Step 8 too, and the plan summary ' +
         'says so.',
     );
+  });
+
+  // Codex followed the guide on the owner's laptop and never offered the Strata
+  // or Maya engine, because no line in the guide named one. It also called video
+  // and music "Not possible here": the 11 GB it measured against is Forge's own
+  // `min_free_vram_mb` startup check, not the engine's minimum, and ACE-Step is
+  // configured with CPU offload on. Each string below sits on one line in the
+  // doc, so an agent or a picker copies it whole.
+  it('asks whether to install Strata or Maya, and does not call a smaller GPU "not possible"', () => {
+    for (const line of [
+      '12. **Model engine** (one choice): "Install an engine for large local models',
+      '## Step 12a — Optional: Strata or Maya engine',
+      '- "Strata" or "Maya" (question 12): Step 12a.',
+      "Forge's config, not the engine's own minimum.",
+      '- Strata or Maya — not picked in question 12; name it to follow Step 12a.',
+    ])
+      expect(doc, line).toContain(line);
   });
 
   // The two media steps used to open only for a request that named them, and

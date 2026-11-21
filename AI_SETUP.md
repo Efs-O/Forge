@@ -112,6 +112,11 @@ Step 0 question:
   installed.
 - **llama.cpp** — fastest and the most control; needs a GGUF that fits.
 - **Ollama** — simplest if it is already installed and has models.
+- **Strata or Maya** — engines for large mixture-of-experts models
+  ([Niko1221/Strata](https://github.com/Niko1221/Strata),
+  [mw00/project-maya](https://github.com/mw00/project-maya)). Models another
+  computer already serves on them need nothing installed here. Installing an
+  engine on this machine is the user's choice: question 12 asks it.
 - **Cloud / CLI only** — no suitable GPU: an OpenAI-compatible provider, or
   Claude Code / Codex as the model (`provider: cli`).
 
@@ -145,8 +150,12 @@ After the survey and backend choice, show one concise summary containing:
   computer;
 - a **Features** table, one row per feature in questions 7 and 8: what is
   already on disk (paths), what is missing (exact filenames and sizes), and
-  "not possible here: <reason>" when this machine cannot run it (for
-  example, no GPU with enough free VRAM for video). A feature's downloads
+  "not possible here: <reason>" only when it cannot be installed or run on
+  this machine at all (for example, no NVIDIA GPU for video). When it can be
+  installed but this machine has less free VRAM than Forge's config starts it
+  with, the row reads "can install; may not run here: <free> MB free, Forge's
+  config starts it at <min_free_vram_mb> MB", and the feature is still
+  offered. A feature's downloads
   and installs are part of the plan, and picking it confirms them. Image
   generation is "not possible here" only when this machine has no suitable
   GPU, no cloud image provider is configured, and "Other computer" is not in
@@ -163,7 +172,7 @@ asking again.
 
 With a multiple-choice question tool (Claude Code: `AskUserQuestion`, at most
 four questions per call and four choices per question), ask questions 1-4 in
-one call, 5-8 in a second call straight after it, and 9-11 in a third call.
+one call, 5-8 in a second call straight after it, and 9-12 in a third call.
 Without such a tool, ask the same questions in one text message, in the same
 order and with the same wording. "No, change nothing" means stop without
 changing files, installing software, or downloading models. Offer "Run Forge's
@@ -227,6 +236,12 @@ marks "not possible here".
     choice's description: "Its tools run without a card, except in a chat
     that has read a secret file." Picking none keeps every MCP tool asking
     before each call.
+12. **Model engine** (one choice): "Install an engine for large local models
+    on this PC?" with "No (Recommended)", "Strata" and "Maya". Each engine
+    choice's description names its requirement from that engine's README
+    (for example "Needs an NVIDIA RTX 30, 40 or 50 GPU") and, when the survey
+    shows this machine falls short, adds "This PC has <GPU, free VRAM, RAM>:
+    it may not run here."
 
 Each pick turns on exactly what Step 5 lists for it; a switch the user did not
 pick stays off. "Run Forge's messages without asking" and "Global note" need
@@ -370,6 +385,7 @@ those:
 - "Cloud models": Step 4.
 - "Chats may start chats": `permissions.chats.new_chat: true` and
   `permissions.chats.steer: true`.
+- "Strata" or "Maya" (question 12): Step 12a.
 - "Yes, let it see them" (question 10): merge
   `"forge.terminal.watchUserCommands": true` into VS Code's user
   `settings.json` (Windows `%APPDATA%\Code\User\settings.json`, macOS
@@ -853,6 +869,15 @@ When requested:
      instrumental only. Each uses one configured GPU and they run sequentially.
      The example gates each at 11 GB free VRAM. Stable Audio 3 Medium supports
      up to 380 seconds.
+   - Each free-VRAM figure above is the `min_free_vram_mb` startup check in
+     Forge's config, not the engine's own minimum. Forge already runs
+     ACE-Step with its CPU offload on (`offload_to_cpu`), so music can work
+     on a smaller card, slowly: say that instead of "not possible". LTX-2.5
+     video below 11 GB free is not expected to run. Lower
+     `min_free_vram_mb` only when the user picked the feature after a "may
+     not run here" row, and tell them the value you wrote.
+   - Video and music run on this machine only: "Other computer" serves chat
+     models and images, not video or music.
 3. Name the model repositories: [Lightricks/LTX-2.5](https://huggingface.co/Lightricks/LTX-2.5)
    and, for the Q8 GGUF used by this adapter, the community
    [Abiray/LTX-2.5-Distilled-GGUF](https://huggingface.co/Abiray/LTX-2.5-Distilled-GGUF);
@@ -920,6 +945,34 @@ in.
 **Check:** read the pasted result. Every link it lists passes, or name the
 first broken link and the step above that fixes it.
 
+## Step 12a — Optional: Strata or Maya engine
+
+Run this section only when the user picked "Strata" or "Maya" in Step 0
+question 12. Models another computer serves on these engines never need it.
+Do items 1-2 before Step 6, and write the model in the same config write as
+the rest, so Step 6's reload loads it.
+
+1. Read the engine's README in its official repository
+   ([Niko1221/Strata](https://github.com/Niko1221/Strata),
+   [mw00/project-maya](https://github.com/mw00/project-maya)) and install it
+   the way that README says, from its official release or setup script. Do
+   not build from source when the README offers an installer.
+2. Download only the model files the README names for a model that fits the
+   survey (Step 0's fit rule applies); their exact filenames and sizes are in
+   the plan summary.
+3. Start the engine the way its README says and note the local address it
+   serves. Add one model to `config.yaml` against that address, following the
+   commented Strata example in `config/config.example.yaml`
+   (`provider: openai-compatible`, `endpoint`, `model`, `num_ctx`). Forge
+   does not start this engine: tell the user to start it before using the
+   model. Forge can start and stop it through an `engines:` entry
+   (`start_command` / `stop_command`, see `config/config.example.yaml`); that
+   is the user's edit, and once Step 14 has run it lives in
+   `~/.forge/policy.yaml`, which you never write.
+
+**Check:** the engine's `GET /v1/models` lists the model, and a one-line chat
+with the new model in Forge answers.
+
 ## Step 13 — Optional: daily chat retitle
 
 Run this section only when the user said yes to "Daily chat retitle" in Step 0,
@@ -974,6 +1027,7 @@ Report to the user:
   - Reverse image search — not picked or named; name it to follow Step 9b.
   - Cloud models — not picked or named; name it to follow Step 4.
   - Other computer — not requested or declined; name it to follow Step 12.
+  - Strata or Maya — not picked in question 12; name it to follow Step 12a.
   - Daily chat retitle — not requested or declined; name it to follow Step 13.
   - Global note — not picked in Step 0; name it to follow Step 7.
   - Terminal capture — not picked in question 10; set `forge.terminal.watchUserCommands` to `true` in VS Code's settings to turn it on.
