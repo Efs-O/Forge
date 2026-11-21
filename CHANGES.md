@@ -1,5 +1,30 @@
 # Forge — Recent Changes
 
+## 0.17.208
+
+**Setup fixes from a fresh install of 0.17.207 on a second PC.**
+
+**The setup is named after your AI agent, not after Claude.** The sidebar button reads **Set up with
+an AI agent** and the command is **Forge: Set Up With an AI Agent**: Claude Code, Codex and Copilot all
+run the same setup prompt. The line under the button still names the agent Forge found on this PC.
+
+**Wizard pop-up texts fit on one line.** VS Code's multi-select pop-up cuts an item's detail at one
+line, so the wizard's longer switch texts lost their ends. The wizard now shows a short form of at most
+80 characters; the full text is unchanged in `AI_SETUP.md`.
+
+**`AI_SETUP.md` asks about Strata and Maya, and stops calling media "not possible" on a smaller GPU.**
+A new question 12 asks whether to install an engine for large local models, and Step 12a installs
+Strata or Maya from its official repository. Video and music on a GPU below the free VRAM in Forge's
+example config now read "can install; may not run here" and are still offered: that figure is Forge's
+`min_free_vram_mb` startup check, and ACE-Step already runs with CPU offload. `docs/MEDIA.md`, which
+`AI_SETUP.md` links to, now ships in the extension.
+
+**A broken `edits` list in `edit_file` says where it broke.** A local model writes `edit_file`'s
+`edits` array as JSON text, and a low-bit quant now and then slips on one escape. The refusal used to
+say only that `edits` "arrived as a string"; it now names the character position, the likely slip
+(a backslash before a line break, an invalid escape, an unescaped quote) and the text around it, and
+points at the one-edit-per-call form, whose top-level strings need no JSON escaping.
+
 ## 0.17.207
 
 **Security fixes from an outside audit of 0.17.206.**
