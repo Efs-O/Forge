@@ -26,6 +26,7 @@ import {
   TIPS_TABLE_MAX_LINES,
 } from '../../src/llm/codingTipsBudget';
 import { TOOL_TIPS_MAX_PER_TOOL } from '../../src/llm/toolTips';
+import { withoutReviewedMark } from '../../src/llm/tipsReviewed';
 
 const root = path.resolve(__dirname, '..', '..');
 const read = (rel: string): string => fs.readFileSync(path.join(root, rel), 'utf8');
@@ -65,9 +66,9 @@ const ENTRY = /^\d+\.\s/;
 /** A Forge-tool row: the numbered prefix, the tool's name in backticks, ` · `, the tip. */
 const TOOL_ROW = /^\d+\. `([a-z][a-z0-9_]*)` \u00B7 \S/;
 
-/** Parse one table into the parts the shape checks need. */
+/** Parse one table, as the prompt gets it (no review mark), into the parts to check. */
 function parseTable(text: string) {
-  const lines = text.split(/\r?\n/);
+  const lines = withoutReviewedMark(text).split(/\r?\n/);
   const headingLines: { name: string; at: number }[] = [];
   lines.forEach((line, i) => {
     const match = line.match(HEADING);
@@ -125,9 +126,7 @@ describe.each(TABLES)('%s stays an exact-syntax table', (rel, allowance) => {
       // Forge-tool rows are capped per tool, in the next test: they are not scanned here.
       if (section.name === 'FORGE_TOOLS') continue;
       const next = headingLines[i + 1] ? headingLines[i + 1]!.at : lines.length;
-      const count = lines
-        .slice(section.at + 1, next)
-        .filter((line) => ENTRY.test(line)).length;
+      const count = lines.slice(section.at + 1, next).filter((line) => ENTRY.test(line)).length;
       expect(count, `section ${section.name} outgrew ${MAX_PER_SECTION} lines`).toBeLessThanOrEqual(
         MAX_PER_SECTION,
       );
