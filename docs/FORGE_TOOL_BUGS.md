@@ -166,13 +166,18 @@ Entry shape (copy it, fill it, newest entry last):
 
 ## A scheduled job that finished and reported is logged as "interrupted — Forge restarted during the run"
 
-- Seen: 2026-11-17, also 2026-11-16, Forge 0.17.18x, job "Basalt Windows multi-GPU watch"
+- Seen: 2026-11-17, also 2026-11-16, 2026-11-19, and five times on 2026-11-21 (the 06:45, 06:51,
+  06:54, 06:58 and 07:14 turns each ended with their `RESULT:` line in the chat minutes before the
+  runner logged them), Forge 0.17.18x → 0.17.207, job "Basalt Windows multi-GPU watch"
 - Tool: the scheduled job runner, recorded in `~/.forge/jobs/runs/basalt-watch.jsonl`
 - Did: `{"at":1794891190572,"outcome":"failed","summary":"interrupted — Forge restarted during
   the run"}` written about three minutes after the same turn ended with `RESULT: ok — the first
   Windows two-GPU peer run with published numbers…`; the file holds no entry carrying that
   summary, nor the previous day's (`…the maintainer says layer split is on main…`), and a second
-  run of the same job fires minutes later
+  run of the same job fires minutes later. The 2026-11-21 variant logs
+  `interrupted — no heartbeat for 2 min; the run's window stopped responding or exited (started
+  06:45)` (widening to `no heartbeat for 3 min` by 07:14) for five runs in a row whose turns kept
+  answering tool calls and ended with their `RESULT:` line
 - Should: record the `RESULT:` line the finished turn produced, and not mark a run interrupted
   when the restart comes after its last message
 - Workaround: the report is in the chat; the retried run re-sweeps and answers "nothing new since

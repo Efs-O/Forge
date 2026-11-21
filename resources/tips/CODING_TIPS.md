@@ -42,6 +42,7 @@
 21. `python -c "…split('\\\\')…"` under bash → bash eats the backslashes first → `SyntaxError: unterminated string literal`. keep backslashes out of a double-quoted `-c` body
 22. a pwsh log name with a space (`> logs/run 1.log`) → a later `Select-String -Path` says the path does not exist. no spaces in log file names
 23. `tail -5 a.log b.log` in Git Bash → `tail: option used in invalid context -- 5`: the old `-N` form takes one file only. write `tail -n 5`
+24. `export PATH="$APPDATA/npm:$PATH"` in Git Bash → node resolves `C:\Program Files\Git\Users\…` → MODULE_NOT_FOUND: MSYS ate the `C:`. write the POSIX form `/c/Users/<name>/AppData/Roaming/npm`
 
 ## GIT
 1. `git commit -- <file> -m "msg"` → git reads `-m` and the message as pathspecs after `--`. put every flag before `--`, the files last; a new file needs `git add` first
