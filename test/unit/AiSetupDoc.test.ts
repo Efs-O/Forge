@@ -185,7 +185,7 @@ describe('AI_SETUP.md', () => {
       '- **Music**: Songs with ACE-Step 1.5 through ComfyUI.',
       '- **Voice notes**: Talk to Forge on Telegram: voice notes are transcribed on this PC with whisper.cpp, and `/voice` reads replies aloud with Piper. Needs Telegram.',
       '- **Codebase index**: Search your code by meaning (`search_codebase`). A small embedding model runs on the CPU.',
-      '- **Reverse image search**: Find where a picture appears online (Google Lens through SerpApi). Needs a SerpApi key; each search uploads the image to litterbox.catbox.moe for one hour.',
+      '- **Reverse image search**: Find where a picture appears online, with Yandex (fast, the default) and Google Lens. One SerpApi key covers both, and SerpApi has a free plan; each search uploads the image to litterbox.catbox.moe for one hour.',
       '- **Cloud models**: Add OpenRouter or OpenAI models next to the local ones. Needs your key; the provider bills you.',
       '- **Chats may start chats**: A chat may open a new chat or interrupt a running one (`message_chat` new / steer).',
     ];
@@ -207,7 +207,9 @@ describe('AI_SETUP.md', () => {
   // doc, so an agent or a picker copies it whole.
   it('asks whether to install Strata or Maya, and does not call a smaller GPU "not possible"', () => {
     for (const line of [
-      '12. **Model engine** (one choice): "Install an engine for large local models',
+      '12. **Model engine** (one choice): "Install a local model engine on this PC?"',
+      '- "llama.cpp" (question 12): Step 2, with a model that fits this PC.',
+      '  - llama.cpp on this PC — not picked in question 12; name it to follow Step 2.',
       '## Step 12a — Optional: Strata or Maya engine',
       '- "Strata" or "Maya" (question 12): Step 12a.',
       "Forge's config, not the engine's own minimum.",

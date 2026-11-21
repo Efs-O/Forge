@@ -221,7 +221,7 @@ marks "not possible here".
    - **Voice notes**: Talk to Forge on Telegram: voice notes are transcribed on this PC with whisper.cpp, and `/voice` reads replies aloud with Piper. Needs Telegram.
 8. **More tools** (multi-select): "Add any of these?"
    - **Codebase index**: Search your code by meaning (`search_codebase`). A small embedding model runs on the CPU.
-   - **Reverse image search**: Find where a picture appears online (Google Lens through SerpApi). Needs a SerpApi key; each search uploads the image to litterbox.catbox.moe for one hour.
+   - **Reverse image search**: Find where a picture appears online, with Yandex (fast, the default) and Google Lens. One SerpApi key covers both, and SerpApi has a free plan; each search uploads the image to litterbox.catbox.moe for one hour.
    - **Cloud models**: Add OpenRouter or OpenAI models next to the local ones. Needs your key; the provider bills you.
    - **Chats may start chats**: A chat may open a new chat or interrupt a running one (`message_chat` new / steer).
 9. **Git name and email** (one choice): "Name and email for your commits?"
@@ -236,12 +236,14 @@ marks "not possible here".
     choice's description: "Its tools run without a card, except in a chat
     that has read a secret file." Picking none keeps every MCP tool asking
     before each call.
-12. **Model engine** (one choice): "Install an engine for large local models
-    on this PC?" with "No (Recommended)", "Strata" and "Maya". Each engine
-    choice's description names its requirement from that engine's README
-    (for example "Needs an NVIDIA RTX 30, 40 or 50 GPU") and, when the survey
-    shows this machine falls short, adds "This PC has <GPU, free VRAM, RAM>:
-    it may not run here."
+12. **Model engine** (one choice): "Install a local model engine on this PC?"
+    with "No (Recommended)", "llama.cpp", "Strata" and "Maya". Offer
+    "llama.cpp" only when the chosen backend is not llama.cpp, described as
+    "For small GGUF models on this PC, for example while the other computer is
+    off." Strata and Maya run large local models: each one's description names
+    its requirement from that engine's README (for example "Needs an NVIDIA
+    RTX 30, 40 or 50 GPU") and, when the survey shows this machine falls
+    short, adds "This PC has <GPU, free VRAM, RAM>: it may not run here."
 
 Each pick turns on exactly what Step 5 lists for it; a switch the user did not
 pick stays off. "Run Forge's messages without asking" and "Global note" need
@@ -274,7 +276,12 @@ an answer, set nothing and say so in **Finish**. Never invent either value.
 
 ## Step 2 — llama.cpp backend (skip for Ollama / cloud)
 
-If the chosen backend is llama.cpp and no `llama-server` is on PATH, install
+Run this step too when the user picked "llama.cpp" in Step 0 question 12:
+its model sits beside the chosen backend's models, and the chosen default
+model stays the default.
+
+If the chosen backend is llama.cpp, or the user picked it in question 12, and
+no `llama-server` is on PATH, install
 the build selected for this machine and listed in the plan summary:
 
 - **Windows + NVIDIA**: from the newest release on
@@ -385,6 +392,7 @@ those:
 - "Cloud models": Step 4.
 - "Chats may start chats": `permissions.chats.new_chat: true` and
   `permissions.chats.steer: true`.
+- "llama.cpp" (question 12): Step 2, with a model that fits this PC.
 - "Strata" or "Maya" (question 12): Step 12a.
 - "Yes, let it see them" (question 10): merge
   `"forge.terminal.watchUserCommands": true` into VS Code's user
@@ -742,7 +750,8 @@ Run this section when the user picked "Reverse image search" in Step 0 or the
 setup request names it. Tell the user to get a key at serpapi.com, then run
 **Forge: Set Cloud Provider Token** (`forge.setCloudToken`) in VS Code with
 the key name `serpapi` and enter the key there. Wait; never request, read or
-repeat it. Add:
+repeat it. SerpApi's free plan is enough to start, and the one key serves
+both engines the tool offers: Yandex (the default) and Google Lens. Add:
 
 ```yaml
 # partial: the image_search block only, not a whole config
@@ -1027,6 +1036,7 @@ Report to the user:
   - Reverse image search — not picked or named; name it to follow Step 9b.
   - Cloud models — not picked or named; name it to follow Step 4.
   - Other computer — not requested or declined; name it to follow Step 12.
+  - llama.cpp on this PC — not picked in question 12; name it to follow Step 2.
   - Strata or Maya — not picked in question 12; name it to follow Step 12a.
   - Daily chat retitle — not requested or declined; name it to follow Step 13.
   - Global note — not picked in Step 0; name it to follow Step 7.
