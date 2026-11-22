@@ -1,5 +1,12 @@
 # Forge — Recent Changes
 
+## 0.17.211
+
+**Coding tips, one row.** The project tips table now records the two guards that decide which tips
+file a row belongs in, and the 25-row-per-section limit that means a general tip has to be merged into
+a neighbouring row instead of added as another one. Nothing you do in Forge works differently - no
+behaviour change.
+
 ## 0.17.210
 
 **A config edit no longer destroys your security settings.** Running **Forge: Setup Wizard** on a PC
