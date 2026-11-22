@@ -93,6 +93,125 @@ describe('writeConfigSafely', () => {
 });
 
 /**
+ * A whole-object write is handed the keys one config happens to hold. `policy.yaml`
+ * is owner-authored and holds far more than that (`approvals`, `engines`,
+ * `mcp_servers`, `remote`), and `x_shared` can never be in the object at all
+ * because zod strips it — so neither may be treated as stale (BL-048, BL-049).
+ */
+const CONFIG_WITH_MODEL =
+  'active_model: m\nmodels:\n  - name: m\n    provider: ollama\n    endpoint: http://127.0.0.1:11434\n';
+
+describe('writeConfigSafely against a policy.yaml it was not told about (BL-048, BL-049)', () => {
+  let directory: string;
+  let configPath: string;
+  let policyPath: string;
+
+  beforeEach(() => {
+    directory = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-config-writer-policy-'));
+    configPath = path.join(directory, 'config.yaml');
+    policyPath = path.join(directory, 'policy.yaml');
+  });
+
+  afterEach(() => {
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+
+  it('keeps every policy block the written config never mentions', () => {
+    fs.writeFileSync(
+      policyPath,
+      [
+        'permissions:',
+        '  net:',
+        '    search: true',
+        'approvals:',
+        '  always: []',
+        'engines:',
+        '  llama:',
+        '    llama_server_binary: C:/llama/llama-server.exe',
+        'mcp_servers:',
+        '  - name: halluscribe',
+        '    command: node',
+        '    args: [server.js]',
+        'remote:',
+        '  enabled: true',
+        '',
+      ].join('\n'),
+    );
+    fs.writeFileSync(configPath, CONFIG_WITH_MODEL);
+    writeConfigSafely(
+      configPath,
+      { ...ollamaConfig, permissions: { net: { search: false } } },
+      { policyPath },
+    );
+    const after = fs.readFileSync(policyPath, 'utf8');
+    for (const block of ['approvals:', 'engines:', 'mcp_servers:', 'remote:']) {
+      expect(after).toContain(block);
+    }
+    // A block the object DID give is still updated, not left stale.
+    expect(after).toContain('search: false');
+  });
+
+  it('never overwrites an owner policy block with a schema default the caller never named', () => {
+    fs.writeFileSync(
+      policyPath,
+      [
+        'permissions:',
+        '  net:',
+        '    search: true',
+        'agent_links:',
+        '  telegram:',
+        '    workspace: N:/other project',
+        '',
+      ].join('\n'),
+    );
+    fs.writeFileSync(configPath, CONFIG_WITH_MODEL);
+    // The object never mentions `agent_links`, but ForgeConfigSchema.parse fills
+    // one in, and that default used to replace whatever the owner had written.
+    writeConfigSafely(
+      configPath,
+      { ...ollamaConfig, permissions: { net: { search: false } } },
+      { policyPath },
+    );
+    const after = fs.readFileSync(policyPath, 'utf8');
+    expect(after).toContain('workspace: N:/other project');
+    expect(after).toContain('search: false');
+  });
+
+  it('keeps x_shared and the aliases that still reference it (BL-049)', () => {
+    fs.writeFileSync(
+      policyPath,
+      [
+        'x_shared:',
+        '  mcp_args: &mcp_args [server.js]',
+        'mcp_servers:',
+        '  - name: halluscribe',
+        '    command: node',
+        '    args: *mcp_args',
+        '',
+      ].join('\n'),
+    );
+    fs.writeFileSync(
+      configPath,
+      'x_shared:\n  hint: &hint "keep me"\n' + CONFIG_WITH_MODEL,
+    );
+    // Before the fix this throws: deleting x_shared leaves `*mcp_args`
+    // unresolvable, and `doc.toString()` refuses to serialise the document.
+    // `permissions` is passed so the policy write runs whatever else the caller
+    // omitted — without a policy key in hand there would be nothing to reconcile.
+    expect(() =>
+      writeConfigSafely(
+        configPath,
+        { ...ollamaConfig, permissions: { net: { search: false } } },
+        { policyPath },
+      ),
+    ).not.toThrow();
+    expect(fs.readFileSync(policyPath, 'utf8')).toContain('*mcp_args');
+    expect(fs.readFileSync(policyPath, 'utf8')).toContain('x_shared:');
+    expect(fs.readFileSync(configPath, 'utf8')).toContain('x_shared:');
+  });
+});
+
+/**
  * The two halves of the writer rule, taken from the 2026-10-27 `llama-updates`
  * failure: a stale model reference must NOT block an unrelated write (the
  * llama.cpp binary switch was refused because of a name that had been stale for

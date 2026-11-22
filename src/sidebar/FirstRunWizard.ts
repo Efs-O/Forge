@@ -319,7 +319,9 @@ async function confirmConfigPath(context: vscode.ExtensionContext): Promise<stri
   const configPath = path.join(context.globalStorageUri.fsPath, 'config.yaml');
   if (!fs.existsSync(configPath)) return configPath;
   const replace = await vscode.window.showWarningMessage(
-    `Forge: ${configPath} already exists. Replace it? A .bak backup will be created.`,
+    `Forge: ${configPath} already exists. Replace it? A .bak backup will be created. ` +
+      `Where ~/.forge/policy.yaml holds the security settings, this wizard replaces only the ` +
+      `blocks it configures (permissions, llama_server) and leaves every other block there alone.`,
     { modal: true },
     'Replace config',
   );

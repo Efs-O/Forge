@@ -302,6 +302,12 @@ export function writeConfigSafely(
   const validated = ForgeConfigSchema.parse(config) as ForgeConfig;
   const policyPath = options.policyPath ?? defaultPolicyPath();
   const policyState = readYamlMapFile(policyPath);
+  // Which top-level keys this caller actually handed over, before zod filled in
+  // its defaults. A whole-object write may only overwrite owner policy config with
+  // a block the caller named: `agent_links` has a schema default, so a wizard
+  // starter that never mentioned it would otherwise replace the owner's
+  // `agent_links` in policy.yaml with a default nobody asked for (BL-048 review).
+  const passedKeys = new Set(Object.keys(config as unknown as Record<string, unknown>));
   const { models, ...rest } = validated as unknown as Record<string, unknown> & {
     models: ForgeConfig['models'];
   };
@@ -310,6 +316,7 @@ export function writeConfigSafely(
   for (const [key, value] of Object.entries(rest)) {
     if (value === undefined) continue;
     if (isPolicyKey(key) && policyState.exists) {
+      if (!passedKeys.has(key)) continue;
       toPolicy[key] = value;
     } else toConfig[key] = value;
   }
@@ -319,7 +326,10 @@ export function writeConfigSafely(
   // decides which value won. Before the owner migrates there is no policy file, so
   // `toPolicy` stays empty and this is exactly one call, exactly as it was.
   if (Object.keys(toPolicy).length > 0) {
-    updateConfigFile(configPath, (doc) => reconcileTopLevel(doc, toPolicy), undefined, {
+    // `true`: policy.yaml is owner-authored and this object only carries the
+    // policy keys the incoming config happens to hold, so a block this caller
+    // never heard of is kept, not deleted (BL-048).
+    updateConfigFile(configPath, (doc) => reconcileTopLevel(doc, toPolicy, true), undefined, {
       policyPath,
       target: 'policy',
     });

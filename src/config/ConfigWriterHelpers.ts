@@ -1,4 +1,5 @@
 import * as YAML from 'yaml';
+import { SHARED_ANCHOR_KEY } from './policySchema';
 import type { ModelConfig } from './types';
 
 /**
@@ -210,8 +211,25 @@ export function deleteModelSubField(
  * Reconcile a whole top-level config object into `doc` field-by-field,
  * touching only keys whose value actually changed so unrelated comments
  * survive. Used by the legacy `writeConfigSafely(path, config)` call shape.
+ *
+ * Two keys are never delete candidates. `models` has its own reconciler
+ * (`reconcileModels`). `x_shared` is the file's own YAML anchors: zod strips it
+ * (`policySchema.ts`), so no reconciled object can ever carry it, and the loader
+ * exempts it (`PolicyLoader.ts`) — deleting it left every `*alias` in the file
+ * unresolvable, and a whole-object write then throws before writing anything
+ * (BL-049).
+ *
+ * `keepKeysNotGiven` skips the delete loop entirely. A whole-object write to
+ * `policy.yaml` is handed only the policy keys the incoming config happens to
+ * hold, and that file is owner-authored: a key the caller never heard of
+ * (`approvals`, `engines`, `mcp_servers`, `remote`, …) must survive saving a
+ * model list. Removing a policy key is an explicit targeted write (BL-048).
  */
-export function reconcileTopLevel(doc: YAML.Document, next: Record<string, unknown>): void {
+export function reconcileTopLevel(
+  doc: YAML.Document,
+  next: Record<string, unknown>,
+  keepKeysNotGiven = false,
+): void {
   const current = (doc.toJS() ?? {}) as Record<string, unknown>;
   const currentKeys = new Set(Object.keys(current));
   for (const key of Object.keys(next)) {
@@ -219,8 +237,9 @@ export function reconcileTopLevel(doc: YAML.Document, next: Record<string, unkno
     if (!deepEqual(current[key], next[key])) setTopLevel(doc, key, next[key]);
     currentKeys.delete(key);
   }
+  if (keepKeysNotGiven) return;
   for (const staleKey of currentKeys) {
-    if (staleKey === 'models') continue;
+    if (staleKey === 'models' || staleKey === SHARED_ANCHOR_KEY) continue;
     doc.delete(staleKey);
   }
 }
