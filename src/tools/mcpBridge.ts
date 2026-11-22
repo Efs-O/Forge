@@ -76,6 +76,12 @@ export function mcpToolToRegisteredTool(
      *  and cannot be spelled in advance (`exfilTaint.ts` derives the flag from the
      *  transcript through this same declaration). */
     untrustedResult: true,
+    /** The tier above is a guess, not a promise: an unlisted tool gets `read`
+     *  because Forge cannot know what the server does with the call. Declared so
+     *  the dispatcher never parks this call — parking starts it while its card
+     *  waits, and a tool that may write would then be answered over by a later
+     *  read in the same round (BL-046). */
+    unknownEffects: true,
     /** Whether this call has to ask, decided by `mcpApprovalFor` below: a tool the
      *  user never listed, or any call in a chat that has read a secret. */
     approval: (_args, context) =>
@@ -134,7 +140,17 @@ export function mcpApprovalFor(
     return {
       detail,
       cardReason: `"${name.external}" is not listed under this server's tool_permissions, so it asks before each call`,
-      declineHint: `ask the owner to list "${name.external}" under tool_permissions for MCP server "${serverName}" in ~/.forge/policy.yaml (config.yaml if the security settings were never moved there)`,
+      // `tool_permissions` is read once, when the bridge registers these tools at
+      // activation (`toolActivationSetup.ts`), and nothing re-bridges them on a
+      // config reload — so the hint has to say that the edit lands only on the
+      // next window, or the agent relays it, the owner edits, and the card keeps
+      // coming (BL-047). Same convention as `RemoteStarterClient.ts` and
+      // `poolStructuralConfig.ts`, which name the reload for the same reason.
+      declineHint:
+        `ask the owner to list "${name.external}" under tool_permissions for MCP server ` +
+        `"${serverName}" in ~/.forge/policy.yaml (config.yaml if the security settings were never ` +
+        `moved there), then run "Developer: Reload Window" — that listing is read once when Forge ` +
+        `starts, so the card keeps coming until the window reloads`,
     };
   }
   // Listed and nothing tainted in this chat: the permission tier decides, exactly

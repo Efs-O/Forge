@@ -279,6 +279,18 @@ export interface RegisteredTool {
    * the tools that actually exist.
    */
   untrustedResult?: boolean;
+  /**
+   * True when nothing declares what this tool can change. An MCP server's tool is
+   * the only one: its name, its arguments and its effects all belong to a program
+   * Forge did not write, and an unlisted tool is handed the `read` tier precisely
+   * because Forge cannot know what it does (`src/tools/mcpBridge.ts`).
+   *
+   * So the tier is not evidence that the call changes nothing, and that is what
+   * `src/sidebar/ToolDispatchParallel.ts` needs: parking a gated call STARTS it
+   * while its card waits, which may only be done to a call that changes nothing.
+   * A tool with this flag keeps its position in the round and is awaited.
+   */
+  unknownEffects?: boolean;
   /** Which way this tool leaves the machine when the arguments do not decide:
    *  `cross_chat` for `message_chat` and `ask_agent`, `delegation` for
    *  `ask_local_agent`. A tool whose egress depends on the call (`shell`) reports

@@ -63,6 +63,23 @@ describe('mcpToolToRegisteredTool', () => {
     expect(registered.permission).toBe('delegate');
   });
 
+  it('declares that a bridged tool may change anything, so the dispatcher will not park it (BL-046)', () => {
+    const registered = mcpToolToRegisteredTool(
+      'files',
+      pair('delete_all'),
+      {
+        name: 'delete_all',
+        description: 'Delete every file under the folder',
+        inputSchema: { type: 'object', properties: {}, required: [] },
+      },
+      async () => ({ content: [] }),
+    );
+    // The tier is the bridge's guess and the reason parking has to be refused:
+    // an unlisted tool is `read` only because Forge cannot know what the server does.
+    expect(registered.permission).toBe('read');
+    expect(registered.unknownEffects).toBe(true);
+  });
+
   it('defaults an unlisted bridged tool to read permission', () => {
     const registered = mcpToolToRegisteredTool(
       'halluscribe',
@@ -242,7 +259,7 @@ describe('mcpApprovalFor', () => {
       cardReason:
         '"delete_all" is not listed under this server\'s tool_permissions, so it asks before each call',
       declineHint:
-        'ask the owner to list "delete_all" under tool_permissions for MCP server "files" in ~/.forge/policy.yaml (config.yaml if the security settings were never moved there)',
+        'ask the owner to list "delete_all" under tool_permissions for MCP server "files" in ~/.forge/policy.yaml (config.yaml if the security settings were never moved there), then run "Developer: Reload Window" \u2014 that listing is read once when Forge starts, so the card keeps coming until the window reloads',
     });
   });
 
@@ -271,7 +288,7 @@ describe('mcpApprovalFor', () => {
       cardReason:
         '"delete_all" is not listed under this server\'s tool_permissions, so it asks before each call',
       declineHint:
-        'ask the owner to list "delete_all" under tool_permissions for MCP server "files" in ~/.forge/policy.yaml (config.yaml if the security settings were never moved there)',
+        'ask the owner to list "delete_all" under tool_permissions for MCP server "files" in ~/.forge/policy.yaml (config.yaml if the security settings were never moved there), then run "Developer: Reload Window" \u2014 that listing is read once when Forge starts, so the card keeps coming until the window reloads',
     });
   });
 
@@ -298,7 +315,7 @@ describe('mcpApprovalFor', () => {
       cardReason:
         '"my.tool" is not listed under this server\'s tool_permissions, so it asks before each call',
       declineHint:
-        'ask the owner to list "my.tool" under tool_permissions for MCP server "files" in ~/.forge/policy.yaml (config.yaml if the security settings were never moved there)',
+        'ask the owner to list "my.tool" under tool_permissions for MCP server "files" in ~/.forge/policy.yaml (config.yaml if the security settings were never moved there), then run "Developer: Reload Window" \u2014 that listing is read once when Forge starts, so the card keeps coming until the window reloads',
     });
   });
 });

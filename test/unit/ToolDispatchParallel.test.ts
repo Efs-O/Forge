@@ -406,6 +406,88 @@ describe('ToolDispatch parallel read batches', () => {
     expect(messages.map((message) => message.tool_call_id)).toEqual(['w', 'r']);
   });
 
+  it('never parks a read-tier call whose effects Forge cannot know (BL-046)', async () => {
+    const steps: string[] = [];
+    // A bridged MCP tool: tiered `read` because the bridge cannot know what the
+    // server does, and it asks every call because the owner never listed it. The
+    // name is arbitrary here — the rule reads the declaration, not the name.
+    toolRegistry.register({
+      ...readTool(
+        'mcp_delete_all',
+        async () => {
+          steps.push('mcp:start');
+          await pause(20);
+          steps.push('mcp:end');
+          return 'deleted';
+        },
+        () => ({ detail: 'MCP server "files", tool "delete_all"' }),
+      ),
+      unknownEffects: true,
+    });
+    toolRegistry.register(
+      readTool('read_file', async () => {
+        steps.push('read:start');
+        steps.push('read:end');
+        return 'contents';
+      }),
+    );
+
+    let releaseApproval: () => void = () => undefined;
+    requestApproval.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          steps.push('approval');
+          releaseApproval = () => resolve('approved');
+        }),
+    );
+
+    const round = dispatch.dispatch(
+      [
+        makeToolCall('mcp_delete_all', {}, 'm'),
+        makeToolCall('read_file', { path: 'x.ts' }, 'r'),
+      ],
+      allowed,
+      messages,
+      'mcp-order',
+    );
+    await pause(5);
+    // Parking would START this call while its card waits, and the read that comes
+    // after it would answer from before a write nobody could see coming.
+    expect(steps).not.toContain('read:start');
+    releaseApproval();
+    await round;
+    expect(steps).toEqual(['approval', 'mcp:start', 'mcp:end', 'read:start', 'read:end']);
+    expect(messages.map((message) => message.tool_call_id)).toEqual(['m', 'r']);
+  });
+
+  it('will not put a call whose effects Forge cannot know into a parallel run (BL-046)', async () => {
+    const steps: string[] = [];
+    // `read_file` is on the parallel allowlist and nothing here is gated, so only
+    // the declaration can keep such a call out of a batch where it would run
+    // beside a later read of the same file.
+    toolRegistry.register({
+      ...readTool('read_file', async () => {
+        steps.push('read:start');
+        await pause(20);
+        steps.push('read:end');
+        return 'contents';
+      }),
+      unknownEffects: true,
+    });
+
+    await dispatch.dispatch(
+      [
+        makeToolCall('read_file', { path: 'a.ts' }, 'a'),
+        makeToolCall('read_file', { path: 'b.ts' }, 'b'),
+      ],
+      allowed,
+      messages,
+      'unknown-effects',
+    );
+
+    expect(steps).toEqual(['read:start', 'read:end', 'read:start', 'read:end']);
+  });
+
   it('says who approved a gated call, and how long the wait cost', async () => {
     toolRegistry.register(
       readTool(

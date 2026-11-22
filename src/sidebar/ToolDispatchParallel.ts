@@ -100,6 +100,10 @@ export async function checkParallelReadCall(
     (reg.permission !== 'read' && reg.permission !== 'git-read') ||
     reg.mutation !== undefined ||
     reg.workspaceStateMutation === true ||
+    // A tool that cannot promise it changes nothing never joins a batch, whatever
+    // its tier says: an MCP server's tool is tiered `read` only because Forge
+    // cannot know what it does (BL-046). The same rule guards parking below.
+    reg.unknownEffects === true ||
     reg.untrustedResult === true ||
     reg.reachesOut !== undefined ||
     reg.refuseBeforeApproval !== undefined
@@ -384,7 +388,9 @@ export async function dispatchWithParallelReads(
  * The call must also be one that can actually raise a card, or parking a plain read
  * would run it early for no reason and reorder every existing round.
  * Up to three consecutive web_fetch calls to different hosts may park together;
- * other gated calls keep today's behaviour.
+ * other gated calls keep today's behaviour. A tool that cannot promise it changes
+ * nothing (`unknownEffects`, an MCP server's tool) is never parked whatever its
+ * tier says, because that tier is the bridge's guess and not a declaration.
  */
 function canParkForApproval(
   call: ToolCall,
@@ -395,6 +401,11 @@ function canParkForApproval(
   const reg = toolRegistry.get(call.function.name);
   if (!reg) return false;
   if (reg.mutation !== undefined || reg.workspaceStateMutation === true) return false;
+  // A declared tier is only evidence when the tool declares it. `mcpBridge.ts`
+  // gives an unlisted MCP tool `read` because Forge cannot know what that server
+  // does with the call, so parking one can start a write early and let the next
+  // read in the round answer from before it (BL-046).
+  if (reg.unknownEffects === true) return false;
   if (!READ_ONLY_PERMISSIONS.has(reg.permission)) return false;
   return reg.approval !== undefined || reg.reachesOut !== undefined;
 }
