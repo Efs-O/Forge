@@ -56,6 +56,7 @@
 20. from `src/tools/browser/*.ts` `require('../util/logger')` → TS2307 inside the `typeof import()`: the logger is `../../util/logger`. keep the require lazy, a top-level import drags `vscode` into the browser graph the smoke runs under node
 21. a fire-and-forget `void closeQuietly()` in an abort path → the profile `fs.rm` is still in flight when the test file ends, so `test/support/tempGuard.setup.ts` fails `temp leak: … forge-browser-XXXX`. an exit that finds the close taken must await it, not return at once
 22. `npx vitest run <file>` from a lowercase `n:\vs code apps\Forge` working directory → every file fails with "Vitest failed to find the current suite" (`test/support/tempGuard.setup.ts`). run it from `N:\` with a capital drive letter (`cd "/n/vs code apps/Forge"` in Git Bash)
+23. a row added to `docs/CODING_TIPS.md` that names no repo path and no PC fact → `CodingTipsHome.test.ts` fails `npm run ci`; the shipped table caps each section at 25 rows (`CodingTipsDoc.test.ts`), so merge the row into a neighbour instead of adding a 26th
 
 ## PATHS
 1. `zipfile.ZipFile('test/fixtures/sample.xlsx')` in a scan → FileNotFoundError: that is not where the fixture lives. read the test's `fixture()` helper for the real path first
