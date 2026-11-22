@@ -22,7 +22,7 @@
 1. `node -e '… /regex/ …'` under bash → quoting dies through bash → node → regex. use plain string comparisons, or a script file
 2. `… | tail -3; echo "exit: $?"` → `$?` is tail's code, not the command's; a background job ending `echo "exit: $?"` says 0 whatever ran. read the line the command wrote
 3. an f-string containing `\|` or `\n` inside `{…}` on Python 3.10 → SyntaxError: f-string expression part cannot include a backslash. build the escaped text into a variable first
-4. a Python scan printing `→` or `×` → UnicodeEncodeError: 'charmap' codec can't encode. first line of the scan: `sys.stdout.reconfigure(encoding="utf-8")`
+4. a Python scan printing → or × → UnicodeEncodeError: 'charmap' codec can't encode. first line of the scan: `sys.stdout.reconfigure(encoding="utf-8")`; `cat -A` in Git Bash prints a CRLF file as plain `$`, so it reads as LF and a string match finds 0 — check endings with `open(..., newline='')`
 5. `json.loads` on every line of a session log → one bad line kills the scan halfway. guard each line with `try/except` and keep going
 6. `cd ../other && { … ; } > rel/file.txt; tail rel/file.txt` → the `cd` moves the cwd for every later command, so `tail` reads the wrong folder. give later commands absolute paths
 7. a bash double-quoted string holding backticks → bash runs them as command substitution. wrap the body in single quotes or a quoted heredoc
@@ -43,6 +43,7 @@
 22. a pwsh log name with a space (`> logs/run 1.log`) → a later `Select-String -Path` says the path does not exist. no spaces in log file names
 23. `tail -5 a.log b.log` in Git Bash → `tail: option used in invalid context -- 5`: the old `-N` form takes one file only. write `tail -n 5`
 24. `export PATH="$APPDATA/npm:$PATH"` in Git Bash → node resolves `C:\Program Files\Git\Users\…` → MODULE_NOT_FOUND: MSYS ate the `C:`. write the POSIX form `/c/Users/<name>/AppData/Roaming/npm`
+25. `powershell -Command "… $_ …"` from bash → bash substitutes `$_` first, so PowerShell sees `/usr/bin/bash.Name` → CommandNotFoundException. single-quote the PowerShell body, or name the variable `${PSItem}`
 
 ## GIT
 1. `git commit -- <file> -m "msg"` → git reads `-m` and the message as pathspecs after `--`. put every flag before `--`, the files last; a new file needs `git add` first
@@ -166,3 +167,5 @@
 56. `shell` · `ls test/unit | grep -i -e a -e b` → `exit 134` with `Aborted` and no listing, so the answer is lost not just failed: MSYS job control kills the pipeline. use `find_files` / `grep_search` instead of piping `ls`
 57. `web_fetch` · `remember` or a `gh api` shell call in a scheduled job → `approval key denied by policy`: a job holds only the keys in `approvals.jobs.<job>.allow` in `~/.forge/policy.yaml` (the owner adds them). do not retry; name the denied key in the job's result and work from its own snippets
 58. `edit_file` · an `edits[]` item with only `old_str`, meant to delete a line → refused: `edit 1 needs string old_str and new_str (it has: old_str)`. the delete form is `new_str: ""`
+59. `edit_file` · a path outside the workspace → `Path is outside the workspace ... outside extra_file_roots`, though `read_file` reads it and shell writes it. edit it with a script through `shell`, or ask for the folder in `extra_file_roots`
+60. `monitor_execution` · an execution id shortened from a note or summary → `unknown execution id "exec-92bfe375"`: ids are the full `exec-<8>-<4>-<4>-<4>-<12>`. call `list_executions` for the live one, or read the job's own log file
