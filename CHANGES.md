@@ -1,5 +1,35 @@
 # Forge — Recent Changes
 
+## 0.17.210
+
+**A config edit no longer destroys your security settings.** Running **Forge: Setup Wizard** on a PC
+where the security settings live in `~/.forge/policy.yaml` rewrote that file from a fresh starter, so
+every block the starter never mentions went missing — your always-allow approvals, your `engines`,
+your `mcp_servers`, Telegram remote — and the next start could refuse to load if a model named an
+engine that had just disappeared. A whole-object write now keeps every block it was not given, and the
+wizard's own pop-up says which blocks it replaces. The same pass deleted a file's own `x_shared:`
+anchor block, and where another setting pointed at one of those anchors **Forge: Add Models** failed
+with a YAML error instead of adding a model.
+
+**The model benchmark stops asking you to reload the window.** The Qwen lifecycle commands talk to
+Forge's control server, and since 0.17.207 those routes have demanded the bearer token from
+`control-server.json` — which the benchmark never sent. An unload answered `401 missing or stale
+token` and told you to reload the window, and the check that keeps a second copy of a 13 GB model off a
+GPU the chat node already holds had quietly stopped working, because a refused answer was read as
+"nothing is loaded". Both now carry the token, a refusal stops the run instead of being read as an
+answer, and the unload command it prints reads the token from that file when you run it — the token is
+no longer printed into the benchmark's own logs.
+
+**An MCP tool no longer runs early.** A bridged tool you have not listed under `tool_permissions` asks
+before each call, and asking used to mean *started*: the call was launched while its card waited, so a
+`read_file` or `grep_search` later in the same round could answer before that tool had written
+anything. A bridged tool now says out loud that Forge cannot know what it changes, and nothing runs it
+early. The card that tells you to list a tool also names **Developer: Reload Window**, because that
+listing is read once when Forge starts — editing it without reloading left the same card coming back.
+
+Ships the five confirmed rows of the 2026-11-22 hunt: BL-048 and BL-049 (`bcd850bf`), BL-045
+(`fae20392`), BL-046 and BL-047 (`81b3c1d2`).
+
 ## 0.17.209
 
 **Animation previews capture the exact moment you ask for.** `render_html_to_image` in preview mode
