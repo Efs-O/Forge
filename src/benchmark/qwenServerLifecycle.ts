@@ -3,6 +3,10 @@ import { parse as parseYaml } from 'yaml';
 import { ForgeConfigSchema } from '../config/schema';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import { DirectBackend } from '../backend/DirectBackend';
+import {
+  readControlServerToken,
+  controlServerRegistryPath,
+} from '../backend/ControlServerRegistry';
 import { resolveRequestModel, resolveSpawnModel } from '../config/ConfigResolver';
 import { inspectQwenEndpoint, normalizeLlamaBaseUrl, type QwenEndpointFacts } from './preflight';
 
@@ -54,13 +58,26 @@ async function controlRequest(
   route: 'ensure' | 'release' | 'unload',
   model: string,
 ): Promise<Record<string, unknown>> {
+  const token = readControlServerToken();
   const response = await fetch(`${baseUrl}/${route}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify({ model }),
   });
   const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!response.ok) throw new Error(`Forge /${route} failed: ${JSON.stringify(body)}`);
+  if (!response.ok) {
+    throw new Error(
+      `Forge /${route} failed: ${JSON.stringify(body)}` +
+        (response.status === 401
+          ? token === null
+            ? ' — and there is no control-server.json to read the bearer token from, so start Forge first'
+            : ' — the token in control-server.json is stale: restart Forge.'
+          : ''),
+    );
+  }
   return body;
 }
 
@@ -78,13 +95,30 @@ interface ChatNodeEntry {
 
 /** Read the chat node's catalog entry for the Qwen model from the control
  *  server. Returns null when the control server is unreachable or the model is
- *  not in the catalog — in which case there is nothing to contend with. */
+ *  not in the catalog — in which case there is nothing to contend with. A refused
+ *  request is the opposite case: the server is there and said no, so the caller
+ *  must not read `null` as "idle" and start a second server beside a resident
+ *  model (BL-045). */
 async function fetchChatNodeEntry(
   baseUrl: string,
   modelName: string,
 ): Promise<ChatNodeEntry | null> {
   try {
-    const response = await fetch(`${baseUrl}/models`, { signal: AbortSignal.timeout(3_000) });
+    const token = readControlServerToken();
+    const response = await fetch(`${baseUrl}/models`, {
+      signal: AbortSignal.timeout(3_000),
+      ...(token ? { headers: { authorization: `Bearer ${token}` } } : {}),
+    });
+    if (response.status === 401 || response.status === 403) {
+      throw new QwenArmUnavailableError(
+        `The control server refused ${baseUrl}/models (${String(response.status)}), so the ` +
+          `benchmark cannot tell whether the chat node is holding the model in VRAM. ` +
+          (token === null
+            ? 'There is no control-server.json to read the bearer token from: start Forge first.'
+            : 'The token in control-server.json is stale: restart Forge.') +
+          ' Refusing to start a minimal server that could share the GPU with a resident model.',
+      );
+    }
     if (!response.ok) return null;
     const body = (await response.json().catch(() => ({}))) as {
       models?: Array<{ name: string; loaded: boolean; holds: number }>;
@@ -94,7 +128,8 @@ async function fetchChatNodeEntry(
     if (exact) return exact;
     // Fall back to any loaded local Qwen model when no exact name was given.
     return candidates.find((m) => m.loaded && /qwen/iu.test(m.name)) ?? null;
-  } catch {
+  } catch (error) {
+    if (error instanceof QwenArmUnavailableError) throw error;
     return null;
   }
 }
@@ -131,10 +166,19 @@ export async function checkOrUnloadChatNode(
     );
   }
   if (!forceUnload) {
+    const registryPath = controlServerRegistryPath();
+    // The token itself is never printed: this text reaches `recordSkippedArm`, so
+    // it lands in the bench run directory on disk and in CI logs. The command
+    // reads it out of the registry file when it runs (review, 2026-11-22).
+    const readToken = registryPath
+      ? `const t=JSON.parse(require('fs').readFileSync('${registryPath.split('\\').join('/')}','utf8')).token;`
+      : '';
     throw new QwenArmUnavailableError(
       `Cannot start the minimal Qwen server: the Forge chat node has "${entry.name}" loaded in ` +
         `VRAM (holds=0). Unload it first:\n` +
-        `  node -e "fetch('${base}/unload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({model:'${entry.name}'})}).then(r=>r.json()).then(console.log)"\n` +
+        `  node -e "${readToken}fetch('${base}/unload',{method:'POST',headers:{'content-type':'application/json'` +
+        (registryPath ? `,'authorization':'Bearer '+t` : '') +
+        `},body:JSON.stringify({model:'${entry.name}'})}).then(r=>r.json()).then(console.log)"\n` +
         `Or re-run with --unload-chat-node to let the benchmark do this automatically.`,
     );
   }

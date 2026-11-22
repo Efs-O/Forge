@@ -32,6 +32,30 @@ export function controlServerRegistryPath(
   return home ? path.join(home, '.forge', 'control-server.json') : null;
 }
 
+/**
+ * The bearer token a running window published, or null when no record can be
+ * read. Every model route demands it (`ControlServer.ts` `MODEL_ROUTES`) and
+ * answers 401 without it, so each external consumer asks here instead of
+ * re-implementing the path and the shape — which is where the benchmark
+ * originally lost them (BL-045). The token is regenerated on every server start,
+ * so callers read it per request rather than caching it.
+ *
+ * `filePath` defaults to the machine-wide record, resolved at call time so a
+ * caller (or a test) that moves `LOCALAPPDATA`/`HOME` is not pinned to whatever
+ * the environment said when this module was first imported.
+ */
+export function readControlServerToken(
+  filePath = controlServerRegistryPath() ?? '',
+): string | null {
+  if (!filePath) return null;
+  try {
+    const record = JSON.parse(fs.readFileSync(filePath, 'utf8')) as { token?: unknown };
+    return typeof record.token === 'string' && record.token.length > 0 ? record.token : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Atomic localhost control-server discovery record for external Forge clients. */
 export class ControlServerRegistry implements IControlServerRegistry {
   constructor(private readonly filePath: string) {}
