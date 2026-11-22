@@ -12,11 +12,26 @@ import { Agent, fetch as undiciFetch } from 'undici';
  */
 export const LOCAL_HEADERS_TIMEOUT_MS = 30 * 60_000;
 
+/**
+ * How long a streaming local response may go quiet between two body chunks.
+ *
+ * undici's default is 300 s, and a local server can be silent that long in
+ * the middle of an answer: Maya can emit a large tool call in one piece (a
+ * few thousand tokens at ~14 t/s is past 300 s), and some engines re-prefill
+ * a long prompt mid-answer. Hitting the default ended the turn with
+ * `terminated: Body Timeout Error (UND_ERR_BODY_TIMEOUT)`. The caller's
+ * abort signal still ends a stuck stream at any time.
+ */
+export const LOCAL_BODY_TIMEOUT_MS = 30 * 60_000;
+
 let agent: Agent | undefined;
 
 /** fetch for local llama.cpp chat requests; one Agent is shared by all of them. */
 export function localLlamaFetch(url: string, init: RequestInit): Promise<Response> {
-  agent ??= new Agent({ headersTimeout: LOCAL_HEADERS_TIMEOUT_MS });
+  agent ??= new Agent({
+    headersTimeout: LOCAL_HEADERS_TIMEOUT_MS,
+    bodyTimeout: LOCAL_BODY_TIMEOUT_MS,
+  });
   // undici types its RequestInit/Response separately from the DOM lib's; at
   // runtime they are the same web-standard shapes Node's own fetch uses.
   return undiciFetch(url, {
