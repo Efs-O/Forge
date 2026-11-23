@@ -6,6 +6,7 @@ import {
   hiddenLazyToolNames,
   isLazyGroupActive,
   isLazyGroupAvailable,
+  isListedLazyGroup,
   isSchemasInResult,
   lazyGroupForTool,
   lazyGroupNames,
@@ -15,6 +16,7 @@ import {
   resetLazyToolGroups,
   resultSchemaToolNames,
   setSchemasInResult,
+  setTextCallCatalog,
 } from '../../src/tools/lazyToolGroups';
 import { makeLoadToolGroupTool } from '../../src/tools/toolGroupTools';
 import { mcpToolToRegisteredTool } from '../../src/tools/mcpBridge';
@@ -555,6 +557,130 @@ describe('lazy tool groups', () => {
       new Set(['edit_notebook_cell', 'read_notebook']),
     );
     expect(modelFacingTools(registry, 'conv-a')).not.toContain('read_notebook');
+  });
+
+  // The owner turns `schemas_in_result` on mid-chat. A group this chat already
+  // lists natively (loaded while the flag was off) must stay listed when the
+  // model loads it again: moving it into the result-schema set would take away
+  // tools the model has been calling, and this turn's catalog holds only
+  // unlisted tools, so its schemas would come back as "not allowed in this chat".
+  it('keeps a group already listed when it is loaded again under schemas_in_result', async () => {
+    const registry = new ToolRegistry();
+    registry.register(makeLoadToolGroupTool());
+    registerNotebook(registry);
+    const first = await registry.dispatch(
+      'load_tool_group',
+      { group: 'notebook' },
+      ALL_PERMISSIONS,
+      {
+        beforeMutate: () => undefined,
+        conversationId: 'conv-a',
+      },
+    );
+    expect(first).toContain('They are listed on the next step.');
+    expect(isListedLazyGroup('conv-a', 'notebook')).toBe(true);
+    expect(modelFacingTools(registry, 'conv-a')).toEqual(
+      expect.arrayContaining(['read_notebook', 'edit_notebook_cell']),
+    );
+    // The flag turns on. The model, whose list still shows the tools, loads the group again.
+    setSchemasInResult('conv-a', true);
+    const second = await registry.dispatch(
+      'load_tool_group',
+      { group: 'notebook' },
+      ALL_PERMISSIONS,
+      {
+        beforeMutate: () => undefined,
+        conversationId: 'conv-a',
+      },
+    );
+    // Nothing the model had is hidden, and nothing moved into the result-schema set.
+    expect(hiddenLazyToolNames('conv-a')).toEqual(new Set());
+    expect(resultSchemaToolNames('conv-a')).toEqual(new Set());
+    expect(isListedLazyGroup('conv-a', 'notebook')).toBe(true);
+    expect(modelFacingTools(registry, 'conv-a')).toEqual(
+      expect.arrayContaining(['read_notebook', 'edit_notebook_cell']),
+    );
+    // Normal-mode text, with no line naming a tool the model can already call.
+    expect(second).toBe(
+      'notebook tools enabled for this conversation: edit_notebook_cell, read_notebook. ' +
+        'They are listed on the next step.',
+    );
+    expect(second).not.toContain('Not allowed in this chat');
+  });
+
+  // The eager-by-default groups are never in the active-group map, so the
+  // already-listed check cannot stop at activation: `memory` is in every chat's
+  // list from the first request. (2026-11-23 bug hunt: the result the model read
+  // printed an empty schema list and named all four memory tools as refused.)
+  it('leaves an eager-by-default group listed when it is loaded under schemas_in_result', async () => {
+    const registry = new ToolRegistry();
+    registry.register(makeLoadToolGroupTool());
+    for (const name of ['remember', 'recall', 'list_memories', 'forget']) {
+      registry.register({
+        definition: {
+          type: 'function',
+          function: { name, description: '', parameters: { type: 'object' } },
+        },
+        permission: 'read',
+        handler: async () => 'ok',
+      });
+      recordNativeLazyTool(name);
+    }
+    // What ModelTurn stores: the tools this request does NOT list. `memory` is
+    // eager, so none of its members is in the catalog schemas are printed from.
+    setTextCallCatalog('conv-a', [
+      {
+        type: 'function',
+        function: { name: 'read_notebook', description: '', parameters: { type: 'object' } },
+      },
+    ]);
+    setSchemasInResult('conv-a', true);
+    const result = await registry.dispatch(
+      'load_tool_group',
+      { group: 'memory' },
+      ALL_PERMISSIONS,
+      {
+        beforeMutate: () => undefined,
+        conversationId: 'conv-a',
+      },
+    );
+    expect(isListedLazyGroup('conv-a', 'memory')).toBe(true);
+    expect(hiddenLazyToolNames('conv-a')).toEqual(new Set());
+    expect(resultSchemaToolNames('conv-a')).toEqual(new Set());
+    expect(result).toBe(
+      'memory tools enabled for this conversation: forget, list_memories, recall, remember. ' +
+        'They are listed on the next step.',
+    );
+    expect(result).not.toContain('Not allowed in this chat');
+  });
+
+  // A group the model config makes eager (`tool_groups.eager: [notebook]`) is
+  // invisible to this module's own hidden-name set, so the turn's catalog of
+  // unlisted tools is what proves its members are already in the list.
+  it('treats a config-eager group as listed, from the turn catalog', async () => {
+    const registry = new ToolRegistry();
+    registry.register(makeLoadToolGroupTool());
+    registerNotebook(registry);
+    setTextCallCatalog('conv-a', [
+      {
+        type: 'function',
+        function: { name: 'some_other_tool', description: '', parameters: { type: 'object' } },
+      },
+    ]);
+    setSchemasInResult('conv-a', true);
+    expect(isListedLazyGroup('conv-a', 'notebook')).toBe(true);
+    const result = await registry.dispatch(
+      'load_tool_group',
+      { group: 'notebook' },
+      ALL_PERMISSIONS,
+      {
+        beforeMutate: () => undefined,
+        conversationId: 'conv-a',
+      },
+    );
+    expect(resultSchemaToolNames('conv-a')).toEqual(new Set());
+    expect(result).toContain('They are listed on the next step.');
+    expect(result).not.toContain('Not allowed in this chat');
   });
 
   it('promotes a result-schema group into the list when the flag goes off', () => {

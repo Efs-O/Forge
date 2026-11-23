@@ -247,6 +247,30 @@ export function isLazyGroupActive(conversationId: string, group: string): boolea
   return activeByConversation.get(conversationId)?.has(group) === true;
 }
 
+/**
+ * A group whose tools this conversation's tool list already holds, so loading it
+ * again must not move it into the result-schema set: that hides tools the model
+ * has been calling, and this turn's text-call catalog holds only unlisted tools,
+ * so every member would come back named "not allowed in this chat".
+ *
+ * Two views, each with what it can prove. The hidden-name set covers the groups
+ * this module knows are always listed: eager by default, or activated while the
+ * flag was off. The turn's own catalog is the authoritative list of what the
+ * request does NOT hold, so it also covers a group made eager by
+ * `tool_groups.eager` or named in `tools:` -- config this module cannot see.
+ * An empty catalog means no turn has recorded one yet, so nothing is claimed.
+ */
+export function isListedLazyGroup(conversationId: string, group: string): boolean {
+  const members = lazyGroupMembers(group);
+  if (members.length === 0) return false;
+  const hidden = hiddenLazyToolNames(conversationId);
+  if (members.some((name) => !hidden.has(name))) return true;
+  const catalog = textCallCatalog(conversationId);
+  if (catalog.length === 0) return false;
+  const unlisted = new Set(catalog.map((definition) => definition.function.name));
+  return !members.some((name) => unlisted.has(name));
+}
+
 /** Clears loaded schemas when their conversation is cleared or deleted. */
 export function deactivateLazyGroups(conversationId: string): void {
   activeByConversation.delete(conversationId);

@@ -40,7 +40,7 @@
 3. a fake-timer test around a sleep → use `sleepOrThrow` from `src/util/abortableSleep.ts`: fake timers patch it
 4. a fact value for `src/agentBus/agentNote.md` written with its own backticks → the template already wraps `__FORGE_CONFIG__` in backticks, so the line renders doubled ones. pass the bare value
 5. a `vi.hoisted` `fs.mkdtempSync(os.tmpdir())` in a test file → teardown fails: `temp leak: <file> left 1 entry in os.tmpdir()`. `test/support/tempGuard.setup.ts` narrows tmpdir per file, so rm it in an `afterAll`
-6. a `toContain` pin of `AI_SETUP.md` prose retyped from the brief with a `’` apostrophe → fails: the doc uses ASCII `'`; only its dashes are `—`. copy the sentence from the doc
+6. a `toContain`/`toBe` pin retyped instead of copied — `AI_SETUP.md` prose (ASCII `'`, dashes `—`, not `’`) or the `load_tool_group` enabled text in `src/tools/toolGroupTools.ts` (members in `lazyGroupMembers` order, not registration order) → copy the string from the doc or from the failure
 7. a new top-level `config.yaml` key → `test/unit/ModelReferences.test.ts` fails until it is in `NON_MODEL_REF_FIELDS`, and `config.example.yaml` needs a commented block for it
 8. a test reading a media job's `job.json` after `status()` answers `done` → the file still holds `running`: `finish()` in `src/media/remoteMediaJobs.ts` writes without awaiting. poll the file until the field lands
 9. a gate setting added to `.github/workflows/ci.yml` only → `publish.yml` runs the same `npm run ci` without it and fails on a tree CI passed. grep every workflow that runs the gate and copy the env

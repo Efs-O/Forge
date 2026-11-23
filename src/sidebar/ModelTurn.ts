@@ -38,8 +38,11 @@ import {
 } from './turnContext';
 import { pinForgeInstructions } from './forgeInstructionsPin';
 import { pinCodingTips } from './codingTipsPin';
-import { assertTextCallsReadable } from './turnToolDefinitions';
-import { buildTextCallDefinitions, buildToolDefinitions } from './turnToolDefinitions';
+import {
+  assertTextCallsReadable,
+  buildTextCallDefinitions,
+  buildToolDefinitions,
+} from './turnToolDefinitions';
 import { formatCompactionResumeNote } from './compactionTypes';
 import { terminalCommandTracker } from '../tools/TerminalCommandTracker';
 import { toolOutputLimits } from '../tools/toolOutputLimits';
@@ -204,19 +207,16 @@ export async function runModelTurn(
     isVisionModel ? undefined : buildVisionRefusals(ctx.toolRegistry, model.name),
     unattended,
   );
-  // Config-derived, never per round: a per-round value would change the tool
-  // list mid-turn and cost a cold prefill each time.
+  // Config-derived, never per round: that would change the list mid-turn, cold prefill each time.
   const provider = model.provider ?? 'llama.cpp';
   const writeLimit = writeChunkLimit(model, config.llama_server, config.auto_compact, provider);
   const outputLimits = toolOutputLimits(model, config.llama_server, config.auto_compact, provider);
-  // Rebuilt on every round rather than snapshotted once per turn: a lazy tool
-  // group activates mid-turn via `load_tool_group`, and its schemas have to
-  // reach the request that follows. Both lists come from `turnToolDefinitions`.
+  // Rebuilt on every round, not snapshotted once: `load_tool_group` activates a lazy
+  // group mid-turn and its schemas must reach the request that follows.
   const getToolDefinitions = () =>
     buildToolDefinitions(conv, model, ctx, allowed, unattendedRefusals, budget);
   const getTextCallDefinitions = () =>
     buildTextCallDefinitions(conv, model, ctx, allowed, unattendedRefusals, budget);
-  // This turn's `schemas_in_result`, and the catalog `load_tool_group` prints from.
   assertTextCallsReadable(model);
   setSchemasInResult(conv.id, model.tool_groups?.schemas_in_result === true);
   setTextCallCatalog(conv.id, getTextCallDefinitions());

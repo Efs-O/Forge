@@ -5,6 +5,7 @@ import {
   activateLazyGroup,
   hasAvailableLazyGroup,
   isLazyGroupAvailable,
+  isListedLazyGroup,
   isSchemasInResult,
   lazyGroupMembers,
   lazyGroupNames,
@@ -191,7 +192,12 @@ export function makeLoadToolGroupTool(
             'Answer from the workspace and the conversation instead.',
         );
       }
-      if (isSchemasInResult(conversationId)) {
+      // A group this chat's tool list already holds -- loaded while the flag was
+      // off, or eager by default or through `tool_groups.eager` -- stays listed.
+      // Adding it to the result-schema set would hide tools the model has been
+      // calling, and this turn's catalog holds only unlisted tools, so its
+      // schemas would come back named as "not allowed in this chat".
+      if (isSchemasInResult(conversationId) && !isListedLazyGroup(conversationId, group)) {
         activateLazyGroup(conversationId, group, { schemasInResult: true });
         return withResultSchemas(group, offered, notOffered, conversationId);
       }
