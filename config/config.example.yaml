@@ -524,8 +524,6 @@ models:
         - "8"
         - "--checkpoint-min-step"
         - "1024"
-    sampling:
-      preserve_thinking: true
     group: llamacpp-qwen3
 
 
@@ -637,8 +635,6 @@ models:
         - "8"
         - "--checkpoint-min-step"
         - "1024"
-    sampling:
-      preserve_thinking: true
     group: llamacpp-qwen3
 
 
@@ -680,8 +676,6 @@ models:
         - "--checkpoint-min-step"
         - "1024"
          
-    sampling:
-      preserve_thinking: true
     group: llamacpp-qwen4exp
 
   # EXPERIMENTAL: shared MTP head for Flash-Next. The draft must sit on the last
@@ -743,8 +737,6 @@ models:
         - "8"
         - "--checkpoint-min-step"
         - "1024"
-    sampling:
-      preserve_thinking: true
     group: llamacpp-qwen4exp
 
   - name: glm-5.3-flash-ud-iq1s-no-vision
@@ -778,8 +770,6 @@ models:
         - "8"
         - "--checkpoint-min-step"
         - "1024"
-    sampling:
-      preserve_thinking: true
     group: llamacpp-glm5
 
 
@@ -887,10 +877,8 @@ models:
     # its default is xhigh). medium matched xhigh's result in less time; low
     # thought more, not less, on a coding task.
     reasoning_effort: medium
-    # Send the current task's thinking back each tool round (as reasoning_content).
-    # Without it the model forgets what it concluded a round ago and re-investigates.
-    sampling:
-      preserve_thinking: true
+    # Forge sends earlier thinking back by default (as reasoning_content). Set
+    # sampling.preserve_thinking: false on a model whose template mishandles it.
 
   - name: claude-code
     provider: cli

@@ -4,6 +4,7 @@ import { mergeSampling } from '../llm/SamplingMerge';
 import type { ChatCompletionRequest, ChatMessage, ToolDefinition } from '../llm/types';
 import { withFallbackToolInstructions } from '../tools/FallbackToolPrompt';
 import { stripTools } from '../tools/StripTools';
+import { templatePreserveThinking } from './preserveThinking';
 import { applyOutputCap } from './truncationRecovery';
 
 /**
@@ -40,6 +41,7 @@ export function buildRoundRequest(input: RoundRequestInput): RoundRequest {
   const fallbackMessages =
     toolDefinitions.length > 0 ? withFallbackToolInstructions(prepared, toolDefinitions) : prepared;
   const nativeDefinitions = input.nativeTools && !input.stripAllTools ? toolDefinitions : [];
+  const preserveThinkingKwarg = templatePreserveThinking(model);
   const base: ChatCompletionRequest = {
     model: model.name,
     messages: nativeDefinitions.length > 0 ? prepared : fallbackMessages,
@@ -53,8 +55,8 @@ export function buildRoundRequest(input: RoundRequestInput): RoundRequest {
     ...(input.canUseThinkingKwargs && (model.think !== undefined || suppressThinking)
       ? {
           chat_template_kwargs: {
-            ...(model.sampling?.preserve_thinking !== undefined
-              ? { preserve_thinking: model.sampling.preserve_thinking }
+            ...(preserveThinkingKwarg !== undefined
+              ? { preserve_thinking: preserveThinkingKwarg }
               : {}),
             enable_thinking: suppressThinking ? false : model.think,
           },

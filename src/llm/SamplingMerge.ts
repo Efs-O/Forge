@@ -1,3 +1,4 @@
+import { templatePreserveThinking } from '../agent/preserveThinking';
 import type { ChatCompletionRequest } from './types';
 import type { ModelConfig } from '../config/types';
 
@@ -21,7 +22,16 @@ function modelSamplingOverrides(
   model: ModelConfig | undefined,
   opts: MergeSamplingOptions,
 ): Partial<ChatCompletionRequest> {
-  if (!model?.sampling) return {};
+  // The thinking kwarg follows the model and the new default, not its `sampling`
+  // block: a model that has no sampling block still gets it.
+  const allowPreserveThinking = opts.allowPreserveThinking ?? true;
+  const preserveThinkingKwarg =
+    model && allowPreserveThinking ? templatePreserveThinking(model) : undefined;
+  if (!model?.sampling) {
+    return preserveThinkingKwarg === undefined
+      ? {}
+      : { chat_template_kwargs: { preserve_thinking: preserveThinkingKwarg } };
+  }
 
   const {
     temperature,
@@ -36,12 +46,10 @@ function modelSamplingOverrides(
     repeat_penalty,
     repeat_last_n,
     stop,
-    preserve_thinking,
   } = model.sampling;
 
-  const allowPreserveThinking = opts.allowPreserveThinking ?? true;
   const chatTemplateKwargs =
-    !allowPreserveThinking || preserve_thinking === undefined ? undefined : { preserve_thinking };
+    preserveThinkingKwarg === undefined ? undefined : { preserve_thinking: preserveThinkingKwarg };
 
   return {
     ...(temperature !== undefined ? { temperature } : {}),

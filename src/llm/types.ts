@@ -33,7 +33,7 @@ export interface ChatMessage {
   reasoning?: string;
   /**
    * Wire-only copy of `reasoning`, set on a model-facing copy for the current
-   * task's assistant turns when a llama.cpp model has `preserve_thinking: true`.
+   * task's assistant turns when `preservesThinking(model)` is true.
    * Never set on the stored transcript.
    */
   reasoning_content?: string;

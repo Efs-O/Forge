@@ -37,4 +37,25 @@ describe('mergeSampling', () => {
 
     expect(mergeSampling(baseRequest, qwen)).toMatchObject(qwen.sampling!);
   });
+
+  // Preserving thinking is the default now (2026-11-24), so a model with no
+  // `sampling` block at all still gets the kwarg: the early return that used to
+  // skip it was the whole bug for every model entry that set no sampling.
+  it('sends the thinking kwarg for a model with no sampling block, when kwargs are allowed', () => {
+    expect(
+      mergeSampling({ messages: [] } as never, { name: 'q' } as never, {
+        allowPreserveThinking: true,
+      }).chat_template_kwargs,
+    ).toEqual({ preserve_thinking: true });
+    expect(
+      mergeSampling({ messages: [] } as never, { name: 'q' } as never, {
+        allowPreserveThinking: false,
+      }).chat_template_kwargs,
+    ).toBeUndefined();
+    // No model, no kwarg.
+    expect(
+      mergeSampling({ messages: [] } as never, undefined, { allowPreserveThinking: true })
+        .chat_template_kwargs,
+    ).toBeUndefined();
+  });
 });

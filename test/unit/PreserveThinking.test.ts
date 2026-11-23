@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { buildRoundRequest } from '../../src/agent/buildRoundRequest';
 import {
   attachReasoning,
   dropOldestReasoning,
   preservesThinking,
+  templatePreserveThinking,
 } from '../../src/agent/preserveThinking';
 import { prepareToolResultContext } from '../../src/agent/toolResultContext';
 import { streamChatCompletion } from '../../src/llm/OpenAIClient';
@@ -45,16 +47,94 @@ describe('preserve_thinking', () => {
     for (const cloud of ['openrouter', 'openai', 'ollama']) expect(at(cloud, true)).toBe(false);
   });
 
-  it('is on only for a llama.cpp model with the flag explicitly true', () => {
+  it('is on by default for a llama.cpp model, off only when the flag is false', () => {
     expect(preservesThinking({ name: 'q', sampling: { preserve_thinking: true } } as never)).toBe(true);
     expect(
       preservesThinking({ name: 'q', provider: 'llama.cpp', sampling: { preserve_thinking: true } } as never),
     ).toBe(true);
-    expect(preservesThinking({ name: 'q' } as never)).toBe(false);
+    expect(preservesThinking({ name: 'q' } as never)).toBe(true);
     expect(preservesThinking({ name: 'q', sampling: { preserve_thinking: false } } as never)).toBe(false);
     expect(
       preservesThinking({ name: 'q', provider: 'openrouter', sampling: { preserve_thinking: true } } as never),
     ).toBe(false);
+  });
+
+  it('is on for an openai-compatible endpoint on this machine, off for a remote one', () => {
+    const at = (endpoint: string | undefined, flag?: boolean) =>
+      preservesThinking({
+        name: 'q',
+        provider: 'openai-compatible',
+        ...(endpoint ? { endpoint } : {}),
+        sampling: { preserve_thinking: flag },
+      } as never);
+    // Strata and Maya are served on this machine.
+    expect(at('http://127.0.0.1:8091')).toBe(true);
+    expect(at('http://localhost:8070')).toBe(true);
+    // A strict API rejects `reasoning_content` on an input message, so a remote
+    // endpoint stays opt-in: `true` still sends it.
+    expect(at('https://api.cerebras.ai')).toBe(false);
+    expect(at('https://api.cerebras.ai', true)).toBe(true);
+    // No host to call loopback.
+    expect(at(undefined)).toBe(false);
+    // A named cloud provider stays off with or without the flag.
+    for (const cloud of ['openrouter', 'openai', 'ollama']) {
+      expect(preservesThinking({ name: 'q', provider: cloud } as never)).toBe(false);
+      expect(
+        preservesThinking({
+          name: 'q',
+          provider: cloud,
+          sampling: { preserve_thinking: true },
+        } as never),
+      ).toBe(false);
+    }
+  });
+
+  it('sends the template kwarg by default for a local model, and the flag for any provider', () => {
+    expect(templatePreserveThinking({ name: 'q' } as never)).toBe(true);
+    expect(
+      templatePreserveThinking({ name: 'q', sampling: { preserve_thinking: false } } as never),
+    ).toBe(false);
+    expect(templatePreserveThinking({ name: 'q', provider: 'openrouter' } as never)).toBeUndefined();
+    expect(
+      templatePreserveThinking({
+        name: 'q',
+        provider: 'openrouter',
+        sampling: { preserve_thinking: true },
+      } as never),
+    ).toBe(true);
+    expect(
+      templatePreserveThinking({
+        name: 'q',
+        provider: 'openai-compatible',
+        endpoint: 'https://api.cerebras.ai',
+      } as never),
+    ).toBeUndefined();
+    expect(
+      templatePreserveThinking({
+        name: 'q',
+        provider: 'openai-compatible',
+        endpoint: 'http://127.0.0.1:8091',
+      } as never),
+    ).toBe(true);
+  });
+
+  it('puts the default kwarg beside enable_thinking in a built round request', () => {
+    const built = buildRoundRequest({
+      model: { name: 'q', think: true } as never,
+      prepared: [{ role: 'user', content: 'go' }],
+      toolDefinitions: [],
+      nativeTools: undefined,
+      stripAllTools: undefined,
+      includeUsage: undefined,
+      maxOutputTokens: undefined,
+      canUseThinkingKwargs: true,
+      suppressThinking: false,
+      outputRoom: undefined,
+    });
+    expect(built.request.chat_template_kwargs).toEqual({
+      preserve_thinking: true,
+      enable_thinking: true,
+    });
   });
 
   it('sends back every task, verbatim, but never blank thinking', () => {

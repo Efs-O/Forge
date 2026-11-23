@@ -6,6 +6,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { templatePreserveThinking } from '../agent/preserveThinking';
 import type { ForgeConfig, ModelConfig } from '../config/types';
 import type { RuntimeModelCapabilities } from '../backend/ModelCapabilities';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
@@ -20,7 +21,7 @@ export function canUseThinkingKwargs(
 ): boolean {
   if (!model) return false;
   if (runtimeCaps?.likelySupportsThinking === false) return false;
-  return model.think !== undefined || model.sampling?.preserve_thinking !== undefined;
+  return model.think !== undefined || templatePreserveThinking(model) !== undefined;
 }
 
 /**
