@@ -5,6 +5,9 @@ declare function acquireVsCodeApi(): { postMessage(message: { type: 'ready' }): 
 export const MONITOR_CREDIT =
   "Card layout inspired by Strata's Monitor page (github.com/Niko1221/Strata, MIT).";
 
+export const UPS_SETUP_HINT =
+  'No UPS connected. To show one here, ask your AI agent to follow Step 12b of AI_SETUP.md (run Forge: Set Up With an AI Agent).';
+
 export function App(): React.JSX.Element {
   const [snapshot, setSnapshot] = useState<MonitorSnapshot>();
   useEffect(() => {
@@ -91,10 +94,12 @@ export function App(): React.JSX.Element {
             </div>
           </section>
         ) : null}
-        {snapshot?.ups ? (
+        {snapshot ? (
           <section className="monitor-card">
             <h2>UPS</h2>
-            {snapshot.ups.error ? (
+            {!snapshot.ups ? (
+              <p>{UPS_SETUP_HINT}</p>
+            ) : snapshot.ups.error ? (
               <p>{snapshot.ups.error}</p>
             ) : (
               Object.entries(snapshot.ups.values).map(([key, value]) => (

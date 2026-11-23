@@ -7,7 +7,7 @@ import { ForgeConfigSchema } from '../../src/config/schema';
 import { ModelConfigSchema } from '../../src/config/modelSchema';
 import { readLlamaStats } from '../../src/monitor/llamaServerStats';
 import { readFileSync } from 'fs';
-import { MONITOR_CREDIT } from '../../webview-ui/src/monitor/App';
+import { MONITOR_CREDIT, UPS_SETUP_HINT } from '../../webview-ui/src/monitor/App';
 import { noStatsReaderMessage } from '../../src/monitor/monitorTypes';
 
 const servers: net.Server[] = [];
@@ -113,6 +113,9 @@ describe('Monitor readers', () => {
     expect(result.error).toBe("Speed needs llama-server's --metrics flag.");
     expect(noStatsReaderMessage('Strata demo')).toBe(
       'No stats reader set for "Strata demo": add stats: llama or stats: strata to its engine in ~/.forge/policy.yaml.',
+    );
+    expect(UPS_SETUP_HINT).toBe(
+      'No UPS connected. To show one here, ask your AI agent to follow Step 12b of AI_SETUP.md (run Forge: Set Up With an AI Agent).',
     );
     expect(MONITOR_CREDIT).toBe(
       "Card layout inspired by Strata's Monitor page (github.com/Niko1221/Strata, MIT).",

@@ -972,9 +972,10 @@ the rest, so Step 6's reload loads it.
 3. Start the engine the way its README says and note the local address it
    serves. Add one model to `config.yaml` against that address, following the
    commented Strata example in `config/config.example.yaml`
-   (`provider: openai-compatible`, `endpoint`, `model`, `num_ctx`). Set
-   `stats: strata` on its engine in `~/.forge/policy.yaml` to show readings in
-   `Forge: Open Monitor`. Forge
+   (`provider: openai-compatible`, `endpoint`, `model`, `num_ctx`). To show
+   its readings in `Forge: Open Monitor`, its `engines:` entry needs
+   `stats: strata`: add it while the entry is still in `config.yaml`; once
+   Step 14 has moved it to `~/.forge/policy.yaml`, tell the user to add it. Forge
    does not start this engine: tell the user to start it before using the
    model. Forge can start and stop it through an `engines:` entry
    (`start_command` / `stop_command`, see `config/config.example.yaml`); that
@@ -983,6 +984,23 @@ the rest, so Step 6's reload loads it.
 
 **Check:** the engine's `GET /v1/models` lists the model, and a one-line chat
 with the new model in Forge answers.
+
+## Step 12b — Optional: UPS on the monitor
+
+Run this section only when the user names it (the UPS card in
+`Forge: Open Monitor` points here). Forge reads a UPS through a NUT (Network
+UPS Tools) server on this machine; it never reads one on another host.
+
+1. Ask whether a UPS is connected to this PC by USB or serial. If not, stop
+   here: there is nothing to read.
+2. If `upsc -l` already lists a UPS, use that name. Otherwise install NUT the
+   way networkupstools.org documents for this OS (Linux: the distribution's
+   `nut` package), configure the UPS's driver, and start the server. Installing
+   and configuring a system service is the user's choice: ask before each step.
+3. Add to `config.yaml`: `monitor: { ups: "<ups name>@127.0.0.1:3493" }`.
+
+**Check:** `upsc <ups name>@127.0.0.1` prints `ups.status`, and the UPS card
+in `Forge: Open Monitor` shows readings instead of the setup line.
 
 ## Step 13 — Optional: daily chat retitle
 
@@ -1040,6 +1058,7 @@ Report to the user:
   - Other computer — not requested or declined; name it to follow Step 12.
   - llama.cpp on this PC — not picked in question 12; name it to follow Step 2.
   - Strata or Maya — not picked in question 12; name it to follow Step 12a.
+  - UPS on the monitor — not requested; name it to follow Step 12b.
   - Daily chat retitle — not requested or declined; name it to follow Step 13.
   - Global note — not picked in Step 0; name it to follow Step 7.
   - Terminal capture — not picked in question 10; set `forge.terminal.watchUserCommands` to `true` in VS Code's settings to turn it on.
