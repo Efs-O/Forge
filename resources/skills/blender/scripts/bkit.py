@@ -745,7 +745,7 @@ def reimport_check(filepath, label=""):
 
 # -------------------------------------------------------------------- rendering
 def set_world_look(scene, which="dusk", strength=0.55, z_rot=0.0):
-    """Pick one of the HDRI backgrounds 06_realism.py built ('dusk'/'day'),
+    """Pick one of the HDRI world nodes a scene script built earlier ('dusk'/'day'),
     or 'none' to fall back to the procedural sky. Missing nodes are not an error."""
     w = scene.world
     if not (w and w.use_nodes):
@@ -791,7 +791,7 @@ def scene_path(root, argv_name="--scene", default=None):
 
 
 def render_dir(folder):
-    """One folder per render, per the user's rule."""
+    """One folder per render, so a new render never overwrites an older one."""
     os.makedirs(folder, exist_ok=True)
     return folder
 
