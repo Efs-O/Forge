@@ -21,6 +21,22 @@ function pngBytes(): Buffer {
   return Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 }
 
+function webpBytes(): Buffer {
+  return Buffer.from([
+    0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+  ]);
+}
+
+/** The message a view_image call refuses with, for the file in the fixture. */
+async function refusalFor(file: string): Promise<string> {
+  try {
+    await makeViewImageTool().handler({ path: file });
+    return '<no refusal>';
+  } catch (error) {
+    return (error as Error).message;
+  }
+}
+
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-view-image-'));
   setWorkspace(root);
@@ -79,13 +95,49 @@ describe('view_image', () => {
     }
   });
 
-  it('rejects mismatched or unsupported image formats', async () => {
-    const target = path.join(root, 'fake.jpg');
-    fs.writeFileSync(target, pngBytes());
+  it('refuses bytes that are not an image at all, and says what they may be', async () => {
+    fs.writeFileSync(path.join(root, 'page.png'), '<html><body>a saved web page</body></html>');
 
-    await expect(makeViewImageTool().handler({ path: 'fake.jpg' })).rejects.toThrow(
-      /unsupported image format/,
+    expect(await refusalFor('page.png')).toBe(
+      'view_image: the file is not a PNG, JPEG, GIF, BMP or WebP image (it may be a web page or ' +
+        'another format saved with an image extension). Check what it is with the shell tool before ' +
+        'viewing it again.',
     );
+  });
+
+  it('refuses an image whose extension is not an image extension, naming the type and the fix', async () => {
+    fs.writeFileSync(path.join(root, 'shot.dat'), pngBytes());
+
+    expect(await refusalFor('shot.dat')).toBe(
+      'view_image: the file is a PNG image but its extension .dat is not an image extension. ' +
+        'Rename or copy it to .png and view that.',
+    );
+  });
+
+  it('names the missing extension as (none)', async () => {
+    fs.writeFileSync(path.join(root, 'noext'), pngBytes());
+
+    expect(await refusalFor('noext')).toBe(
+      "view_image: the file is a PNG image but its extension (none) is not an image extension. " +
+        'Rename or copy it to .png and view that.',
+    );
+  });
+
+  it('refuses an image whose extension belongs to another type, naming both', async () => {
+    fs.writeFileSync(path.join(root, 'shot.png'), webpBytes());
+
+    expect(await refusalFor('shot.png')).toBe(
+      'view_image: the file is a WebP image but its extension .png is for PNG. ' +
+        'Rename or copy it to .webp and view that.',
+    );
+  });
+
+  it('still loads an image whose bytes match its extension', async () => {
+    fs.writeFileSync(path.join(root, 'real.png'), pngBytes());
+
+    const result = await makeViewImageTool().handler({ path: 'real.png' });
+
+    expect(typeof result === 'string' ? result : result.text).toContain('image/png');
   });
 
   it('rejects images over the bounded upload size', async () => {

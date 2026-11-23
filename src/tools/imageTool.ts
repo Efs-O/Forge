@@ -20,6 +20,28 @@ const IMAGE_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
   '.webp': 'image/webp',
 };
 
+/** What each supported type is called, in the words the model already sees. */
+const IMAGE_KIND_BY_MIME: Readonly<Record<string, string>> = {
+  'image/png': 'PNG',
+  'image/jpeg': 'JPEG',
+  'image/gif': 'GIF',
+  'image/bmp': 'BMP',
+  'image/webp': 'WebP',
+};
+
+/** The extension to rename to, for the type the bytes actually are. */
+const SUGGESTED_EXTENSION_BY_MIME: Readonly<Record<string, string>> = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/gif': '.gif',
+  'image/bmp': '.bmp',
+  'image/webp': '.webp',
+};
+
+function kind(mime: string): string {
+  return IMAGE_KIND_BY_MIME[mime] ?? mime;
+}
+
 /**
  * Image type from magic bytes. Exported because `read_file` needs the same
  * answer to tell the model an image belongs to `view_image` — two sniffers
@@ -87,8 +109,9 @@ async function resolveImagePath(requestedPath: string): Promise<{ root: string; 
  */
 export function visionUnavailableMessage(modelName: string): string {
   return (
-    `Error: view_image needs a vision model; the active model "${modelName}" has no vision ` +
-    'projector configured (mmproj_path). Do not try to read the image with another tool: ' +
+    `Error: view_image needs a vision model; the active model "${modelName}" is not configured ` +
+    'for vision (llama.cpp: set mmproj_path; other providers: declare the vision capability). ' +
+    'Do not try to read the image with another tool: ' +
     'report that you cannot see it and ask the user to switch to a vision-capable model.'
   );
 }
@@ -198,10 +221,28 @@ export function makeViewImageTool(
 
       const bytes = await fs.readFile(file);
       const mime = mimeFromHeader(bytes);
-      const extensionMime = IMAGE_MIME_BY_EXTENSION[path.extname(file).toLowerCase()];
-      if (!mime || !extensionMime || mime !== extensionMime) {
+      const extensionMime = IMAGE_MIME_BY_EXTENSION[extension];
+      if (!mime) {
+        // The 11-23 scan: a saved web page named `.png` got this same refusal
+        // twice, and the model kept re-reading it. Naming the likely cause and
+        // the check is cheaper than another round.
         throw new Error(
-          'view_image: unsupported image format. Use PNG, JPEG, GIF, BMP, or WebP with a matching file extension.',
+          'view_image: the file is not a PNG, JPEG, GIF, BMP or WebP image (it may be a web page ' +
+            'or another format saved with an image extension). Check what it is with the shell tool ' +
+            'before viewing it again.',
+        );
+      }
+      const suggested = SUGGESTED_EXTENSION_BY_MIME[mime] ?? '.png';
+      if (!extensionMime) {
+        throw new Error(
+          `view_image: the file is a ${kind(mime)} image but its extension ${extension || '(none)'} ` +
+            `is not an image extension. Rename or copy it to ${suggested} and view that.`,
+        );
+      }
+      if (mime !== extensionMime) {
+        throw new Error(
+          `view_image: the file is a ${kind(mime)} image but its extension ${extension} is for ` +
+            `${kind(extensionMime)}. Rename or copy it to ${suggested} and view that.`,
         );
       }
 

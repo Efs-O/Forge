@@ -101,7 +101,7 @@ export function makeDesktopTools(getConfig: GetConfig): RegisteredTool[] {
       autoApprove: true,
       advertise: isWin,
       requiresVision: (name) =>
-        `Error: desktop_capture needs a vision model; the active model "${name}" has no vision projector configured (mmproj_path). Ask the user to switch to a vision-capable model before inspecting desktop captures.`,
+        `Error: desktop_capture needs a vision model; the active model "${name}" is not configured for vision (llama.cpp: set mmproj_path; other providers: declare the vision capability). Ask the user to switch to a vision-capable model before inspecting desktop captures.`,
       approval: captureApproval(driver, monitorApproval),
       handler: async (args, toolCtx): Promise<MultimodalToolResult> => {
         const title = str(args, 'window_title');

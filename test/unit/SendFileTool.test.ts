@@ -167,17 +167,28 @@ describe('send_file', () => {
     }
   });
 
-  it('refuses paths outside both roots and names the allowed locations', async () => {
+  it('refuses paths outside both roots and names the way forward', async () => {
     const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-outside-'));
     const file = await writeFile(path.join(outside, 'secret.txt'));
     const { tool } = makeTool();
     try {
       const result = await tool.handler({ path: file }, context('conv-a'));
-      expect(result).toContain(
-        "path must be in the workspace or this conversation's screenshot directory",
+      expect(result).toBe(
+        "Error: path must be in the workspace or this conversation's screenshot directory. " +
+          'To send a file from elsewhere, copy it into the workspace first (for example with the '
+          + 'shell tool) and send the copy.',
       );
     } finally {
       await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the plain refusal, with no copy hint, for an empty path', async () => {
+    const { tool } = makeTool();
+    for (const pathArg of ['', '   ']) {
+      expect(await tool.handler({ path: pathArg }, context('conv-a'))).toBe(
+        "Error: path must be in the workspace or this conversation's screenshot directory.",
+      );
     }
   });
 

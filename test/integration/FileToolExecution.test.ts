@@ -124,7 +124,7 @@ describe('isolated file and directory tool execution', () => {
   it('refuses path and reads together, and neither, and names the fix', async () => {
     await makeWriteFileTool().handler({ path: 'a.txt', content: 'one\n' });
     await expect(
-      makeReadFileTool().handler({ path: 'a.txt', reads: [{ path: 'a.txt' }] }),
+      makeReadFileTool().handler({ path: 'a.txt', reads: [{ path: 'b.txt' }] }),
     ).rejects.toThrow('path and reads cannot be used together');
     await expect(makeReadFileTool().handler({})).rejects.toThrow(
       'neither path nor reads was given; minimal valid call: {"path":"src/a.ts"}',
@@ -135,6 +135,40 @@ describe('isolated file and directory tool execution', () => {
     await expect(makeReadFileTool().handler({ path: 'a.txt', start_line: 5 })).resolves.toContain(
       'the file has 1 line(s)',
     );
+  });
+
+  // A model that names the same file in both fields means one read, not a
+  // contradiction: the mega-bench chat lost a round to this refusal on every one
+  // of them. The repeat is now read; everything else still refuses.
+  it('reads a path that repeats reads[0].path, and still refuses the rest', async () => {
+    await makeWriteFileTool().handler({ path: 'a.txt', content: 'one\n' });
+    await makeWriteFileTool().handler({ path: 'b.txt', content: 'alpha\nbeta\n' });
+
+    const ranged = (await makeReadFileTool().handler({
+      path: 'a.txt',
+      reads: [{ path: 'a.txt', start_line: 1, end_line: 1 }],
+    })) as string;
+    expect(ranged).toContain('--- a.txt (lines 1-1 of 1) ---');
+    expect(ranged).toContain('one');
+
+    const bothFiles = (await makeReadFileTool().handler({
+      path: 'a.txt',
+      reads: [{ path: 'a.txt' }, { path: 'b.txt' }],
+    })) as string;
+    expect(bothFiles).toContain('--- a.txt (1 lines) ---');
+    expect(bothFiles).toContain('--- b.txt (2 lines) ---');
+
+    // A different second file, an empty batch, and a top-level range — which has
+    // nowhere to go inside reads — all keep the refusal.
+    await expect(
+      makeReadFileTool().handler({ path: 'a.txt', reads: [{ path: 'b.txt' }] }),
+    ).rejects.toThrow('path and reads cannot be used together');
+    await expect(makeReadFileTool().handler({ path: 'a.txt', reads: [] })).rejects.toThrow(
+      'path and reads cannot be used together',
+    );
+    await expect(
+      makeReadFileTool().handler({ path: 'a.txt', start_line: 5, reads: [{ path: 'a.txt' }] }),
+    ).rejects.toThrow('path and reads cannot be used together');
   });
 
   it('a missing path in reads fails only its own section', async () => {

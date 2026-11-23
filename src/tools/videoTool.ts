@@ -32,8 +32,9 @@ const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.mov', '.mkv', '.avi', '.m4v
  */
 export function videoUnavailableMessage(modelName: string): string {
   return (
-    `Error: view_video needs a vision model; the active model "${modelName}" has no vision ` +
-    'projector configured (mmproj_path). Do not try to read the video with another tool: ' +
+    `Error: view_video needs a vision model; the active model "${modelName}" is not configured ` +
+    'for vision (llama.cpp: set mmproj_path; other providers: declare the vision capability). ' +
+    'Do not try to read the video with another tool: ' +
     'report that you cannot see it and ask the user to switch to a vision-capable model.'
   );
 }

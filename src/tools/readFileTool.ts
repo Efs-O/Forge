@@ -226,8 +226,23 @@ export function makeReadFileTool(deps: ReadFileDeps = {}): RegisteredTool {
       };
     },
     handler: async (args, context) => {
-      const rawPath = typeof args['path'] === 'string' ? args['path'] : undefined;
+      let rawPath = typeof args['path'] === 'string' ? args['path'] : undefined;
       const rawReads = args['reads'];
+      // A model that names the same file in BOTH fields means one read, not a
+      // contradiction. When `reads[0].path` is exactly `path` and no top-level
+      // range is set, `path` repeats what `reads` already asks for: drop it and
+      // run the batch. Every other combination keeps the refusal — a top-level
+      // `start_line` has nowhere to go inside `reads`, so that call still has to
+      // be resent rather than silently read from line 1.
+      const firstRead = Array.isArray(rawReads) ? rawReads[0] : undefined;
+      const repeatsFirstRead =
+        rawPath !== undefined &&
+        typeof firstRead === 'object' &&
+        firstRead !== null &&
+        (firstRead as { path?: unknown }).path === rawPath &&
+        typeof args['start_line'] !== 'number' &&
+        typeof args['end_line'] !== 'number';
+      if (repeatsFirstRead) rawPath = undefined;
       if (rawPath !== undefined && rawReads !== undefined) {
         throw new Error(
           'read_file: path and reads cannot be used together. Put the one file in path, or ' +

@@ -13,6 +13,14 @@ import type { RegisteredTool, ToolHandlerContext } from './ToolRegistry';
 
 const PATH_REFUSAL =
   "Error: path must be in the workspace or this conversation's screenshot directory.";
+/**
+ * The same refusal, for a path outside both roots. The mega-bench chat refused
+ * seven renders this way in one run and improvised nothing: the plain refusal
+ * names the rule but no way forward, and the files were one `cp` away.
+ */
+const OUTSIDE_REFUSAL =
+  "Error: path must be in the workspace or this conversation's screenshot directory. To send a " +
+  'file from elsewhere, copy it into the workspace first (for example with the shell tool) and send the copy.';
 
 export interface SendFileDeps {
   notifications: UserNotificationService;
@@ -205,7 +213,7 @@ export function makeSendFileTool(deps: SendFileDeps): RegisteredTool {
           context?.conversationId,
           deps.getConfig?.().image_generation?.output_dir ?? DEFAULT_IMAGE_OUTPUT_DIR,
         );
-        if (!missing) return PATH_REFUSAL;
+        if (!missing) return OUTSIDE_REFUSAL;
         return (
           `Error: no file at ${missing.relativePath}` +
           (missing.suggestion ? ` (did you mean ${missing.suggestion}?)` : '')
@@ -214,7 +222,7 @@ export function makeSendFileTool(deps: SendFileDeps): RegisteredTool {
 
       const inspected = await inspectFileForDelivery(absolute);
       if (!inspected.ok) {
-        if (inspected.reason === 'path') return PATH_REFUSAL;
+        if (inspected.reason === 'path') return OUTSIDE_REFUSAL;
         return `Error: ${fileDeliveryRefusal(inspected)}.`;
       }
 

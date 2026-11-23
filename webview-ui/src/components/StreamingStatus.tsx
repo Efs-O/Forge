@@ -81,7 +81,7 @@ export function StreamingStatus({
   return (
     <div id="streaming-status" className={streaming ? 'is-streaming' : undefined}>
       {/* The rotating text is hidden from assistive tech: announcing a new
-          whimsical word every 3.5s for a whole turn would be hostile. The live
+          whimsical word every 12 s for a whole turn would be hostile. The live
           region below states the fact once instead. */}
       <span className="streaming-status-dot" aria-hidden="true" />
       <span className="streaming-status-text" aria-hidden="true">

@@ -147,6 +147,35 @@ describe('CLI target discovery and capabilities', () => {
       message: 'Review',
     });
   });
+
+  // A laptop chat on the desktop relay found no local target and went and
+  // dialed the relay's own endpoints, which load and unload the desktop's
+  // models. The result now says where the targets live.
+  it('adds the machine note only when this chat is on the desktop relay', async () => {
+    const context = { conversation: { id: 'tool-chat' } } as ToolHandlerContext;
+    const laptopConfig = {
+      ...config,
+      groups: { 'desktop-relay': { endpoint: 'https://desktop.example:8765' } },
+    } as ForgeConfig;
+
+    const onRelay = JSON.parse(
+      (await makeListAgentTargetsTool(
+        () => laptopConfig,
+        () => cwd,
+      ).handler({}, context)) as string,
+    );
+    expect(onRelay.machine_note).toBe(
+      "These targets run on this machine only. Agents on the desktop this laptop connects to (its Forge chats, Codex and Claude sessions) cannot be reached from here: ask the user to run that task on the desktop. Do not call the desktop relay's endpoints yourself; they load and unload the desktop's models.",
+    );
+
+    const offRelay = JSON.parse(
+      (await makeListAgentTargetsTool(
+        () => config,
+        () => cwd,
+      ).handler({}, context)) as string,
+    );
+    expect('machine_note' in offRelay).toBe(false);
+  });
 });
 
 function setup() {
