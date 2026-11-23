@@ -2,12 +2,39 @@
 
 ## 0.17.212
 
-**Forge Monitor reads llama.cpp and Strata stats in one panel.** The panel shows
-GPU readings, engine slots and speed, Forge's daily counters, and optional UPS
-values from a local NUT server. Forge now starts llama-server with `--metrics`
-so the speed gauges are available. Because that flag changes the shared-runtime
-argv key, windows running older Forge builds will not share this runtime until
-they are updated together.
+**Forge Monitor reads llama.cpp and Strata stats in one panel.** Run **Forge: Open Monitor**. The
+panel shows GPU readings, engine slots and speed, Forge's daily counters, and UPS values from a NUT
+server on this machine. It only polls while the panel is visible. Mark an engine in
+`~/.forge/policy.yaml` with `stats: llama` or `stats: strata` to choose its reader. With no UPS set up,
+the UPS card says so and points at the new optional Step 12b of `AI_SETUP.md`. Forge now starts
+llama-server with `--metrics` so the speed gauges work. That flag changes the shared-runtime key, so
+windows running an older Forge build will not share this runtime until they are updated too. The card
+layout follows Strata's own Monitor page (github.com/Niko1221/Strata, MIT), and the panel says so.
+
+**A fixed tool list, if you want one.** `tool_groups.schemas_in_result: true` on a model entry keeps
+the advertised tools the same for the whole chat. `load_tool_group` then returns the group's tools in
+its result, and the model calls them as text, so loading a group no longer makes the server re-read the
+whole conversation (about 100 s at 70K tokens). The memory tools are now always available from the
+first message. It is off by default.
+
+**Refusals say what to do instead.** `send_file` on a file outside the workspace, `view_image` on a file
+that is not really an image (it names the format it found), `read_file` with the same file in both
+`path` and `reads` (now simply read), and the vision refusals on models served without llama.cpp each
+now name the way forward. `list_agent_targets` on a laptop says the desktop's agents are not reachable
+from there.
+
+**A Blender skill ships with Forge.** It finds Blender on any machine (`BLENDER`, then `PATH`, then the
+standard install folders, newest version first) and carries a scene-building helper and a render check.
+Forge now ships five skills.
+
+**One home per instruction.** The coding prompt, the starter `FORGE.md` new projects get, and the shipped
+tips no longer state the same rule twice in different words. The starter's line about
+`shell` time limits contradicted the prompt and is gone. A new test checks every limit an instruction
+quotes against the tool that enforces it.
+
+**Long quiet answers from a local server no longer end the turn.** A local engine that sent nothing for
+five minutes mid-answer (a slow model writing a large tool call) cut the turn off with
+`Body Timeout Error`. The wait is now 30 minutes, and Stop still ends a stuck answer at once.
 
 ## 0.17.211
 
