@@ -66,6 +66,7 @@ export interface TurnServicesAssembly {
   /** Registered after construction — read at call time. */
   getOnContextChanged: () => ((convId: string) => void) | undefined;
   getToolsOfferedListener: () => TurnServices['onToolsOffered'];
+  getTextToolCallsListener: () => TurnServices['onTextToolCalls'];
   getRequestStatsListener: () => TurnServices['onRequestStats'];
   /** Registered after construction and only while a transport is running. */
   getRemoteReach: () => ((conversationId: string) => number) | undefined;
@@ -132,6 +133,8 @@ export function buildTurnServices(d: TurnServicesAssembly): TurnServices {
     onTranscriptChanged: (conv) => d.recordTranscriptMutation(conv),
     onToolsOffered: (convId, names, fingerprint) =>
       d.getToolsOfferedListener()?.(convId, names, fingerprint),
+    onTextToolCalls: (convId, names, unlisted) =>
+      d.getTextToolCallsListener()?.(convId, names, unlisted),
     onRequestStats: (convId, capture) => d.getRequestStatsListener()?.(convId, capture),
     emitAgentProgress: (event) => d.emitAgentProgress(event),
     // Wrapped, not snapshotted, for the reason above: the probe is

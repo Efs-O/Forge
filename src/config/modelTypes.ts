@@ -76,7 +76,7 @@ export interface GroupConfig {
   max_tool_rounds?: number;
   /** Which text shapes may become a tool call. See ModelConfig. */
   text_tool_calls?: 'auto' | 'text' | 'native';
-  tool_groups?: { eager: string[] };
+  tool_groups?: { eager: string[]; schemas_in_result?: boolean };
   /** Tool-name allowlist for models in this group. */
   tools?: string[];
   /** Per-tool max invocations per turn for models in this group. */
@@ -100,7 +100,7 @@ export interface ProfileConfig {
 }
 
 export interface DefaultsConfig extends ProfileConfig {
-  tool_groups?: { eager: string[] };
+  tool_groups?: { eager: string[]; schemas_in_result?: boolean };
 }
 
 export interface ModelConfig {
@@ -296,5 +296,5 @@ export interface ModelConfig {
    */
   max_tool_rounds?: number;
   /** Lazy native tool groups advertised from the first request. */
-  tool_groups?: { eager: string[] };
+  tool_groups?: { eager: string[]; schemas_in_result?: boolean };
 }

@@ -36,6 +36,7 @@ import {
   type CompactionStageResult,
 } from './compactionStage';
 import { resetContextTrimState } from '../agent/toolResultContext';
+import { forgetResultSchemaGroups } from '../tools/lazyToolGroups';
 
 const log = getLogger();
 
@@ -349,6 +350,10 @@ async function compactOnce(
     );
 
     // Non-destructive: recorded only once the candidate is known to be better.
+    // A loaded group whose schemas lived only in a `load_tool_group` result
+    // deactivates here: the summary does not carry them, so the model loads the
+    // group again and gets them again.
+    forgetResultSchemaGroups(conv.id);
     conv.compaction = {
       ...candidate,
       generation,

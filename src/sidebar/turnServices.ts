@@ -63,6 +63,8 @@ export interface TurnServices {
   onContextChanged: (convId: string) => void;
   onUsage: (conv: ConversationRuntime, inputTokens: number, outputTokens: number) => void;
   onToolsOffered?: RequestOfferedListener;
+  /** Tool names a round's text gave as calls, and which of them were unlisted. */
+  onTextToolCalls?: (convId: string, names: readonly string[], unlisted: readonly string[]) => void;
   onRequestStats?: (conversationId: string, capture: RequestCapture) => void;
   /** Persists a transcript mutation immediately, including an in-flight turn. */
   onTranscriptChanged: (conv: ConversationRuntime) => void;

@@ -37,7 +37,9 @@ import { persistedToRuntime, runtimeToPersisted } from '../../src/sidebar/sessio
 import {
   activateLazyGroup,
   isLazyGroupActive,
+  recordLazyGroupTool,
   resetLazyToolGroups,
+  resultSchemaToolNames,
 } from '../../src/tools/lazyToolGroups';
 
 function conv(messages: ChatMessage[]): ConversationRuntime {
@@ -599,6 +601,27 @@ describe('runCompaction', () => {
 
     expect(c.compaction?.summary).not.toContain('Loaded optional tool groups');
     expect(isLazyGroupActive(c.id, 'media')).toBe(true);
+    resetLazyToolGroups();
+  });
+
+  // The schemas of a result-schema group live only in a `load_tool_group`
+  // result, which compaction summarises away, so the group must deactivate: the
+  // model loads it again and gets its schemas again.
+  it('deactivates a group whose schemas lived only in a load result', async () => {
+    resetLazyToolGroups();
+    const c = conv([
+      { role: 'user', content: 'first task' },
+      { role: 'assistant', content: 'did the first task' },
+      { role: 'user', content: 'second task' },
+    ]);
+    recordLazyGroupTool('notebook', 'read_notebook');
+    activateLazyGroup(c.id, 'notebook', { schemasInResult: true });
+    const h = harness(c, async () => long('summary'));
+
+    await expect(runCompaction(h.deps, c.id, { auto: true })).resolves.toBe('compacted');
+
+    expect(isLazyGroupActive(c.id, 'notebook')).toBe(false);
+    expect(resultSchemaToolNames(c.id)).toEqual(new Set());
     resetLazyToolGroups();
   });
 

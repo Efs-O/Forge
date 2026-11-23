@@ -2,15 +2,19 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   activateLazyGroup,
   deactivateLazyGroups,
+  forgetResultSchemaGroups,
   hiddenLazyToolNames,
   isLazyGroupActive,
   isLazyGroupAvailable,
+  isSchemasInResult,
   lazyGroupForTool,
   lazyGroupNames,
   lazyGroupForServer,
   recordNativeLazyTool,
   recordLazyGroupTool,
   resetLazyToolGroups,
+  resultSchemaToolNames,
+  setSchemasInResult,
 } from '../../src/tools/lazyToolGroups';
 import { makeLoadToolGroupTool } from '../../src/tools/toolGroupTools';
 import { mcpToolToRegisteredTool } from '../../src/tools/mcpBridge';
@@ -472,8 +476,10 @@ describe('lazy tool groups', () => {
 
   it('eagerly advertises a configured group without adding it to the active group map', () => {
     const registry = new ToolRegistry();
-    const memoryTools = ['remember', 'recall', 'list_memories', 'forget'];
-    for (const name of memoryTools) {
+    // `notebook`, not `memory`: memory joined the eager-by-default set on
+    // 2026-11-23, so a test on it would pass even with the escape hatch broken.
+    const notebookTools = ['read_notebook', 'edit_notebook_cell'];
+    for (const name of notebookTools) {
       registry.register({
         definition: {
           type: 'function',
@@ -484,22 +490,110 @@ describe('lazy tool groups', () => {
       });
       recordNativeLazyTool(name);
     }
-    const budget = new ToolBudget({ tools: memoryTools });
-    const hidden = hiddenLazyToolNames('conv-a', new Set(), new Set(['memory']));
+    const budget = new ToolBudget({ tools: notebookTools });
+    const hidden = hiddenLazyToolNames('conv-a', new Set(), new Set(['notebook']));
     const advertised = budget.filterDefinitions(
       registry.definitions(ALL_PERMISSIONS).filter((d) => !hidden.has(d.function.name)),
     );
-    expect(advertised.map((definition) => definition.function.name)).toEqual(memoryTools);
-    expect(memoryTools.map((name) => lazyGroupForTool(name))).toEqual([
-      'memory',
-      'memory',
-      'memory',
-      'memory',
+    expect(advertised.map((definition) => definition.function.name)).toEqual(notebookTools);
+    expect(notebookTools.map((name) => lazyGroupForTool(name))).toEqual([
+      'notebook',
+      'notebook',
     ]);
-    expect(isLazyGroupActive('conv-a', 'memory')).toBe(false);
+    expect(isLazyGroupActive('conv-a', 'notebook')).toBe(false);
     deactivateLazyGroups('conv-a');
-    expect(isLazyGroupActive('conv-a', 'memory')).toBe(false);
-    expect(hiddenLazyToolNames('conv-a', new Set(), new Set(['memory']))).toEqual(new Set());
+    expect(isLazyGroupActive('conv-a', 'notebook')).toBe(false);
+    expect(hiddenLazyToolNames('conv-a', new Set(), new Set(['notebook']))).toEqual(new Set());
+  });
+
+  // `memory` joined the eager-by-default set on 2026-11-23: it was 38 of the 51
+  // group loads in the last 80 chats, each one a cold re-read of the chat.
+  it('advertises the memory group on the first request, with no load round', () => {
+    const registry = new ToolRegistry();
+    for (const name of ['remember', 'recall', 'list_memories', 'forget']) {
+      registry.register({
+        definition: {
+          type: 'function',
+          function: { name, description: '', parameters: { type: 'object' } },
+        },
+        permission: 'read',
+        handler: async () => 'ok',
+      });
+      recordNativeLazyTool(name);
+    }
+    expect(hiddenLazyToolNames('fresh-conversation')).toEqual(new Set());
+    expect(modelFacingTools(registry, 'fresh-conversation')).toEqual(
+      expect.arrayContaining(['remember', 'recall', 'list_memories', 'forget']),
+    );
+  });
+
+  /** Two members of a group that is neither native-eager nor configured eager. */
+  function registerNotebook(registry: ToolRegistry): void {
+    for (const name of ['read_notebook', 'edit_notebook_cell']) {
+      registry.register({
+        definition: {
+          type: 'function',
+          function: { name, description: '', parameters: { type: 'object' } },
+        },
+        permission: 'read',
+        handler: async () => 'ok',
+      });
+      recordLazyGroupTool('notebook', name);
+    }
+  }
+
+  it('keeps a loaded group out of the list while schemas_in_result is on', () => {
+    const registry = new ToolRegistry();
+    registerNotebook(registry);
+    setSchemasInResult('conv-a', true);
+    activateLazyGroup('conv-a', 'notebook', { schemasInResult: true });
+    expect(isLazyGroupActive('conv-a', 'notebook')).toBe(true);
+    expect(hiddenLazyToolNames('conv-a')).toEqual(
+      new Set(['edit_notebook_cell', 'read_notebook']),
+    );
+    expect(resultSchemaToolNames('conv-a')).toEqual(
+      new Set(['edit_notebook_cell', 'read_notebook']),
+    );
+    expect(modelFacingTools(registry, 'conv-a')).not.toContain('read_notebook');
+  });
+
+  it('promotes a result-schema group into the list when the flag goes off', () => {
+    const registry = new ToolRegistry();
+    registerNotebook(registry);
+    setSchemasInResult('conv-a', true);
+    activateLazyGroup('conv-a', 'notebook', { schemasInResult: true });
+    setSchemasInResult('conv-a', false);
+    expect(isSchemasInResult('conv-a')).toBe(false);
+    // The group stays active, so the tools join the list: one cold re-read.
+    expect(isLazyGroupActive('conv-a', 'notebook')).toBe(true);
+    expect(hiddenLazyToolNames('conv-a')).toEqual(new Set());
+    expect(resultSchemaToolNames('conv-a')).toEqual(new Set());
+    expect(modelFacingTools(registry, 'conv-a')).toEqual(
+      expect.arrayContaining(['read_notebook', 'edit_notebook_cell']),
+    );
+  });
+
+  it('deactivates a result-schema group when compaction forgets it', () => {
+    registerNotebook(new ToolRegistry());
+    setSchemasInResult('conv-a', true);
+    activateLazyGroup('conv-a', 'notebook', { schemasInResult: true });
+    forgetResultSchemaGroups('conv-a');
+    expect(isLazyGroupActive('conv-a', 'notebook')).toBe(false);
+    expect(resultSchemaToolNames('conv-a')).toEqual(new Set());
+  });
+
+  it('clears the flag and the result-schema set with the conversation', () => {
+    registerNotebook(new ToolRegistry());
+    setSchemasInResult('conv-a', true);
+    activateLazyGroup('conv-a', 'notebook', { schemasInResult: true });
+    deactivateLazyGroups('conv-a');
+    expect(isSchemasInResult('conv-a')).toBe(false);
+    expect(isLazyGroupActive('conv-a', 'notebook')).toBe(false);
+    expect(resultSchemaToolNames('conv-a')).toEqual(new Set());
+    // Hidden again as any unactivated group is: the set is empty, not stale.
+    expect(hiddenLazyToolNames('conv-a')).toEqual(
+      new Set(['edit_notebook_cell', 'read_notebook']),
+    );
   });
 
   it('appends the loaded schemas after the existing prefix, leaving it byte-identical', () => {

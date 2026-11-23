@@ -42,7 +42,7 @@ describe('load_tool_group description', () => {
     }
 
     expect(registry.get('load_tool_group')?.describe?.().function.description).toBe(
-      'Load a tool group; its tools appear on the next step. Available groups:\n' +
+      'Load a tool group; the result says how to call its tools. Available groups:\n' +
         'code_intel: rename symbols, apply code actions, format files, semantic search (apply_code_action, format_file)\n' +
         'sample_mcp: fetch_page, list_repos',
     );

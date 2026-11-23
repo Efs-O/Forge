@@ -1,3 +1,5 @@
+import type { ToolDefinition } from '../llm/types';
+
 /**
  * Demand-loaded groups. Tools stay registered and dispatchable; this module
  * controls only which schemas are advertised in each conversation.
@@ -153,6 +155,24 @@ const NATIVE_GROUP_NAMES: ReadonlySet<string> = new Set(
 /** Tools actually registered or bridged in, per group. */
 const membersByGroup = new Map<string, Set<string>>();
 const activeByConversation = new Map<string, Set<string>>();
+/**
+ * Per-turn `tool_groups.schemas_in_result`: while it is on, the conversation's
+ * tool list must not grow, so a group loaded in it is advertised by nothing but
+ * the schemas in its own load result.
+ */
+const schemasInResultByConversation = new Set<string>();
+/**
+ * Groups loaded while that flag was on: active, and hidden from the `tools`
+ * array because their schemas live only in a tool result. This set is what
+ * keeps them hidden, and what promotes or deactivates them later.
+ */
+const resultSchemaGroupsByConversation = new Map<string, Set<string>>();
+/**
+ * The definitions this chat's text-form calls may be typed and admitted from,
+ * set once per turn: `load_tool_group` prints schemas from it, so its result
+ * names only tools this chat may actually call.
+ */
+const textCallCatalogByConversation = new Map<string, readonly ToolDefinition[]>();
 
 /**
  * The lazy group an MCP server's tools belong to: its own name, so
@@ -160,8 +180,8 @@ const activeByConversation = new Map<string, Set<string>>();
  * undefined only for a server that asks to stay advertised on every request.
  *
  * A server whose name IS a built-in group cannot have it: its tools would join
- * that group, load and hide with the native ones, and for `files` and
- * `background` — the two groups advertised on every request — the server would
+ * that group, load and hide with the native ones, and for `files`, `background`
+ * and `memory` — the groups advertised on every request — the server would
  * pay its schemas in every conversation without being asked. Such a server gets
  * `mcp-<name>`, which is the name `load_tool_group` is then told to pass.
  */
@@ -208,10 +228,19 @@ export function hasAvailableLazyGroup(): boolean {
   return lazyGroupNames().length > 0;
 }
 
-export function activateLazyGroup(conversationId: string, group: string): void {
+export function activateLazyGroup(
+  conversationId: string,
+  group: string,
+  opts?: { schemasInResult?: boolean },
+): void {
   const active = activeByConversation.get(conversationId) ?? new Set<string>();
   active.add(group);
   activeByConversation.set(conversationId, active);
+  if (opts?.schemasInResult === true) {
+    const groups = resultSchemaGroupsByConversation.get(conversationId) ?? new Set<string>();
+    groups.add(group);
+    resultSchemaGroupsByConversation.set(conversationId, groups);
+  }
 }
 
 export function isLazyGroupActive(conversationId: string, group: string): boolean {
@@ -221,6 +250,70 @@ export function isLazyGroupActive(conversationId: string, group: string): boolea
 /** Clears loaded schemas when their conversation is cleared or deleted. */
 export function deactivateLazyGroups(conversationId: string): void {
   activeByConversation.delete(conversationId);
+  schemasInResultByConversation.delete(conversationId);
+  resultSchemaGroupsByConversation.delete(conversationId);
+  textCallCatalogByConversation.delete(conversationId);
+}
+
+/** Records this turn's `schemas_in_result`. Turning it off mid-chat promotes
+ *  the groups it had hidden: they join the tool list, one cold re-read, which
+ *  is today's cost for a group load. */
+export function setSchemasInResult(conversationId: string, on: boolean): void {
+  if (!on) {
+    schemasInResultByConversation.delete(conversationId);
+    promoteResultSchemaGroups(conversationId);
+    return;
+  }
+  schemasInResultByConversation.add(conversationId);
+}
+
+export function isSchemasInResult(conversationId: string): boolean {
+  return schemasInResultByConversation.has(conversationId);
+}
+
+/** Flag off mid-chat: the loaded groups stay active, so they appear in the tool
+ *  list from the next request instead of only in an old tool result. */
+export function promoteResultSchemaGroups(conversationId: string): void {
+  resultSchemaGroupsByConversation.delete(conversationId);
+}
+
+/** Compaction summarises the schemas in the load results away, so the groups
+ *  deactivate: the model loads one again and gets its schemas again. */
+export function forgetResultSchemaGroups(conversationId: string): void {
+  const groups = resultSchemaGroupsByConversation.get(conversationId);
+  if (!groups) return;
+  const active = activeByConversation.get(conversationId);
+  for (const group of groups) active?.delete(group);
+  resultSchemaGroupsByConversation.delete(conversationId);
+}
+
+/** Members of result-schema groups that this turn still keeps out of the list,
+ *  so a request's tool set and its text-call set cannot disagree about them. */
+export function resultSchemaToolNames(
+  conversationId: string | undefined,
+  eagerNames: ReadonlySet<string> = new Set(),
+  eagerGroups: ReadonlySet<string> = new Set(),
+): ReadonlySet<string> {
+  const groups =
+    conversationId === undefined ? undefined : resultSchemaGroupsByConversation.get(conversationId);
+  if (groups === undefined || groups.size === 0) return new Set();
+  const hidden = hiddenLazyToolNames(conversationId, eagerNames, eagerGroups);
+  const names = new Set<string>();
+  for (const group of groups) {
+    for (const name of membersByGroup.get(group) ?? []) {
+      if (hidden.has(name)) names.add(name);
+    }
+  }
+  return names;
+}
+
+/** The definitions this chat's text-form calls are typed from and printed by. */
+export function setTextCallCatalog(conversationId: string, defs: readonly ToolDefinition[]): void {
+  textCallCatalogByConversation.set(conversationId, defs);
+}
+
+export function textCallCatalog(conversationId: string): readonly ToolDefinition[] {
+  return textCallCatalogByConversation.get(conversationId) ?? [];
 }
 
 /** Hidden names omit explicitly allowlisted tools: config is an eager opt-in. */
@@ -231,18 +324,21 @@ export function hiddenLazyToolNames(
 ): ReadonlySet<string> {
   const hidden = new Set<string>();
   for (const [group, members] of membersByGroup) {
-    // `files` and `background` stay eager: `files` holds the structured-edit,
+    // `files`, `background` and `memory` stay eager: `files` holds the structured-edit,
     // move and restore tools a coding turn reaches for, and `background` holds
-    // what a long turn needs without a load round (`delete_file` is eager for
+    // what a long turn needs without a load round; `memory` joined on 2026-11-23, when it
+    // was 38 of 51 group loads in 80 chats, each a cold re-read (`delete_file` is eager for
     // its own reason — it is ungrouped, and it is the alternative every rm /
     // Remove-Item refusal names). `media` left this list on 2026-10-29; a
     // profile that renders or reviews images restores it with
     // `tool_groups.eager: [media]`.
-    const eagerByDefault = group === 'files' || group === 'background';
+    const eagerByDefault = group === 'files' || group === 'background' || group === 'memory';
     if (
       eagerByDefault ||
       eagerGroups.has(group) ||
-      (conversationId !== undefined && isLazyGroupActive(conversationId, group))
+      (conversationId !== undefined &&
+        isLazyGroupActive(conversationId, group) &&
+        !resultSchemaGroupsByConversation.get(conversationId)?.has(group))
     )
       continue;
     for (const name of members) {
@@ -256,4 +352,7 @@ export function hiddenLazyToolNames(
 export function resetLazyToolGroups(): void {
   membersByGroup.clear();
   activeByConversation.clear();
+  schemasInResultByConversation.clear();
+  resultSchemaGroupsByConversation.clear();
+  textCallCatalogByConversation.clear();
 }

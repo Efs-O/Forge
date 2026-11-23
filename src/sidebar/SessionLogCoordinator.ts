@@ -57,6 +57,15 @@ export class SessionLogCoordinator {
     logger.logRequestPrefix(fingerprint, conv.active_model ?? '');
   }
 
+  /** Records the tool names a round's text gave as calls, through its session log. */
+  logTextToolCalls(convId: string, names: readonly string[], unlisted: readonly string[]): void {
+    const conv = this.getSidebar().conversations.find((c) => c.id === convId);
+    if (!conv) return;
+    const logger = this.loggerFor(conv);
+    logger.updateTitle(conv.title);
+    logger.logTextToolCalls(names, unlisted, conv.active_model ?? '');
+  }
+
   /** Appends request stats and queues an opt-in exact-body dump. */
   logRequestStats(convId: string, capture: RequestCapture): void {
     const conv = this.getSidebar().conversations.find((c) => c.id === convId);

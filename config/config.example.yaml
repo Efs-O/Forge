@@ -149,6 +149,11 @@ defaults:
   # it below to keep it eager.
   tool_groups:
     eager: []
+    # Keep the tool list fixed for the whole chat: `load_tool_group` answers with
+    # the group's schemas instead of adding them to the list, so the server never
+    # re-reads the conversation because the list grew. Cannot be combined with
+    # `text_tool_calls: native`.
+    # schemas_in_result: true
   sampling:
     temperature: 0.6
     top_p: 0.95

@@ -5,18 +5,21 @@ import {
   activateLazyGroup,
   hasAvailableLazyGroup,
   isLazyGroupAvailable,
+  isSchemasInResult,
   lazyGroupMembers,
   lazyGroupNames,
+  textCallCatalog,
 } from './lazyToolGroups';
 
 /**
- * `load_tool_group` flips one per-conversation flag; the real schemas arrive
- * through the normal `tools` array on the next round, so this tool must never
- * restate them. Each line names its members after the purpose, so a model asked
- * for a tool by name can find its group. A model that already knows a name
- * loses nothing: dispatch runs a registered tool whether or not its group is
- * loaded, a near-miss name gets ToolDispatch's unloaded-group hint, and the
- * load result names the members too.
+ * `load_tool_group` flips one per-conversation flag. In normal mode the real
+ * schemas arrive through the `tools` array on the next round, so the result
+ * never restates them; with tool_groups.schemas_in_result the list stays fixed,
+ * so the result carries them instead. Each line names its members after the
+ * purpose, so a model asked for a tool by name can find its group. A model that
+ * already knows a name loses nothing: dispatch runs a registered tool whether or
+ * not its group is loaded, a near-miss name gets ToolDispatch's unloaded-group
+ * hint, and the load result names the members too.
  * Keyed by `NATIVE_LAZY_GROUP_NAMES`, so a new group without one fails to
  * compile. Keep HalluScribe's measured history cue close to its original
  * wording: Qwen found that group unprompted with the longer phrase.
@@ -66,7 +69,7 @@ function buildDefinition(groups?: string[]): ToolDefinition {
     function: {
       name: 'load_tool_group',
       description:
-        'Load a tool group; its tools appear on the next step. Available groups:\n' +
+        'Load a tool group; the result says how to call its tools. Available groups:\n' +
         describeGroups(),
       parameters: {
         type: 'object',
@@ -79,8 +82,48 @@ function buildDefinition(groups?: string[]): ToolDefinition {
 }
 
 /**
- * Demand-load entry point. Real schemas arrive through the next normal tools
- * array. `isAdvertised` lets the caller drop members the next request will not
+ * One JSON schema per line, in the order the members were advertised, from the
+ * turn's own text-call catalog: the allowed, budget-filtered definitions this
+ * chat may actually call. A member the catalog does not hold is refused here and
+ * named on the last line, so the result never teaches a call that cannot run.
+ * A repeat call returns the same text — that is the recovery path after
+ * excerpting or compaction took the schemas out of the transcript.
+ */
+function withResultSchemas(
+  group: string,
+  offered: readonly string[],
+  notOffered: readonly string[],
+  conversationId: string,
+): string {
+  const catalog = new Map(textCallCatalog(conversationId).map((d) => [d.function.name, d]));
+  const withSchema = offered.filter((name) => catalog.has(name));
+  const refused = offered.filter((name) => !catalog.has(name));
+  const lines = withSchema
+    .map((name) => {
+      const def = catalog.get(name)!;
+      return JSON.stringify({
+        name: def.function.name,
+        description: def.function.description,
+        parameters: def.function.parameters,
+      });
+    })
+    .join('\n');
+  return [
+    `${group} tools enabled for this conversation: ${withSchema.join(', ')}. They are not added ` +
+      `to your tool list; call them like your other tools, with these schemas:\n${lines}`,
+    ...(refused.length > 0
+      ? [`Not allowed in this chat, so not listed: ${refused.join(', ')}.`]
+      : []),
+    ...(notOffered.length > 0
+      ? [`Not set up in this window, so not listed: ${notOffered.join(', ')}.`]
+      : []),
+  ].join('\n');
+}
+
+/**
+ * Demand-load entry point. In normal mode the schemas arrive through the next
+ * tools array; with tool_groups.schemas_in_result they come in the result.
+ * `isAdvertised` lets the caller drop members the next request will not
  * actually offer — a tool whose `advertise()` returns false, such as
  * `image_search` on a machine with no `image_search` config block. With no
  * argument, every member counts as advertised, so callers that do not care keep
@@ -97,7 +140,7 @@ export function makeLoadToolGroupTool(
       function: {
         name: 'load_tool_group',
         description:
-          'Load an optional tool group for this conversation. After loading, its tools appear on the next step.',
+          'Load an optional tool group for this conversation. The result says how to call its tools.',
         parameters: {
           type: 'object',
           properties: { group: { type: 'string', description: 'Group to load.' } },
@@ -147,6 +190,10 @@ export function makeLoadToolGroupTool(
             'is set up in this window; do not retry. ' +
             'Answer from the workspace and the conversation instead.',
         );
+      }
+      if (isSchemasInResult(conversationId)) {
+        activateLazyGroup(conversationId, group, { schemasInResult: true });
+        return withResultSchemas(group, offered, notOffered, conversationId);
       }
       activateLazyGroup(conversationId, group);
       // The description no longer lists members, so the load says what arrived.

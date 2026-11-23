@@ -150,6 +150,23 @@ describe('session log forensics', () => {
     expect(rows().filter((row) => row['type'] === 'tools_offered')).toHaveLength(3);
   });
 
+  it('writes one text_tool_calls row per round whose text gave tool calls', () => {
+    const logger = new SessionLogger(id, 'Forensics', 'model');
+    logger.logTextToolCalls(['remember', 'read_file'], ['remember'], 'model');
+    logger.logTextToolCalls(['remember'], ['remember'], 'model');
+    const textRows = rows().filter((row) => row['type'] === 'text_tool_calls');
+    // No dedupe: unlike `tools_offered`, every round that called is a row.
+    expect(textRows).toHaveLength(2);
+    expect({ ...textRows[0], timestamp_ms: undefined }).toEqual({
+      type: 'text_tool_calls',
+      names: ['remember', 'read_file'],
+      unlisted: ['remember'],
+      timestamp_ms: undefined,
+      model: 'model',
+    });
+    expect(typeof textRows[1]?.['timestamp_ms']).toBe('number');
+  });
+
   it.each([
     {
       label: 'a repeated read-only call',

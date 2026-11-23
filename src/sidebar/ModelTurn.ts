@@ -15,7 +15,6 @@ import type { RuntimeModelCapabilities } from '../backend/ModelCapabilities';
 import type { TemplateEngine } from '../llm/TemplateEngine';
 import type { ForgeInstructionsLoader } from '../llm/ForgeInstructionsLoader';
 import type { ToolRegistry } from '../tools/ToolRegistry';
-import type { ToolDefinition } from '../llm/types';
 import type { MidTurnDrainResult } from '../agent/MidTurnInbox';
 import type { CheckinStage } from '../agent/elapsedTimeNote';
 import { createContextTrimState } from '../agent/toolResultContext';
@@ -27,7 +26,7 @@ import { announceMissingImages } from './imageNotices';
 import { prepareModelTurnMessages } from './prepareModelTurnMessages';
 import { resolveToolPermissions } from '../tools/PermissionResolver';
 import { ToolBudget } from '../tools/ToolBudget';
-import { hiddenLazyToolNames } from '../tools/lazyToolGroups';
+import { setSchemasInResult, setTextCallCatalog } from '../tools/lazyToolGroups';
 import { deriveStaticCapabilities } from '../config/ConfigResolver';
 import { applyToolCalls } from './transcriptMutations';
 import { mirrorLiveSessionAnswers } from './liveSessionMirror';
@@ -38,7 +37,9 @@ import {
   type TurnContextState,
 } from './turnContext';
 import { pinForgeInstructions } from './forgeInstructionsPin';
-import { pinCodingTips, withPinnedToolTips } from './codingTipsPin';
+import { pinCodingTips } from './codingTipsPin';
+import { assertTextCallsReadable } from './turnToolDefinitions';
+import { buildTextCallDefinitions, buildToolDefinitions } from './turnToolDefinitions';
 import { formatCompactionResumeNote } from './compactionTypes';
 import { terminalCommandTracker } from '../tools/TerminalCommandTracker';
 import { toolOutputLimits } from '../tools/toolOutputLimits';
@@ -105,6 +106,8 @@ export interface ModelTurnContext {
   onContextChanged?: (convId: string) => void;
   onUsage?: (conv: ConversationRuntime, inputTokens: number, outputTokens: number) => void;
   onToolsOffered?: RequestOfferedListener;
+  /** Tool names a round's text gave as calls, and which of them were unlisted. */
+  onTextToolCalls?: (convId: string, names: readonly string[], unlisted: readonly string[]) => void;
   onRequestStats?: (conversationId: string, capture: RequestCapture) => void;
   onTranscriptChanged?: (conv: ConversationRuntime) => void;
   emitAgentProgress: (event: AgentProgressEvent) => void;
@@ -208,22 +211,17 @@ export async function runModelTurn(
   const outputLimits = toolOutputLimits(model, config.llama_server, config.auto_compact, provider);
   // Rebuilt on every round rather than snapshotted once per turn: a lazy tool
   // group activates mid-turn via `load_tool_group`, and its schemas have to
-  // reach the request that immediately follows.
-  const buildToolDefinitions = (): ToolDefinition[] => {
-    const hiddenLazyTools = hiddenLazyToolNames(
-      conv.id,
-      new Set(model.tools ?? []),
-      new Set(model.tool_groups?.eager ?? []),
-    );
-    const advertised = ctx.toolRegistry
-      .definitions(allowed)
-      .filter(
-        ({ function: { name } }) => !hiddenLazyTools.has(name) && !unattendedRefusals?.has(name),
-      );
-    return withPinnedToolTips(conv, ctx.forgeLoader?.root, budget.filterDefinitions(advertised));
-  };
+  // reach the request that follows. Both lists come from `turnToolDefinitions`.
+  const getToolDefinitions = () =>
+    buildToolDefinitions(conv, model, ctx, allowed, unattendedRefusals, budget);
+  const getTextCallDefinitions = () =>
+    buildTextCallDefinitions(conv, model, ctx, allowed, unattendedRefusals, budget);
+  // This turn's `schemas_in_result`, and the catalog `load_tool_group` prints from.
+  assertTextCallsReadable(model);
+  setSchemasInResult(conv.id, model.tool_groups?.schemas_in_result === true);
+  setTextCallCatalog(conv.id, getTextCallDefinitions());
   const nativeTools = runtimeCaps?.likelySupportsTools !== false;
-  if (buildToolDefinitions().length > 0 && !nativeTools) {
+  if (getToolDefinitions().length > 0 && !nativeTools) {
     ctx.warnOnce(
       `${model.name}:tools`,
       `Forge: model "${model.name}" does not appear to have a tool-aware chat template. Forge will use its fallback tool format.`,
@@ -281,8 +279,10 @@ export async function runModelTurn(
       resolveBaseUrl,
       model,
       messages: conv.messages,
-      getToolDefinitions: buildToolDefinitions,
+      getToolDefinitions,
+      getTextCallDefinitions,
       onToolsOffered: (names, fingerprint) => ctx.onToolsOffered?.(conv.id, names, fingerprint),
+      onTextToolCalls: (names, unlisted) => ctx.onTextToolCalls?.(conv.id, names, unlisted),
       onRequestStats: (capture) => ctx.onRequestStats?.(conv.id, capture),
       signal: ctrl.signal,
       maxRounds,
@@ -313,7 +313,7 @@ export async function runModelTurn(
           // Re-evaluated every round: compaction can move the window mid-turn (codingTipsPin.ts).
           codingTips: pinCodingTips(conv, ctx.forgeLoader?.root),
           turnContext,
-          getToolDefinitions: buildToolDefinitions,
+          getToolDefinitions,
         });
       },
       dispatchToolCalls: async (toolCalls, messages) => {

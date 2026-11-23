@@ -136,14 +136,21 @@ usable immediately. Groups an agent rarely needs are demand-loaded through
 The first load in a conversation pauses while the model re-reads its context:
 about **100 seconds at 70K tokens** and **190 seconds at 120K tokens** on the
 reference machine (Qwen3.8-27B, measured on llama.cpp b11243). Only rarely used
-groups use this path; reading, writing, editing, searching, `shell` and the
-background tools stay available by default. As of this build the `git` group —
+groups use this path; reading, writing, editing, searching, `shell`, the
+background tools and memory (`remember`, `recall`) stay available by default. As
+of this build the `git` group —
 including `git_read` — and the `media` group (images, video, rendering,
 `send_file`) also load on demand, because 53 sessions since 0.17.80 used
 `git_read` 6 times against 418 `git` commands typed into `shell`, and used four
 of the media tools 0 times. A profile that runs git through the tools, or
 reviews and makes images, keeps them advertised with
 `tool_groups.eager: [git, media]`.
+
+A model entry that sets `tool_groups` replaces the defaults' block, so repeat
+`eager` there. `schemas_in_result: true` keeps the tool list fixed for the whole
+chat: `load_tool_group` returns the group's schemas in its result and the model
+calls those tools as text, so the server never re-reads the conversation because
+the list grew. It cannot be combined with `text_tool_calls: native`.
 
 **Files and edits.** `read_file`, `write_file` — `mode: "append"` adds to the
 end of a file, which is how a write that was cut off is finished — `edit_file` with

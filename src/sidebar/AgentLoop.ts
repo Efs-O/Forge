@@ -73,6 +73,7 @@ export class AgentLoop {
   private midTurnTells?: MidTurnTellServices;
   private onTranscriptChanged?: (convId: string) => void;
   private onToolsOffered?: TurnServices['onToolsOffered'];
+  private onTextToolCalls?: TurnServices['onTextToolCalls'];
   private onRequestStats?: TurnServices['onRequestStats'];
   private readonly progress = new AgentProgressBus();
 
@@ -125,6 +126,11 @@ export class AgentLoop {
 
   setToolsOfferedListener(listener: NonNullable<TurnServices['onToolsOffered']>): void {
     this.onToolsOffered = listener;
+  }
+
+  /** Registers the text-form tool-call reporter used for the session-log row. */
+  setTextToolCallsListener(listener: NonNullable<TurnServices['onTextToolCalls']>): void {
+    this.onTextToolCalls = listener;
   }
 
   setRequestStatsListener(listener: NonNullable<TurnServices['onRequestStats']>): void {
@@ -253,6 +259,7 @@ export class AgentLoop {
       ...(this.getConfigPath ? { getConfigPath: this.getConfigPath } : {}),
       getOnContextChanged: () => this.onContextChanged,
       getToolsOfferedListener: () => this.onToolsOffered,
+      getTextToolCallsListener: () => this.onTextToolCalls,
       getRequestStatsListener: () => this.onRequestStats,
       getRemoteReach: () => this.remoteReach,
       ...(turnDeps?.listMemoryLines && { listMemoryLines: turnDeps.listMemoryLines }),

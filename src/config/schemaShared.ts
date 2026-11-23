@@ -50,6 +50,10 @@ export const ToolCallLimitsSchema = z.record(z.string().min(1), z.number().int()
 
 export const ToolGroupsSchema = z.object({
   eager: z.array(z.string().min(1)).default([]),
+  /** Keep the tool list fixed for the whole chat: `load_tool_group` returns the
+   *  group's schemas in its result and the model calls those tools as text.
+   *  Cannot be combined with `text_tool_calls: native`. */
+  schemas_in_result: z.boolean().optional(),
 });
 
 // Spawn-time facts (F6). All optional — present-block overrides flat fields.

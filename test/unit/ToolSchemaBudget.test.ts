@@ -178,7 +178,10 @@ import { makeMaximalRegistry } from '../support/maximalToolRegistry';
 // "send suggested_next_wait_ms back as an argument", and the week's scan counted 6 refusals
 // of exactly that unknown key (docs/plans/SESSION_SCAN_CAUSE_FIXES_PLAN.md Phase 2).
 // 2026-11-21: 68,453 (+289) after frames state exact page time and what is not controlled.
-const MEASURED_CHARS = 68_453;
+// 2026-11-23: 68,457 (+4) after `load_tool_group`'s description stopped promising the
+// next tools array (true only in normal mode) and said the result explains how to call
+// its tools, which is true in both modes (tool_groups.schemas_in_result, Lane A).
+const MEASURED_CHARS = 68_457;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.

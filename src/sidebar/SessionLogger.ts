@@ -209,6 +209,20 @@ export class SessionLogger {
     this.lastToolsOfferedHash = hash;
   }
 
+  /** One row per round whose text gave tool calls: the names it used, and which
+   *  of them this request had not listed. Written whatever the mode is, so the
+   *  marker calls Forge already parses today are counted too. */
+  logTextToolCalls(names: readonly string[], unlisted: readonly string[], model: string): void {
+    this.ensureHeader(model);
+    this.append({
+      type: 'text_tool_calls',
+      names,
+      unlisted,
+      timestamp_ms: Date.now(),
+      model,
+    });
+  }
+
   /** One row per model request: what its head looked like, as hashes and counts. */
   logRequestPrefix(fingerprint: RequestFingerprint, model: string): void {
     this.ensureHeader(model);

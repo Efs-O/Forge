@@ -351,6 +351,9 @@ export function wireSidebar(host: SidebarHost, parts: SidebarParts): SidebarRunt
   agentLoop.setToolsOfferedListener((conversationId, names, fingerprint) =>
     send.sessionLogs.logToolsOffered(conversationId, names, fingerprint),
   );
+  agentLoop.setTextToolCallsListener((conversationId, names, unlisted) =>
+    send.sessionLogs.logTextToolCalls(conversationId, names, unlisted),
+  );
   agentLoop.setRequestStatsListener((conversationId, capture) => {
     // Every request of a turn already passes here, so this is where the turn's
     // speed is built — not in the transport, which cannot see requests.

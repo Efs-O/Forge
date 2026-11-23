@@ -53,6 +53,11 @@ export interface ToolCallingLoopOptions {
    * with the request's head as hashes (see requestFingerprint.ts).
    */
   onToolsOffered?: (names: readonly string[], fingerprint: RequestFingerprint) => void;
+  /** Definitions for registered tools this request does not list, so a tool call
+   *  the model wrote as text still gets typed arguments and passes the name filter. */
+  getTextCallDefinitions?: () => ToolDefinition[];
+  /** Every tool name this round's text gave, and which of them were unlisted. */
+  onTextToolCalls?: (names: readonly string[], unlisted: readonly string[]) => void;
   /** Finished client-side measurements and the exact serialized request body. */
   onRequestStats?: RequestStatsHandler;
   /** Finished narration for a round that calls tools. */

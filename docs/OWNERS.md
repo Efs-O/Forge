@@ -74,6 +74,7 @@ overlaps with an existing owner, extend the owner instead.
 | Per-conversation streaming/cancel state              | `src/sidebar/TurnLifecycle.ts`           |
 | Provider question wait suspension and resumption     | `src/sidebar/providerQuestionWait.ts`     |
 | Model-endpoint turn: preflight + request             | `src/sidebar/ModelTurn.ts`               |
+| A turn's tool list and its text-call definitions     | `src/sidebar/turnToolDefinitions.ts`      |
 | Vision-only turn preflight and its owner-facing refusal | `src/sidebar/turnPreflight.ts` |
 | Vision gate: single source of truth (advertise + refuse) | `src/sidebar/visionGate.ts`    |
 | Model-facing message preparation for a turn (window, images, system prompt, turn context, tool-result excerpts) | `src/sidebar/prepareModelTurnMessages.ts` |
@@ -677,6 +678,7 @@ overlaps with an existing owner, extend the owner instead.
 | Semantic codebase search tool              | `src/tools/semanticSearchTool.ts`     |
 | MCP client bridge (external MCP servers)   | `src/tools/mcpBridge.ts`              |
 | Demand-loaded native and MCP tool groups  | `src/tools/lazyToolGroups.ts`         |
+| Text-form tool calls and their report row | `src/tools/textCallDefinitions.ts`  |
 | `load_tool_group` discovery tool           | `src/tools/toolGroupTools.ts`         |
 | Static native lazy group names             | `src/config/toolGroupNames.ts`        |
 | Tool-result size capping                   | `src/tools/resultCap.ts`              |

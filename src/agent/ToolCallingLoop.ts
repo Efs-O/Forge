@@ -2,7 +2,7 @@ import { HtmlDocumentBoilerplateStripper } from '../llm/HtmlDocumentBoilerplateS
 import { ThinkingChannelStripper } from '../llm/ThinkingChannelStripper';
 import type { ChatCompletionRequest, ToolCall } from '../llm/types';
 import { StructuredOutputStripper } from '../tools/StructuredOutputParser';
-import { extractFallbackToolCalls } from '../tools/ToolCallFallback';
+import { extractTextCalls } from '../tools/textCallDefinitions';
 import {
   nativeOnlyToolCalls,
   NATIVE_ONLY_PARSE_ERROR,
@@ -86,6 +86,7 @@ export async function runToolCallingLoop(
       truncatedThisTurn,
     );
     const offeredToolNames = toolDefinitions.map((definition) => definition.function.name);
+    const textDefs = options.getTextCallDefinitions?.() ?? [];
     const measureOutput = (request: ChatCompletionRequest) => {
       const budget = options.getOutputRoom?.(request.messages, request.tools ?? []);
       const estimated = typeof budget === 'object' ? budget.outputRoom : budget;
@@ -309,7 +310,7 @@ export async function runToolCallingLoop(
 
     // Only a shape the round accepts, naming a real tool, is a call; anything
     // else stays in the answer as the text the user asked for.
-    const toolNames = new Set(toolDefinitions.map((d) => d.function.name));
+    const toolNames = new Set([...toolDefinitions, ...textDefs].map((d) => d.function.name));
     const strip = options.stripThinkingChannels ?? false;
     const assistantContent = sanitizeText(rawAssistant, strip, toolNames, forms);
     const assistantReasoning = options.stripThinkingChannels
@@ -319,7 +320,7 @@ export async function runToolCallingLoop(
     const calls = streamed.toolCalls?.length
       ? streamed.toolCalls
       : toolDefinitions.length > 0 && rawAssistant && mayReadText
-        ? extractFallbackToolCalls(rawAssistant, toolDefinitions, forms)
+        ? extractTextCalls(rawAssistant, toolDefinitions, forms, options, offeredToolNames)
         : null;
     const maxTokens = request.max_tokens;
     const earlyLengthStop =
@@ -483,12 +484,7 @@ export async function runToolCallingLoop(
   const createdAt = Date.now();
   options.messages.push({ role: 'assistant', content: capNotice, createdAt });
   options.onMessagesChanged?.();
-  options.onToken?.(
-    `
-
-_${capNotice}_`,
-    createdAt,
-  );
+  options.onToken?.(`\n\n_${capNotice}_`, createdAt);
   options.onDone?.('max_rounds');
   return {
     finishReason: 'max_rounds',
