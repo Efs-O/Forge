@@ -302,7 +302,8 @@ export class BackendPool implements IBackendPool {
     return this.gate.isPinned(key) || (this.turnPins.get(key) ?? 0) > 0;
   }
 
-  /** Pin an external holder through the same busy counter as `acquireForTurn`. */
+  /** Pin a non-turn holder (a remote lease) with `acquireForTurn`'s counter, so `isBusy`,
+   *  `makeRoom`, `freeVramForExternal` and the shared-runtime gate treat it as a turn. */
   pinModel(modelName: string): () => void {
     const key = this.poolKey(modelName);
     this.turnPins.set(key, (this.turnPins.get(key) ?? 0) + 1);
