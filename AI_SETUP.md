@@ -1049,8 +1049,8 @@ Report to the user:
 - these owner-only choices, unchanged: `~/.forge/policy.yaml`, **Always in this
   project**, and Clanker for ordinary chats.
 
-Then tell the user where things live: Forge ships four skills inside the
-extension (hf-download, music-track, office-files, video-clip), updated with
+Then tell the user where things live: Forge ships five skills inside the
+extension (blender, hf-download, music-track, office-files, video-clip), updated with
 Forge; their own skills go in `~/.forge/skills/<name>/`. Memories start empty
 and fill as agents save them. `FORGE.md` is theirs to edit.
 `docs/CODING_TIPS.md` appears when an agent records its first lesson. The

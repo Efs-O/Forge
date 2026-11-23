@@ -51,6 +51,7 @@ const REQUIRED_VSIX_FILES = [
   'resources/media/music_ace.py',
   'resources/media/music_sa3.py',
   'resources/media/music_analyze.py',
+  'resources/skills/blender/SKILL.md',
   'resources/skills/video-clip/SKILL.md',
   'resources/skills/music-track/SKILL.md',
   'resources/tips/CODING_TIPS.md',

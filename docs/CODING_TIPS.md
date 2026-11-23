@@ -19,6 +19,7 @@
 5. editing `src/` while `npm run ci` runs → its `build` step bundles the half-edited tree: `No matching export in "src/util/powershellScratchDir.ts" for import "powershellScratchEnv"` and `ci exit: 1` on a tree that is fine. finish the edits, then run the gate
 6. `npm run type-check` or `check:changed` in a shared tree → stops at the other lane's half-edited file, so the webview pass and tests never run. grep the log for your paths, then run `npx tsc -p webview-ui/tsconfig.json --noEmit` and `rg -l <file> test`'s tests yourself
 7. `test/unit/ToolSchemaBudget.test.ts` red mid-run (`expected 68161 to be 68029`) → another lane's tool-description edit landed while my `npm run ci` was reading the schema, so that number is theirs: rerun the file alone, green, and report it as theirs
+8. `python -m py_compile resources/skills/<skill>/scripts/*.py` → leaves `__pycache__/*.pyc` inside the shipped skill: `ShippedSkills.test.ts` and `MediaInspectSkill.test.ts` go red and `check-vsix-contents.mjs` refuses the `.pyc`. delete it before CI and before committing
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green and the tree stood still: never run `record-ci-pass.mjs` by hand — the `ci:steps` chain writes it
@@ -64,6 +65,7 @@
 1. `zipfile.ZipFile('test/fixtures/sample.xlsx')` in a scan → FileNotFoundError: that is not where the fixture lives. read the test's `fixture()` helper for the real path first
 2. `wc -l test/unit/BusContent.test.ts` → no such file: busContent's tests live in `test/unit/AgentBus.test.ts`. `ls test/unit | grep -i <topic>` before naming a test file
 3. `grep_search` include `src/tools/memoryStore.ts` → `nothing at it exists under the workspace root`: the store is `src/memory/memoryStore.ts`, `src/tools/memoryTools.ts` is only its tool wrapper. glob `**/memoryStore.ts` before naming a src path
+4. `os.path.exists("V:/vs code apps/Blender/assets/textures")` → False: the Blender *project* is `N:/vs code apps/Blender`, only the program is `V:/Tools/Blender`. a `texture_set` miss prints the folder you passed, so it reads like a naming bug
 
 ## FORENSICS
 1. a Canon print job parked in `Printing`, `PrinterStatus 4` → it waits in Canon IJ Preview (Start Printing); `Get-PrintJob` is not installed here: use `Get-CimInstance Win32_PrintJob` / `Win32_Printer`

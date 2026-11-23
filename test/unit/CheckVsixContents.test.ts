@@ -26,6 +26,7 @@ const todaysFiles = [
   'dist/pdfjs/pdf.worker.mjs',
   'dist/webview/index.js',
   'resources/skills/hf-download/SKILL.md',
+  'resources/skills/blender/SKILL.md',
   'resources/media/media_job.py',
   'resources/media/media_comfy.py',
   'resources/media/video_ltx25.py',
