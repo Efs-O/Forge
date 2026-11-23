@@ -28,9 +28,9 @@ const root = path.resolve(__dirname, '..', '..');
 const engine = new TemplateEngine(path.join(root, 'config', 'templates', 'builtin'));
 const generalRulesTailLines = [
   'a preview result is a tool result.',
-  '- A question is not an instruction to build; wait for an explicit change request.',
+  '- A question is not an instruction to build; wait for an explicit change request ("do it", "fix it").',
   '- Commit, build or install requests do not authorize a push; get approval for the exact range.',
-  '- Name leftovers in the final report or clean them up.',
+  '- Name leftovers (a branch, a file, a memory note, a background job) in the final report or clean them up.',
   '- Separate measured values from preferences and enforced gates.',
   '- `shell.timeout_ms` is 1,000–600,000 ms; run longer work in the background.',
   '- `ask_user`: 1–4 questions, labels ≤80 chars, descriptions ≤500; `message_chat` needs `action` and caps messages at 16,000.',
@@ -43,7 +43,7 @@ const generalRulesTailLines = [
   '- After using task memories, save durable facts and clear completed pending notes.',
   '- Follow a refusal and its stated alternative; never route around it.',
   '- When asked to reply only, answer without tools or writes.',
-  '- For `edit_file`, use the shortest unique verbatim anchor from the newest read and account for prior batch edits.',
+  '- For `edit_file`, use the shortest unique verbatim anchor (whitespace exact) from the newest read and account for prior batch edits.',
   '- Before an audit, establish its exact range and baseline; report pre-existing defects separately from new ones.',
   '- Plans need acceptance checks that name invariants and how each is validated.',
   '- For durable state, map create, delete, pause, crash, owner death and expiry.',

@@ -20,6 +20,10 @@
  * co-injected pair scores 0.250 and the worst pair inside the tips table 0.273, so
  * the gates sit above both while still catching a rule copied with light rewording
  * (a paraphrase of one sentence scores 0.6+).
+ *
+ * Conflicts and numbers live next door: `test/unit/InstructionConflicts.test.ts`
+ * is the home for a rule two sources word differently, a limit that disagrees with
+ * its schema, and a rule hiding in an intro paragraph this claim scan skips.
  */
 import * as fs from 'fs';
 import * as path from 'path';

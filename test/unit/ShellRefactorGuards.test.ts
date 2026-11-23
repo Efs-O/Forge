@@ -133,10 +133,15 @@ describe('shell/core-group refactor guards', () => {
   // leaves a small margin for these measured additions without making prompt
   // growth free.
   // 2026-11-18: raised to 9,800 after ffccfd02 (plain-language reply guidance) took it to 9,754.
-  it('config/templates/builtin/execute.njk is at most 9,800 bytes', () => {
+  // 2026-11-23: raised to 9,900. Deleting the rules `FORGE.md` repeated from the
+  // template left its three lines carrying the detail those copies added — the
+  // leftover kinds, the change-request trigger words, and "whitespace exact" for an
+  // edit anchor — which is 45 bytes (the file is 9,845); `FORGE.md` lost about
+  // 2.6 KB of duplicated prose with them.
+  it('config/templates/builtin/execute.njk is at most 9,900 bytes', () => {
     const file = path.join(root, 'config', 'templates', 'builtin', 'execute.njk');
     const size = fs.statSync(file).size;
-    expect(size, `execute.njk is ${size} bytes; the cap is 9800`).toBeLessThanOrEqual(9800);
+    expect(size, `execute.njk is ${size} bytes; the cap is 9900`).toBeLessThanOrEqual(9900);
   });
 
   it('the dead src/templates/builtin copy is deleted', () => {

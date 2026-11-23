@@ -30,7 +30,6 @@ Fill in the blanks below; delete any rule that does not fit this project.
 
 ## Tool arguments that are refused (each refusal costs a round)
 - `edit_file`: the shortest unique `old_str`, copied verbatim, whitespace exact. Never reuse an anchor an earlier edit in the same batch changed.
-- `shell` `timeout_ms` is at most 600000 (10 min). Longer work: `background: true`, then `monitor_execution`.
 - Booleans are bare JSON `true`/`false`, never `True` or `"true"`. Array arguments (`edits`, `reads`, `questions`, `items`) are JSON arrays, not strings.
 - `ask_user` option `description` is at most 500 characters (label 80). Put long context in the prompt or a file you name.
 

@@ -49,6 +49,20 @@ export const PROJECT_TIPS_RELATIVE_PATH = 'docs/CODING_TIPS.md';
  */
 export const CODING_TIPS_TAG = 'coding_tips';
 
+/**
+ * The shipped table's own intro names where a new tip belongs. Outside this
+ * repository that answer is right, so the sentence stays. In this repository the
+ * workspace file IS the shipped table, and the heading this module puts above it
+ * already says "record a general tip here": the same paragraph then tells the
+ * model the opposite, and the model obeyed the wrong one (2026-11-23 audit).
+ * Only the injected copy drops the sentence, and only in that mode — the file on
+ * disk keeps it for every other user. `test/unit/InstructionConflicts.test.ts`
+ * pins both halves, so an edit to the intro fails CI instead of bringing the
+ * contradiction back.
+ */
+export const SHIPPED_TIPS_RECORDING_SENTENCE =
+  "Record in the project's `docs/CODING_TIPS.md`, never in the shipped table, which arrives read-only.";
+
 const TRUNCATION_NOTICE = '\n[… truncated to fit the tips allowance for this file';
 
 export interface CodingTipsSource {
@@ -139,8 +153,12 @@ function readBounded(
   file: string,
   allowance: number,
   displayPath: string,
+  drop?: string,
 ): { text: string; truncated: boolean } | undefined {
-  const raw = withoutReviewedMark(fs.readFileSync(file, 'utf8')).trim();
+  const read = withoutReviewedMark(fs.readFileSync(file, 'utf8'));
+  // A drop the file does not contain is left alone: the injection goes ahead, and
+  // InstructionConflicts.test.ts is what notices the sentence moved.
+  const raw = (drop ? read.replace(drop, '') : read).trim();
   if (!raw) return undefined;
   const clamped = clampUtf8(raw, allowance);
   if (!clamped.truncated) return { text: clamped.text, truncated: false };
@@ -185,7 +203,14 @@ export function loadCodingTips(
   let duplicateSkipped = false;
 
   const shipped = shippedFile
-    ? readBounded(shippedFile, SHIPPED_TIPS_ALLOWANCE, 'resources/tips/CODING_TIPS.md')
+    ? readBounded(
+        shippedFile,
+        SHIPPED_TIPS_ALLOWANCE,
+        'resources/tips/CODING_TIPS.md',
+        // Only the repository's own copy contradicts the heading above it, so only
+        // that one loses the sentence.
+        fromWorkspace ? ` ${SHIPPED_TIPS_RECORDING_SENTENCE}` : undefined,
+      )
     : undefined;
   if (shipped) {
     sources.push({ kind: 'shipped', displayPath: 'resources/tips/CODING_TIPS.md', ...shipped });

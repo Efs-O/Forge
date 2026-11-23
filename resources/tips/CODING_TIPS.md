@@ -136,7 +136,7 @@
 25. `write_file` · a backtick I thought it had escaped → it writes exactly what I typed, so a later `old_str` misses. read_file it back before blaming the write
 26. `desktop_click` · on a field may not move the caret → text runs on behind it. move with `tab`, clear with `ctrl+a`+`delete`; a new capture drops the old `capture_id`
 27. `read_tool_result` · `tool_call_id: "read_file"` (a tool's NAME, not an id) or a `message_index` of a tool result → `no text tool result with call ID`: results take the result's own `tool_call_id`, prompts take `message_index`
-28. `update_plan` · `items` → refused: `"items" must be a JSON array, not a string`, for a bare-string entry or one missing `"text"`. every entry is exactly `{"text":…,"status":…}`; resend the whole array
+28. `update_plan` · `items` → refused: `"items" must be a JSON array, not a string`, for a bare-string entry or one missing `"text"`. every entry is exactly `{"text":…,"status":…}`; resend the whole array If it fires on a list that looks well formed, resend it unchanged once.
 29. `remember` · `title:`, `path:`, `name:` or `content:` → refused: unknown argument. name the memory with `key`, put its text in `value`
 30. `recall` · the fields `remember` takes → refused. send the memory's name alone: `{"key": …}`
 31. `ask_user` · a top-level `header` → refused: unknown argument. `header` belongs to each question
@@ -158,7 +158,7 @@
 47. `desktop_press` · `consequential: true` → `unknown argument "consequential"`: it takes only `keys`. send `{"keys": ["enter"]}` alone
 48. `shell` · a script given a file under `~/.forge/` (a screenshot) → `refuses to change Forge's own files`, even when it only reads it. sample the live screen region instead
 49. `desktop_click` · a stale `capture_id` once the app lost focus → refused again on each retry. re-focus it (`desktop_focus_window`), capture anew, click by that id
-50. `find_files` · `include_ignored: "True"` → `"include_ignored" must be a JSON boolean, not a string`. send the bare `true`, no quotes
+50. `find_files` · `include_ignored: "True"` → `"include_ignored" must be a JSON boolean, not a string`. send the bare `true`, no quotes; inside a `<parameter=…>` block, the bare word `true`
 51. `desktop_capture` · a window title from before the app renamed it (`Untitled*` once edited) → `window not found`; a bare `Paint 3D` matches another window of that name. `desktop_focus_window` with the `window_id` from `desktop_windows`, then capture with the exact title its reply prints
 52. `desktop_capture` · the last `capture_id` sent back to refresh it → `unknown argument "capture_id"`: a capture always starts new and returns its own id. send only `window_title` (or `monitor`) and `kind`
 53. `shell` · a background script that drives the mouse for minutes and checks the foreground once at the start → a dialog that pops up meanwhile takes the clicks. check the foreground before every stroke and stop when it changes
