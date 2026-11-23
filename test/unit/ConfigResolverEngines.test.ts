@@ -26,6 +26,7 @@ const CONFIG: ForgeConfig = {
       start_command: ['python', 'N:/Strata/start_strata.py', '--config', 'x', 'solo'],
       stop_command: ['python', 'N:/Strata/stop_strata.py'],
       unload_path: '/unload',
+      stats: 'strata',
       llama_server_binary: 'C:/Forge/llama-server.exe',
     },
   },
@@ -50,6 +51,7 @@ describe('the engine fold (phase 2)', () => {
     expect(model?.stop_command).toEqual(['python', 'N:/Strata/stop_strata.py']);
     expect(model?.unload_path).toBe('/unload');
     expect(model?.llama_server_binary).toBe('C:/Forge/llama-server.exe');
+    expect(model?.stats).toBe('strata');
     // The flat shape consumers already read: no engine pointer travels with it.
     expect(model?.engine).toBeUndefined();
   });

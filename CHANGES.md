@@ -1,5 +1,14 @@
 # Forge — Recent Changes
 
+## 0.17.212
+
+**Forge Monitor reads llama.cpp and Strata stats in one panel.** The panel shows
+GPU readings, engine slots and speed, Forge's daily counters, and optional UPS
+values from a local NUT server. Forge now starts llama-server with `--metrics`
+so the speed gauges are available. Because that flag changes the shared-runtime
+argv key, windows running older Forge builds will not share this runtime until
+they are updated together.
+
 ## 0.17.211
 
 **Coding tips, one row.** The project tips table now records the two guards that decide which tips

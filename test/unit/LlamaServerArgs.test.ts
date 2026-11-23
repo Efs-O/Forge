@@ -29,6 +29,15 @@ describe('composeLlamaServerArgs', () => {
     expect(args).toContain('--port');
     expect(args).toContain('8080');
     expect(args).toContain('--jinja');
+    expect(args.filter((arg) => arg === '--metrics')).toHaveLength(1);
+  });
+
+  it('includes --metrics once when supplied in either extra argument list', () => {
+    for (const args of [
+      composeLlamaServerArgs('', baseModel, { ...serverDefaults, extra_llama_server_args: ['--metrics'] }, '127.0.0.1', 8080),
+      composeLlamaServerArgs('', { ...baseModel, extra_llama_server_args: ['--metrics'] }, serverDefaults, '127.0.0.1', 8080),
+      composeLlamaServerArgs('', { ...baseModel, extra_llama_server_args: ['--metrics'] }, { ...serverDefaults, extra_llama_server_args: ['--metrics'] }, '127.0.0.1', 8080),
+    ]) expect(args.filter((arg) => arg === '--metrics')).toHaveLength(1);
   });
 
   it('uses server defaults when model does not override', () => {

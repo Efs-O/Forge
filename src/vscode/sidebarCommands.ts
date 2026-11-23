@@ -3,12 +3,16 @@ import type { IBackendPool } from '../backend/BackendPool';
 import type { ForgeConfig } from '../config/types';
 import type { SidebarProvider } from '../sidebar/SidebarProvider';
 import { ModelManagerPanel } from '../sidebar/modelManager/ModelManagerPanel';
+import { MonitorPanel } from '../monitor/MonitorPanel';
+import type { ControlStats } from '../backend/controlStats';
 
 export interface SidebarCommandDeps {
   pool: IBackendPool;
   sidebar: SidebarProvider;
   getConfig: () => ForgeConfig;
   getConfigPath: () => string;
+  getStats: () => ControlStats;
+  getSecret: (name: string) => Promise<string | undefined>;
 }
 
 /** Report `run()`'s outcome to the user either way — a failed Keep/Undo that
@@ -43,6 +47,16 @@ export function registerSidebarCommands(
         deps.getConfigPath,
       );
       panel.refresh();
+    }),
+
+    vscode.commands.registerCommand('forge.openMonitor', () => {
+      MonitorPanel.createOrShow(context, {
+        extensionUri: context.extensionUri,
+        pool: deps.pool,
+        getConfig: deps.getConfig,
+        getStats: deps.getStats,
+        getSecret: deps.getSecret,
+      });
     }),
 
     vscode.commands.registerCommand('forge.showBackendConsole', () => {

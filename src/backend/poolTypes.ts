@@ -31,6 +31,8 @@ export interface IBackendPool {
    *  success, cancellation, and failure paths (extra calls are no-ops). */
   acquireForDelegation(primaryModel: string, targetModel: string): Promise<DelegationHold>;
   parallelCapacity(modelName: string): number;
+  /** Base URL for a loaded model's monitoring endpoint, or null when unavailable. */
+  modelBaseUrl(modelName: string): string | null;
   /** Stop and remove a single model's backend, freeing its VRAM / port slot. */
   release(modelName: string, stopExternal?: boolean): Promise<void>;
   stopAll(stopExternal?: boolean): Promise<void>;

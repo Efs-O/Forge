@@ -306,6 +306,17 @@ overlaps with an existing owner, extend the owner instead.
 | Typed webview ↔ host message contract          | `src/sidebar/modelManager/messages.ts`          |
 | Panel lifecycle + message dispatch (singleton) | `src/sidebar/modelManager/ModelManagerPanel.ts` |
 | Panel HTML/CSP/nonce builder                   | `src/sidebar/modelManager/panelHtml.ts`         |
+| Monitor panel lifecycle and visibility polling  | `src/monitor/MonitorPanel.ts`                  |
+| Monitor panel HTML/CSP builder                 | `src/monitor/monitorHtml.ts`                   |
+| Monitor source polling and cancellation        | `src/monitor/monitorPollers.ts`                |
+| llama.cpp slots and Prometheus metrics         | `src/monitor/llamaServerStats.ts`              |
+| Strata JSON metrics reader                     | `src/monitor/strataStats.ts`                   |
+| NUT UPS client                                  | `src/monitor/nutClient.ts`                     |
+| Monitor panel message and snapshot types       | `src/monitor/monitorTypes.ts`                  |
+| Shared webview nonce generation                | `src/util/webviewNonce.ts`                     |
+| Monitor webview entry and card display         | `webview-ui/src/monitor/App.tsx`               |
+| Monitor webview entry point                    | `webview-ui/src/monitor/index.tsx`             |
+| Monitor webview theme styles                   | `webview-ui/styles/monitor.css`                |
 | Full-state assembly (stateless view contract)  | `src/sidebar/modelManager/modelSnapshot.ts`     |
 | Group/defaults merge + inherited-key detection | `src/sidebar/modelManager/resolvedView.ts`      |
 | Field edit / remove / purge write path         | `src/sidebar/modelManager/editOps.ts`           |
@@ -486,6 +497,7 @@ overlaps with an existing owner, extend the owner instead.
 | Machine-wide llama.cpp runtime discovery + leases | `src/backend/SharedRuntimeRegistry.ts` |
 | Machine-wide managed-external turn holds (record dir, TTL, refresh interval, lock) | `src/backend/ExternalTurnHolds.ts` |
 | Backend pool contract (IBackendPool)              | `src/backend/poolTypes.ts`             |
+| Backend pool client endpoint and port lookup     | `src/backend/poolEndpoint.ts`          |
 | Slot boot/restart + dead-slot reconcile           | `src/backend/poolStart.ts`             |
 | llama-server stdio/exit diagnostics               | `src/backend/serverDiagnostics.ts`     |
 | GGUF/mmproj existence + served-model match        | `src/backend/modelFileChecks.ts`       |
@@ -783,6 +795,8 @@ overlaps with an existing owner, extend the owner instead.
 | Concern                                                 | Owner                                |
 | ------------------------------------------------------- | ------------------------------------ |
 | `config.yaml` schema (Zod)                              | `src/config/schema.ts`               |
+| Top-level monitor UPS configuration schema             | `src/config/monitorSchema.ts`        |
+| Top-level video configuration schema                   | `src/config/videoSchema.ts`          |
 | Runtime CLI target discovery and expiring chat-scoped target ids | `src/agentLinks/agentTargets.ts` |
 | Explicit CLI target execution without changing links or defaults | `src/agentLinks/selectedAgentAsk.ts` |
 | Model-facing CLI target discovery tool | `src/tools/listAgentTargetsTool.ts` |

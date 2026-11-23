@@ -146,6 +146,8 @@ export interface ModelConfig {
    * `RemoteStartEntryShape` spells its optionals out.
    */
   gpus?: number[] | undefined;
+  /** Stats reader selected on the model's policy.yaml engine. */
+  stats?: 'llama' | 'strata' | undefined;
   /**
    * Per-model override of the llama-server executable, for a patched fork (e.g.
    * the Unsloth MTP fork). Absent = use the global `llama_server.binary`.

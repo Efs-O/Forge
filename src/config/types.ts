@@ -172,6 +172,8 @@ export interface ForgeConfig {
   /** `view_video` frame extraction. Top-level only: tools are registered once
    *  at activation and never see the per-turn resolved model. */
   video?: VideoConfig;
+  /** Optional local NUT UPS to show in the Monitor panel. */
+  monitor?: { ups?: string };
   /** Speech-to-text ingress. Off unless `enabled`. */
   voice?: VoiceConfig;
   /** `generate_image` backends. Absent means the tool is not advertised. */

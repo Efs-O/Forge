@@ -1,3 +1,5 @@
+import { parseLlamaSlots } from '../monitor/llamaServerStats';
+
 /**
  * Health polling for a llama-server this window adopted rather than spawned.
  *
@@ -80,12 +82,10 @@ export function startAdoptedServerMonitor(
       try {
         const slotsRes = await probe('/slots');
         if (slotsRes.ok) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- /slots is untyped llama.cpp JSON
-          const slots: any[] = (await slotsRes.json()) as any[];
-          const active = slots.filter((s) => s.state === 1).length;
-          const total = slots.length;
-          slotsPart = total ? `slots: ${active}/${total} active` : '';
-          ctx = slots[0] ? `${slots[0].n_past ?? 0}/${slots[0].n_ctx ?? '?'} ctx` : '';
+          const stats = parseLlamaSlots(await slotsRes.json());
+          slotsPart = stats?.total ? `slots: ${stats.active}/${stats.total} active` : '';
+          const first = stats?.slots[0];
+          ctx = first ? `${first.used ?? 0}/${first.size ?? '?'} ctx` : '';
         } else if (slotsRes.status === 501 || slotsRes.status === 404) {
           // A server run with --no-slots never offers this endpoint: say
           // nothing about slots, as before, rather than a 501 every 5 s.

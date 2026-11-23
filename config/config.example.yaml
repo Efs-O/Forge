@@ -1292,12 +1292,17 @@ agent_links:
 #     start_command: [python, N:/Strata/start_strata.py, --config, x.json, solo]
 #     stop_command: [python, N:/Strata/stop_strata.py]
 #     unload_path: /unload
+#     stats: strata               # Engine stats reader for Forge: Open Monitor
 #   llamacpp-b10430:
 #     llama_server_binary: 'C:/Forge/llama.cpp-b10430/llama-server.exe'
 # Hosts a config.yaml model `endpoint` may name besides loopback. A model that
 # names a host not in this list fails to load once config.yaml opens to agents,
 # because otherwise an agent could add a model that sends the chat anywhere.
 # model_hosts: [100.64.0.10]
+
+# Optional UPS status from a local NUT server. Forge only connects to loopback.
+# monitor:
+#   ups: "ups@127.0.0.1:3493"
 
 # Optional local video and music generation. With enabled: false, generation
 # tools are not registered. Paths are machine-local and models are never

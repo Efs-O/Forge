@@ -3,6 +3,7 @@ import type { ForgeConfig } from '../config/types';
 import type { BackendPool } from '../backend/BackendPool';
 import type { SidebarProvider } from '../sidebar/SidebarProvider';
 import type { BackendStatusBar } from './BackendStatusBar';
+import type { ControlServer } from '../backend/ControlServer';
 import { ForgeCodeActionProvider } from './codeActions';
 import { registerNativeCommands } from './nativeCommands';
 import { registerMediaSetupCommand } from './mediaCommands';
@@ -16,6 +17,7 @@ export interface CommandRegistrationOptions {
   configPath: string;
   getConfig: () => ForgeConfig;
   setConfig: (next: ForgeConfig) => void;
+  controlServer: ControlServer;
 }
 
 /** Register the contributed commands and file code actions after the sidebar exists. */
@@ -49,5 +51,7 @@ export function registerActivationCommands(
     sidebar: options.sidebar,
     getConfig: options.getConfig,
     getConfigPath: () => options.configPath,
+    getStats: () => options.controlServer.buildStats(),
+    getSecret: async (name) => await context.secrets.get(name),
   });
 }

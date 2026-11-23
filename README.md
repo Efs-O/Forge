@@ -315,6 +315,16 @@ truncated identity hashes. No prompt text, no responses, no secrets, no paths.
 
 WhatsApp exists as a separately opt-in experimental linked-device adapter.
 
+## Forge Monitor
+
+Run `Forge: Open Monitor` to see local GPU readings, llama.cpp or Strata engine
+stats, Forge's daily counters, and optional UPS readings from a loopback NUT
+server. Set `stats: strata` on the engine in `~/.forge/policy.yaml` to read a
+managed Strata engine. Configure `monitor.ups` in `.forge/config.yaml` only
+when a local NUT server is available.
+
+Card layout inspired by Strata's Monitor page (github.com/Niko1221/Strata, MIT).
+
 ## Use Forge from another computer
 
 Two ways to work when the models, the files and the GPU live on one computer —

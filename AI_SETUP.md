@@ -972,7 +972,9 @@ the rest, so Step 6's reload loads it.
 3. Start the engine the way its README says and note the local address it
    serves. Add one model to `config.yaml` against that address, following the
    commented Strata example in `config/config.example.yaml`
-   (`provider: openai-compatible`, `endpoint`, `model`, `num_ctx`). Forge
+   (`provider: openai-compatible`, `endpoint`, `model`, `num_ctx`). Set
+   `stats: strata` on its engine in `~/.forge/policy.yaml` to show readings in
+   `Forge: Open Monitor`. Forge
    does not start this engine: tell the user to start it before using the
    model. Forge can start and stop it through an `engines:` entry
    (`start_command` / `stop_command`, see `config/config.example.yaml`); that

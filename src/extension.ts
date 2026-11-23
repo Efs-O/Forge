@@ -376,6 +376,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     setConfig: (next) => {
       config = next;
     },
+    controlServer,
   });
   registerExternalModelLifecycleLease(context, backendSetup);
 

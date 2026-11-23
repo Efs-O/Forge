@@ -249,6 +249,7 @@ function applyEngine(config: ForgeConfig, model: ModelConfig): ModelConfig {
   // so the `out.gpus === undefined` guard is the same "model fields win" rule as
   // every other field rather than a reachable override.
   if (out.gpus === undefined && engine.gpus !== undefined) out.gpus = engine.gpus;
+  if (out.stats === undefined && engine.stats !== undefined) out.stats = engine.stats;
   return out;
 }
 

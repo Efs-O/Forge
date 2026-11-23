@@ -31,6 +31,7 @@ export function composeLlamaServerArgs(
     throw new Error(`Model "${model.name}" is missing gguf_path for llama.cpp`);
   }
   const args: string[] = ['-m', model.gguf_path, '--host', host, '--port', String(port), '--jinja'];
+  args.push('--metrics');
 
   // 999 ("every layer"), not -1. `-ngl -1` used to mean "all layers"; on current
   // llama.cpp (b10430+) it means AUTO-FIT, which keeps a ~1024 MiB margin and
@@ -81,6 +82,17 @@ export function composeLlamaServerArgs(
 
   if (model.extra_llama_server_args) {
     args.push(...model.extra_llama_server_args);
+  }
+
+  const metricsFlags = args.filter((arg) => arg === '--metrics').length;
+  if (metricsFlags > 1) {
+    let kept = false;
+    return args.filter((arg) => {
+      if (arg !== '--metrics') return true;
+      if (kept) return false;
+      kept = true;
+      return true;
+    });
   }
 
   return args;

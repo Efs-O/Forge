@@ -7,13 +7,14 @@ import {
   expandAlias,
   splitModelProfile,
   resolveModelName,
-  resolveRequestModel,
   AmbiguousModelError,
 } from '../config/ConfigResolver';
 import { probeHealthy } from './HealthCheck';
-import { createControlStatsBuilder, type ControlStatsBuilder } from './controlStats';
-import { perSlotContext } from '../util/contextBudget';
-import { sessionsDirectory } from '../sidebar/SessionLogger';
+import {
+  createForgeControlStatsBuilder,
+  type ControlStatsBuilder,
+  type ControlStats,
+} from './controlStats';
 // prettier-ignore
 import {
   sendJson,
@@ -147,27 +148,14 @@ export class ControlServer implements vscode.Disposable {
     if (deps.chatProxy) this.chatProxy = deps.chatProxy;
     if (deps.registry) this.registry = deps.registry;
     this.version = deps.version ?? 'unknown';
-    this.stats =
-      deps.stats ??
-      createControlStatsBuilder({
-        sessionsDir: sessionsDirectory(),
-        now: Date.now,
-        forgeVersion: this.version,
-        contextLimitFor: (model) => {
-          try {
-            const resolved = resolveRequestModel(this.config, model);
-            return perSlotContext(
-              resolved,
-              this.config.llama_server,
-              resolved.provider ?? 'llama.cpp',
-            );
-          } catch {
-            return null;
-          }
-        },
-      });
+    this.stats = deps.stats ?? createForgeControlStatsBuilder(() => this.config, this.version);
     if (deps.agentRoutes) this.agentRoutes = deps.agentRoutes;
     this.agentRoutes?.setEnabled(config.agent_bus?.enabled === true);
+  }
+
+  /** In-process stats snapshot shared with the Monitor panel. */
+  buildStats(): ControlStats {
+    return this.stats.build();
   }
 
   applyForgeConfig(next: ForgeConfig): void {

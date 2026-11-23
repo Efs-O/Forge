@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { getNonce } from '../../util/webviewNonce';
 
 /**
  * HTML shell for the Model Manager webview panel — second bundle/entry point
@@ -44,11 +45,4 @@ export function buildModelManagerHtml(extensionUri: vscode.Uri, webview: vscode.
   <script nonce="${nonce}" src="${jsUri}"></script>
 </body>
 </html>`;
-}
-
-function getNonce(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let result = '';
-  for (let i = 0; i < 32; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
-  return result;
 }

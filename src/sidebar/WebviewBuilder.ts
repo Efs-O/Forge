@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { screenshotRoot } from '../tools/browser/screenshotPaths';
+import { getNonce } from '../util/webviewNonce';
 
 export function buildWebviewHtml(extensionUri: vscode.Uri, webview: vscode.Webview): string {
   const distDir = path.join(extensionUri.fsPath, 'dist', 'webview');
@@ -38,7 +39,6 @@ export function buildWebviewHtml(extensionUri: vscode.Uri, webview: vscode.Webvi
 </body>
 </html>`;
 }
-
 /** Everything the sidebar webview may load from disk. */
 export function webviewResourceRoots(
   extensionUri: vscode.Uri,
@@ -54,11 +54,4 @@ export function webviewResourceRoots(
     // generate_image thumbnails load straight from where the image was saved.
     ...(vscode.workspace.workspaceFolders?.[0] ? [vscode.workspace.workspaceFolders[0].uri] : []),
   ];
-}
-
-function getNonce(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let result = '';
-  for (let i = 0; i < 32; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
-  return result;
 }

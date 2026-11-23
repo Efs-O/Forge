@@ -40,6 +40,8 @@ const NON_MODEL_REF_FIELDS = [
   'search',
   'embeddings',
   'video',
+  // `monitor` is only a local UPS spec, not a model reference.
+  'monitor',
   'voice',
   'image_generation',
   'media',

@@ -33,6 +33,7 @@ These commands are currently contributed by the extension.
 | `Forge: Pick Model`           | Pick the active model                |
 | `Forge: Pick GGUF Model File` | Pick a GGUF file during setup        |
 | `Forge: Model Manager`        | Open the Model Manager panel         |
+| `Forge: Open Monitor`         | Open the local system and engine monitor |
 | `Forge: Add Models`           | Add model entries to the config      |
 | `Forge: Compact config into groups` | Migrate the config into shared groups (comment-preserving) |
 | `Forge: Move security settings to policy.yaml` | Move the policy keys and each model's server programs from `config.yaml` into `~/.forge/policy.yaml` (owner-run; backs up config.yaml first, refuses to overwrite an existing policy file) |

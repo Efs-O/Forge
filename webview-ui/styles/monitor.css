@@ -1,0 +1,12 @@
+html, body { height: 100%; margin: 0; background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size, 13px); }
+.monitor-root { min-height: 100vh; box-sizing: border-box; padding: 20px; }
+.monitor-root header { display: flex; align-items: baseline; gap: 14px; border-bottom: 1px solid var(--vscode-panel-border); margin-bottom: 18px; }
+.monitor-root h1 { font-size: 1.5em; }
+.monitor-root header span, .monitor-root footer { opacity: .75; }
+.monitor-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+.monitor-card { min-width: 0; padding: 14px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; background: var(--vscode-sideBar-background); }
+.monitor-card h2 { margin: 0 0 12px; font-size: 1.1em; }
+.monitor-row { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid var(--vscode-panel-border); }
+.monitor-row span { text-align: right; }
+.monitor-card pre { overflow: auto; white-space: pre-wrap; }
+.monitor-root footer { margin-top: 20px; font-size: .9em; }

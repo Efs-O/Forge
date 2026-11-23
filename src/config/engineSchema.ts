@@ -60,6 +60,7 @@ export const EngineConfigSchema = z
         'gpus must not repeat a device index',
       )
       .optional(),
+    stats: z.enum(['llama', 'strata']).optional(),
   })
   .strict();
 

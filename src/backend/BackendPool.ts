@@ -29,6 +29,7 @@ import type { PortClaim, PoolSlot, SlotTable } from './poolSlots';
 import type { BackendTurnLease, IBackendPool, RemoteLeaseReleaser } from './poolTypes';
 import type { BackendProcess } from '../system/SystemReport';
 import { effectiveParallelCapacity } from './parallelCapacity';
+import { externalModelBaseUrl, modelPortFromBaseUrl } from './poolEndpoint';
 import { acquireTurnLease } from './turnLeaseAcquisition';
 import type { ExternalModelServers } from './ExternalModelServers';
 import { reconcileDeadSlot, restartSlot, startSlot, type SlotStartContext } from './poolStart';
@@ -301,13 +302,7 @@ export class BackendPool implements IBackendPool {
     return this.gate.isPinned(key) || (this.turnPins.get(key) ?? 0) > 0;
   }
 
-  /**
-   * Pin a model for a holder that is not a sidebar turn — today a remote
-   * (laptop) lease — and return the matching unpin. It is the SAME counter
-   * `acquireForTurn` uses, so `isBusy` is true for the pin's whole life and
-   * `makeRoom`, `freeVramForExternal` and the shared-runtime gate leave the
-   * model alone, exactly as during a desktop turn. The unpin is idempotent.
-   */
+  /** Pin an external holder through the same busy counter as `acquireForTurn`. */
   pinModel(modelName: string): () => void {
     const key = this.poolKey(modelName);
     this.turnPins.set(key, (this.turnPins.get(key) ?? 0) + 1);
@@ -319,14 +314,17 @@ export class BackendPool implements IBackendPool {
     };
   }
 
-  /** The port this model's backend answers on, or null when it is not resident
-   *  here. A runtime borrowed from another window is still the port a client
-   *  must use, so it is reported too. */
+  /** Client port for an owned or borrowed backend, or null when unavailable. */
   modelPort(modelName: string): number | null {
     const backend = this.backendFor(this.poolKey(modelName));
-    if (!backend) return null;
-    const port = Number(new URL(backend.baseUrl()).port);
-    return Number.isInteger(port) && port > 0 ? port : null;
+    return backend ? modelPortFromBaseUrl(backend.baseUrl()) : null;
+  }
+
+  modelBaseUrl(modelName: string): string | null {
+    const key = this.poolKey(modelName);
+    const backend = this.backendFor(key);
+    if (backend) return backend.baseUrl();
+    return externalModelBaseUrl(this.config, key, this.external?.isManaged(key) ?? false);
   }
 
   /** Readiness across owned, borrowed, and Ollama backends. */

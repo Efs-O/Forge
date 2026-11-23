@@ -69,6 +69,12 @@ const modelManagerConfig = {
   jsxImportSource: 'react',
 };
 
+const monitorConfig = {
+  ...modelManagerConfig,
+  entryPoints: ['webview-ui/src/monitor/index.tsx'],
+  outfile: 'dist/webview/monitor.js',
+};
+
 const CSS_PARTIALS = [
   'webview-ui/styles/base.css',
   'webview-ui/styles/animations.css',
@@ -95,6 +101,7 @@ const MODEL_MANAGER_CSS_PARTIALS = [
   'webview-ui/styles/model-manager.css',
   'webview-ui/styles/model-manager-detail.css',
 ];
+const MONITOR_CSS_PARTIALS = ['webview-ui/styles/base.css', 'webview-ui/styles/monitor.css'];
 
 function copyWebviewAssets() {
   mkdirSync('dist/webview', { recursive: true });
@@ -105,6 +112,8 @@ function copyWebviewAssets() {
   const modelManagerCss = MODEL_MANAGER_CSS_PARTIALS.map((f) => readFileSync(f, 'utf8')).join('\n');
   writeFileSync('dist/webview/modelManager.css', modelManagerCss);
   copyFileSync('webview-ui/modelManager.html', 'dist/webview/modelManager.html');
+  writeFileSync('dist/webview/monitor.css', MONITOR_CSS_PARTIALS.map((f) => readFileSync(f, 'utf8')).join('\n'));
+  copyFileSync('webview-ui/monitor.html', 'dist/webview/monitor.html');
 }
 
 // B4: playwright-core is external and shipped intact next to the bundle, where
@@ -136,7 +145,8 @@ async function build() {
     const extCtx = await esbuild.context(extensionConfig);
     const webCtx = await esbuild.context(webviewConfig);
     const mmCtx = await esbuild.context(modelManagerConfig);
-    await Promise.all([extCtx.watch(), webCtx.watch(), mmCtx.watch()]);
+    const monitorCtx = await esbuild.context(monitorConfig);
+    await Promise.all([extCtx.watch(), webCtx.watch(), mmCtx.watch(), monitorCtx.watch()]);
     copyWebviewAssets();
     console.log('Watching for changes…');
     return;
@@ -145,6 +155,7 @@ async function build() {
   if (webviewOnly) {
     await esbuild.build(webviewConfig);
     await esbuild.build(modelManagerConfig);
+    await esbuild.build(monitorConfig);
     copyWebviewAssets();
     console.log('Webview built.');
     return;
@@ -160,6 +171,7 @@ async function build() {
   if (buildAll) {
     await esbuild.build(webviewConfig);
     await esbuild.build(modelManagerConfig);
+    await esbuild.build(monitorConfig);
     copyWebviewAssets();
     console.log('Webview built.');
   }

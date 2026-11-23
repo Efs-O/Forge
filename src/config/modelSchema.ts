@@ -157,6 +157,9 @@ export const ModelConfigSchema = z.object({
       error: 'gpus belongs on the engine in ~/.forge/policy.yaml, not on a model entry',
     })
     .optional(),
+  stats: z
+    .never({ error: 'stats belongs on the engine in ~/.forge/policy.yaml, not on a model entry' })
+    .optional(),
   // Per-model llama-server executable override (e.g. a patched fork for one
   // model). Absent = the global llama_server.binary. See ModelConfig.
   llama_server_binary: z.string().min(1).optional(),

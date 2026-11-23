@@ -74,6 +74,10 @@
         "title": "Forge: Model Manager"
       },
       {
+        "command": "forge.openMonitor",
+        "title": "Forge: Open Monitor"
+      },
+      {
         "command": "forge.ensureModel",
         "title": "Forge: Ensure Model (load on demand)"
       },

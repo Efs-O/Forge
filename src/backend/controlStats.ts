@@ -3,6 +3,10 @@ import * as path from 'path';
 import { z } from 'zod';
 import { isFailureResult } from '../sidebar/toolResultView';
 import { readSessionLogRows } from '../sessions/sessionLogRows';
+import type { ForgeConfig } from '../config/types';
+import { resolveRequestModel } from '../config/ConfigResolver';
+import { perSlotContext } from '../util/contextBudget';
+import { sessionsDirectory } from '../sidebar/SessionLogger';
 
 export const controlStatsSchema = z.object({
   forge_version: z.string(),
@@ -57,6 +61,27 @@ export const controlStatsSchema = z.object({
 });
 
 export type ControlStats = z.infer<typeof controlStatsSchema>;
+
+/** The in-process daily builder shared by the control server and Monitor panel. */
+export function createForgeControlStatsBuilder(
+  getConfig: () => ForgeConfig,
+  forgeVersion: string,
+): ControlStatsBuilder {
+  return createControlStatsBuilder({
+    sessionsDir: sessionsDirectory(),
+    now: Date.now,
+    forgeVersion,
+    contextLimitFor: (model) => {
+      try {
+        const config = getConfig();
+        const resolved = resolveRequestModel(config, model);
+        return perSlotContext(resolved, config.llama_server, resolved.provider ?? 'llama.cpp');
+      } catch {
+        return null;
+      }
+    },
+  });
+}
 
 interface FileCacheEntry {
   size: number;
