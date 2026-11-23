@@ -136,7 +136,7 @@
 25. `write_file` · a backtick I thought it had escaped → it writes exactly what I typed, so a later `old_str` misses. read_file it back before blaming the write
 26. `desktop_click` · on a field may not move the caret → text runs on behind it. move with `tab`, clear with `ctrl+a`+`delete`; a new capture drops the old `capture_id`
 27. `read_tool_result` · `tool_call_id: "read_file"` (a tool's NAME, not an id) or a `message_index` of a tool result → `no text tool result with call ID`: results take the result's own `tool_call_id`, prompts take `message_index`
-28. `update_plan` · `items` → refused: `"items" must be a JSON array, not a string`, for a bare-string entry or one missing `"text"`. every entry is exactly `{"text":…,"status":…}`; resend the whole array If it fires on a list that looks well formed, resend it unchanged once.
+28. `update_plan` · `items` → refused: `"items" must be a JSON array, not a string`, for a bare-string entry or one missing `"text"`. every entry is exactly `{"text":…,"status":…}`; resend the whole array. If it fires on a list that looks well formed, resend it unchanged once.
 29. `remember` · `title:`, `path:`, `name:` or `content:` → refused: unknown argument. name the memory with `key`, put its text in `value`
 30. `recall` · the fields `remember` takes → refused. send the memory's name alone: `{"key": …}`
 31. `ask_user` · a top-level `header` → refused: unknown argument. `header` belongs to each question
