@@ -34,6 +34,7 @@ OUT_FILES = {
     'versions': 'failed_tools_versions.txt',
     'repeats': 'tips_repeats.txt',
     'rate': 'failed_tools_rate.txt',
+    'sig_outside': 'failed_tools_sig_outside.txt',
 }
 
 
@@ -196,6 +197,19 @@ def exclude_set(exclude_file):
 
 def excluded(sid, prefixes):
     return any(sid.startswith(p) for p in prefixes)
+
+
+def is_forge_workspace(name):
+    """True when a chat's `workspace_name` is one of Forge's own checkouts.
+
+    `session_start` rows carry an optional `workspace_name`; a chat that predates
+    the field reports '?', which counts as NOT Forge: the point of the column is
+    to show where an outside mistake belongs, and an unknown workspace is treated
+    as outside. Matching is by lower-cased name, so `Forge`, `forge`,
+    `Forge-lab2`, `forge-relay` and `forge-sectest-1028` all answer True.
+    """
+    ws = (name or '').strip().lower()
+    return ws == 'forge' or ws.startswith('forge-')
 
 
 def writer(out_dir, name, mode='w'):

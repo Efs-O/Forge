@@ -17,6 +17,7 @@ from session_scan_common import (
     exclude_set,
     excluded,
     version_ok,
+    is_forge_workspace,
     writer,
 )
 
@@ -72,6 +73,7 @@ def sig(t):
 rows = []
 counts = collections.Counter()
 sigc = collections.Counter()
+sigc_outside = collections.Counter()
 by_model = collections.Counter()
 by_day = collections.Counter()
 toolres_total = collections.Counter()
@@ -86,6 +88,7 @@ tool_fails_prod = collections.Counter()
 forge_rule_all = collections.Counter()
 forge_rule_prod = collections.Counter()
 chats = set()
+outside_rows = 0
 files_scanned = 0
 recs_scanned = 0
 
@@ -97,6 +100,7 @@ for path in session_files(opts.sessions):
     chats.add(sid)
     title = ''
     cur_ver = '?'
+    cur_ws = '?'
     calls = {}
     for line in open(path, encoding='utf-8', errors='replace'):
         try:
@@ -110,12 +114,15 @@ for path in session_files(opts.sessions):
                 # Read before the window on purpose: a chat that started on the old
                 # build is still on it for every tool row that follows.
                 cur_ver = r.get('forge_version') or '?'
+                # Same for the workspace: a chat runs in one folder from start to end.
+                cur_ws = r.get('workspace_name') or '?'
             continue
         recs_scanned += 1
         t = r.get('type') or r.get('role')
         if t == 'session_start':
             title = (r.get('title') or '')[:40]
             cur_ver = r.get('forge_version') or '?'
+            cur_ws = r.get('workspace_name') or '?'
         elif t == 'assistant':
             for c in (r.get('tool_calls') or []):
                 if not calls and len(rows) < 1:
@@ -169,6 +176,7 @@ for path in session_files(opts.sessions):
                 model=(r.get('model') or '?')[:40],
                 tool=name,
                 bucket=b,
+                ws=cur_ws,
                 args=args_json[:180].replace('\n', ' '),
                 err=body[:400].replace('\n', ' | '),
                 s=sig(first),
@@ -177,6 +185,10 @@ for path in session_files(opts.sessions):
             rows.append(row)
             counts[b] += 1
             sigc[(b, name, row['s'])] += 1
+            if not is_forge_workspace(row['ws']):
+                # '?' (a log from before `workspace_name` existed) counts as outside.
+                outside_rows += 1
+                sigc_outside[(b, name, row['s'])] += 1
             by_model[(mdl, b)] += 1
             by_day[day] += 1
             tool_fails_all[name] += 1
@@ -186,10 +198,13 @@ for path in session_files(opts.sessions):
                 model_fails_prod[mdl] += 1
 
 rows.sort(key=lambda x: (int(x['ts'].split()[1]), x['ts'].split()[2]))
+# Ten tab columns, `workspace` right after the chat id and the call id still last:
+# args and err are not tab-escaped, so tips_repeats.py reads them as `p[7]` and
+# `p[8:-1]` and any column added after the call id would swallow one of them.
 with writer(opts.out, 'raw') as f:
     for r in rows:
-        f.write('\t'.join([r['ts'], r['bucket'], r['tool'], r['model'], r['sid'], r['title'],
-                          'ARGS: ' + r['args'], 'ERR: ' + r['err'], r['cid']]) + '\n')
+        f.write('\t'.join([r['ts'], r['bucket'], r['tool'], r['model'], r['sid'], r['ws'],
+                          r['title'], 'ARGS: ' + r['args'], 'ERR: ' + r['err'], r['cid']]) + '\n')
 
 # Per-tool failure rate. The job asks which tool fails more than a third of its
 # calls, and nothing else here wrote calls per tool, so the question could not be
@@ -235,6 +250,7 @@ def a(s):
 
 
 print('FILES_SCANNED', files_scanned, 'RECORDS_AFTER_CUT', recs_scanned, 'FAILURES', len(rows))
+print('OUTSIDE_ROWS', outside_rows, '(chat workspace is not Forge)')
 print('BUCKETS:', dict(counts))
 print('DAYS:', dict(sorted(by_day.items(), key=lambda kv: int(kv[0].split()[1]))))
 print('PROD_FAIL_BY_DAY:', dict(sorted(by_day_fail_prod.items(), key=lambda kv: int(kv[0].split()[1]))))
@@ -247,6 +263,13 @@ with writer(opts.out, 'sig') as f:
         f.write('%4d  %-14s %-16s %s\n' % (c, b, name, s))
         if c >= 2:
             print('%4d %-14s %-14s %s' % (c, a(b), a(name), a(s)))
+# The same signatures, counted only for chats whose workspace is not Forge: subject
+# knowledge (Blender, ffmpeg, an engine) lands in whichever repo hit it first and
+# never reaches the others, so the report needs to say whose it was. A run with no
+# such rows writes an empty file.
+with writer(opts.out, 'sig_outside') as f:
+    for (b, name, s), c in sigc_outside.most_common(200):
+        f.write('%4d  %-14s %-16s %s\n' % (c, b, name, s))
 print('--- SINGLETONS (count 1) ---')
 for (b, name, s), c in sigc.items():
     if c == 1:

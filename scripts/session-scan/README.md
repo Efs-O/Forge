@@ -29,12 +29,17 @@ every line — they share the raw rows and the frozen cutoff.
 
 1. `scan_logs.py` — reads the logs. Writes `failed_tools_raw.txt` (one tab-separated
    row per failed call), `failed_tools_sig.txt` (failure signatures, most common
-   first), `failed_tools_rate.txt` (per tool: `tool`, `calls`, `failures`, `rate%`,
+   first), `failed_tools_sig_outside.txt`, `failed_tools_rate.txt` (per tool: `tool`, `calls`, `failures`, `rate%`,
    tab-separated — the tools with at least 10 calls first, worst rate on top, ties
    broken by name, then the rare ones in the same order; this is what answers "which
    tool fails more than a third of its calls"), `scan_summary.txt` (the counts, plus
    `WINDOW_START` so the next run can start where this one ended and `MIN_VERSION`
    so the build the numbers measure is on the record), and `scan_cutoff.txt`.
+   `failed_tools_raw.txt` columns, tab-separated: `time`, `kind`, `tool`, `model`,
+   `chat id`, `workspace` (the chat's `workspace_name`, `?` when the log has none),
+   `title`, `ARGS: …`, `ERR: …`, `call id`. `failed_tools_sig_outside.txt` — the
+   same signatures, counting only chats whose workspace is not Forge (`forge` or
+   `forge-*`, any case).
 2. `recovery_check.py` — reads `failed_tools_raw.txt`, `scan_summary.txt`,
    `scan_cutoff.txt` and the logs. Writes `recovery.txt`: of the failures that are
    not a non-zero shell exit, how many were followed by the same tool succeeding

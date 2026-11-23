@@ -207,7 +207,7 @@ fails = []
 unplaced = 0
 for line in open(RAW, encoding='utf-8'):
     p = line.rstrip('\n').split('\t')
-    if len(p) < 9:
+    if len(p) < 10:
         continue
     if p[1] in SKIP_BUCKETS or excluded(p[4], PROBE):
         continue
@@ -216,7 +216,7 @@ for line in open(RAW, encoding='utf-8'):
         unplaced += 1
         continue
     fails.append(dict(e=e, ts=p[0], tool=p[2], model=p[3], sid=p[4],
-                      args=p[6], err_l='\t'.join(p[7:-1]).lower()))
+                      args=p[7], err_l='\t'.join(p[8:-1]).lower()))
 
 measured = [measure(r) for r in tip_rows()]
 measurable = [r for r in measured if 'reason' not in r]
