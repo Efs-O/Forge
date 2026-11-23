@@ -30,7 +30,7 @@
 9. a 2nd gated call after one card expired → `... needs the approval that went unanswered earlier in this turn, so no new card was shown` → only the first card waits
 10. a gated call batched with later gated calls → each raises its own card and waits the full `approval_timeout_minutes`. send one gated call, then the next
 11. a heredoc terminator with a command after it (`MSG; echo ok`) → not seen as a terminator: the command text lands in the file and never runs. keep it alone on its line
-12. a field the tool does not declare (a result's field resent as input, a stray `=`, every arg nested in `arguments`) → refused: unknown arguments; one refusal names them all. re-read the field list
+12. a field the tool does not declare (a result's field resent as input, a stray `=`, a typo'd `start_line>` inside a `reads` item) → refused: unknown arguments; one refusal names them all. re-read the field list
 13. `npm test 2>&1 > run.log` → vitest writes failures to stderr, so the file holds only the summary. write `> run.log 2>&1`
 14. an approval-gated command inside `A && B && C` → the card can expire with the owner away and B/C never run. restore a tracked file with `git show HEAD:path > path`: no card
 15. a pid taken in Git Bash (`$$`, `$!`) → an MSYS pid, so Win32 `OpenProcess` answers 87. take it from the Windows side (PowerShell `$PID`) or a Win32 tool
@@ -43,7 +43,7 @@
 22. a pwsh log name with a space (`> logs/run 1.log`) → a later `Select-String -Path` says the path does not exist. no spaces in log file names
 23. `tail -5 a.log b.log` in Git Bash → `tail: option used in invalid context -- 5`: the old `-N` form takes one file only. write `tail -n 5`
 24. `export PATH="$APPDATA/npm:$PATH"` in Git Bash → node resolves `C:\Program Files\Git\Users\…` → MODULE_NOT_FOUND: MSYS ate the `C:`. write the POSIX form `/c/Users/<name>/AppData/Roaming/npm`
-25. `powershell -Command "… $_ …"` from bash → bash substitutes `$_` first, so PowerShell sees `/usr/bin/bash.Name` → CommandNotFoundException. single-quote the PowerShell body, or name the variable `${PSItem}`
+25. `powershell -Command "… $p …"` from bash → bash substitutes EVERY `$var` first (`$_` → `/usr/bin/bash`), so PowerShell sees `/usr/bin/bash.Name` → CommandNotFoundException. set `shell: "pwsh"` on the call
 
 ## GIT
 1. `git commit -- <file> -m "msg"` → git reads `-m` and the message as pathspecs after `--`. put every flag before `--`, the files last; a new file needs `git add` first
@@ -120,9 +120,9 @@
 9. `grep_search` · query `constructor(` → `rg: regex parse error: ... unclosed group`; a balanced `(a, b)` is a valid group and silently finds nothing. the query is ripgrep regex: escape every paren or set `literal: true`
 10. `find_files` · `path:` or an absolute, `~` or `..` pattern → refused, or opens nothing outside the workspace. put the folder in the pattern: `{"pattern":"src/**/*.ts"}`; outside it, `list_directory` the absolute path
 11. `shell` · `cd "<dir>" && …`, or `cwd` inside `~/.forge/sessions` → refused: writes are judged from the start folder. pass `cwd:` and the command alone; scan sessions from the workspace
-12. `shell` · `wc`/`sed`/`grep -o` in a `shell: pwsh` call → "The term 'wc' is not recognized"; `2>/dev/null` → `Out-File: Could not find a part of the path`. rerun with `shell: "bash"`, or write `2>$null`
+12. `shell` · bash↔pwsh mix-ups: `wc`/`sed`/`tail` in a `shell: pwsh` call → "The term 'wc' is not recognized" (`tail` → `Get-Content -Tail`); a pwsh cmdlet in a bash call → `command not found`; `2>/dev/null` → `Out-File: Could not find a part of the path`. rerun with the other `shell`
 13. `shell` · `ls ~/.forge/jobs/*` lists fine, `rm -f ~/.forge/x` → "refuses to change Forge's own files"; `Get-ItemProperty` on a file there counts as a change. read the text with `grep_search`
-14. `shell` · `query:`/`include:` or another tool's field → refused: unknown argument. fields are `command`/`cwd`/`timeout_ms`/`background`/…
+14. `shell` · `query:`/`include:` or another tool's field → refused: unknown argument. fields are `command`/`cwd`/`timeout_ms`/`background`/…; an empty call → `missing required argument "command"`, resend with `command`
 15. `stop_execution` · on a background `npm run ci` → the wrapper dies, the child tree may live and hold its lock: `MSYS_NO_PATHCONV=1 taskkill /PID <top> /T /F`; with NO_PATHCONV `//PID` → `Invalid argument/option - '//PID'`
 16. `monitor_execution` · `wait_ms: 90000` remembered from `wait`'s 900 s → refused: must be within 0 to 60000. re-read the advertised bounds instead of recalling them
 17. `monitor_execution` · `suggested_next_wait_ms` echoed back as an argument, or `output_stream: "none"` → `unknown argument "suggested_next_wait_ms"` / `output_stream must be "both", "stdout", or "stderr"`: the first is a returned field — pass its value as `wait_ms`; never invent an enum value
@@ -135,7 +135,7 @@
 24. `apply_line_edits` · a range counted from an unnumbered `read_file`, or from before a formatter pass → refused: `operation 1 is stale ... they DO match lines 276-279`. read with `numbered: true` in the same round
 25. `write_file` · a backtick I thought it had escaped → it writes exactly what I typed, so a later `old_str` misses. read_file it back before blaming the write
 26. `desktop_click` · on a field may not move the caret → text runs on behind it. move with `tab`, clear with `ctrl+a`+`delete`; a new capture drops the old `capture_id`
-27. `read_tool_result` · `message_index` of a tool result → refused: that index is a tool result, use its tool_call_id. results take tool_call_id, prompts take message_index
+27. `read_tool_result` · `tool_call_id: "read_file"` (a tool's NAME, not an id) or a `message_index` of a tool result → `no text tool result with call ID`: results take the result's own `tool_call_id`, prompts take `message_index`
 28. `update_plan` · `items` → refused: `"items" must be a JSON array, not a string`, for a bare-string entry or one missing `"text"`. every entry is exactly `{"text":…,"status":…}`; resend the whole array
 29. `remember` · `title:`, `path:`, `name:` or `content:` → refused: unknown argument. name the memory with `key`, put its text in `value`
 30. `recall` · the fields `remember` takes → refused. send the memory's name alone: `{"key": …}`
@@ -167,5 +167,7 @@
 56. `shell` · `ls test/unit | grep -i -e a -e b` → `exit 134` with `Aborted` and no listing, so the answer is lost not just failed: MSYS job control kills the pipeline. use `find_files` / `grep_search` instead of piping `ls`
 57. `web_fetch` · `remember` or a `gh api` shell call in a scheduled job → `approval key denied by policy`: a job holds only the keys in `approvals.jobs.<job>.allow` in `~/.forge/policy.yaml` (the owner adds them). do not retry; name the denied key in the job's result and work from its own snippets
 58. `edit_file` · an `edits[]` item with only `old_str`, meant to delete a line → refused: `edit 1 needs string old_str and new_str (it has: old_str)`. the delete form is `new_str: ""`
-59. `edit_file` · a path outside the workspace → `Path is outside the workspace ... outside extra_file_roots`, though `read_file` reads it and shell writes it. edit it with a script through `shell`, or ask for the folder in `extra_file_roots`
+59. `edit_file` · a path outside the workspace → `Path is outside the workspace ... outside extra_file_roots`, though `read_file`, `open_file` and shell reach it. edit it with a script through `shell`, or ask for the folder in `extra_file_roots`
 60. `monitor_execution` · an execution id shortened from a note or summary → `unknown execution id "exec-92bfe375"`: ids are the full `exec-<8>-<4>-<4>-<4>-<12>`. call `list_executions` for the live one, or read the job's own log file
+61. `manage_jobs` · `resume` on a job whose state file another VS Code window holds → `EPERM: operation not permitted, rename ... held by <pid> Visual Studio Code`, job unchanged. wait ~8 s and resend the same call
+62. `shell` · `gh api --jq` with `\(user.login)` inside the string → `function not defined: user/0`, escaped as `\user` → `invalid escape sequence "\u"`. keep jq dot-only: `.[] | .user.login + ": " + (.body | .[0:600])`

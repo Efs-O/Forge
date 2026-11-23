@@ -166,9 +166,10 @@ Entry shape (copy it, fill it, newest entry last):
 
 ## A scheduled job that finished and reported is logged as "interrupted — Forge restarted during the run"
 
-- Seen: 2026-11-17, also 2026-11-16, 2026-11-19, and five times on 2026-11-21 (the 06:45, 06:51,
+- Seen: 2026-11-17, also 2026-11-16, 2026-11-19, five times on 2026-11-21 (the 06:45, 06:51,
   06:54, 06:58 and 07:14 turns each ended with their `RESULT:` line in the chat minutes before the
-  runner logged them), Forge 0.17.18x → 0.17.207, job "Basalt Windows multi-GPU watch"
+  runner logged them) and three times on 2026-11-22 (10:45, 10:54, 10:59), Forge 0.17.18x →
+  0.17.207, job "Basalt Windows multi-GPU watch"
 - Tool: the scheduled job runner, recorded in `~/.forge/jobs/runs/basalt-watch.jsonl`
 - Did: `{"at":1794891190572,"outcome":"failed","summary":"interrupted — Forge restarted during
   the run"}` written about three minutes after the same turn ended with `RESULT: ok — the first
@@ -179,7 +180,12 @@ Entry shape (copy it, fill it, newest entry last):
   06:45)` (widening to `no heartbeat for 3 min` by 07:14) for five runs in a row whose turns kept
   answering tool calls and ended with their `RESULT:` line
 - Should: record the `RESULT:` line the finished turn produced, and not mark a run interrupted
-  when the restart comes after its last message
+  when the restart comes after its last message. The numbers do not fit the task it guards: the
+  beat is every 30 s and the marker is stale after 120 s (`TASK_RUN_HEARTBEAT_MS` /
+  `TASK_RUN_STALE_MS`, `src/jobs/agentTaskState.ts:63-66`), while the same job's action allows a
+  20-minute agent task, so any turn that spends more than two minutes between tool calls looks
+  dead. Clearing the marker also leaves the daily run not-done, so the next tick starts it again:
+  five notices in 20 minutes on 2026-11-22, one Telegram ping each.
 - Workaround: the report is in the chat; the retried run re-sweeps and answers "nothing new since
   the report minutes ago"
 - Status: open
@@ -212,4 +218,13 @@ Entry shape (copy it, fill it, newest entry last):
 - Should: run the pipeline, or refuse with the reason; a SIGABRT from the shell's own job control
   is not something the caller can act on
 - Workaround: `find_files` / `grep_search` instead of piping `ls` into `grep`
+- Status: open
+
+## `manage_jobs` `resume` fails with EPERM when another window holds the job state file
+
+- Seen: 2026-11-22, Forge 0.17.211, chat 6de9dc67-b750-424a-8a52-26678e98d6dc
+- Tool: `manage_jobs` action `resume`, job `strata-update`
+- Did: `Error: EPERM: operation not permitted, rename 'C:\Users\efso office\.forge\jobs\state\.strata-update.json.forge-<uuid>.tmp' -> 'C:\Users\efso office\.forge\jobs\state\strata-update.json' — rename onto ... was retried for 2500 ms and gave up; held by 30544 Visual Studio Code.` The job stayed paused, so `run_now` on it would have been a no-op.
+- Should: retry longer than the 2500 ms it already spent (an editor/watcher holding a file releases in seconds), or report `resume deferred: state file held by <pid>, retry` instead of an Error, so the caller does not read it as a failed operation
+- Workaround: `wait` 8 s and resend the identical `resume`; it applied on the second try
 - Status: open

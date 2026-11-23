@@ -61,6 +61,7 @@
 ## PATHS
 1. `zipfile.ZipFile('test/fixtures/sample.xlsx')` in a scan → FileNotFoundError: that is not where the fixture lives. read the test's `fixture()` helper for the real path first
 2. `wc -l test/unit/BusContent.test.ts` → no such file: busContent's tests live in `test/unit/AgentBus.test.ts`. `ls test/unit | grep -i <topic>` before naming a test file
+3. `grep_search` include `src/tools/memoryStore.ts` → `nothing at it exists under the workspace root`: the store is `src/memory/memoryStore.ts`, `src/tools/memoryTools.ts` is only its tool wrapper. glob `**/memoryStore.ts` before naming a src path
 
 ## FORENSICS
 1. a Canon print job parked in `Printing`, `PrinterStatus 4` → it waits in Canon IJ Preview (Start Printing); `Get-PrintJob` is not installed here: use `Get-CimInstance Win32_PrintJob` / `Win32_Printer`
