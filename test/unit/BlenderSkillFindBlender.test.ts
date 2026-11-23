@@ -20,7 +20,9 @@ const pythonCheck = spawnSync(python, ['-c', 'pass'], { encoding: 'utf8' });
 const canRun = pythonCheck.status === 0 && fs.existsSync(script);
 
 const DRIVER = [
-  'import os, sys',
+  // Import the stdlib first: shutil picks its platform module at import time,
+  // and with os.name patched to "nt" it imports Windows-only `nt` on POSIX.
+  'import glob, os, re, shutil, sys',
   'os.name = "nt"',
   'os.environ.pop("BLENDER", None)',
   'os.environ["ProgramFiles"] = sys.argv[1]',
