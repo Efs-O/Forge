@@ -19,6 +19,7 @@ Standard library only; it imports nothing that a Blender install provides.
 """
 import glob
 import os
+import re
 import shutil
 import sys
 
@@ -34,14 +35,27 @@ def _clean(value):
     return value
 
 
+def _version_key(path):
+    """The version numbers of an install folder, as numbers.
+
+    Numeric on purpose: as text "Blender 4.10" sorts below "Blender 4.2", and a
+    future "Blender 10.0" below "Blender 5.0", so a plain sort hands an older
+    major to the scripts."""
+    return tuple(int(x) for x in re.findall(r"\d+", os.path.basename(os.path.dirname(path))))
+
+
 def standard_paths():
     """The install folders Blender's own installer uses, per operating system."""
     if os.name == "nt":
         base = os.environ.get("ProgramFiles")
         if base:
-            # Sorted so a pinned version wins deterministically over an older one.
-            yield from sorted(glob.glob(
-                os.path.join(base, "Blender Foundation", "Blender*", "blender.exe")))
+            # Newest install first: upgrading in place leaves the older major
+            # side by side, and the skill's scripts target the newer one.
+            yield from sorted(
+                glob.glob(os.path.join(base, "Blender Foundation", "Blender*", "blender.exe")),
+                key=_version_key,
+                reverse=True,
+            )
     elif sys.platform == "darwin":
         yield "/Applications/Blender.app/Contents/MacOS/Blender"
     else:
