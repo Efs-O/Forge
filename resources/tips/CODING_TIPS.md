@@ -78,7 +78,7 @@
 12. a fake loopback `http` server closed with `server.close()` alone → the test hangs to its timeout: fetch keeps the connection alive. call `server.closeAllConnections()` first
 13. an expected message built from fragments joined with `cond ? 'x' : ''` and no `+` before the next fragment → the assertion compares a mangled string. join with ` +`, wrap each conditional in parentheses
 14. a new method on a class tests fake with `{ … } as unknown as X` → `TypeError: x.method is not a function` in other files' tests. `grep -rn "as unknown as X" test scripts` and add it to every fake
-15. a python heredoc writing a file that holds `'\n'` escapes → Python turns them into real newlines (vitest: `PARSE_ERROR`). write the escape as `chr(92)+"n"`, or use the edit tool
+15. a python heredoc writing a file that holds `'\n'` or `'\\blender'` escapes → Python turns them into real newlines or a backspace (vitest: `PARSE_ERROR`; a markdown cell silently loses a letter). write the escape as `chr(92)+"n"`, or use the edit tool
 16. a "the stale read must not publish" test asserting a snapshot count → fails on macOS: `fs.watch` reports the fixture's own writes. make the stale result distinguishable (`[]`) and assert none is it
 17. a fake that picks "the first call is the slow one" after `await super.x()` → two concurrent calls race to that check and the wrong one goes slow. read and clear the flag before the first await
 18. a function with a default parameter, tested for "no value" by calling it with an explicit `undefined` → the default takes it, so the test proves nothing. omit the argument, or pass a value that means none
@@ -107,6 +107,7 @@
 13. a `gh run list` run seconds after `git push` → only the older runs: the new one registers 20-40 s later. wait, then pick it with `--json headSha`, never from the top row
 14. `gh run view <id> --log` on a run still in progress → prints nothing (1,676 lines once it ends). for live step status poll `gh run view <id> --json jobs --jq '.jobs[] | "\(.name)\t\(.status)\t\(.conclusion)"'`
 15. `vsce publish` prints "Published vN" → the Marketplace index and item page still show v(N-1) for ~11 min. the package is live: proof GET `/publishers/<pub>/vsextensions/<ext>/<ver>/vspackage`, gunzip it (magic `1f 8b`) before `zipfile`, else BadZipFile
+16. reading the control server's `GET /stats` → the `today` and `session` blocks repeat every counter name, so `compaction_attempts_failed: 2` can be the whole-chat number rather than today's. name the block before filing it
 
 ## FORGE_TOOLS
 1. `read_file` · a guessed `end_line` → refused: start_line is past end_line. read whole, or take the range from a search hit, never from memory
