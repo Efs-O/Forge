@@ -1,5 +1,15 @@
 # Forge — Recent Changes
 
+## 0.17.215
+
+**The Monitor shows CPU temperature and power, and opens by itself.** With LibreHardwareMonitor's
+web server running, `monitor: { cpu: http://127.0.0.1:8085/data.json }` in `.forge/config.yaml`
+adds a CPU card with the package temperature and power, read every 2 seconds. If LibreHardwareMonitor
+is not answering, the card shows the error and Forge waits 30 seconds before asking again. Only an
+address on this machine is accepted. The Monitor now also opens the first time a window starts a
+model server, without taking the keyboard from the editor. Closing it keeps it closed for that
+window, and `monitor: { auto_open: false }` turns this off.
+
 ## 0.17.214
 
 **0.17.213 is released as 0.17.214.** 0.17.213 stopped before publishing, because a Windows test of
