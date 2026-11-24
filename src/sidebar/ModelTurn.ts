@@ -31,48 +31,28 @@ import { deriveStaticCapabilities } from '../config/ConfigResolver';
 import { applyToolCalls } from './transcriptMutations';
 import { mirrorLiveSessionAnswers } from './liveSessionMirror';
 import { extractToolDetail, activityToolName } from './toolSummary';
-import {
-  freezeTurnContextAndConsumeResumeNote,
-  isNewChatFirstTurn,
-  type TurnContextState,
-} from './turnContext';
-import { pinForgeInstructions } from './forgeInstructionsPin';
+import { snapshotTurnPromptHead } from './turnPromptSnapshot';
+import { buildTurnStreamHandlers } from './turnStreamHandlers';
 import { pinCodingTips } from './codingTipsPin';
 import {
   assertTextCallsReadable,
   buildTextCallDefinitions,
   buildToolDefinitions,
 } from './turnToolDefinitions';
-import { formatCompactionResumeNote } from './compactionTypes';
-import { terminalCommandTracker } from '../tools/TerminalCommandTracker';
 import { toolOutputLimits } from '../tools/toolOutputLimits';
-import { localDate } from '../util/localClock';
 import { buildVisionRefusals } from './visionGate';
 import { unattendedConversations, withUnattendedRefusals } from './unattendedConversations';
-import {
-  isTurnCutOffError,
-  ROUND_CAP_INCOMPLETE_PREFIX,
-  runToolCallingLoop,
-  type ToolCallingLoopResult,
-} from '../agent/ToolCallingLoop';
+import { runToolCallingLoop, type ToolCallingLoopResult } from '../agent/ToolCallingLoop';
+import { publishTurnOutcome, trackTurnCompletion } from './turnOutcomeReporting';
 import { canUseThinkingKwargs, isProjectRoot, shouldStripThinking } from './turnModelBehavior';
 import { warnAboutModel } from './modelMismatchWarnings';
-import { runningBackgroundExecutionsNotice } from './backgroundExitNotice';
 import type { AgentProgressEvent } from './AgentProgress';
 import type { LiveStreamMeter } from './LiveStreamMeter';
 import { writeChunkLimit } from '../tools/writeChunking';
-import { toolCallProgressMsg } from './toolCallProgress';
 import type { RequestOfferedListener } from '../sessions/requestFingerprint';
 import type { RequestCapture } from '../sessions/requestStats';
 import { isMutatingTool, type QuestionWaitRunner } from '../tools/toolContract';
-import { reportRequestUsage } from './requestUsageReporting';
 import { startStrataBusyWarning } from './strataBusyWarning';
-
-function activeTerminalCwd(): string | undefined {
-  const cwd = vscode.window.activeTerminal?.shellIntegration?.cwd;
-  if (!cwd) return undefined;
-  return cwd.scheme === 'file' ? cwd.fsPath : cwd.toString(true);
-}
 
 /** Tool rounds per sidebar turn when the model does not set `max_tool_rounds`. */
 export const MAX_TOOL_ROUNDS = 1000;
@@ -144,24 +124,6 @@ export interface ModelTurnRequest {
   withQuestionWait?: QuestionWaitRunner;
 }
 
-/**
- * Records turns that ended for want of room. `runToolCallingLoop` *throws* on
- * the round cap and on exhausted context, so both have to be caught here —
- * only `finish_reason: length` comes back through a normal return.
- */
-async function trackTurnCompletion<T>(
-  lifecycle: TurnLifecycle,
-  convId: string,
-  run: () => Promise<T>,
-): Promise<T> {
-  try {
-    return await run();
-  } catch (err) {
-    if (isTurnCutOffError(err)) lifecycle.markIncomplete(convId, (err as Error).message);
-    throw err;
-  }
-}
-
 export async function runModelTurn(
   ctx: ModelTurnContext,
   {
@@ -230,39 +192,8 @@ export async function runModelTurn(
 
   announceMissingImages(conv, model, isVisionModel, { postC, warnOnce: ctx.warnOnce });
 
-  // Layer C is snapshotted HERE, once per turn, not rebuilt per round.
-  // `prepareMessages` runs again on every tool round, so reading `conv.plan`
-  // live meant an `update_plan` mid-turn rewrote a message sitting just after
-  // the system prompt -- the block folds into the last USER message, and on
-  // round N that is the request that opened the turn. Measured on a 4-round
-  // turn with three update_plan calls: cache reuse fell from 76% to 39%, and
-  // two consecutive 186-token prompt growths re-evaluated 15401 tokens (~20 s).
-  // It need not be re-rendered: update_plan's result confirms the write, and the
-  // new plan reaches the next USER turn, which extends the prefix anyway. `items`
-  // is copied so a later in-place edit of conv.plan cannot reach this prompt.
-  const remoteChats = ctx.remoteReach?.(conv.id) ?? 0;
-  const userTerminalCommands = terminalCommandTracker.recentUserCommands();
-  const terminalCwd = userTerminalCommands.length > 0 ? activeTerminalCwd() : undefined;
-  const instructions = pinForgeInstructions(conv, ctx.forgeLoader?.instructionsFor(activeFile));
-  const memoryIndex = isNewChatFirstTurn(conv.messages, conv.compaction)
-    ? ctx.listMemoryLines?.()
-    : undefined;
-  const turnContext: TurnContextState = {
-    ...(instructions.note ? { forgeInstructionsNote: instructions.note } : {}),
-    activeFile,
-    currentDate: localDate(),
-    ...(userTerminalCommands.length > 0 ? { userTerminalCommands } : {}),
-    ...(terminalCwd ? { activeTerminalCwd: terminalCwd } : {}),
-    ...(conv.plan ? { plan: { items: [...conv.plan.items], updatedAt: conv.plan.updatedAt } } : {}),
-    // Snapshotted with the rest of Layer C: a chat binding that changes
-    // mid-turn must not rewrite the prompt near the head and cost this turn's
-    // own tool rounds.
-    ...(remoteChats > 0 ? { remoteChats } : {}),
-    ...(unattended ? { unattended } : {}),
-    compactionResume: formatCompactionResumeNote(conv.compaction?.resumeNote),
-    ...(memoryIndex && memoryIndex.length > 0 ? { memoryIndex } : {}),
-  };
-  freezeTurnContextAndConsumeResumeNote(conv.messages, turnContext, conv.compaction);
+  // The prompt head, snapshotted once per turn: turnPromptSnapshot.ts.
+  const { turnContext, instructions } = snapshotTurnPromptHead(ctx, conv, activeFile, unattended);
   const workspaceIsProjectRoot = ctx.forgeLoader?.root
     ? isProjectRoot(ctx.forgeLoader.root)
     : false;
@@ -377,123 +308,11 @@ export async function runModelTurn(
       isMutatingTool: (name) => isMutatingTool(ctx.toolRegistry.get(name)),
       onMessagesChanged: () => ctx.onTranscriptChanged?.(conv),
       ...(ctx.drainTells ? { drainTells: () => ctx.drainTells!(conv.id) } : {}),
-      onToken: (text, createdAt) => {
-        ctx.streamMeter?.add(conv.id, 'answer', text);
-        postC({ type: 'token', text, ...(createdAt !== undefined ? { createdAt } : {}) });
-        ctx.emitAgentProgress({ conversationId: conv.id, kind: 'commentary', text });
-      },
-      onReasoning: (text, createdAt) => {
-        ctx.streamMeter?.add(conv.id, 'reasoning', text);
-        postC({
-          type: 'reasoningToken',
-          text,
-          ...(createdAt !== undefined ? { createdAt } : {}),
-        });
-        ctx.emitAgentProgress({ conversationId: conv.id, kind: 'reasoning' });
-      },
-      onToolCallProgress: (progress) => {
-        const msg = toolCallProgressMsg(progress);
-        if (msg) postC(msg);
-      },
-      // The round's own words, once it has finished saying them. Only remote
-      // surfaces act on this: the sidebar already rendered every token of it.
-      onRoundNarration: (text) =>
-        ctx.emitAgentProgress({ conversationId: conv.id, kind: 'narration', text }),
-      onDone: (finishReason) => {
-        postC({ type: 'done', finishReason: ctrl.signal.aborted ? 'cancelled' : finishReason });
-      },
-      onRepeatedCall: () =>
-        postC({
-          type: 'error',
-          message:
-            'Forge: agent is repeating the same tool call — stopping to avoid a loop. Try rephrasing your request or use /compact if the context is full.',
-        }),
-      onNativeFallback: () => {
-        ctx.failureTracker.recordNativeParseFailure(conv.id);
-        ctx.warnOnce(
-          `${model.name}:native-tool-json`,
-          `Forge: llama-server rejected this model's native tool-call JSON. Retrying with Forge's JSON fallback tool format.`,
-        );
-      },
-      onUsage: (usage, request) => {
-        reportRequestUsage({
-          conv,
-          usage,
-          request,
-          outputBudget,
-          onUsage: ctx.onUsage,
-          streamMeter: ctx.streamMeter,
-          onContextChanged: ctx.onContextChanged,
-        });
-      },
-      // A status line, not an error: the turn continues and the model is being
-      // asked for the same write in chunks.
-      onTruncatedToolCall: ({ toolName, approxBytes }) => {
-        const safeToolName = toolName ?? 'tool call';
-        postC({
-          type: 'toolActivity',
-          toolName: safeToolName,
-          detail: `output cut off after ${approxBytes} bytes — retrying in chunks`,
-        });
-        ctx.emitAgentProgress({
-          conversationId: conv.id,
-          kind: 'tool',
-          toolName: safeToolName,
-        });
-      },
+      ...buildTurnStreamHandlers({ ctx, conv, model, postC, ctrl, outputBudget }),
       getOutputRoom: outputBudget.getOutputRoom,
       ...(compactor ? { compactMidTurn: (req) => compactor(conv, req) } : {}),
     }),
   );
-  // Final publish for the turn. The per-round ticks above are throttled, so
-  // the last one may have been coalesced away.
-  ctx.onContextChanged?.(conv.id);
-  // Cut off by the output ceiling: the reply stopped mid-thought, so the work
-  // is unfinished even though the loop returned normally.
-  if (result.finishReason === 'length') {
-    ctx.lifecycle.markIncomplete(conv.id, 'the reply was cut off by the output limit');
-    // An empty cut-off reply needs an explicit cause and recovery path.
-    if (!result.finalText) {
-      postC({
-        type: 'notice',
-        message:
-          'Forge: the model used its whole output budget on reasoning and was cut off ' +
-          'before answering. The context is nearly full — run /compact, or lower ' +
-          `\`--reasoning-budget\` for "${model.name}".`,
-      });
-    }
-  }
-  // The model ended its own generation mid-thought (see ToolCallingLoop). Not
-  // the output limit, so /compact is not the remedy; a plain retry usually is.
-  if (result.stoppedWhileReasoning) {
-    ctx.lifecycle.markIncomplete(conv.id, 'the model stopped while still reasoning');
-    postC({
-      type: 'notice',
-      // Warning, so a remote chat gets a push: the user must send "continue".
-      severity: 'warning',
-      message:
-        'Forge: the model ended its reply mid-thought twice (the automatic retry with ' +
-        'thinking off also produced nothing). Say "continue" to resume.',
-    });
-  }
-  // Same shape as the `length` case above: the loop returned normally, but the
-  // request is unfinished. Marking it is what lets the post-turn resume pick it
-  // up — without this the turn simply stopped, and only a manual "continue"
-  // restarted it (with a fresh, equally exhaustible budget).
-  if (result.hitRoundCap) {
-    ctx.lifecycle.markIncomplete(conv.id, `${ROUND_CAP_INCOMPLETE_PREFIX} (${maxRounds})`);
-    // Name the knob. Hitting the cap on real work is a budgeting problem the
-    // user can fix, and without this the stop looked like an internal failure
-    // with no recourse but to retype "continue" for another identical budget.
-    postC({
-      type: 'notice',
-      message:
-        `Forge: stopped after ${maxRounds} tool rounds with the task unfinished. ` +
-        `Send a smaller step, or raise \`max_tool_rounds\` on "${model.name}" ` +
-        `(or its group) if this task legitimately needs more.`,
-    });
-  }
-  const running = runningBackgroundExecutionsNotice(conv.id);
-  if (running) postC({ type: 'notice', message: running });
+  publishTurnOutcome({ ctx, conv, model, maxRounds, postC, result });
   return result;
 }

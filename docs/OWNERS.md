@@ -75,6 +75,9 @@ overlaps with an existing owner, extend the owner instead.
 | Per-conversation streaming/cancel state              | `src/sidebar/TurnLifecycle.ts`           |
 | Provider question wait suspension and resumption     | `src/sidebar/providerQuestionWait.ts`     |
 | Model-endpoint turn: preflight + request             | `src/sidebar/ModelTurn.ts`               |
+| A finished turn's outcome: incomplete marks and the owner-facing notices | `src/sidebar/turnOutcomeReporting.ts` |
+| The once-per-turn prompt-head snapshot (Layer C, its side effects in order) | `src/sidebar/turnPromptSnapshot.ts` |
+| A turn's live output: stream callbacks, meters and progress | `src/sidebar/turnStreamHandlers.ts` |
 | A turn's tool list and its text-call definitions     | `src/sidebar/turnToolDefinitions.ts`      |
 | Vision-only turn preflight and its owner-facing refusal | `src/sidebar/turnPreflight.ts` |
 | Vision gate: single source of truth (advertise + refuse) | `src/sidebar/visionGate.ts`    |
