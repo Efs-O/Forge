@@ -125,6 +125,9 @@ uses \`forge.sh read-verdict <name> <exchangeId>\` and then separately runs
 \`forge.sh ack-verdict <name> <exchangeId>\`. Reading does not delete
 the artifact; only the acknowledgment does. If a read response is lost, repeat
 the read before acknowledging. Unacknowledged verdicts remain for recovery.
+An answer that was retained instead of delivered live is announced on every
+\`forge.sh\` call you make — one line on stderr naming its chat and exchange — until
+you acknowledge it or 24 hours pass.
 
 A \`--new\` needs a free chat tab. If that window is at its chat cap and nothing
 can be archived, \`say --new\` exits non-zero with a 409 naming what is holding

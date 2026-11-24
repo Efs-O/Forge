@@ -132,7 +132,12 @@ export interface AgentMessagingWiring {
    *  constructor loads it synchronously through `loadSidebarSession`, so
    *  neither a session-restore await nor `resolveWebviewView` comes before the
    *  first safe call, and a window that never opens the Forge view still
-   *  recovers its replies. */
+   *  recovers its replies.
+   *
+   *  It also announces the answers that are waiting for a session this window
+   *  links — the ones `recover()` never sees, because they were retained in an
+   *  earlier window. Same rule for when it is safe to call: the chat list has to
+   *  be there to read a title and a link from. */
   recoverPendingReplies(): Promise<void>;
 }
 
@@ -312,6 +317,17 @@ export function setupAgentMessaging(
     } catch (error) {
       void vscode.window.showWarningMessage(
         `Forge could not recover pending agent replies: ${String(error)}`,
+      );
+    }
+    // Its own try, after the recovery above rather than inside it: an answer
+    // waiting for a restarting session is a separate fact from the replies this
+    // window was mid-way through, and a recovery that failed must not swallow
+    // the announcement of the ones it never touched.
+    try {
+      await replyLifecycle.announceWaitingVerdicts();
+    } catch (error) {
+      void vscode.window.showWarningMessage(
+        `Forge could not announce the answers waiting for agent sessions: ${String(error)}`,
       );
     }
   };

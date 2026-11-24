@@ -14,6 +14,7 @@
  * never be advertised with no handler behind it.
  */
 import type { BusPaths } from '../agentBus/agentBus';
+import type { WaitingVerdict } from '../agentMesh/verdictArtifact';
 import type {
   AgentInbox,
   ChatTargetResult,
@@ -230,4 +231,13 @@ export interface AgentRoutesDeps {
   senderIsLive?: (sender: AgentSenderMetadata) => boolean;
   /** Drop a stale one-turn recovery route when a newer agent message takes the chat. */
   dropRecoveryReplyRoute?: (conversationId: string) => void;
+  /**
+   * The answers that are waiting for one session: retained on disk, recorded as
+   * that session's, never delivered live, and less than 24 hours old
+   * (`waitingVerdictsForSession` owns the rules). Every response a session's own
+   * request produces carries them, so a session that was not live when its
+   * answer arrived learns the answer is there. Absent means no announcement:
+   * the window answers exactly as it did before.
+   */
+  waitingVerdicts?: (senderSessionId: string) => WaitingVerdict[];
 }

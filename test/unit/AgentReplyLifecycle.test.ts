@@ -398,4 +398,94 @@ describe('inbound agent reply lifecycle', () => {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+
+  /** A window starting now, with the session live again: the same bus folder,
+   *  a runtime that can reach the session, and nothing else. */
+  function startingWindow(
+    root: string,
+    state: ReturnType<typeof fixture>,
+    sendLive = state.sendLive,
+    live = true,
+  ) {
+    return makeAgentReplyLifecycle({
+      root,
+      workspaceRoot: '/workspace',
+      pending: state.pending,
+      runtime: {
+        isLive: vi.fn(async () => live),
+        sendLive,
+      } as unknown as AskAgentRuntime,
+      getFacade: () => state.facade,
+      showWarning: (message) => state.notices.push(message),
+    });
+  }
+
+  /** The state a session that never saw its answer leaves behind: the accepted
+   *  row, the retained artifact, and the verdict event saying it was kept. */
+  async function retainedFor(
+    state: ReturnType<typeof fixture>,
+    root: string,
+  ): Promise<string> {
+    const record = state.pending.create(sender, 'chat-1', '/workspace');
+    await recordAcceptedInboundReply(root, record);
+    await state.lifecycle.onAgentTurnFinished(
+      { pendingReplyId: record.exchangeId, targetConversationId: 'chat-1', sender },
+      { kind: 'failed', error: 'Forge restarted before answering' },
+    );
+    return record.exchangeId;
+  }
+
+  it('announces a retained answer to the session this window links, at start-up', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-agent-reply-announce-'));
+    try {
+      const state = fixture(root, false);
+      const exchangeId = await retainedFor(state, root);
+      expect(state.sendLive).not.toHaveBeenCalled();
+      await startingWindow(root, state).announceWaitingVerdicts();
+      expect(state.sendLive).toHaveBeenCalledTimes(1);
+      // The same sentence the client prints, so the two paths cannot drift.
+      expect(state.sendLive.mock.calls[0]?.[2]).toBe(
+        `An answer is waiting for you from chat "Review chat" (exchange ${exchangeId}), not seen live. Read it with: forge.sh read-verdict claude ${exchangeId}`,
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves a waiting answer alone when the link here names a different session', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-agent-reply-announce-foreign-'));
+    try {
+      const state = fixture(root, false);
+      await retainedFor(state, root);
+      // Another window holds this session now, or the chat moved to a different
+      // Claude session: either way this window cannot reach the one to tell.
+      state.facade.getAgentLink = vi.fn(() => ({
+        ...linked,
+        sessionId: '00000000-0000-4000-8000-000000000202',
+      })) as unknown as ForgeHostFacade['getAgentLink'];
+      await startingWindow(root, state).announceWaitingVerdicts();
+      expect(state.sendLive).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('attempts a start-up notice once and stays silent when the delivery fails', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-agent-reply-announce-fails-'));
+    try {
+      const state = fixture(root, false);
+      await retainedFor(state, root);
+      const sendLive = vi.fn(async () => {
+        throw new Error('the session refused');
+      });
+      // Not thrown out of the start-up task: the routes announce the same answer
+      // on every call the session makes, so a failed attempt here is nothing.
+      await expect(
+        startingWindow(root, state, sendLive).announceWaitingVerdicts(),
+      ).resolves.toBeUndefined();
+      expect(sendLive).toHaveBeenCalledTimes(1);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

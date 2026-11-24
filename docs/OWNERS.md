@@ -1045,6 +1045,9 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Durable exchange event log and interprocess lock | `src/agentMesh/exchangeLog.ts`    |
 | Exchange file lock                              | `src/agentMesh/lock.ts`           |
 | Full verdict retention and acknowledgment        | `src/agentMesh/verdictArtifact.ts`|
+| Which retained answers are still waiting for a session, and the notice sentence | `src/agentMesh/verdictArtifact.ts`|
+| The waiting-answer trailer on a route response    | `src/backend/agentWaitingVerdicts.ts` |
+| Announcing a waiting answer when a window starts   | `src/agentLinks/agentReplyLifecycle.ts` |
 | Codex thread liveness for a linked session       | `src/agentLinks/codexThreadLiveness.ts` |
 | Authenticated verdict read/ack HTTP handlers     | `src/backend/agentVerdictRoute.ts`|
 

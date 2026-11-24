@@ -4,12 +4,17 @@ import type { BusTurnEnd } from '../agentBus/agentInbox';
 import { processIsAlive } from '../agentBus/windowEndpoints';
 import { EXCHANGES_LOG_NAME, appendEvent, type ExchangeLogPaths } from '../agentMesh/exchangeLog';
 import { retainVerdict, verdictArtifactPath, verdictEventId } from '../agentMesh/verdictArtifact';
+import {
+  waitingVerdictNoticeSentence,
+  waitingVerdictsForSession,
+} from '../agentMesh/verdictArtifact';
 import { writeFileAtomicSync } from '../util/atomicWrite';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { PendingAgentReply, PendingAgentReplies } from './pendingAgentReplies';
 import type { AskAgentRuntime } from './askAgentService';
 import { deliverAgentReply } from './askAgentService';
 import { agentDisplayName } from './chatAgentLinks';
+import { agentKindSchema } from './chatAgentLinks';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
@@ -350,6 +355,59 @@ export function makeAgentReplyLifecycle(options: {
         } catch (error) {
           options.showWarning(
             `Forge could not recover pending reply ${record.exchangeId}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+    },
+    /**
+     * Tell a session, once, at this window's start-up, that an answer was kept
+     * for it while it was not live. `recover()` above only walks the replies
+     * this window was mid-way through; an answer retained earlier — for a
+     * session that was restarting at the time, and so never heard — is invisible
+     * to it, and that is the case that started this (2026-11-24: exchange
+     * `8a786a82` was kept while Claude session `6f94cb07` was itself coming
+     * back).
+     *
+     * Every waiting answer is listed with its own session, and this window can
+     * only reach the ones it holds a live link for: the exchange names the chat,
+     * and the link on that chat has to name the same session. That is the whole
+     * filter — an answer belonging to another window's session is left alone.
+     *
+     * One attempt, and nothing on failure. A session that is not live is the
+     * very reason the answer was retained, and the routes announce the same
+     * answer on every call the session makes, so a failed attempt here is not a
+     * loss and a retry loop here would be noise at start-up.
+     */
+    announceWaitingVerdicts: async (): Promise<void> => {
+      const waiting = waitingVerdictsForSession(
+        options.root,
+        undefined,
+        Date.now(),
+        (conversationId) =>
+          options
+            .getFacade()
+            .status()
+            .conversations.find((item) => item.id === conversationId)?.title,
+      );
+      for (const verdict of waiting) {
+        const kind = agentKindSchema.safeParse(verdict.from.toLowerCase());
+        // No chat recorded, or a sender alias that is not one of the three agent
+        // kinds: either way this window has nothing to hand the answer to.
+        if (!kind.success || verdict.conversationId === undefined) continue;
+        try {
+          const facade = options.getFacade();
+          const link = facade.getAgentLink(verdict.conversationId, kind.data);
+          if (link?.sessionId !== verdict.senderSessionId) continue;
+          await deliverAgentReply(
+            options.runtime,
+            kind.data,
+            link,
+            waitingVerdictNoticeSentence(verdict),
+            new AbortController().signal,
+          );
+        } catch (error) {
+          log.warn(
+            `[agent-bus] start-up notice for ${verdict.exchangeId} was not delivered: ${error instanceof Error ? error.message : String(error)}`,
           );
         }
       }

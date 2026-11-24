@@ -13,6 +13,7 @@ import {
   type BusPaths,
 } from '../../src/agentBus/agentBus';
 import { AgentRoutes } from '../../src/backend/agentRoutes';
+import type { WaitingVerdict } from '../../src/agentMesh/verdictArtifact';
 import { InboundAgentChatNotOpenError } from '../../src/agentLinks/inboundAgentRouting';
 import { PendingAgentReplies } from '../../src/agentLinks/pendingAgentReplies';
 import { windowEndpointPath } from '../../src/agentBus/windowEndpoints';
@@ -3178,4 +3179,148 @@ describe('forge.sh who against the routes (§11)', () => {
     const res = await runClient(['who', 'extra'], '');
     expect(res.code).toBe(2);
   }, 30_000);
+});
+
+/**
+ * An answer that was retained instead of delivered live is announced on the
+ * responses the asking session gets, so a session that was restarting when its
+ * answer arrived learns the answer is there. The window computes the list; the
+ * response carries `WAITING_VERDICT\t<exchangeId>\t<chat label>` lines; the
+ * client turns each into one sentence on stderr and leaves the body alone.
+ */
+describe('an answer waiting for a session', () => {
+  const OWN = '00000000-0000-4000-8000-000000000401';
+  const OTHER = '00000000-0000-4000-8000-000000000402';
+  const EXCHANGE = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  /** A title with brackets, quotes and spaces: it goes over the wire verbatim. */
+  const CHAT_TITLE = 'Nightly [audit] "quoted" chat';
+  const STATUS_TEXT = 'Chat: Nightly audit · c1\nState: idle\nQueued from you: 0';
+
+  let usable = false;
+  beforeAll(async () => {
+    const probe = path.join(os.tmpdir(), `forge-bash-waiting-${process.pid}`);
+    fs.writeFileSync(probe, '');
+    const bash = TEST_BASH;
+    usable =
+      !!bash &&
+      (await new Promise<boolean>((resolve) =>
+        execFile(
+          bash,
+          ['-c', 'test -f "$1" && command -v curl >/dev/null', '_', probe.replace(/\\/g, '/')],
+          { timeout: 10_000, env: gitBashEnvironment() },
+          (err) => resolve(!err),
+        ),
+      ));
+    fs.rmSync(probe, { force: true });
+  });
+
+  const waitingFor = (senderSessionId: string): WaitingVerdict[] =>
+    senderSessionId === OWN
+      ? [
+          {
+            exchangeId: EXCHANGE,
+            senderSessionId: OWN,
+            from: 'claude',
+            conversationId: 'c1',
+            chatLabel: CHAT_TITLE,
+            verdictTs: Date.now(),
+          },
+        ]
+      : [];
+
+  function install(): void {
+    routes.dispose();
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      // A `say` from a session identity is admitted through the link path, so
+      // this window needs the two dependencies that path asks for.
+      workspaceRoot: '/workspace',
+      pendingReplies: new PendingAgentReplies(paths.root),
+      resolveInboundAgent: async (sender) => ({
+        conversationId: 'c1',
+        title: 'Nightly audit',
+        sender: { kind: sender.kind, sessionId: sender.sessionId, title: 'Claude session' },
+        link: {
+          kind: sender.kind,
+          sessionId: sender.sessionId,
+          title: 'Claude session',
+          cwd: '/workspace',
+          linkedAt: 1,
+          lastUsedAt: 1,
+          origin: 'first-inbound',
+        },
+      }),
+      status: () => ({ ok: true, text: STATUS_TEXT }),
+      waitingVerdicts: waitingFor,
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+  }
+
+  const get = (query: string): Promise<Response> =>
+    fetch(`${base}/agent/status?${query}`, { headers: { Authorization: `Bearer ${TOKEN}` } });
+
+  it('carries the waiting answer in a status response for its own session only', async () => {
+    install();
+    const own = await get(`from=claude&kind=claude&sessionId=${OWN}`);
+    expect(own.status).toBe(200);
+    expect(await own.text()).toBe(`${STATUS_TEXT}\nWAITING_VERDICT\t${EXCHANGE}\t${CHAT_TITLE}\n`);
+    // Another session asks the same route and gets exactly the body it always got.
+    const other = await get(`from=claude&kind=claude&sessionId=${OTHER}`);
+    expect(await other.text()).toBe(`${STATUS_TEXT}\n`);
+    // A caller with no session identity has nothing to attribute the notice to.
+    const nameless = await get('from=claude');
+    expect(await nameless.text()).toBe(`${STATUS_TEXT}\n`);
+  });
+
+  it('forge.sh prints the notice on stderr and leaves the body on stdout', async (ctx) => {
+    if (!usable) ctx.skip();
+    install();
+    const run = await runClientDetailed(
+      ['status', 'claude'],
+      '',
+      { CLAUDE_CODE_SESSION_ID: OWN },
+      30_000,
+    );
+    expect(run.code).toBe(0);
+    expect(run.stdout).toBe(`${STATUS_TEXT}\n`);
+    expect(run.stderr).toBe(
+      `forge.sh: an answer is waiting for you from chat "${CHAT_TITLE}" (exchange ${EXCHANGE}), ` +
+        `not seen live. Read it with: forge.sh read-verdict claude ${EXCHANGE}\n`,
+    );
+  });
+
+  it('forge.sh say keeps its JSON on stdout and puts the notice on stderr', async (ctx) => {
+    if (!usable) ctx.skip();
+    install();
+    const run = await runClientDetailed(
+      ['say', 'claude'],
+      'hello Forge\n',
+      { CLAUDE_CODE_SESSION_ID: OWN },
+      30_000,
+    );
+    expect(run.code).toBe(0);
+    // The JSON a session parses is untouched by the announcement.
+    expect(JSON.parse(run.stdout)).toMatchObject({ queued: 1, id: 'm1' });
+    expect(run.stderr).toBe(
+      `forge.sh: an answer is waiting for you from chat "${CHAT_TITLE}" (exchange ${EXCHANGE}), ` +
+        `not seen live. Read it with: forge.sh read-verdict claude ${EXCHANGE}\n`,
+    );
+  });
+
+  it('announces nothing when the window has no waiting answer for that session', async () => {
+    routes.dispose();
+    routes = new AgentRoutes({
+      paths: () => paths,
+      inbox: stubInbox(),
+      token: TOKEN,
+      status: () => ({ ok: true, text: STATUS_TEXT }),
+    });
+    routes.setEnabled(true);
+    routes.onListening(base);
+    const response = await get(`from=claude&kind=claude&sessionId=${OWN}`);
+    expect(await response.text()).toBe(`${STATUS_TEXT}\n`);
+  });
 });

@@ -19,6 +19,7 @@ import type { AgentInbox } from '../agentBus/agentInbox';
 import { BUS_TARGET_SCAN, senderConversation } from '../agentBus/busTarget';
 import { renderBusStatus, renderBusView, renderQueuedStatus } from '../agentBus/busStatusView';
 import type { BusTurnWatch } from '../agentBus/busTurnWatch';
+import { waitingVerdictsForSession } from '../agentMesh/verdictArtifact';
 import type { ForgeConfig } from '../config/types';
 import { makeAgentToAgentRelay, makeAgentToAgentSteer } from '../agentLinks/agentToAgentRelay';
 import { chatNotOpenHereMessage } from '../agentLinks/inboundAgentRouting';
@@ -452,5 +453,19 @@ export function buildAgentRouteDeps(hosts: AgentRouteDepsHosts): AgentRoutesDeps
         : { kind: 'refused', error: 'the remote runtime is unavailable' };
     },
     notifyOwner: makeNotifyOwner(getConfig, defaultOutboxDir(home)),
+    // The answers this session has not seen live, so every response its own
+    // request produces can name them (`agentWaitingVerdicts.ts` owns the wire
+    // form, `forge.sh` owns the sentence). Titles come from this window's chat
+    // list: the exchange records the chat's id, and an id is no use to a reader.
+    waitingVerdicts: (senderSessionId) =>
+      waitingVerdictsForSession(
+        busAt().root,
+        senderSessionId,
+        Date.now(),
+        (conversationId) =>
+          getFacade()
+            .status()
+            .conversations.find((conversation) => conversation.id === conversationId)?.title,
+      ),
   };
 }

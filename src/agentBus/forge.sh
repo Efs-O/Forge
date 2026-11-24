@@ -8,6 +8,7 @@
 #   forge.sh notify <your-name> [file]  send the owner a Telegram message through Forge's notify outbox (no chat, no model turn); one pending per name, a newer one replaces it
 #   forge.sh read-verdict <your-name> <exchangeId>  read the full retained verdict without consuming it
 #   forge.sh ack-verdict <your-name> <exchangeId>   acknowledge a read verdict and remove its retained copy
+#   An answer kept for you that you did not see live is announced on every call: one line on stderr naming its chat and exchange, until you acknowledge it or 24 hours pass.
 #   forge.sh steer <your-name> <to> [--to <conversationId>] [file] forge: interrupt the running turn and run this next (--to only here); claude/codex/copilot: withdraw this chat's earlier ask to that agent and ask this instead
 #   forge.sh stop <your-name> [--to <conversationId>]  cancel a running Forge turn; queued messages may still start
 #   forge.sh reload <your-name> --to <conversationId> [--force] [--reopen-claude <sessionId>]  reload the window holding that chat; --force allows a running turn to be cut off; --reopen-claude reopens an idle Claude Code session
@@ -104,6 +105,24 @@ resolve_reload_endpoint() {
     echo "forge.sh: no open Forge window holds chat \"$CONVERSATION_ID\"." >&2
     exit 1
   fi
+}
+# The routes append one line per answer this session has not seen live:
+#   WAITING_VERDICT<TAB><exchangeId><TAB><chat title>
+# Print those on stderr as a sentence the agent can act on, and print everything
+# else on stdout unchanged — a session parsing say's JSON still sees just the
+# JSON. The title is whatever follows the second tab, so a title containing tabs,
+# quotes or spaces passes through exactly as Forge wrote it.
+report_waiting_verdicts() {
+  local name="$1"
+  awk -v name="$name" '
+    BEGIN { FS = "\t" }
+    $1 == "WAITING_VERDICT" && NF >= 3 {
+      id = $2
+      title = substr($0, length($1) + length($2) + 3)
+      printf "forge.sh: an answer is waiting for you from chat \"%s\" (exchange %s), not seen live. Read it with: forge.sh read-verdict %s %s\n", title, id, name, id > "/dev/stderr"
+      next
+    }
+    { print }'
 }
 # Under WSL2 (NAT on Windows 10) 127.0.0.1 is the Linux VM, not Windows where
 # Forge listens; Windows' curl.exe (via interop) reaches Windows' loopback.
@@ -231,8 +250,14 @@ if [ "$VERB" = "status" ] || [ "$VERB" = "view" ]; then
   [ -f "$EP" ] || { echo "forge.sh: not reachable: open Forge with control_server and agent_bus enabled" >&2; exit 1; }
   URL="$(grep '"url"' "$EP" | cut -d'"' -f4)"
   TOKEN="$(grep '"token"' "$EP" | cut -d'"' -f4)"
-  curl -sS --fail-with-body -X GET -H "Authorization: Bearer $TOKEN" "$URL/agent/$VERB?$QUERY" \
-    || { echo "forge.sh: Forge's endpoint did not accept it (see above)." >&2; exit 1; }
+  if ! READING="$(curl -sS --fail-with-body -X GET -H "Authorization: Bearer $TOKEN" "$URL/agent/$VERB?$QUERY")"; then
+    # The body of a refused read is the reason, and capturing it moved it off the
+    # terminal: print it, or the line after it blames itself ("see above").
+    [ -z "${READING:-}" ] || printf '%s\n' "$READING" >&2
+    echo "forge.sh: Forge's endpoint did not accept it (see above)." >&2
+    exit 1
+  fi
+  printf '%s\n' "$READING" | report_waiting_verdicts "$NAME"
   exit 0
 fi
 if [ "$VERB" = "read-verdict" ] || [ "$VERB" = "ack-verdict" ]; then
@@ -250,15 +275,25 @@ if [ "$VERB" = "read-verdict" ] || [ "$VERB" = "ack-verdict" ]; then
     IDENTITY_ARGS+=(--data-urlencode "kind=$SENDER_KIND" --data-urlencode "sessionId=$SENDER_ID")
   fi
   if [ "$VERB" = "read-verdict" ]; then
-    curl -sS --fail-with-body -G -H "Authorization: Bearer $TOKEN" \
+    if ! VERDICT="$(curl -sS --fail-with-body -G -H "Authorization: Bearer $TOKEN" \
       --data-urlencode "from=$NAME" --data-urlencode "id=$EXCHANGE_ID" \
       "${IDENTITY_ARGS[@]}" \
-      "$URL/agent/read-verdict" || { echo "forge.sh: verdict read failed" >&2; exit 1; }
+      "$URL/agent/read-verdict")"; then
+      [ -z "${VERDICT:-}" ] || printf '%s\n' "$VERDICT" >&2
+      echo "forge.sh: verdict read failed" >&2
+      exit 1
+    fi
+    printf '%s\n' "$VERDICT" | report_waiting_verdicts "$NAME"
   else
-    curl -sS --fail-with-body -X POST -H "Authorization: Bearer $TOKEN" \
+    if ! ACKED="$(curl -sS --fail-with-body -X POST -H "Authorization: Bearer $TOKEN" \
       --data-urlencode "from=$NAME" --data-urlencode "id=$EXCHANGE_ID" \
       "${IDENTITY_ARGS[@]}" \
-      "$URL/agent/ack-verdict" || { echo "forge.sh: verdict acknowledgment failed" >&2; exit 1; }
+      "$URL/agent/ack-verdict")"; then
+      [ -z "${ACKED:-}" ] || printf '%s\n' "$ACKED" >&2
+      echo "forge.sh: verdict acknowledgment failed" >&2
+      exit 1
+    fi
+    printf '%s\n' "$ACKED" | report_waiting_verdicts "$NAME"
     echo
   fi
   exit 0
@@ -335,9 +370,13 @@ if [ "$VERB" = "wait" ]; then
       case "$STATE" in
         idle*)
           if [ "$QUEUED" = "0" ]; then
-            printf '%s\n' "$LAST"
-            curl -sS --fail-with-body -G -H "Authorization: Bearer $TOKEN" --data-urlencode "from=$NAME" --data-urlencode "count=1" "${IDENTITY_ARGS[@]}" "${TARGET_ARGS[@]}" "$URL/agent/view" \
-              || { echo "forge.sh: Forge's endpoint did not accept it (see above)." >&2; exit 1; }
+            printf '%s\n' "$LAST" | report_waiting_verdicts "$NAME"
+            if ! WAIT_VIEW="$(curl -sS --fail-with-body -G -H "Authorization: Bearer $TOKEN" --data-urlencode "from=$NAME" --data-urlencode "count=1" "${IDENTITY_ARGS[@]}" "${TARGET_ARGS[@]}" "$URL/agent/view")"; then
+              [ -z "${WAIT_VIEW:-}" ] || printf '%s\n' "$WAIT_VIEW" >&2
+              echo "forge.sh: Forge's endpoint did not accept it (see above)." >&2
+              exit 1
+            fi
+            printf '%s\n' "$WAIT_VIEW" | report_waiting_verdicts "$NAME"
             exit 0
           fi;;
       esac
@@ -524,7 +563,7 @@ if [ -f "$EP" ]; then
   fi
   if RESULT="$(curl -sS --fail-with-body -X POST -H "Authorization: Bearer $TOKEN" \
       -H "Content-Type: text/plain; charset=utf-8" --data-binary "@$TMP" "$URL/agent/$ROUTE?$QUERY")"; then
-    printf '%s\n' "$RESULT"
+    printf '%s\n' "$RESULT" | report_waiting_verdicts "$ARG"
     exit 0
   fi
   [ -z "${RESULT:-}" ] || printf '%s\n' "$RESULT" >&2

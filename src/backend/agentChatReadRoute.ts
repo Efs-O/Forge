@@ -1,9 +1,11 @@
 import type * as http from 'http';
 import type { AgentSender } from '../agentLinks/chatAgentLinks';
+import type { WaitingVerdict } from '../agentMesh/verdictArtifact';
 import type { ForgeExchange } from '../sidebar/sessionProjections';
 import { sendJson, sendText } from './controlHttp';
 import { AgentRouteHttpError as HttpError } from './agentRouteFields';
 import { parseOptionalReadSender, validateBusSenderName } from './agentSenderParsing';
+import { appendWaitingVerdictTrailer, noticesForSender } from './agentWaitingVerdicts';
 import { parseReadConversationId } from './agentMessageOptions';
 import { MAX_VIEW_COUNT, parseViewCount } from '../remote/RemoteTranscriptView';
 
@@ -100,6 +102,9 @@ export interface AgentChatReadRouteDeps {
     count: number,
     windowId: string,
   ) => PeerViewResult | Promise<PeerViewResult>;
+  /** The answers waiting for the caller's session, appended to a successful
+   *  `status` or `view` so a session that was not live learns about them. */
+  waitingVerdicts?: (senderSessionId: string) => WaitingVerdict[];
 }
 
 /**
@@ -125,6 +130,11 @@ export interface AgentChatReadRouteDeps {
  * session last addressed. The route only checks its shape and hands it down:
  * which chats a session may read is the window's answer, not this file's, and a
  * chat that is not linked to the caller's session comes back 404 naming it.
+ *
+ * A successful `status` or `view` also carries the answers waiting for the
+ * caller's session, as trailer lines (`agentWaitingVerdicts.ts`). `forge.sh wait`
+ * polls `status`, so that path is announced too, and its `State:` / `Queued from
+ * you:` parsing is untouched by a line that starts with neither.
  */
 export async function handleAgentChatReadRoute(
   req: http.IncomingMessage,
@@ -200,6 +210,14 @@ export async function handleAgentChatReadRoute(
           conversationId,
         );
   if (!result) return sendJson(res, 404, { error: `no route for GET ${route}` });
-  if (result.ok) return sendText(res, 200, result.text);
+  if (result.ok)
+    return sendText(
+      res,
+      200,
+      appendWaitingVerdictTrailer(
+        result.text,
+        noticesForSender(deps.waitingVerdicts, readSender?.sessionId),
+      ),
+    );
   return sendJson(res, result.status, { error: result.error });
 }

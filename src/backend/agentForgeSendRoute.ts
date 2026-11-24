@@ -14,7 +14,6 @@ import type * as http from 'http';
 import { MAX_INBOUND_CHARS, forgeInboundPrompt } from '../agentBus/busContent';
 import type { AgentInbox, InboxMessageOptions } from '../agentBus/agentInbox';
 import type { AgentSender } from '../agentLinks/chatAgentLinks';
-import { sendJson } from './controlHttp';
 import {
   AgentRouteHttpError as HttpError,
   requireText,
@@ -22,6 +21,7 @@ import {
 } from './agentRouteFields';
 import { parseAgentMessageOptions, parseFromConversation } from './agentMessageOptions';
 import { admitInboundMessage } from './agentInboundAdmission';
+import { noticesForSender, sendJsonWithWaitingVerdicts } from './agentWaitingVerdicts';
 import type { AgentRoutesDeps } from './agentRoutesDeps';
 
 /**
@@ -152,19 +152,29 @@ export async function sendForgeInboundMessage(
     // The last guard has passed: the held message may now start, in the
     // lane the interrupted turn is freeing.
     deps.inbox.release(id);
-    return sendJson(res, 202, { queued, id, ...outcome });
+    return sendJsonWithWaitingVerdicts(
+      res,
+      202,
+      { queued, id, ...outcome },
+      noticesForSender(deps.waitingVerdicts, declaredSender?.sessionId),
+    );
   }
-  return sendJson(res, 202, {
-    queued,
-    id,
-    ...(target ? { conversationId: target.conversationId, title: target.title } : {}),
-    ...(pendingReplyId ? { exchangeId: pendingReplyId } : {}),
-    ...(pendingReplyId && target
-      ? {
-          receipt: `Forge received your message (chat "${target.title}")${queuedBehindRunningTurn ? ' — queued behind the running turn' : ''}`,
-        }
-      : {}),
-  });
+  return sendJsonWithWaitingVerdicts(
+    res,
+    202,
+    {
+      queued,
+      id,
+      ...(target ? { conversationId: target.conversationId, title: target.title } : {}),
+      ...(pendingReplyId ? { exchangeId: pendingReplyId } : {}),
+      ...(pendingReplyId && target
+        ? {
+            receipt: `Forge received your message (chat "${target.title}")${queuedBehindRunningTurn ? ' — queued behind the running turn' : ''}`,
+          }
+        : {}),
+    },
+    noticesForSender(deps.waitingVerdicts, declaredSender?.sessionId),
+  );
 }
 
 /** The inbound message options, with `model` refused unless this window has it. */

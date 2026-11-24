@@ -1,9 +1,15 @@
 import type * as http from 'http';
 import type { BusPaths } from '../agentBus/agentBus';
+import type { WaitingVerdict } from '../agentMesh/verdictArtifact';
 import { acknowledgeVerdict, readVerdictArtifact } from '../agentMesh/verdictArtifact';
 import { sendJson } from './controlHttp';
 import { agentSenderSchema } from '../agentLinks/chatAgentLinks';
 import { BUS_SENDER_NAME } from './agentSenderParsing';
+import {
+  appendWaitingVerdictTrailer,
+  noticesForSender,
+  sendJsonWithWaitingVerdicts,
+} from './agentWaitingVerdicts';
 
 export interface VerdictRouteDeps {
   paths: () => BusPaths;
@@ -13,6 +19,9 @@ export interface VerdictRouteDeps {
     | { ok: true }
     | { ok: false; error: string }
     | Promise<{ ok: true } | { ok: false; error: string }>;
+  /** The other answers still waiting for this session, announced alongside the
+   *  one it came to read or acknowledge. */
+  waitingVerdicts?: (senderSessionId: string) => WaitingVerdict[];
 }
 
 function sessionIdentity(
@@ -59,7 +68,12 @@ export async function handleVerdictRead(
   try {
     const body = readVerdictArtifact(deps.paths(), id, from, identity.sessionId);
     res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8' });
-    res.end(body);
+    // Reading does not consume the answer, so the answer it came for is still
+    // waiting: the trailer lists every one of them, and the session sees the
+    // whole set rather than learning about the next one another call later.
+    res.end(
+      appendWaitingVerdictTrailer(body, noticesForSender(deps.waitingVerdicts, identity.sessionId)),
+    );
     return;
   } catch {
     return sendJson(res, 404, { error: 'verdict unavailable for this sender and exchange' });
@@ -92,5 +106,12 @@ export async function handleVerdictAck(
   } catch {
     return sendJson(res, 404, { error: 'verdict unavailable for this sender and exchange' });
   }
-  return sendJson(res, 200, { acknowledged: true });
+  // Asked after the acknowledgment, so the one it just acked is already off the
+  // list and only the ones still waiting are announced.
+  return sendJsonWithWaitingVerdicts(
+    res,
+    200,
+    { acknowledged: true },
+    noticesForSender(deps.waitingVerdicts, identity.sessionId),
+  );
 }

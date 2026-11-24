@@ -27,6 +27,7 @@ import {
   parseOptionalAgentSender,
   validateBusSenderName,
 } from './agentSenderParsing';
+import { noticesForSender, sendJsonWithWaitingVerdicts } from './agentWaitingVerdicts';
 
 const log = getLogger();
 
@@ -290,20 +291,25 @@ export class AgentRoutes {
           deps: this.deps,
         });
         if (!result.ok) throw new HttpError(400, result.error);
-        return sendJson(res, 202, {
-          relayed: true,
-          ...(result.exchangeId ? { exchangeId: result.exchangeId } : {}),
-          ...(!isSteer
-            ? {
-                message:
-                  `Sent as exchange ${result.exchangeId}. The verdict wakes the sending Forge chat ` +
-                  'when it is open (when the send came from a Forge chat). Use `wait` and then ' +
-                  '`read-verdict` for the full response.',
-              }
-            : {}),
-          ...(result.deliveredTo ? { delivered_to: result.deliveredTo } : {}),
-          ...(result.note ? { note: result.note } : {}),
-        });
+        return sendJsonWithWaitingVerdicts(
+          res,
+          202,
+          {
+            relayed: true,
+            ...(result.exchangeId ? { exchangeId: result.exchangeId } : {}),
+            ...(!isSteer
+              ? {
+                  message:
+                    `Sent as exchange ${result.exchangeId}. The verdict wakes the sending Forge chat ` +
+                    'when it is open (when the send came from a Forge chat). Use `wait` and then ' +
+                    '`read-verdict` for the full response.',
+                }
+              : {}),
+            ...(result.deliveredTo ? { delivered_to: result.deliveredTo } : {}),
+            ...(result.note ? { note: result.note } : {}),
+          },
+          noticesForSender(this.deps.waitingVerdicts, declaredSender?.sessionId),
+        );
       }
       // Awaited, not returned: a rejection has to reach the catch below, which
       // is what turns an `HttpError` into the status the sender reads.
