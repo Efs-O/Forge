@@ -158,6 +158,20 @@ describe('HiddenChatAlerts', () => {
     state.alerts.dispose();
   });
 
+  /** A card that blocks a chat has to be answered in that chat, so a sidebar that
+   *  comes forward for it shows THAT chat, not the one that happened to be last on
+   *  screen — and it does so without the owner having found and clicked the notice. */
+  it('shows the chat a hidden card belongs to, without the owner clicking', async () => {
+    const state = fixture();
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    const command = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
+    state.approval().requested({ conversationId: 'background' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(command).toHaveBeenCalledWith('workbench.view.extension.forge-sidebar');
+    expect(state.switchChat).toHaveBeenCalledWith('background');
+    state.alerts.dispose();
+  });
+
   it('suppresses the active visible chat and alerts when that same view is hidden', () => {
     const state = fixture();
     const toast = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);

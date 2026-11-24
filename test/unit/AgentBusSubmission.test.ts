@@ -153,6 +153,31 @@ describe('bus-opened Clanker chats', () => {
     expect(state.notices).toEqual([]);
   });
 
+  it('shows the chat a bus prompt went to, not the one that was last on screen', async () => {
+    const state = fixture();
+    state.chats.set('elsewhere', {
+      id: 'elsewhere',
+      title: 'elsewhere',
+      createdAt: 0,
+      updatedAt: 0,
+      messages: [],
+      clanker: true,
+    } as ConversationRuntime);
+
+    await submitBusMessage(state.facade, 'follow up', {
+      from: 'claude',
+      targetConversationId: 'elsewhere',
+    });
+
+    // The bus submit reveals the sidebar before it delivers the prompt, so the
+    // window comes forward for THIS prompt. A sidebar that comes forward showing
+    // the chat that happened to be on screen shows the owner nothing of the work
+    // they just asked for.
+    expect(state.facade.restoreConversation).toHaveBeenCalledWith('elsewhere', {
+      activate: true,
+    });
+  });
+
   it('does not arm or announce a chat when pinning its model fails', async () => {
     const state = fixture();
     state.setConversationModel.mockRejectedValueOnce(new Error('pin failed'));

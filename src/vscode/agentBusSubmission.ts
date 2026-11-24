@@ -336,7 +336,11 @@ export async function submitBusMessage(
     const target = busTarget(facade, options?.from, options?.targetConversationId);
     conversationId = target;
     if (target !== facade.status().activeConversationId) {
-      await facade.restoreConversation(target, { activate: false });
+      // The bus submit that gets here reveals the sidebar first, so the window
+      // comes forward for THIS prompt — and a sidebar that comes forward showing
+      // the chat that happened to be last on screen shows the owner nothing of the
+      // work they just asked for. Reveal and show the same chat.
+      await facade.restoreConversation(target, { activate: true });
     }
     if (options?.model) await facade.setConversationModel(target, options.model);
   }

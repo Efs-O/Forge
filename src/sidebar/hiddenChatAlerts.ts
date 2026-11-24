@@ -96,6 +96,10 @@ export class HiddenChatAlerts implements vscode.Disposable {
     const message = `${this.subject(conversationId)} ${what}`;
     if (waiting) {
       const key = conversationId ?? 'unattributed';
+      // A request that blocks a chat the owner cannot see has to be answered in
+      // that chat, so the window goes to it: the sidebar comes forward showing
+      // THAT chat, not whichever one was last on screen.
+      if (conversationId) this.reveal(conversationId);
       if (this.waiting.has(key)) return;
       this.waiting.set(key, message);
     }
