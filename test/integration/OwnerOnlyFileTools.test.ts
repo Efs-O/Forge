@@ -133,8 +133,8 @@ describe('Forge own configuration is refused by the file tools', () => {
             {
               start_line: 1,
               end_line: 1,
-              expected_lines: ['active_model: none'],
-              replacement_lines: ['active_model: null'],
+              expected_text: 'active_model: none',
+              replacement_text: 'active_model: null',
             },
           ],
         },

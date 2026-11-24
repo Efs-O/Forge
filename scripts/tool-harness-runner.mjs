@@ -61,8 +61,8 @@ const EXAMPLE_ARGS = {
       {
         start_line: 1,
         end_line: 1,
-        expected_lines: ['Forge tool-call smoke test'],
-        replacement_lines: ['Forge tool-call smoke test updated'],
+        expected_text: 'Forge tool-call smoke test',
+        replacement_text: 'Forge tool-call smoke test updated',
       },
     ],
   },

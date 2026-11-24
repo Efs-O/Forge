@@ -786,8 +786,8 @@ describe('the three write tools call it from the same point', () => {
           {
             start_line: 1,
             end_line: 1,
-            expected_lines: ['const q = 1;'],
-            replacement_lines: ['const qq = 1;'],
+            expected_text: 'const q = 1;',
+            replacement_text: 'const qq = 1;',
           },
         ],
       }),
@@ -816,8 +816,8 @@ describe('the three write tools call it from the same point', () => {
           {
             start_line: 1,
             end_line: 1,
-            expected_lines: ['x'],
-            replacement_lines: ['y'],
+            expected_text: 'x',
+            replacement_text: 'y',
           },
         ],
       },
@@ -850,8 +850,8 @@ describe('the three write tools call it from the same point', () => {
         {
           start_line: 1,
           end_line: 1,
-          expected_lines: ['const w = 2;'],
-          replacement_lines: ['const q = 1;'],
+          expected_text: 'const w = 2;',
+          replacement_text: 'const q = 1;',
         },
       ],
     });
@@ -884,8 +884,8 @@ describe('the three write tools call it from the same point', () => {
           {
             start_line: 1,
             end_line: 1,
-            expected_lines: ['const q = 1;'],
-            replacement_lines: ['const qq = 1;'],
+            expected_text: 'const q = 1;',
+            replacement_text: 'const qq = 1;',
           },
         ],
       }),

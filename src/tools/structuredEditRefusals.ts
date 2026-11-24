@@ -1,21 +1,51 @@
 /**
- * The stale-`expected_lines` refusal texts for `apply_line_edits`, kept apart from the tool so
- * the tool stays inside the file-length gate and the texts stay one place. Each sentence exists
- * because a measured failure class cost the model a round it could have avoided (the overnight
- * lab, docs/reports/TOOL_TEST_LEDGER.md T16/T27/T35/T36): the refusal is what teaches, so the
- * refusal has to contain the answer.
+ * The refusal texts for `apply_line_edits`, kept apart from the tool so the tool stays inside the
+ * file-length gate and the texts stay one place. Each sentence exists because a measured failure
+ * class cost the model a round it could have avoided (the overnight lab,
+ * docs/reports/TOOL_TEST_LEDGER.md T16/T27/T35/T36): the refusal is what teaches, so the refusal
+ * has to contain the answer.
  */
 
-import type { LineEditOperation } from './structuredEditTool';
+import type { SplitLineEditOperation } from './structuredEditTool';
 
 /** Hard cap on any single refusal: a refusal that outgrows it stops teaching and starts costing
  *  the model context. The quoted block is cut to fit; the warning never is. */
 const MAX_REFUSAL_CHARS = 1_200;
 
-/** Throw the refusal for an operation whose `expected_lines` do not match the requested range.
+/**
+ * The operation fields that became one string each on 2026-11-24, old name to new. A call still
+ * sending an old name is refused rather than coerced: an array of separately quoted code lines is
+ * the shape that arrived unparseable in 23 of 474 calls, so accepting it again would keep the
+ * failure and hide the fix. There is no spelling that accepts both.
+ */
+const RENAMED_OPERATION_FIELDS: Readonly<Record<string, string>> = {
+  expected_lines: 'expected_text',
+  replacement_lines: 'replacement_text',
+};
+
+/** Refuse an operation that still sends `expected_lines` or `replacement_lines`, naming the field
+ *  it must send instead. Undefined when the operation names neither. */
+export function renamedOperationFieldRefusal(
+  record: Record<string, unknown>,
+  index: number,
+): string | undefined {
+  const sent = Object.keys(RENAMED_OPERATION_FIELDS).filter((old) => record[old] !== undefined);
+  if (sent.length === 0) return undefined;
+  const clauses = sent.map(
+    (old) =>
+      `${old} is now ${RENAMED_OPERATION_FIELDS[old]}: one string, the lines joined with newlines`,
+  );
+  const quoted = sent.map((old) => `"${old}"`).join(' and ');
+  return (
+    `apply_line_edits: operation ${index} sends ${quoted}; ${clauses.join('; ')}. Nothing ran. ` +
+    'Resend the operation with the new field names.'
+  );
+}
+
+/** Throw the refusal for an operation whose `expected_text` does not match the requested range.
  *  Returns silently only when there is nothing to refuse. */
 export function throwStaleRefusal(
-  operation: LineEditOperation,
+  operation: SplitLineEditOperation,
   index: number,
   lines: readonly string[],
 ): void {
@@ -29,8 +59,8 @@ export function throwStaleRefusal(
   const where = findBlockLocations(lines, operation.expected_lines);
   if (where.length === 1) {
     throw new Error(
-      `apply_line_edits: operation ${index} is stale; expected_lines do not match the current ` +
-        `file, but they DO match lines ${where[0][0]}-${where[0][1]} — use those line numbers.`,
+      `apply_line_edits: operation ${index} is stale; expected_text does not match the current ` +
+        `file, but it DOES match lines ${where[0][0]}-${where[0][1]} — use those line numbers.`,
     );
   }
   // Common text (`}`, `return;`, a blank line) appears in a file more than once. Naming one copy
@@ -53,14 +83,14 @@ export function throwStaleRefusal(
       .map(([first]) => `${first}-${first + operation.expected_lines.length - 1}`)
       .join(', ');
     heading =
-      `apply_line_edits: operation ${index} is stale; expected_lines do not match the current ` +
-      `file, and they appear ${where.length} times in it ` +
+      `apply_line_edits: operation ${index} is stale; expected_text does not match the current ` +
+      `file, and it appears ${where.length} times in it ` +
       `(${where.length > 3 ? 'closest 3: lines ' : 'lines '}${nearest}, nearest to your requested ` +
       'range first), so no single range is safe to name. No changes were written.';
   } else {
     heading =
-      `apply_line_edits: operation ${index} is stale; expected_lines do not match the current ` +
-      'file and do not appear anywhere in it. No changes were written. Current text:\n';
+      `apply_line_edits: operation ${index} is stale; expected_text does not match the current ` +
+      'file and does not appear anywhere in it. No changes were written. Current text:\n';
   }
   throw new Error(
     heading +

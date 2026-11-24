@@ -224,8 +224,8 @@ describe('isolated file and directory tool execution', () => {
         {
           start_line: 2,
           end_line: 2,
-          expected_lines: ['beta'],
-          replacement_lines: ['second'],
+          expected_text: 'beta',
+          replacement_text: 'second',
         },
       ],
     });
@@ -309,8 +309,8 @@ describe('isolated file and directory tool execution', () => {
           {
             start_line: 1,
             end_line: 1,
-            expected_lines: ['old'],
-            replacement_lines: ['new'],
+            expected_text: 'old',
+            replacement_text: 'new',
           },
         ],
       }),
@@ -346,8 +346,8 @@ describe('isolated file and directory tool execution', () => {
           {
             start_line: 2,
             end_line: 2,
-            expected_lines: ['1. alpha → one'],
-            replacement_lines: ['1. alpha → one', '1. alpha → one'],
+            expected_text: '1. alpha → one',
+            replacement_text: '1. alpha → one\n1. alpha → one',
           },
         ],
       }),

@@ -30,11 +30,11 @@ describe('lab-measured refusal texts', () => {
         {
           start_line: 2,
           end_line: 3,
-          expected_lines: ['beta', 'gamma'],
-          replacement_lines: ['BETA', 'gamma'],
+          expected_text: 'beta\ngamma',
+          replacement_text: 'BETA\ngamma',
         },
       ]),
-    ).toThrow(/but they DO match lines 3-4 — use those line numbers/);
+    ).toThrow(/but it DOES match lines 3-4 — use those line numbers/);
   });
 
   it('stale refusal echoes the current range and says the file may have moved', () => {
@@ -43,8 +43,8 @@ describe('lab-measured refusal texts', () => {
         {
           start_line: 2,
           end_line: 3,
-          expected_lines: ['beta', 'missing'],
-          replacement_lines: ['BETA'],
+          expected_text: 'beta\nmissing',
+          replacement_text: 'BETA',
         },
       ]),
     ).toThrow(/Current file lines 2-3:\n2\|beta\n3\|gamma[\s\S]*the file changed since you read it/);
@@ -60,16 +60,16 @@ describe('lab-measured refusal texts', () => {
         {
           start_line: 6,
           end_line: 6,
-          expected_lines: ['}'],
-          replacement_lines: ['}'],
+          expected_text: '}',
+          replacement_text: '}',
         },
       ]);
     } catch (error) {
       message = String((error as Error).message);
     }
     expect(message).toBe(
-      'apply_line_edits: operation 1 is stale; expected_lines do not match the current file, and ' +
-        'they appear 2 times in it (lines 3-3, 9-9, nearest to your requested range first), so no ' +
+      'apply_line_edits: operation 1 is stale; expected_text does not match the current file, and ' +
+        'it appears 2 times in it (lines 3-3, 9-9, nearest to your requested range first), so no ' +
         'single range is safe to name. No changes were written. Current file lines 6-6:\n' +
         '6|z\n' +
         'If these are not the lines you meant, the file changed since you read it — re-read it ' +
@@ -91,14 +91,14 @@ describe('lab-measured refusal texts', () => {
             {
               start_line: 2,
               end_line: 2,
-              expected_lines: ['beta', 'gamma'],
-              replacement_lines: ['BETA', 'GAMMA'],
+              expected_text: 'beta\ngamma',
+              replacement_text: 'BETA\nGAMMA',
             },
           ],
         }),
       );
       expect(out.slice(out.indexOf('\nNote: operation'))).toBe(
-        '\nNote: operation 1 end_line 2 did not match its expected_lines count; applied at lines ' +
+        '\nNote: operation 1 end_line 2 did not match its expected_text line count; applied at lines ' +
           '2-3 because the text matched exactly at start_line.',
       );
       expect(fs.readFileSync(target, 'utf8')).toContain('BETA\nGAMMA');
@@ -119,17 +119,17 @@ describe('lab-measured refusal texts', () => {
         {
           start_line: 1,
           end_line: 1,
-          expected_lines: ['beta', 'gamma'],
-          replacement_lines: ['BETA'],
+          expected_text: 'beta\ngamma',
+          replacement_text: 'BETA',
         },
       ]);
     } catch (error) {
       countMismatch = String((error as Error).message);
     }
     expect(countMismatch).toBe(
-      'apply_line_edits: operation 1 expected_lines has 2 line(s), but lines 1-1 are 1 line(s). ' +
-        'expected_lines must be exactly the current text of start_line through end_line, one entry ' +
-        'per line. Current file lines 1-1:\n1|x',
+      'apply_line_edits: operation 1 expected_text has 2 line(s), but lines 1-1 are 1 line(s). ' +
+        'expected_text must be exactly the current text of start_line through end_line, one line ' +
+        'per newline. Current file lines 1-1:\n1|x',
     );
     // Same block, span length matching the count: the stale refusal names the real lines.
     expect(() =>
@@ -137,11 +137,11 @@ describe('lab-measured refusal texts', () => {
         {
           start_line: 1,
           end_line: 2,
-          expected_lines: ['beta', 'gamma'],
-          replacement_lines: ['BETA'],
+          expected_text: 'beta\ngamma',
+          replacement_text: 'BETA',
         },
       ]),
-    ).toThrow(/but they DO match lines 3-4 — use those line numbers/);
+    ).toThrow(/but it DOES match lines 3-4 — use those line numbers/);
   });
 
   it('five copies with long lines still fits the cap and keeps the warning last', () => {
@@ -158,8 +158,8 @@ describe('lab-measured refusal texts', () => {
         {
           start_line: 1,
           end_line: 1,
-          expected_lines: ['}'],
-          replacement_lines: ['x'],
+          expected_text: '}',
+          replacement_text: 'x',
         },
       ]);
     } catch (error) {
@@ -181,8 +181,8 @@ describe('lab-measured refusal texts', () => {
         {
           start_line: 1,
           end_line: 12,
-          expected_lines: lines.map(() => 'zzz not these lines zzz'),
-          replacement_lines: ['x'],
+          expected_text: lines.map(() => 'zzz not these lines zzz').join('\n'),
+          replacement_text: 'x',
         },
       ]);
     } catch (error) {
@@ -199,8 +199,8 @@ describe('lab-measured refusal texts', () => {
         {
           start_line: 2,
           end_line: 8,
-          expected_lines: ['beta', 'gamma', 'delta', 'e', 'f', 'g', 'h'],
-          replacement_lines: ['BETA'],
+          expected_text: 'beta\ngamma\ndelta\ne\nf\ng\nh',
+          replacement_text: 'BETA',
         },
       ]),
     ).toThrow(/out-of-range line span; the file has 4 line\(s\), so a span must lie within 1-4/);

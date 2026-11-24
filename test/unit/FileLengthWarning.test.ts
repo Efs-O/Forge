@@ -221,8 +221,8 @@ describe('the write tools all report the line from the same point', () => {
             {
               start_line: 1,
               end_line: 2,
-              expected_lines: ['line 1', 'line 2'],
-              replacement_lines: ['line 1', 'line 2', 'added a', 'added b'],
+              expected_text: 'line 1\nline 2',
+              replacement_text: 'line 1\nline 2\nadded a\nadded b',
             },
           ],
         },
@@ -267,8 +267,8 @@ describe('the write tools all report the line from the same point', () => {
               {
                 start_line: 1,
                 end_line: 2,
-                expected_lines: ['line 1', 'line 2'],
-                replacement_lines: ['line 1', 'line 2', 'extra a', 'extra b'],
+                expected_text: 'line 1\nline 2',
+                replacement_text: 'line 1\nline 2\nextra a\nextra b',
               },
             ],
           },
@@ -309,8 +309,8 @@ describe('the write tools all report the line from the same point', () => {
             {
               start_line: 1,
               end_line: 2,
-              expected_lines: ['line 1', 'line 2'],
-              replacement_lines: ['line 1', 'line 2', 'extra'],
+              expected_text: 'line 1\nline 2',
+              replacement_text: 'line 1\nline 2\nextra',
             },
           ],
         },

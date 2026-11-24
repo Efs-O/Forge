@@ -38,7 +38,7 @@ describe('every file-writing tool honours extra_file_roots', () => {
     await makeApplyLineEditsTool(roots).handler({
       path: file,
       operations: [
-        { start_line: 2, end_line: 2, expected_lines: ['beta'], replacement_lines: ['second'] },
+        { start_line: 2, end_line: 2, expected_text: 'beta', replacement_text: 'second' },
       ],
     });
     const moved = path.join(extra, 'sub', 'moved.txt');

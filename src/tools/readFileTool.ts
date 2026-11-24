@@ -149,7 +149,7 @@ export function makeReadFileTool(deps: ReadFileDeps = {}): RegisteredTool {
               description:
                 'Top-level only, never inside a reads item. Prefix each line with its number ' +
                 'as "  12|text"; the text starts after the first "|", so never copy that ' +
-                'prefix into old_str or expected_lines. Use it when your answer cites line ' +
+                'prefix into old_str or expected_text. Use it when your answer cites line ' +
                 'numbers (a review, an audit) or for apply_line_edits. Applies to every ' +
                 'section of a reads call.',
             },

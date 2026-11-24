@@ -6,16 +6,30 @@ import { agentWriteOptions, delayedWriteNote, writeFileAtomic } from '../util/at
 import { guardTipsWrite, tipsWriteNote } from './tipsWriteGuard';
 import { withFileLengthWarning, type FileLengthWarningGetter } from './fileLengthWarning';
 import { NO_PROBLEM_WATCHER, withProblemNote, type ProblemWatcher } from './editDiagnostics';
-import { capAtLineBoundary, numberedBlock, throwStaleRefusal } from './structuredEditRefusals';
+import {
+  capAtLineBoundary,
+  numberedBlock,
+  renamedOperationFieldRefusal,
+  throwStaleRefusal,
+} from './structuredEditRefusals';
+import { splitEditTextLines, checkedEditTextLines } from './lineEditText';
 
 const MAX_EDIT_OPERATIONS = 20;
-const MAX_LINES_PER_OPERATION = 500;
-const MAX_LINE_CHARS = 4_000;
 const MAX_EXPECTED_CHARS = 64_000;
 const MAX_REPLACEMENT_CHARS = 64_000;
-const OPERATION_REQUIRED_FIELDS = ['expected_lines', 'replacement_lines'] as const;
+const OPERATION_REQUIRED_FIELDS = ['expected_text', 'replacement_text'] as const;
 
+/** What a caller sends: each side is one string, the lines joined with newlines. */
 export interface LineEditOperation {
+  start_line: number;
+  end_line: number;
+  expected_text: string;
+  replacement_text: string;
+}
+
+/** An operation after both sides were split by `splitEditTextLines`: the shape the stale check,
+ *  the auto-alignment and the splice work on. */
+export interface SplitLineEditOperation {
   start_line: number;
   end_line: number;
   expected_lines: string[];
@@ -26,7 +40,7 @@ export interface LineEditResult {
   content: string;
   replacedLines: number;
   replacementLines: number;
-  /** Operations whose stated `end_line` miscounted `expected_lines` but whose text matched the
+  /** Operations whose stated `end_line` miscounted `expected_text` but whose text matched the
    *  file exactly at the named `start_line` — the range was corrected and the edit applied. */
   autoAligned: Array<{ index: number; startLine: number; statedEnd: number; actualEnd: number }>;
 }
@@ -48,7 +62,7 @@ export function applyLineEditsToContent(
   const lines = normalized.split('\n');
   if (finalEol) lines.pop();
 
-  const ordered = operations
+  const ordered = splitOperations(operations)
     .map((operation, index) => ({ operation, index: index + 1 }))
     .sort((left, right) => left.operation.start_line - right.operation.start_line);
   // Prevention, not recovery: a miscounted `end_line` whose text nevertheless matches the file at
@@ -74,7 +88,7 @@ export function applyLineEditsToContent(
       entry.operation = { ...entry.operation, end_line: actualEnd };
     }
   }
-  let previous: { operation: LineEditOperation; index: number } | undefined;
+  let previous: { operation: SplitLineEditOperation; index: number } | undefined;
   let expectedChars = 0;
   let replacementChars = 0;
   for (const { operation, index } of ordered) {
@@ -88,11 +102,15 @@ export function applyLineEditsToContent(
     previous = { operation, index };
     expectedChars += operation.expected_lines.reduce((total, line) => total + line.length, 0);
     if (expectedChars > MAX_EXPECTED_CHARS) {
-      throw new Error(`apply_line_edits: expected lines exceed ${MAX_EXPECTED_CHARS} characters`);
+      throw new Error(
+        `apply_line_edits: expected_text exceeds ${MAX_EXPECTED_CHARS} characters across the call`,
+      );
     }
     replacementChars += operation.replacement_lines.reduce((total, line) => total + line.length, 0);
     if (replacementChars > MAX_REPLACEMENT_CHARS) {
-      throw new Error(`apply_line_edits: replacements exceed ${MAX_REPLACEMENT_CHARS} characters`);
+      throw new Error(
+        `apply_line_edits: replacement_text exceeds ${MAX_REPLACEMENT_CHARS} characters across the call`,
+      );
     }
     const actual = lines.slice(operation.start_line - 1, operation.end_line);
     if (!sameLines(actual, operation.expected_lines)) throwStaleRefusal(operation, index, lines);
@@ -122,6 +140,20 @@ export function applyLineEditsToContent(
   };
 }
 
+/**
+ * Both sides of every operation, split by the one rule and capped. This is the only place a text
+ * side becomes lines, so the count check, the stale check, the alignment and the splice cannot
+ * disagree about what the caller's string meant.
+ */
+function splitOperations(operations: readonly LineEditOperation[]): SplitLineEditOperation[] {
+  return operations.map((operation, index) => ({
+    start_line: operation.start_line,
+    end_line: operation.end_line,
+    expected_lines: checkedEditTextLines(operation.expected_text, index, 'expected_text'),
+    replacement_lines: checkedEditTextLines(operation.replacement_text, index, 'replacement_text'),
+  }));
+}
+
 export function makeApplyLineEditsTool(
   extraRoots: () => readonly string[] = () => [],
   lengthWarning: FileLengthWarningGetter = () => undefined,
@@ -133,7 +165,7 @@ export function makeApplyLineEditsTool(
       function: {
         name: 'apply_line_edits',
         description:
-          'Atomically apply non-overlapping replacements to one file using one-based inclusive line ranges; operations are applied in line order. Read the file first and copy the current lines exactly into expected_lines; stale or out-of-range edits are rejected. Give start_line, end_line, or both; a missing one is derived from the length of expected_lines. The file goes at the top level once, not inside each operation.',
+          'Atomically apply non-overlapping replacements to one file using one-based inclusive line ranges; operations are applied in line order. Read the file first and copy the current lines of the range exactly into expected_text, one line per newline. replacement_text is the new text for that range ("" deletes it). Stale or out-of-range edits are rejected. Give start_line, end_line, or both; a missing one is derived from the number of lines in expected_text. The file goes at the top level once, not inside each operation.',
         parameters: {
           type: 'object',
           properties: {
@@ -147,8 +179,8 @@ export function makeApplyLineEditsTool(
                 properties: {
                   start_line: { type: 'integer', minimum: 1 },
                   end_line: { type: 'integer', minimum: 1 },
-                  expected_lines: lineArraySchema(1),
-                  replacement_lines: lineArraySchema(0),
+                  expected_text: { type: 'string', minLength: 1 },
+                  replacement_text: { type: 'string' },
                 },
                 required: [...OPERATION_REQUIRED_FIELDS],
                 additionalProperties: false,
@@ -261,8 +293,8 @@ export function makeApplyLineEditsTool(
       const alignedNote = result.autoAligned
         .map(
           (a) =>
-            `\nNote: operation ${a.index} end_line ${a.statedEnd} did not match its expected_lines ` +
-            `count; applied at lines ${a.startLine}-${a.actualEnd} because ` +
+            `\nNote: operation ${a.index} end_line ${a.statedEnd} did not match its expected_text ` +
+            `line count; applied at lines ${a.startLine}-${a.actualEnd} because ` +
             'the text matched exactly at start_line.',
         )
         .join('');
@@ -343,18 +375,9 @@ function missingPathRefusal(args: Record<string, unknown>): string {
   return (
     'apply_line_edits is missing required "path". ' +
     'Accepted shape: { "path": "...", "operations": [{ "start_line": 1, "end_line": 2, ' +
-    '"expected_lines": ["..."], "replacement_lines": ["..."] }] }. A "path" inside the ' +
+    '"expected_text": "...", "replacement_text": "..." }] }. A "path" inside the ' +
     'operations is lifted only when they all name the same file.'
   );
-}
-
-function lineArraySchema(minItems: number): Record<string, unknown> {
-  return {
-    type: 'array',
-    minItems,
-    maxItems: MAX_LINES_PER_OPERATION,
-    items: { type: 'string', maxLength: MAX_LINE_CHARS },
-  };
 }
 
 function parseOperations(value: unknown): LineEditOperation[] {
@@ -364,13 +387,19 @@ function parseOperations(value: unknown): LineEditOperation[] {
       throw new Error(`apply_line_edits: operation ${index + 1} must be an object`);
     }
     const record = entry as Record<string, unknown>;
+    // The old array fields first: a call that still sends them is a rename the model has not
+    // picked up, and "missing expected_text" would send it hunting for a field it already wrote.
+    const renamed = renamedOperationFieldRefusal(record, index + 1);
+    if (renamed !== undefined) throw new Error(renamed);
     // Distinguish an absent required field from a present wrong-type value:
     // a missing start_line is "missing start_line", not "must be an integer".
     const missing = OPERATION_REQUIRED_FIELDS.find((field) => record[field] === undefined);
     if (missing !== undefined) {
       throw new Error(`apply_line_edits: operation ${index + 1} is missing ${missing}`);
     }
-    const expectedLines = requireLines(record['expected_lines'], index, 'expected_lines');
+    const expectedText = requireText(record['expected_text'], index, 'expected_text');
+    const replacementText = requireText(record['replacement_text'], index, 'replacement_text');
+    const expectedLines = splitEditTextLines(expectedText);
     const hasStart = record['start_line'] !== undefined;
     const hasEnd = record['end_line'] !== undefined;
     if (!hasStart && !hasEnd) {
@@ -385,25 +414,28 @@ function parseOperations(value: unknown): LineEditOperation[] {
     return {
       start_line: suppliedStart ?? suppliedEnd! - expectedLines.length + 1,
       end_line: suppliedEnd ?? suppliedStart! + expectedLines.length - 1,
-      expected_lines: expectedLines,
-      replacement_lines: requireLines(record['replacement_lines'], index, 'replacement_lines'),
+      expected_text: expectedText,
+      replacement_text: replacementText,
     };
   });
 }
 
-function requireLines(value: unknown, index: number, field: string): string[] {
-  if (
-    !Array.isArray(value) ||
-    value.length > MAX_LINES_PER_OPERATION ||
-    value.some((line) => typeof line !== 'string' || line.length > MAX_LINE_CHARS)
-  ) {
-    throw new Error(`apply_line_edits: operation ${index + 1} has invalid ${field}`);
+function requireText(
+  value: unknown,
+  index: number,
+  field: 'expected_text' | 'replacement_text',
+): string {
+  if (typeof value !== 'string') {
+    throw new Error(
+      `apply_line_edits: operation ${index + 1} has invalid ${field}: send one string, the lines ` +
+        'joined with newlines',
+    );
   }
-  return value as string[];
+  return value;
 }
 
 function validateOperation(
-  operation: LineEditOperation,
+  operation: SplitLineEditOperation,
   index: number,
   lines: readonly string[],
 ): void {
@@ -423,39 +455,26 @@ function validateOperation(
     );
   }
   const expectedCount = operation.end_line - operation.start_line + 1;
-  if (!validLineArray(operation.expected_lines) || !validLineArray(operation.replacement_lines)) {
-    throw new Error(`apply_line_edits: operation ${index + 1} contains invalid lines`);
-  }
   if (operation.expected_lines.length !== expectedCount) {
     const detail = numberedBlock(lines, operation.start_line, operation.end_line);
     const message =
-      `apply_line_edits: operation ${index + 1} expected_lines has ${operation.expected_lines.length} ` +
+      `apply_line_edits: operation ${index + 1} expected_text has ${operation.expected_lines.length} ` +
       `line(s), but lines ${operation.start_line}-${operation.end_line} are ${expectedCount} line(s). ` +
-      'expected_lines must be exactly the current text of start_line through end_line, one entry per line.';
+      'expected_text must be exactly the current text of start_line through end_line, one line per newline.';
     throw new Error(message + capAtLineBoundary(detail, Math.max(0, 1200 - message.length)));
   }
-  if (operation.replacement_lines.length > MAX_LINES_PER_OPERATION) {
-    throw new Error(`apply_line_edits: operation ${index + 1} has too many replacement lines`);
-  }
-}
-
-function validLineArray(lines: readonly unknown[]): lines is readonly string[] {
-  return (
-    lines.length <= MAX_LINES_PER_OPERATION &&
-    lines.every((line) => typeof line === 'string' && line.length <= MAX_LINE_CHARS)
-  );
 }
 
 function sameLines(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((line, index) => line === right[index]);
 }
 
-/** The corrected `end_line` when an operation's stated span miscounts `expected_lines` but its
+/** The corrected `end_line` when an operation's stated span miscounts `expected_text` but its
  *  text matches the file exactly at the stated `start_line` — a miscount, not a disagreement.
  *  Returns undefined when nothing is corrected: matching only elsewhere is left to the refusal
  *  that names the lines, because which copy was meant is the caller's call, not the tool's. */
 function alignedEndLine(
-  operation: LineEditOperation,
+  operation: SplitLineEditOperation,
   lines: readonly string[],
 ): number | undefined {
   // An empty block matches every slice, and a start below 1 has no meaning — neither is a

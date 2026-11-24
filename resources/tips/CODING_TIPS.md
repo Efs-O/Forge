@@ -137,7 +137,7 @@
 20. `edit_file` · `new_str` equal to the current text → alone it reports Applied and changes nothing; in a batch → refused: not found. diff the file, not the reply; drop the no-op edit
 21. `edit_file` · top-level `new_str` takes real newlines (a typed `\n` lands as two chars); `edits[]` is JSON, so a real newline or a stray `\` there → refused: `not valid JSON at character N: a backslash stands right before a line break`
 22. `edit_file` · a new function inserted just above `export async function f` → f's doc comment ends up describing the new function. anchor above that doc comment, not below it
-23. `apply_line_edits` · `expected_lines` invented rather than copied → refused: has N lines but the range is M. copy the current lines the refusal prints
+23. `apply_line_edits` · `expected_text` invented rather than copied → refused: has N lines but the range is M. copy the current lines the refusal prints
 24. `apply_line_edits` · a range counted from an unnumbered `read_file`, or from before a formatter pass → refused: `operation 1 is stale ... they DO match lines 276-279`. read with `numbered: true` in the same round
 25. `write_file` · a backtick I thought it had escaped → it writes exactly what I typed, so a later `old_str` misses. read_file it back before blaming the write
 26. `desktop_click` · on a field may not move the caret → text runs on behind it. move with `tab`, clear with `ctrl+a`+`delete`; a new capture drops the old `capture_id`

@@ -115,7 +115,7 @@ describe.runIf(linkSupported)('symlink escape is refused by every write/move/del
       makeApplyLineEditsTool().handler({
         path: 'link/evil.txt',
         operations: [
-          { start_line: 1, end_line: 1, expected_lines: ['a'], replacement_lines: ['b'] },
+          { start_line: 1, end_line: 1, expected_text: 'a', replacement_text: 'b' },
         ],
       }),
     ).rejects.toThrow(/outside the workspace/);

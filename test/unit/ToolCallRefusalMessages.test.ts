@@ -971,8 +971,8 @@ describe('apply_line_edits missing nested field (Fix C)', () => {
           path: relativePath,
           operations: [
             {
-              expected_lines: ['const value = 1;'],
-              replacement_lines: ['const value = 2;'],
+              expected_text: 'const value = 1;',
+              replacement_text: 'const value = 2;',
             },
           ],
         }),
@@ -993,12 +993,12 @@ describe('apply_line_edits missing nested field (Fix C)', () => {
             {
               start_line: 1,
               end_line: 1,
-              expected_lines: ['const value = 1;'],
-              replacement_lines: ['const value = 1;'],
+              expected_text: 'const value = 1;',
+              replacement_text: 'const value = 1;',
             },
             {
-              expected_lines: ['const value = 1;'],
-              replacement_lines: ['x'],
+              expected_text: 'const value = 1;',
+              replacement_text: 'x',
             },
           ],
         }),
@@ -1016,8 +1016,8 @@ describe('apply_line_edits missing nested field (Fix C)', () => {
             {
               start_line: '1',
               end_line: 1,
-              expected_lines: ['const value = 1;'],
-              replacement_lines: ['const value = 2;'],
+              expected_text: 'const value = 1;',
+              replacement_text: 'const value = 2;',
             },
           ],
         }),
