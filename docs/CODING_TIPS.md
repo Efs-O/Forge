@@ -23,6 +23,7 @@
 9. `curl https://cdn.jsdelivr.net/...` answering 200 here → `render_html_to_image` preview still times out at 10 s: this PC's IPv6 default route blackholes and DNS answers AAAA first. prove it with `curl -6` (6 s timeout) against `curl -4` (60 ms) before blaming `src/tools/webFetchSsrf.ts`
 10. moving a block of `src/sidebar/SendPipeline.ts` that already calls `deps.requestChains.run(chain, …)` into a module and wrapping the new call in `run` again → `Forge: request chain conv-1 is already running` thrown at the inner call. the wrapper moves with the block
 11. python reading a git blob with `subprocess(text=True)` → this PC's cp1253 turns `—` into mojibake, so a verbatim-move scan of `src/sidebar/ModelTurn.ts` against `git show` reports false differences. read bytes: `.stdout.decode("utf-8")`
+12. a probe in `.forge/tmp/` bundled with esbuild → `Could not resolve` on a relative import: from `.forge/tmp/` the path to `src/agentMesh/verdictArtifact.ts` is two levels up (`../../src/...`). plain `node` cannot run the TS; the vitest route is TEST 12
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green and the tree stood still: never run `record-ci-pass.mjs` by hand — the `ci:steps` chain writes it
