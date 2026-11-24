@@ -61,7 +61,7 @@
 7. a one-line method `{ return x; }` written to fit a line cap → prettier expands it into three lines. keep it one line as an arrow property: `undo = (): Promise<string[]> => this.actions.undo();`
 8. a maybe-undefined value passed into an optional interface field → TS2379 with `exactOptionalPropertyTypes`. declare the field `?: T | undefined`, not just `?: T`
 9. `old_str` for a line inside a template literal, typed with bare backticks → refused: not found. the file has them escaped: `\``. copy the physical line from the newest read, escapes and all
-10. `sed -i 'A,Bd'` with B on a block's closing brace → the blank line after the block stays, so its neighbours end up two blank lines apart. delete through B+1, or re-read the seam after the delete
+10. a scripted line-range edit: `sed -i 'A,Bd'` ending on a block's closing brace → the blank line stays, neighbours sit two apart (delete through B+1); ops run in written order, not descending → one lands on a line an earlier delete moved. sort descending; assert each range's first line
 11. an `old_str` that ends in a trailing comma and a `new_str` that does not → the object or array literal loses its separator and the file stops compiling. end both on the same character
 12. `edit_file` `old_str` copied from a brief that quotes a JSDoc line with its leading ` * ` (` * endpoint gets it when…`), where that text sits mid-line on disk → refused: not found. anchor at the line's real start, or drop the ` * ` prefix and match the fragment alone
 13. an `edit_file` `edits[]` item whose `new_str` holds `\\n` → the file gets a literal backslash-n, so JSON then fails to parse and nothing refused it. `edits[]` is JSON: write one `\n`; only top-level `new_str` takes real newlines

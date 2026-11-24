@@ -37,6 +37,7 @@
 4. an edit that grows a src file past 500 lines → eslint `max-lines` (`.eslintrc.json`) errors. check `wc -l <file>` first; move the code into a leaf module
 5. hand-copying Strata's Monitor JS from `N:/Strata/serve/web/app.js` into `webview-ui/vendor/strata-monitor/monitor.js` → a dropped closing `"` before a backtick parses as a template string, and `node --check` names a later line. diff every source line against the copy
 6. `CommandNamesExist.test.ts` scans `docs/*.md` for a backticked single slash-word as a command a reader types → a bare metrics path in `docs/OWNERS.md` fails it. name the method first (`GET` then the path) or leave the path unbackicked
+7. `const { a, b } = fn()` where one member is reassigned later → `prefer-const` (from `eslint:recommended` in `.eslintrc.json`) errors on every never-reassigned member. bind the result once, destructure the const members, `let` only the reassigned one
 
 ## TEST
 1. `fs.rmSync` on a killed child's cwd → EPERM is not in `maxRetries`' retried set, so the retries do nothing. use `removeTreeWhenFree` (test/support/removeTempTree.ts): polls until removable
