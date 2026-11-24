@@ -64,6 +64,7 @@
 10. `sed -i 'A,Bd'` with B on a block's closing brace → the blank line after the block stays, so its neighbours end up two blank lines apart. delete through B+1, or re-read the seam after the delete
 11. an `old_str` that ends in a trailing comma and a `new_str` that does not → the object or array literal loses its separator and the file stops compiling. end both on the same character
 12. `edit_file` `old_str` copied from a brief that quotes a JSDoc line with its leading ` * ` (` * endpoint gets it when…`), where that text sits mid-line on disk → refused: not found. anchor at the line's real start, or drop the ` * ` prefix and match the fragment alone
+13. an `edit_file` `edits[]` item whose `new_str` holds `\\n` → the file gets a literal backslash-n, so JSON then fails to parse and nothing refused it. `edits[]` is JSON: write one `\n`; only top-level `new_str` takes real newlines
 
 ## TEST
 1. a harness that only emits calls, or a threshold measured by a script whose pair list differs from the gate's → the number certifies neither. dispatch the calls; measure with the gate's own list
@@ -176,3 +177,4 @@
 60. `monitor_execution` · an execution id shortened from a note or summary → `unknown execution id "exec-92bfe375"`: ids are the full `exec-<8>-<4>-<4>-<4>-<12>`. call `list_executions` for the live one, or read the job's own log file
 61. `manage_jobs` · `resume` on a job whose state file another VS Code window holds → `EPERM: operation not permitted, rename ... held by <pid> Visual Studio Code`, job unchanged. wait ~8 s and resend the same call
 62. `shell` · `gh api --jq` with `\(user.login)` inside the string → `function not defined: user/0`, escaped as `\user` → `invalid escape sequence "\u"`. keep jq dot-only: `.[] | .user.login + ": " + (.body | .[0:600])`
+63. `edit_file` · an anchor as short as `});` → the edit lands at the FIRST of its 18 copies, inside the wrong block; the result names the count too late. anchor on the closing line plus the distinct line above it
