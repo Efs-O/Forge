@@ -30,3 +30,17 @@ export function realPathOfNearestAncestor(resolved: string): string {
     }
   }
 }
+
+/**
+ * The path with symlinks resolved, or as given when it cannot be resolved
+ * (missing, unreadable): the caller then has only the lexical comparison. Not
+ * thrown, because a 500 here would make forge.sh skip this window entirely,
+ * link holder included.
+ */
+export function realOrSelf(target: string): string {
+  try {
+    return fs.realpathSync.native(target);
+  } catch {
+    return target;
+  }
+}

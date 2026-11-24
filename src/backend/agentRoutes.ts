@@ -1,8 +1,5 @@
-import * as fs from 'fs';
 import type * as http from 'http';
-import * as path from 'path';
-import { MAX_INBOUND_CHARS, forgeInboundPrompt } from '../agentBus/busContent';
-import type { AgentInbox, InboxMessageOptions } from '../agentBus/agentInbox';
+import { MAX_INBOUND_CHARS } from '../agentBus/busContent';
 import { sendJson, sendText, bearerTokenMatches } from './controlHttp';
 import { formatWhoText } from './agentWhoText';
 import { handleAgentFileRoute } from './agentFileRoute';
@@ -14,21 +11,16 @@ import {
   AgentRouteHttpError as HttpError,
   readAgentRouteFields as readFields,
   requireText,
-  type AgentRouteFields as Fields,
 } from './agentRouteFields';
-import {
-  parseAgentMessageOptions,
-  parseFromConversation,
-  parseOriginConversation,
-} from './agentMessageOptions';
+import { parseAgentMessageOptions, parseOriginConversation } from './agentMessageOptions';
 import { getLogger } from '../util/logger';
 import { dispatchAgentRelay } from './agentRelayDispatch';
 import { isClaudeSessionId } from '../agentBus/claudeReopen';
 import { handleAgentRemoteSessionRoute } from './agentRemoteSessionRoute';
 import { handleAgentNotifyRoute } from './agentNotifyRoute';
-import { isPathInside } from '../util/pathContainment';
 import { AgentWindowEndpointRegistry } from './agentWindowEndpointRegistry';
-import { admitInboundMessage } from './agentInboundAdmission';
+import { cwdMatch } from './agentCwdMatch';
+import { sendForgeInboundMessage } from './agentForgeSendRoute';
 import type { AgentRoutesDeps } from './agentRoutesDeps';
 import {
   parseAgentSender,
@@ -37,20 +29,6 @@ import {
 } from './agentSenderParsing';
 
 const log = getLogger();
-
-/**
- * The path with symlinks resolved, or as given when it cannot be resolved
- * (missing, unreadable): the caller then has only the lexical comparison. Not
- * thrown, because a 500 here would make forge.sh skip this window entirely,
- * link holder included.
- */
-function realOrSelf(target: string): string {
-  try {
-    return fs.realpathSync.native(target);
-  } catch {
-    return target;
-  }
-}
 
 export class AgentRoutes {
   readonly token: string;
@@ -85,21 +63,6 @@ export class AgentRoutes {
     this.endpoints.dispose();
   }
 
-  /**
-   * How closely this window's workspace contains the sender's folder: its
-   * root's length, or 0. forge.sh sends an unlinked session to the window with
-   * the longest match before falling back to the focused one, so a new chat
-   * opens in the sender's repo, not whichever window was clicked last.
-   * Compared as written and resolved: a shell reports its folder through
-   * symlinks resolved (macOS `/var` is `/private/var`), the workspace may not.
-   */
-  private cwdMatch(cwd: string | null): number {
-    const root = this.deps.workspaceRoot;
-    if (!cwd || !root || !path.isAbsolute(cwd)) return 0;
-    const inside = isPathInside(root, cwd) || isPathInside(realOrSelf(root), realOrSelf(cwd));
-    return inside ? path.resolve(root).length : 0;
-  }
-
   async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     const route = url.pathname;
@@ -130,7 +93,7 @@ export class AgentRoutes {
         }
         return sendJson(res, 200, {
           holdsLink: this.deps.holdsLink?.(sender) === true,
-          cwdMatch: this.cwdMatch(url.searchParams.get('cwd')),
+          cwdMatch: cwdMatch(this.deps.workspaceRoot, url.searchParams.get('cwd')),
           ...(conversationId === undefined
             ? {}
             : { holdsChat: this.deps.holdsChat?.(conversationId) === true }),
@@ -342,153 +305,18 @@ export class AgentRoutes {
           ...(result.note ? { note: result.note } : {}),
         });
       }
-      const text = requireText(fields, MAX_INBOUND_CHARS);
-      const steerForge =
-        (typeof fields['priority'] === 'string' ? fields['priority'] : '').trim().toLowerCase() ===
-        'steer';
-      // A window that cannot interrupt cannot steer. Said here, before anything
-      // is queued, because the answer it would otherwise give is the one a plain
-      // send gives — "queued" — and the sender would report an interruption that
-      // nothing here was ever going to make.
-      if (steerForge && !this.deps.interruptForge)
-        throw new HttpError(409, 'this window cannot steer a Forge chat. Nothing was queued.');
-      const steerEpochField =
-        typeof fields['steer_epoch'] === 'string' ? fields['steer_epoch'].trim() : '';
-      if (steerForge && steerEpochField !== '' && !Number.isInteger(Number(steerEpochField)))
-        throw new HttpError(400, 'steer_epoch must be an integer when it is sent');
-      const fromConversation = parseFromConversation(fields);
-      const admission = await admitInboundMessage({
+      // Awaited, not returned: a rejection has to reach the catch below, which
+      // is what turns an `HttpError` into the status the sender reads.
+      return await sendForgeInboundMessage(res, {
+        fields,
         from,
         ...(declaredSender ? { sender: declaredSender } : {}),
-        messageOptions: this.messageOptions(fields),
         deps: this.deps,
-      });
-      const options = admission.messageOptions;
-      const target = admission.target;
-      const pendingReplyId = admission.pendingReplyId;
-      const queuedBehindRunningTurn = admission.queuedBehindRunningTurn ?? false;
-      // A steer is refused before anything is queued, and its last check runs
-      // AFTER admission with the queue holding the message unstarted until it
-      // passes: `accept` can start the drain in the same tick, so a message
-      // cancelled after the answer came back is not reliably withdrawn — it may
-      // already be the turn this one meant to replace. `steer_epoch` is the
-      // chain the sender read, so a steer written against a turn that has since
-      // been followed by the owner's own message is refused rather than
-      // interrupting the newer work. A steer whose chat cannot be named, or
-      // with no guard to check it against, is refused here while nothing is
-      // queued: after acceptance no answer could honestly say "nothing was
-      // queued".
-      let expectedEpoch: number | undefined;
-      if (steerForge) {
-        expectedEpoch = steerEpochField === '' ? undefined : Number(steerEpochField);
-        if (target === undefined || this.deps.steerGuard === undefined)
-          throw new HttpError(
-            409,
-            'this window cannot say which chat a steer would reach. Nothing was queued.',
-          );
-        const refusal = await this.deps.steerGuard(
-          target.conversationId,
-          target.title,
-          expectedEpoch,
-        );
-        if (refusal) {
-          if (pendingReplyId) this.deps.pendingReplies?.remove(pendingReplyId);
-          throw new HttpError(409, `${refusal}. Nothing was queued.`);
-        }
-      }
-      let accepted: ReturnType<AgentInbox['accept']>;
-      try {
-        accepted = this.deps.inbox.accept(
-          forgeInboundPrompt(
-            from,
-            text,
-            options.sender,
-            // Only a sender whose session this window can reach live is promised
-            // an automatic answer; the rest are pointed at `read-verdict`.
-            options.sender ? (this.deps.senderIsLive?.(options.sender) ?? true) : true,
-          ),
-          from,
-          steerForge,
-          steerForge ? { ...options, hold: true } : options,
-        );
-      } catch (error) {
-        if (pendingReplyId) this.deps.pendingReplies?.remove(pendingReplyId);
-        throw error;
-      }
-      if (accepted === undefined) {
-        if (pendingReplyId) this.deps.pendingReplies?.remove(pendingReplyId);
-        // A `--new` opened its chat before the inbox was asked, so the refusal
-        // has to name what it left behind: an empty chat nobody told the owner
-        // about is a tab they cannot find, and a retry opens a second one.
-        throw new HttpError(
-          429,
-          `Forge has too many unread agent messages${
-            target
-              ? `. The new chat "${target.title}" (${target.conversationId}) is open and empty; close it, or clear the inbox and send again`
-              : ''
-          }.`,
-        );
-      }
-      const { position: queued, id } = accepted;
-      if (fromConversation && target) {
-        this.deps.recordPeerWriter?.(target.conversationId, { id: fromConversation, title: from });
-      }
-      if (steerForge) {
-        let outcome: Awaited<ReturnType<NonNullable<typeof this.deps.interruptForge>>>;
-        try {
-          // The backstop carries the epoch the sender read: a chain that moved
-          // between the guard and here is caught while the held message has
-          // still never run, so taking it back is a guaranteed withdrawal.
-          outcome = (await this.deps.interruptForge?.(
-            from,
-            target?.conversationId,
-            expectedEpoch,
-          )) ?? { steered: false as const, reason: 'no Forge turn was stopped' };
-        } catch (error) {
-          this.deps.inbox.cancel(from, id);
-          if (pendingReplyId) this.deps.pendingReplies?.remove(pendingReplyId);
-          throw error;
-        }
-        // Nothing was interrupted, so this message does not belong in the
-        // inbox either: it would land in front of a turn the owner has not
-        // answered. The queue never started it, so taking it back is certain.
-        if (!outcome.steered && outcome.blocked) {
-          this.deps.inbox.cancel(from, id);
-          if (pendingReplyId) this.deps.pendingReplies?.remove(pendingReplyId);
-          throw new HttpError(409, `${outcome.reason}. Nothing was queued.`);
-        }
-        // The last guard has passed: the held message may now start, in the
-        // lane the interrupted turn is freeing.
-        this.deps.inbox.release(id);
-        return sendJson(res, 202, { queued, id, ...outcome });
-      }
-      return sendJson(res, 202, {
-        queued,
-        id,
-        ...(target ? { conversationId: target.conversationId, title: target.title } : {}),
-        ...(pendingReplyId ? { exchangeId: pendingReplyId } : {}),
-        ...(pendingReplyId && target
-          ? {
-              receipt: `Forge received your message (chat "${target.title}")${queuedBehindRunningTurn ? ' — queued behind the running turn' : ''}`,
-            }
-          : {}),
       });
     } catch (err) {
       if (err instanceof HttpError) return sendJson(res, err.status, { error: err.message });
       throw err;
     }
-  }
-
-  private messageOptions(fields: Fields): InboxMessageOptions {
-    const parsed = parseAgentMessageOptions(fields);
-    const validModels = [...(this.deps.configuredModels?.() ?? [])];
-    if (parsed.model && !validModels.includes(parsed.model)) {
-      throw new HttpError(
-        400,
-        `model: unknown model "${parsed.model}"; valid models: ${validModels.join(', ') || '(none configured)'}`,
-      );
-    }
-    return parsed;
   }
 
   private authorized(header: string | undefined): boolean {

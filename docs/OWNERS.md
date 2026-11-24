@@ -60,7 +60,8 @@ overlaps with an existing owner, extend the owner instead.
 | Background process exit notice + end-of-turn still-running notice text | `src/sidebar/backgroundExitNotice.ts` |
 | Shared typed/background/tool prompt delivery router | `src/sidebar/backgroundExitNotice.ts` |
 | Tool-authored prompt entry into the shared router | `src/sidebar/SidebarProvider.ts` |
-| Send admission, model resolution and request-chain orchestration | `src/sidebar/SendPipeline.ts`            |
+| Send admission: conversation choice, busy refusal, model resolution, chain reservation | `src/sidebar/SendPipeline.ts` |
+| Running a reserved chain: turn loop, continuations, tell disposition, end-of-turn wake | `src/sidebar/sendChainExecution.ts` |
 | Per-conversation chain-settled listeners + worker-chat end-of-turn wake | `src/sidebar/workerChatWake.ts` |
 | Per-conversation session-log lifecycle, event routing and cursor flush | `src/sidebar/SessionLogCoordinator.ts` |
 | /reindex progress interaction                        | `src/sidebar/reindexCommand.ts`          |
@@ -998,6 +999,8 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Which chat an inbound bus message lands in (sender affinity) | `src/agentBus/busTarget.ts`                                    |
 | Plain-text bus status, queue and transcript answers      | `src/agentBus/busStatusView.ts`                                |
 | `/agent/message` + `/agent/reply` routes, endpoint.json    | `src/backend/agentRoutes.ts`                                   |
+| A message addressed to Forge: admission, the steer chain, the 202 receipt | `src/backend/agentForgeSendRoute.ts` |
+| Which window an unlinked sender belongs to (workspace containment score) | `src/backend/agentCwdMatch.ts`         |
 | `/agent/who?format=text` participant field projection       | `src/backend/agentWhoText.ts`                                   |
 | `GET /agent/status` + `GET /agent/view` — read the sender's own chat, or one linked to its session | `src/backend/agentChatReadRoute.ts` |
 | `GET /agent/chats` + `GET /agent/peer-view` — what one window answers to another, on the bus token alone | `src/backend/agentChatReadRoute.ts` |
@@ -1060,7 +1063,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Path containment test (vscode-free)         | `src/util/pathContainment.ts` |
 | The drive fold `/n/x` → `N:/x` (vscode-free) | `src/util/drivePath.ts`       |
 | The path API of the OS being judged, so a Windows-shaped path on a Linux runner is judged the Windows way (`pathApiFor`) | `src/util/drivePath.ts` |
-| Real path of the nearest existing ancestor (8.3 names, junctions; sync) | `src/util/realPath.ts` |
+| Real path of the nearest existing ancestor (8.3 names, junctions; sync), or the path itself when resolution must not throw (`realOrSelf`) | `src/util/realPath.ts` |
 | Spawn-and-collect child process (no vscode) | `src/util/processSpawn.ts`    |
 | Streamed child-output head+tail cap         | `src/util/outputCap.ts`       |
 | Workspace path resolution + realpath        | `src/util/WorkspacePaths.ts`  |
