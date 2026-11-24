@@ -11,22 +11,15 @@ import {
   requestShapeSchema,
 } from './messageChatSchema';
 import {
-  awaitMessageChatDelivery,
-  clearUnclaimedSend,
   createMessageChatActions,
   emitPromptActivity,
-  markUnclaimedSend,
-  MESSAGE_CHAT_DELIVERY_CONFIRM_MS,
   MESSAGE_CHAT_NEW_CHATS_PER_HOUR_DEFAULT,
-  messageChatSendLimit,
   pruneMessageChatWindow,
-  unclaimedSendRefusal,
   type MessageChatActionContext,
   type MessageChatActionSidebar,
   type MessageChatWindow,
-  type MessageChatDeliveryResult,
 } from './messageChatActions';
-import { clipMirroredPrompt } from '../sidebar/turnMirrorWiring';
+import { localSend } from './messageChatLocalSend';
 import {
   unattendedConversations,
   type UnattendedJobMeta,
@@ -420,79 +413,13 @@ export function makeMessageChatTool(options: {
           return say(await peerSend(peerBase(peer.chat, peer.selfWorkspace, parsed.message)));
         return say(await unmatchedRefusal(peer));
       }
-      const target = resolution.chat;
-      const sendLimit = messageChatSendLimit(window, !target.running);
-      if (sendLimit) return say(listRefusal(sendLimit, chats, selfId));
-      // Refused before anything is counted or sent: an earlier message from this
-      // chat to the same target has not been seen to start, so a second one would
-      // deliver the same report twice. Only an idle target can get here, because
-      // a send into a busy chat is admitted as a tell at once.
-      const unclaimed = unclaimedSendRefusal(window, target.id, formatChatName(target));
-      if (unclaimed) return say(listRefusal(unclaimed, chats, selfId));
-
-      let delivery: MessageChatDeliveryResult;
-      try {
-        delivery = await awaitMessageChatDelivery(
-          baseContext.unattended
-            ? sidebar.deliverChatMessage(
-                messageFrom(sender, chats, parsed.message),
-                target.id,
-                false,
-                baseContext.unattended,
-              )
-            : sidebar.deliverChatMessage(messageFrom(sender, chats, parsed.message), target.id),
-          context.abortSignal,
-          () => clearUnclaimedSend(window, target.id),
-        );
-      } catch (error) {
-        return say(
-          listRefusal(
-            `Error: message_chat could not route the message: ${String(error)}. Retry when the sidebar is available.`,
-            chats,
-            selfId,
-          ),
-        );
-      }
-      const name = formatChatName(target);
-      if (delivery.kind === 'refused') {
-        return say(
-          listRefusal(
-            `Error: ${name} did not accept the message: ${delivery.error} Nothing was delivered; retry later or pick another chat.`,
-            chats,
-            selfId,
-          ),
-        );
-      }
-      const body = clipMirroredPrompt(parsed.message);
-      const mirrorStatus =
-        delivery.kind === 'tell' ? 'tell' : delivery.kind === 'turn' ? 'turn' : 'unconfirmed';
-      emitPromptActivity(
+      return await localSend({
+        ...baseContext,
+        message: parsed.message,
+        target: resolution.chat,
         hostFacade,
-        target.id,
-        formatChatMirrorLine('in', sender.title, undefined, body),
-      );
-      emitPromptActivity(
-        hostFacade,
-        sender.id,
-        formatChatMirrorLine('out', target.title, mirrorStatus, body),
-      );
-      // An unconfirmed send may still start, so it counts against both caps.
-      window.sentAt.push(at);
-      if (delivery.kind !== 'tell') window.wakesAt.push(at);
-      // And it is remembered as outstanding, so while it is the same chat cannot
-      // send to the same target again and pay for the report twice. The real
-      // delivery settling late clears this, so a retry is allowed once it starts
-      // or is refused; otherwise the mark dies with the hour.
-      if (delivery.kind === 'unconfirmed') markUnclaimedSend(window, target.id, at);
-      if (delivery.kind === 'tell')
-        return say(
-          `Queued for ${name} (running): not processed yet; it will be read at a tool round or in a follow-up turn.`,
-        );
-      if (delivery.kind === 'turn')
-        return say(`Delivered to ${name} (idle): a turn started there.`);
-      return say(
-        `Sent to ${name}, but its turn had not started after ${delivery.why === 'timeout' ? `${MESSAGE_CHAT_DELIVERY_CONFIRM_MS / 1000} s` : 'this turn was stopped'}; it may still start. Do not resend; check with \`list\` later.`,
-      );
+        say,
+      });
     },
   };
 }
