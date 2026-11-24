@@ -36,7 +36,7 @@ describe.runIf(process.platform === 'win32')('codex queue message delivery', () 
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('delivers the whole multi-line message through an npm shim', async () => {
+  it('delivers the whole multi-line message through an npm shim', { timeout: 20_000, retry: 2 }, async () => {
     const shim = path.join(dir, 'codex.cmd');
     fs.writeFileSync(
       shim,
@@ -47,7 +47,20 @@ describe.runIf(process.platform === 'win32')('codex queue message delivery', () 
     resolveExecutable.mockResolvedValue(shim);
     const message = codexMessage(replyPath, 'fg1791234567890-12345678', 's', 'a & b\n"%PATH%"');
 
-    await queueToCodex('codex', thread, message);
+    // On a loaded GitHub Windows runner this spawn has hung past the test's
+    // limit; abort it at 10 s so the failure says how far it got.
+    const abort = new AbortController();
+    const guard = setTimeout(() => abort.abort(), 10_000);
+    try {
+      await queueToCodex('codex', thread, message, abort.signal);
+    } catch (err) {
+      throw new Error(
+        `queueToCodex did not finish (fake codex.js ran: ${fs.existsSync(argvFile)}): ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    } finally {
+      clearTimeout(guard);
+    }
 
     expect(JSON.parse(fs.readFileSync(argvFile, 'utf8'))).toEqual([
       'queue',
@@ -57,7 +70,7 @@ describe.runIf(process.platform === 'win32')('codex queue message delivery', () 
       message,
     ]);
     // A cmd.exe shim starting node took over 5 s on a loaded GitHub Windows runner.
-  }, 20_000);
+  });
 
   it('refuses before spawning when the shim can only run through cmd.exe', async () => {
     const shim = path.join(dir, 'codex.bat');
