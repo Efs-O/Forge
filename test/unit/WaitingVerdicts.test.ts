@@ -18,8 +18,10 @@ import {
 } from '../../src/agentMesh/verdictArtifact';
 import { EXCHANGES_LOG_NAME } from '../../src/agentMesh/exchangeLog';
 import {
-  WAITING_VERDICT_FIELD,
+  WAITING_VERDICT_TRAILER,
   noticesForSender,
+  sendJsonWithWaitingVerdicts,
+  waitingVerdictNotices,
   waitingVerdictTrailer,
 } from '../../src/backend/agentWaitingVerdicts';
 
@@ -359,7 +361,7 @@ describe('waitingVerdictsForSession', () => {
   });
 });
 
-describe('the notice sentence and the wire trailer', () => {
+describe('the notice sentence and the two wire forms', () => {
   it('the startup sentence is the words the client prints, without its prefix', () => {
     expect(
       waitingVerdictNoticeSentence({
@@ -394,8 +396,91 @@ describe('the notice sentence and the wire trailer', () => {
         },
       ]),
     ).toBe(
-      `\n${WAITING_VERDICT_FIELD}\tex-1\tNightly [audit] "quoted"\n${WAITING_VERDICT_FIELD}\tex-2\tchat-1`,
+      `\n${WAITING_VERDICT_TRAILER}\tex-1\tNightly [audit] "quoted"\n${WAITING_VERDICT_TRAILER}\tex-2\tchat-1`,
     );
+  });
+
+  /** What `sendJson` would hand the socket: the status, the headers, the bytes. */
+  function capture(): {
+    res: Parameters<typeof sendJsonWithWaitingVerdicts>[0];
+    sent: () => { status: number; type: string; body: unknown };
+  } {
+    let status = 0;
+    let type = '';
+    let bytes = '';
+    const res = {
+      writeHead: (code: number, headers: Record<string, string>) => {
+        status = code;
+        type = headers['Content-Type'] ?? '';
+      },
+      end: (body?: string) => {
+        bytes = body ?? '';
+      },
+    } as unknown as Parameters<typeof sendJsonWithWaitingVerdicts>[0];
+    return {
+      res,
+      sent: () => ({ status, type, body: JSON.parse(bytes) as unknown }),
+    };
+  }
+
+  const WAITING_TWO = [
+    {
+      exchangeId: 'ex-1',
+      senderSessionId: OWN,
+      from: 'claude',
+      conversationId: 'chat-1',
+      chatLabel: 'Nightly [audit] "quoted"',
+      verdictTs: NOW,
+    },
+    {
+      exchangeId: 'ex-2',
+      senderSessionId: OWN,
+      from: 'claude',
+      conversationId: 'chat-1',
+      chatLabel: 'chat-1',
+      verdictTs: NOW,
+    },
+  ];
+
+  it('the field is the two words a client needs, in the order forge.sh scans them', () => {
+    expect(waitingVerdictNotices(WAITING_TWO)).toEqual([
+      { exchangeId: 'ex-1', chat: 'Nightly [audit] "quoted"' },
+      { exchangeId: 'ex-2', chat: 'chat-1' },
+    ]);
+    expect(Object.keys(waitingVerdictNotices(WAITING_TWO)[0]!)).toEqual(['exchangeId', 'chat']);
+  });
+
+  it('a JSON body grows the field and stays parseable JSON', () => {
+    const { res, sent } = capture();
+    sendJsonWithWaitingVerdicts(res, 202, { queued: 1, id: 'm1' }, WAITING_TWO);
+    expect(sent()).toEqual({
+      status: 202,
+      type: 'application/json',
+      body: {
+        queued: 1,
+        id: 'm1',
+        waiting_verdicts: [
+          { exchangeId: 'ex-1', chat: 'Nightly [audit] "quoted"' },
+          { exchangeId: 'ex-2', chat: 'chat-1' },
+        ],
+      },
+    });
+  });
+
+  it('with nothing waiting the JSON body is exactly what the route sent', () => {
+    const { res, sent } = capture();
+    sendJsonWithWaitingVerdicts(res, 202, { queued: 1, id: 'm1' }, []);
+    expect(sent()).toEqual({ status: 202, type: 'application/json', body: { queued: 1, id: 'm1' } });
+  });
+
+  it('a body that is not an object gets no field rather than a reshaped body', () => {
+    const { res, sent } = capture();
+    sendJsonWithWaitingVerdicts(res, 200, 'a route answering text-as-JSON', WAITING_TWO);
+    expect(sent()).toEqual({
+      status: 200,
+      type: 'application/json',
+      body: 'a route answering text-as-JSON',
+    });
   });
 
   it('announces nothing to a request that carried no session identity', () => {

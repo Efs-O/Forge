@@ -106,12 +106,16 @@ resolve_reload_endpoint() {
     exit 1
   fi
 }
-# The routes append one line per answer this session has not seen live:
-#   WAITING_VERDICT<TAB><exchangeId><TAB><chat title>
-# Print those on stderr as a sentence the agent can act on, and print everything
-# else on stdout unchanged — a session parsing say's JSON still sees just the
-# JSON. The title is whatever follows the second tab, so a title containing tabs,
-# quotes or spaces passes through exactly as Forge wrote it.
+# An answer this session has not seen live travels in whichever form the route
+# that answers can carry it in (src/backend/agentWaitingVerdicts.ts):
+#   a text body (status, view, read-verdict) grows one line per answer:
+#     WAITING_VERDICT<TAB><exchangeId><TAB><chat title>
+#   a JSON body grows one field, and stays valid JSON:
+#     "waiting_verdicts":[{"exchangeId":"…","chat":"…"}]
+# Either way: print the sentence the agent can act on to stderr, and print the
+# body on stdout exactly as Forge sent it — a session parsing say's JSON still
+# sees exactly that JSON, the new field included. A chat title passes through
+# verbatim, tabs, quotes and spaces included.
 report_waiting_verdicts() {
   local name="$1"
   awk -v name="$name" '
@@ -123,6 +127,59 @@ report_waiting_verdicts() {
       next
     }
     { print }'
+}
+# The JSON form. Scans only inside the waiting_verdicts field, so an exchangeId
+# the route itself put in the body cannot announce twice. Within it, each entry
+# is read in the order Forge writes it — exchangeId, then chat — and the chat
+# value is scanned a character at a time so an escaped quote ends the value in
+# the right place. A newline or tab inside a title arrives as the two characters
+# \n or \t, so one entry still prints as one line.
+report_waiting_verdict_field() {
+  local name="$1"
+  awk -v name="$name" '
+    BEGIN {
+      FIELD = "\"waiting_verdicts\":["
+      KEY = "\"exchangeId\":\""
+      CHAT = "\"chat\":\""
+    }
+    function notice(id, title) {
+      printf "forge.sh: an answer is waiting for you from chat \"%s\" (exchange %s), not seen live. Read it with: forge.sh read-verdict %s %s\n", title, id, name, id > "/dev/stderr"
+    }
+    function scanList(s,   i, j, k, p, c, nxt, id, title) {
+      while ((i = index(s, KEY)) > 0) {
+        s = substr(s, i + length(KEY))
+        j = index(s, "\"")
+        if (j == 0) return
+        id = substr(s, 1, j - 1)
+        s = substr(s, j + 1)
+        title = ""
+        if ((k = index(s, CHAT)) > 0) {
+          s = substr(s, k + length(CHAT))
+          p = 1
+          while (1) {
+            c = substr(s, p, 1)
+            if (c == "") break
+            if (c == "\\") {
+              nxt = substr(s, p + 1, 1)
+              if (nxt == "\"" || nxt == "\\") { title = title nxt; p += 2; continue }
+              title = title c nxt
+              p += 2
+              continue
+            }
+            if (c == "\"") break
+            title = title c
+            p++
+          }
+          s = substr(s, p + 1)
+        }
+        notice(id, title)
+      }
+    }
+    {
+      at = index($0, FIELD)
+      if (at > 0) scanList(substr($0, at + length(FIELD)))
+      print
+    }'
 }
 # Under WSL2 (NAT on Windows 10) 127.0.0.1 is the Linux VM, not Windows where
 # Forge listens; Windows' curl.exe (via interop) reaches Windows' loopback.
@@ -293,7 +350,7 @@ if [ "$VERB" = "read-verdict" ] || [ "$VERB" = "ack-verdict" ]; then
       echo "forge.sh: verdict acknowledgment failed" >&2
       exit 1
     fi
-    printf '%s\n' "$ACKED" | report_waiting_verdicts "$NAME"
+    printf '%s\n' "$ACKED" | report_waiting_verdict_field "$NAME"
     echo
   fi
   exit 0
@@ -563,7 +620,7 @@ if [ -f "$EP" ]; then
   fi
   if RESULT="$(curl -sS --fail-with-body -X POST -H "Authorization: Bearer $TOKEN" \
       -H "Content-Type: text/plain; charset=utf-8" --data-binary "@$TMP" "$URL/agent/$ROUTE?$QUERY")"; then
-    printf '%s\n' "$RESULT" | report_waiting_verdicts "$ARG"
+    printf '%s\n' "$RESULT" | report_waiting_verdict_field "$ARG"
     exit 0
   fi
   [ -z "${RESULT:-}" ] || printf '%s\n' "$RESULT" >&2

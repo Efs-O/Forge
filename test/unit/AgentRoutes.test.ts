@@ -13,6 +13,7 @@ import {
   type BusPaths,
 } from '../../src/agentBus/agentBus';
 import { AgentRoutes } from '../../src/backend/agentRoutes';
+import type { AgentRelayResult } from '../../src/backend/agentRoutesDeps';
 import type { WaitingVerdict } from '../../src/agentMesh/verdictArtifact';
 import { InboundAgentChatNotOpenError } from '../../src/agentLinks/inboundAgentRouting';
 import { PendingAgentReplies } from '../../src/agentLinks/pendingAgentReplies';
@@ -3253,6 +3254,13 @@ describe('an answer waiting for a session', () => {
         },
       }),
       status: () => ({ ok: true, text: STATUS_TEXT }),
+      // `to=codex` goes through the relay, which answers JSON too. Without a
+      // handler here the route refuses, and the test would prove nothing.
+      relayAgent: async (): Promise<AgentRelayResult> => ({
+        ok: true,
+        exchangeId: 'relay-ex-1',
+        deliveredTo: 'a codex session',
+      }),
       waitingVerdicts: waitingFor,
     });
     routes.setEnabled(true);
@@ -3261,6 +3269,11 @@ describe('an answer waiting for a session', () => {
 
   const get = (query: string): Promise<Response> =>
     fetch(`${base}/agent/status?${query}`, { headers: { Authorization: `Bearer ${TOKEN}` } });
+
+    /** A POST body's caller identity: the routes read `sender` from the fields,
+   *  and a bare `from` carries no session to announce to. */
+  const senderParam = (sessionId: string): string =>
+    encodeURIComponent(JSON.stringify({ kind: 'claude', sessionId }));
 
   it('carries the waiting answer in a status response for its own session only', async () => {
     install();
@@ -3273,6 +3286,62 @@ describe('an answer waiting for a session', () => {
     // A caller with no session identity has nothing to attribute the notice to.
     const nameless = await get('from=claude');
     expect(await nameless.text()).toBe(`${STATUS_TEXT}\n`);
+  });
+
+  /** The body with the announcement taken back off: what the route answered
+   *  before the waiting list existed, and what a session with nothing waiting
+   *  still gets. */
+  const withoutField = (body: Record<string, unknown>): Record<string, unknown> => {
+    const { waiting_verdicts: announced, ...rest } = body;
+    expect(announced).toBeDefined();
+    return rest;
+  };
+
+  it('a say response stays valid JSON, and the field is all the answer adds', async () => {
+    install();
+    const own = await post(`/agent/message?from=claude&sender=${senderParam(OWN)}`, 'hello');
+    expect(own.status).toBe(202);
+    expect(own.body['waiting_verdicts']).toEqual([{ exchangeId: EXCHANGE, chat: CHAT_TITLE }]);
+    const other = await post(
+      `/agent/message?from=claude&sender=${senderParam(OTHER)}`,
+      'hello',
+    );
+    expect(other.status).toBe(202);
+    expect(other.body).not.toHaveProperty('waiting_verdicts');
+    // Every send allocates its own id, queue position and exchange id, so those
+    // three are matched loosely. Everything else is exactly the body this route
+    // answered before the waiting list existed, field or no field.
+    const answered = (id: string, queued: number): Record<string, unknown> => ({
+      queued,
+      id,
+      conversationId: 'c1',
+      title: 'Nightly audit',
+      exchangeId: expect.any(String),
+      receipt: 'Forge received your message (chat "Nightly audit")',
+    });
+    expect(own.body).toEqual({
+      ...answered('m1', 1),
+      waiting_verdicts: [{ exchangeId: EXCHANGE, chat: CHAT_TITLE }],
+    });
+    expect(other.body).toEqual(answered('m2', 2));
+  });
+
+  it('a relay response stays valid JSON, and the field is all the answer adds', async () => {
+    install();
+    const own = await post(
+      `/agent/message?from=claude&to=codex&sender=${senderParam(OWN)}`,
+      'hello',
+    );
+    expect(own.status).toBe(202);
+    expect(own.body['relayed']).toBe(true);
+    expect(own.body['waiting_verdicts']).toEqual([{ exchangeId: EXCHANGE, chat: CHAT_TITLE }]);
+    const other = await post(
+      `/agent/message?from=claude&to=codex&sender=${senderParam(OTHER)}`,
+      'hello',
+    );
+    expect(other.status).toBe(202);
+    expect(other.body).not.toHaveProperty('waiting_verdicts');
+    expect(other.body).toEqual(withoutField(own.body));
   });
 
   it('forge.sh prints the notice on stderr and leaves the body on stdout', async (ctx) => {
@@ -3302,8 +3371,10 @@ describe('an answer waiting for a session', () => {
       30_000,
     );
     expect(run.code).toBe(0);
-    // The JSON a session parses is untouched by the announcement.
-    expect(JSON.parse(run.stdout)).toMatchObject({ queued: 1, id: 'm1' });
+    // stdout is exactly the JSON Forge sent, the waiting field included.
+    const parsed = JSON.parse(run.stdout) as Record<string, unknown>;
+    expect(parsed).toMatchObject({ queued: 1, id: 'm1' });
+    expect(parsed['waiting_verdicts']).toEqual([{ exchangeId: EXCHANGE, chat: CHAT_TITLE }]);
     expect(run.stderr).toBe(
       `forge.sh: an answer is waiting for you from chat "${CHAT_TITLE}" (exchange ${EXCHANGE}), ` +
         `not seen live. Read it with: forge.sh read-verdict claude ${EXCHANGE}\n`,

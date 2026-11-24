@@ -69,8 +69,11 @@ export async function handleVerdictRead(
     const body = readVerdictArtifact(deps.paths(), id, from, identity.sessionId);
     res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8' });
     // Reading does not consume the answer, so the answer it came for is still
-    // waiting: the trailer lists every one of them, and the session sees the
-    // whole set rather than learning about the next one another call later.
+    // waiting: the trailer lines list every one of them, and the session sees
+    // the whole set rather than learning about the next one another call later.
+    // Lines, not the `waiting_verdicts` field: this body is the verdict's own
+    // markdown, and wrapping it in JSON to carry a field would change what
+    // `read-verdict` answers for every caller.
     res.end(
       appendWaitingVerdictTrailer(body, noticesForSender(deps.waitingVerdicts, identity.sessionId)),
     );
