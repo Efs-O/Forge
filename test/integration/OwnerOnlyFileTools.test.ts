@@ -4,11 +4,11 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  applyOwnerOnlyWriteGuard,
   ownerOnlySetFor,
   ownerOnlyWriteTargetFor,
   type OwnerOnlySet,
 } from '../../src/tools/ownerPaths';
+import { applyOwnerOnlyWriteGuard } from '../../src/tools/ownerPathsWriteGuard';
 import { makeReadFileTool, makeWriteFileTool } from '../../src/tools/builtinTools';
 import { makeEditFileTool } from '../../src/tools/editFileTool';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';

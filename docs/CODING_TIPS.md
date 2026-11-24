@@ -5,7 +5,7 @@
 **Not a second copy of the rules.** General behaviour belongs in `config/templates/builtin/execute.njk` (injected for every user); facts about this machine or repo belong in `FORGE.md` (injected here). A line that reads like advice rather than syntax is in the wrong file. **Delete a line once the code refuses the mistake** — name the gate in the commit message instead.
 
 ## SEARCH
-1. `rg -n x .` → `dist/`, `coverage/`, `docs/reports/**` and one-line `test/fixtures/*.json` drown the answer. exclude them: `rg -n x --glob '!dist/**' --glob '!coverage/**' --glob '!docs/reports/**'`
+1. `rg -n x .` → `dist/`, `coverage/`, `docs/reports/**` and one-line `test/fixtures/*.json` drown the answer. exclude them: `rg -n x --glob '!dist/**' --glob '!coverage/**' --glob '!docs/reports/**' --glob '!test/fixtures/**'`
 2. `grep_search` query `toolName:` over `test/**/*.ts` → 30 files of unrelated AppMessage fixtures bury the answer. "does any test pin this text?" greps the exact phrase the code emits
 3. `grep_search` `include:"eslint.config.*"` → no matches: this repo's ESLint config is the dotfile `.eslintrc.json` (prettier: `.prettierrc`). glob the dotfile's real name
 4. `grep_search` for a phrase copied from a lane brief → hits the brief itself in `.forge/tmp/lanes/*.md` plus all of `coverage/`. anchor it: `include: "src/**"`

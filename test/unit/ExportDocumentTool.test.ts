@@ -15,7 +15,8 @@ import { markdownToDocx } from '../../src/documents/docxFromMarkdown';
 import { unzipTextParts } from '../../src/documents/zipXml';
 import * as atomicWrite from '../../src/util/atomicWrite';
 import { makeExportDocumentTool } from '../../src/tools/exportDocumentTool';
-import { applyOwnerOnlyWriteGuard, ownerOnlySetFor } from '../../src/tools/ownerPaths';
+import { ownerOnlySetFor } from '../../src/tools/ownerPaths';
+import { applyOwnerOnlyWriteGuard } from '../../src/tools/ownerPathsWriteGuard';
 import { ToolRegistry } from '../../src/tools/ToolRegistry';
 import type { ForgeConfig } from '../../src/config/types';
 

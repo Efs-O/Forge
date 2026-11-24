@@ -115,6 +115,8 @@ overlaps with an existing owner, extend the owner instead.
 | Filesystem-miss error text for tools                 | `src/tools/pathErrorHint.ts`             |
 | Pure filesystem-miss error text                      | `src/tools/pathMissText.ts`              |
 | Owner-only write roots and open memory/skill exceptions | `src/tools/ownerPaths.ts` + `src/tools/ownerPathsOpen.ts` |
+| Owner-only wall applied to a shell command line (which token writes, which `cd`-moved folder, which `>`) | `src/tools/ownerPathsShell.ts` |
+| Owner-only wall attached to a file tool (`refuseBeforeApproval` + handler, before any card) | `src/tools/ownerPathsWriteGuard.ts` |
 | Recycle-bin refusal diagnosis + short-lived path cache | `src/tools/trashRefusal.ts`             |
 | Argument names a model reached for that a tool does not declare (rewrites + refusal hints) | `src/tools/argumentAliases.ts` |
 | Tool call execution + result formatting              | `src/sidebar/ToolDispatch.ts`            |
@@ -640,7 +642,7 @@ overlaps with an existing owner, extend the owner instead.
 | `search_code`: what a result says + the secret gate | `src/tools/searchCodeTool.ts` |
 | `search_code`: the ripgrep crawl, its argv and its page limit | `src/tools/searchCodeCrawl.ts` |
 | Which paths are secrets, and how a path is matched | `src/tools/secretPaths.ts`       |
-| Which paths the agent may not change (Forge's own files, and `config.yaml` only while its security settings are still inside it) | `src/tools/ownerPaths.ts` |
+| Which paths the agent may not change (Forge's own files, and `config.yaml` only while its security settings are still inside it) | `src/tools/ownerPaths.ts` (its two application surfaces: `src/tools/ownerPathsShell.ts`, `src/tools/ownerPathsWriteGuard.ts`) |
 | Which shell argument positions are reads, not writes (interpreters, `cp`/`Copy-Item`, inline `--target=`) | `src/tools/shellWritePositions.ts` |
 | Which hosts a chat may reach (a fetch, its redirects, a preview page's scripts), and what a fetch asks for | `src/tools/fetchHostApprovals.ts` |
 | Search scope: excludes + named-path rule   | `src/tools/searchScope.ts`            |

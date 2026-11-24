@@ -5,12 +5,12 @@ import { afterAll, describe, expect, it } from 'vitest';
 import {
   ownerOnlyInstruction,
   ownerOnlySetFor,
-  ownerOnlyStatementTargetFor,
   ownerOnlyToolRefusal,
   ownerOnlyWriteTargetFor,
   type OwnerOnlyHit,
   type OwnerOnlySet,
 } from '../../src/tools/ownerPaths';
+import { ownerOnlyStatementTargetFor } from '../../src/tools/ownerPathsShell';
 import { classifyShellCommand } from '../../src/tools/shellPolicy';
 import { normalizePathForMatch } from '../../src/tools/secretPaths';
 

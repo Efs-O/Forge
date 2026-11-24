@@ -15,7 +15,7 @@ import {
 import { argumentLooksComputed, secretDeclineHint } from './secretPaths';
 import { secretReadInStatements } from './shellSecretReads';
 import { statementNetworkProgram } from './shellNetworkPrograms';
-import { firstOwnerOnlyRedirect } from './ownerPaths';
+import { firstOwnerOnlyRedirect } from './ownerPathsShell';
 import { commonFolderOf } from '../sidebar/approvalKeyGrammar';
 import { ownerOnlySetForGuard, ownerOnlyShellRule } from './shellOwnerRule';
 import { commandStartsElevation, scriptNestedCommands } from './shellScriptFiles';

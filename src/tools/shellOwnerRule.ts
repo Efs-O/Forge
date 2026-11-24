@@ -19,14 +19,12 @@
  */
 import * as os from 'os';
 import { isDirectoryChange, isReadOnly } from './shellReadOnlyRules';
+import { ownerOnlyInstruction, type OwnerOnlyHit, type OwnerOnlySet } from './ownerPaths';
 import {
   effectiveDirectoryFor,
-  ownerOnlyInstruction,
   ownerOnlyStatementTargetFor,
-  type OwnerOnlyHit,
   type OwnerOnlyRedirect,
-  type OwnerOnlySet,
-} from './ownerPaths';
+} from './ownerPathsShell';
 import type { ShellTokenRule } from './DenyList';
 import type { ShellKind } from './shellCommandTokens';
 
