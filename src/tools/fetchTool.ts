@@ -50,6 +50,19 @@ export const MAX_WEB_FETCH_BYTES = 5 * 1024 * 1024;
  * (code search always needs a token). Strata retried it blind; name the path
  * that carries the user's own `gh auth login` instead.
  */
+/**
+ * A 404 is the one HTTP failure the model can act on, and the status line does
+ * not say how. Measured 2026-11-21 in session 4a27df97-86d2-446d-b9ad-c3462cbcb693:
+ * after web_search had found the repository, the model assembled documentation
+ * paths itself (`/en/guide/getting-started`, `/sitemap.xml`,
+ * `contents/website/src`, `docs/user/guide/quickstart.md`) and five of them
+ * 404'd, each a whole round. Naming the way forward is what stops the next
+ * guess being another spelling of the same path.
+ */
+const NOT_FOUND_HINT =
+  ' — if you built this path yourself, do not try another spelling: web_search the page ' +
+  'title, or fetch the site root and follow a link from there.';
+
 function authHint(url: string, status: number): string {
   if (status !== 401 && status !== 403) return '';
   let host: string;
@@ -84,7 +97,11 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
         parameters: {
           type: 'object',
           properties: {
-            url: { type: 'string', description: 'URL to fetch (must be https:// or http://).' },
+            url: {
+              type: 'string',
+              description:
+                'URL to fetch (must be https:// or http://). Take it from a search result, a link on a page you already fetched, or the user: a path you invent is a guess and comes back 404.',
+            },
             max_chars: {
               type: 'integer',
               minimum: 1,
@@ -198,10 +215,9 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
 
       if (!response.ok) {
         throw new ToolError(
-          `web_fetch: HTTP ${String(response.status)}${statusTextNote(response.statusText)}${authHint(
-            url,
-            response.status,
-          )}`,
+          `web_fetch: HTTP ${String(response.status)}${statusTextNote(response.statusText)}${
+            response.status === 404 ? NOT_FOUND_HINT : ''
+          }${authHint(url, response.status)}`,
         );
       }
 

@@ -22,11 +22,29 @@ function failing(statusText: string, status = 500) {
 const refusal = async (statusText: string, status?: number): Promise<string> =>
   failing(statusText, status)
     .handler({ url: 'https://example.com/page' })
-    .then(() => '', (error: unknown) => (error as Error).message);
+    .then(
+      () => '',
+      (error: unknown) => (error as Error).message,
+    );
 
 describe('web_fetch status text in a refusal', () => {
   it('keeps an ordinary status line as the server wrote it', async () => {
     expect(await refusal('Not Found', 404)).toContain('HTTP 404 Not Found');
+  });
+
+  it('names the way forward on 404, in full', async () => {
+    // Five guessed documentation paths in one session, five rounds: the status
+    // line alone was not enough to stop the next spelling being another guess.
+    expect(await refusal('Not Found', 404)).toBe(
+      'web_fetch: HTTP 404 Not Found — if you built this path yourself, do not try another ' +
+        'spelling: web_search the page title, or fetch the site root and follow a link from there.',
+    );
+  });
+
+  it('says nothing about paths on a failure that is not a missing page', async () => {
+    expect(await refusal('Internal Server Error', 500)).toBe(
+      'web_fetch: HTTP 500 Internal Server Error',
+    );
   });
 
   it('defuses the untrusted-content markers in it', async () => {
@@ -43,5 +61,16 @@ describe('web_fetch status text in a refusal', () => {
     expect(message.length).toBeLessThan(200);
     expect(message).not.toContain('\n');
     expect(message).not.toContain('tail');
+  });
+
+  it('tells the model where a URL should come from, before it writes one', () => {
+    const properties = makeWebFetchTool().definition.function.parameters['properties'] as Record<
+      string,
+      { description?: string }
+    >;
+    expect(properties['url']?.description).toBe(
+      'URL to fetch (must be https:// or http://). Take it from a search result, a link on a ' +
+        'page you already fetched, or the user: a path you invent is a guess and comes back 404.',
+    );
   });
 });

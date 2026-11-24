@@ -184,7 +184,9 @@ import { makeMaximalRegistry } from '../support/maximalToolRegistry';
 // 2026-11-25: 68,531 (+96) after send_file said which roots a path may come from: the
 // scan refused a sanctioned sibling project seven times because the schema named only
 // the workspace and the screenshot directory.
-const MEASURED_CHARS = 68_531;
+// 2026-11-25: 68,661 (+130) after web_fetch said where a URL comes from: a session
+// assembled five documentation paths itself and all five came back 404, one round each.
+const MEASURED_CHARS = 68_661;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.
