@@ -33,7 +33,7 @@ const log = getLogger();
 
 type ReplyLifecycleHandlers = Pick<
   ReturnType<typeof makeAgentReplyLifecycle>,
-  'onAgentTurnStarted' | 'onAgentTurnFinished'
+  'onAgentTurnStarted' | 'onAgentTurnFinished' | 'onConversationTurnFinished'
 >;
 
 /** Owns the replies claimed by one running conversation until its chain settles. */
@@ -234,6 +234,9 @@ export function setupAgentMessaging(
   // Let a chain that already claimed replies settle them even if this extension
   // context is disposed; process death drops the list and recover() finishes its records.
   subscribeConversationSettled(claimedReplies.settled);
+  subscribeConversationSettled((conversationId, outcome) =>
+    replyLifecycle.onConversationTurnFinished(conversationId, toBusTurnEnd(outcome)),
+  );
   context.subscriptions.push(inbox);
   context.subscriptions.push(watch);
   // A relay this window started outlives the wiring that started it only as

@@ -301,6 +301,47 @@ function oneCycle(persisted: ReturnType<typeof runtimeToPersisted>): ReturnType<
 }
 
 describe('property: session persistence round trip', () => {
+  it('keeps a recovery reply route with its conversation across reload', () => {
+    const conversation: ConversationRuntime = {
+      id: 'chat-recovery',
+      title: 'Review chat',
+      createdAt: 1,
+      updatedAt: 2,
+      messages: [],
+      recoveryReplyRoute: {
+        exchangeId: '00000000-0000-4000-8000-000000000202',
+        sender: {
+          kind: 'claude',
+          sessionId: '00000000-0000-4000-8000-000000000101',
+          title: 'Claude review',
+        },
+        conversationId: 'chat-recovery',
+        workspace: '/workspace',
+        createdAt: 3,
+      },
+    };
+    const runtime: SidebarRuntime = {
+      activeConversationId: conversation.id,
+      conversations: [conversation],
+      history: [],
+    };
+    const persisted = runtimeToPersisted(runtime);
+    expect(persisted.conversations[0]?.recovery_reply_route).toEqual({
+      exchangeId: '00000000-0000-4000-8000-000000000202',
+      sender: {
+        kind: 'claude',
+        sessionId: '00000000-0000-4000-8000-000000000101',
+        title: 'Claude review',
+      },
+      conversationId: 'chat-recovery',
+      workspace: '/workspace',
+      createdAt: 3,
+    });
+    expect(
+      persistedToRuntime(conversationPersistedSchema.parse(persisted.conversations[0]!))
+        .recoveryReplyRoute,
+    ).toEqual(conversation.recoveryReplyRoute);
+  });
   it('what the writer produces, the reader schema accepts', () => {
     fc.assert(
       fc.property(runtimeArb, (runtime) => {

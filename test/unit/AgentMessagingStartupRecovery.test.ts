@@ -63,6 +63,7 @@ const sender: AgentSenderMetadata = {
 type WindowSidebar = Parameters<typeof setupAgentMessaging>[1];
 
 function fakeSidebar(chatId: string, title: string) {
+  let recoveryReplyRoute: import('../../src/agentLinks/pendingAgentReplies').RecoveryReplyRoute | undefined;
   const facade = {
     status: () => ({
       activeConversationId: chatId,
@@ -71,6 +72,11 @@ function fakeSidebar(chatId: string, title: string) {
       streamingConversationIds: [],
     }),
     getAgentLink: () => undefined,
+    getConversation: () => ({ id: chatId, recoveryReplyRoute }),
+    setRecoveryReplyRoute: (_id: string, route: typeof recoveryReplyRoute) => {
+      recoveryReplyRoute = route;
+      return true;
+    },
     showConversationNotice: vi.fn(),
     restoreConversation: vi.fn(async () => ({ id: chatId, title })),
     emitHostActivity: vi.fn(),

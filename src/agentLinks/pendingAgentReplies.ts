@@ -8,6 +8,17 @@ import { agentSenderMetadataSchema } from './chatAgentLinks';
 
 export const PENDING_AGENT_REPLY_TTL_MS = 24 * 60 * 60_000;
 
+export const recoveryReplyRouteSchema = z
+  .object({
+    exchangeId: z.string().uuid(),
+    sender: agentSenderMetadataSchema,
+    conversationId: z.string().min(1),
+    workspace: z.string().min(1),
+    createdAt: z.number().int().nonnegative(),
+  })
+  .strict();
+export type RecoveryReplyRoute = z.infer<typeof recoveryReplyRouteSchema>;
+
 const pendingSchema = z
   .object({
     exchangeId: z.string().uuid(),
@@ -89,7 +100,7 @@ export class PendingAgentReplies {
     });
   }
 
-  expired(record: PendingAgentReply): boolean {
+  expired(record: Pick<PendingAgentReply, 'createdAt'>): boolean {
     return this.now() - record.createdAt >= PENDING_AGENT_REPLY_TTL_MS;
   }
 

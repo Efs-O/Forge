@@ -210,9 +210,15 @@ describe('claimed agent-bus replies', () => {
     temporaryRoots.push(root);
     const pending = new PendingAgentReplies(root);
     const record = pending.create(sender, 'chat-1', '/workspace');
+    let recoveryReplyRoute: import('../../src/agentLinks/pendingAgentReplies').RecoveryReplyRoute | undefined;
     const facade = {
       status: () => ({ conversations: [{ id: 'chat-1', title: 'Review chat' }] }),
       getAgentLink: () => undefined,
+      getConversation: () => ({ id: 'chat-1', recoveryReplyRoute }),
+      setRecoveryReplyRoute: (_id: string, route: typeof recoveryReplyRoute) => {
+        recoveryReplyRoute = route;
+        return true;
+      },
       showConversationNotice: vi.fn(),
       restoreConversation: vi.fn(async () => ({ id: 'chat-1' })),
       emitHostActivity: vi.fn(),

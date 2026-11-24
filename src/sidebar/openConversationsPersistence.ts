@@ -47,6 +47,7 @@ const OPEN_SIGNATURE_FIELDS = [
   'keep_open',
   'messages',
   'agentLinks',
+  'recovery_reply_route',
   'opened_by',
   'active_model',
   'cli_sessions',
@@ -105,8 +106,9 @@ function signatureFor(
   displayNotices: unknown,
   forgeInstructionsPin: unknown,
   codingTipsPin: unknown,
+  recoveryReplyRoute: unknown,
 ): string {
-  const historySignature = `${conversation.updatedAt}:${conversation.title}:${conversation.messages.length}:${JSON.stringify(conversation.agentLinks ?? {})}`;
+  const historySignature = `${conversation.updatedAt}:${conversation.title}:${conversation.messages.length}:${JSON.stringify(conversation.agentLinks ?? {})}:${JSON.stringify(recoveryReplyRoute ?? null)}`;
   const compaction = conversation.compaction;
   return JSON.stringify([
     historySignature,
@@ -168,6 +170,7 @@ export function openConversationSignature(conversation: ConversationRuntime): st
     conversation.displayNotices,
     conversation.forgeInstructionsPin,
     conversation.codingTipsPin,
+    conversation.recoveryReplyRoute,
   );
 }
 
@@ -179,6 +182,7 @@ function persistedOpenConversationSignature(conversation: ConversationPersisted)
     conversation.display_notices,
     conversation.forge_instructions_pin,
     conversation.coding_tips_pin,
+    conversation.recovery_reply_route,
   );
 }
 

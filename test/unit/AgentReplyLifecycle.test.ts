@@ -13,7 +13,10 @@ import {
   recordAcceptedInboundReply,
 } from '../../src/agentLinks/agentReplyLifecycle';
 import type { AskAgentRuntime } from '../../src/agentLinks/askAgentService';
-import { PendingAgentReplies } from '../../src/agentLinks/pendingAgentReplies';
+import {
+  PENDING_AGENT_REPLY_TTL_MS,
+  PendingAgentReplies,
+} from '../../src/agentLinks/pendingAgentReplies';
 import type { ForgeHostFacade } from '../../src/sidebar/ForgeHostFacade';
 import type { AgentLink, AgentSenderMetadata } from '../../src/agentLinks/chatAgentLinks';
 
@@ -34,6 +37,7 @@ const linked: AgentLink = {
 function fixture(root: string, live: boolean) {
   const pending = new PendingAgentReplies(root, () => 10_000, 90001);
   const notices: string[] = [];
+  let recoveryReplyRoute: import('../../src/agentLinks/pendingAgentReplies').RecoveryReplyRoute | undefined;
   const sendLive = vi.fn(async (_kind, _link, _text, _signal, purpose) => {
     expect(purpose).toBe('reply');
     return { status: 'completed' as const, finalText: '' };
@@ -47,6 +51,15 @@ function fixture(root: string, live: boolean) {
     getAgentLink: () => linked,
     showConversationNotice: (_id: string, notice: string) => notices.push(notice),
     restoreConversation: vi.fn(async () => ({ id: 'chat-1', title: 'Review chat' })),
+    getConversation: () => ({
+      id: 'chat-1',
+      recoveryReplyRoute,
+      messages: [{ role: 'user', content: 'Owner follow-up', createdAt: 10_001 }],
+    }),
+    setRecoveryReplyRoute: (_id: string, route: typeof recoveryReplyRoute) => {
+      recoveryReplyRoute = route;
+      return true;
+    },
   } as unknown as ForgeHostFacade;
   const lifecycle = makeAgentReplyLifecycle({
     root,
@@ -56,7 +69,7 @@ function fixture(root: string, live: boolean) {
     getFacade: () => facade,
     showWarning: (message) => notices.push(message),
   });
-  return { pending, lifecycle, notices, sendLive, facade };
+  return { pending, lifecycle, notices, sendLive, facade, getRecoveryReplyRoute: () => recoveryReplyRoute };
 }
 
 /** The events one exchange got, in the order they were written. */
@@ -213,6 +226,19 @@ describe('inbound agent reply lifecycle', () => {
       expect(readVerdictArtifact(paths, record.exchangeId, 'claude')).toContain(
         'Forge restarted before answering.',
       );
+      expect(eventsFor(root, record.exchangeId).at(-1)?.detail).toBe(
+        'turn failed (Forge restarted before answering); retained for read-verdict',
+      );
+      expect(state.getRecoveryReplyRoute()).toEqual({
+        exchangeId: record.exchangeId,
+        sender,
+        conversationId: 'chat-1',
+        workspace: '/workspace',
+        createdAt: record.createdAt,
+      });
+      expect(state.notices).toContain(
+        'Forge restarted before answering. The next message you send in this chat will send its answer back to the Claude session "Claude review".',
+      );
       expect(() =>
         readVerdictArtifact(
           paths,
@@ -223,6 +249,120 @@ describe('inbound agent reply lifecycle', () => {
       ).toThrow('session and exchange');
       expect(state.pending.list()).toEqual([]);
       expect(state.notices.some((notice) => notice.includes('not seen live'))).toBe(true);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('uses a kept recovery route once and records the resumed answer against its exchange', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-agent-reply-resumed-'));
+    try {
+      const state = fixture(root, false);
+      const original = state.pending.create(sender, 'chat-1', '/workspace');
+      state.pending.markRunning(original.exchangeId);
+      await makeAgentReplyLifecycle({
+        root,
+        workspaceRoot: '/workspace',
+        pending: state.pending,
+        runtime: {
+          isLive: vi.fn(async () => false),
+          sendLive: state.sendLive,
+        } as unknown as AskAgentRuntime,
+        getFacade: () => state.facade,
+        isOwnerAlive: () => false,
+        showWarning: (message) => state.notices.push(message),
+      }).recover();
+      await state.lifecycle.onConversationTurnFinished('chat-1', {
+        kind: 'completed',
+        finalText: 'Finished plan',
+      });
+      expect(state.getRecoveryReplyRoute()).toBeUndefined();
+      expect(readVerdictArtifact({ root, inbox: '', outbox: '', endpoint: '', script: '' }, original.exchangeId, 'claude')).toBe('Finished plan\n');
+      expect(eventsFor(root, original.exchangeId).at(-1)).toMatchObject({
+        exchangeId: original.exchangeId,
+        type: 'verdict',
+        eventId: `recovery-verdict-${original.exchangeId}`,
+      });
+      await state.lifecycle.onConversationTurnFinished('chat-1', {
+        kind: 'completed',
+        finalText: 'A second turn',
+      });
+      expect(readVerdictArtifact({ root, inbox: '', outbox: '', endpoint: '', script: '' }, original.exchangeId, 'claude')).toBe('Finished plan\n');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('sends the usual cancelled outcome through a kept recovery route', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-agent-reply-resumed-cancel-'));
+    try {
+      const state = fixture(root, true);
+      const original = state.pending.create(sender, 'chat-1', '/workspace');
+      state.pending.markRunning(original.exchangeId);
+      await makeAgentReplyLifecycle({
+        root,
+        workspaceRoot: '/workspace',
+        pending: state.pending,
+        runtime: { isLive: vi.fn(async () => false), sendLive: state.sendLive } as unknown as AskAgentRuntime,
+        getFacade: () => state.facade,
+        isOwnerAlive: () => false,
+        showWarning: (message) => state.notices.push(message),
+      }).recover();
+      await state.lifecycle.onConversationTurnFinished('chat-1', { kind: 'cancelled' });
+      expect(state.sendLive.mock.calls.at(-1)?.[2]).toBe('Forge (chat "Review chat") replied:\n\nForge cancelled: no final answer');
+      expect(state.getRecoveryReplyRoute()).toBeUndefined();
+      expect(
+        readVerdictArtifact(
+          { root, inbox: '', outbox: '', endpoint: '', script: '' },
+          original.exchangeId,
+          'claude',
+        ),
+      ).toBe('Forge cancelled: no final answer\n');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses an expired recovery route and a route associated with another chat', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-agent-reply-route-refusal-'));
+    try {
+      const state = fixture(root, false);
+      const expiredPending = new PendingAgentReplies(root, () => PENDING_AGENT_REPLY_TTL_MS, 90001);
+      const expiredLifecycle = makeAgentReplyLifecycle({
+        root,
+        workspaceRoot: '/workspace',
+        pending: expiredPending,
+        runtime: { isLive: vi.fn(async () => false), sendLive: state.sendLive } as unknown as AskAgentRuntime,
+        getFacade: () => state.facade,
+        showWarning: (message) => state.notices.push(message),
+      });
+      state.facade.setRecoveryReplyRoute('chat-1', {
+        exchangeId: '00000000-0000-4000-8000-000000000303',
+        sender,
+        conversationId: 'chat-1',
+        workspace: '/workspace',
+        createdAt: 0,
+      });
+      await expiredLifecycle.onConversationTurnFinished('chat-1', {
+        kind: 'completed',
+        finalText: 'expired',
+      });
+      expect(state.getRecoveryReplyRoute()).toBeUndefined();
+      expect(state.sendLive).not.toHaveBeenCalled();
+
+      state.facade.setRecoveryReplyRoute('chat-1', {
+        exchangeId: '00000000-0000-4000-8000-000000000304',
+        sender,
+        conversationId: 'another-chat',
+        workspace: '/workspace',
+        createdAt: PENDING_AGENT_REPLY_TTL_MS,
+      });
+      await state.lifecycle.onConversationTurnFinished('chat-1', {
+        kind: 'completed',
+        finalText: 'misrouted',
+      });
+      expect(state.getRecoveryReplyRoute()).toBeUndefined();
+      expect(state.sendLive).not.toHaveBeenCalled();
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

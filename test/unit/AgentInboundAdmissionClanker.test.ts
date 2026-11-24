@@ -33,6 +33,7 @@ const routed = {
 
 function fixture(messageOptions: InboxMessageOptions) {
   const armBusChat = vi.fn();
+  const dropRecoveryReplyRoute = vi.fn();
   const resolveInboundAgent = vi.fn(async () => routed);
   const deps = {
     paths: () => ({ root: '/bus' }) as BusPaths,
@@ -43,8 +44,9 @@ function fixture(messageOptions: InboxMessageOptions) {
     } as unknown as PendingAgentReplies,
     resolveInboundAgent,
     armBusChat,
+    dropRecoveryReplyRoute,
   } as unknown as AgentRoutesDeps;
-  return { armBusChat, resolveInboundAgent, deps, messageOptions };
+  return { armBusChat, resolveInboundAgent, dropRecoveryReplyRoute, deps, messageOptions };
 }
 
 describe('a sender chat and Clanker', () => {
@@ -92,6 +94,18 @@ describe('a sender chat and Clanker', () => {
     });
 
     expect(state.armBusChat).not.toHaveBeenCalled();
+  });
+
+  it('drops a kept recovery route when a newer sender reply is accepted', async () => {
+    const state = fixture({ from: 'claude' });
+    await admitInboundMessage({
+      from: 'claude',
+      sender,
+      messageOptions: state.messageOptions,
+      deps: state.deps,
+    });
+    expect(state.dropRecoveryReplyRoute).toHaveBeenCalledOnce();
+    expect(state.dropRecoveryReplyRoute).toHaveBeenCalledWith('chat-opened-by-new');
   });
 
   it('still admits when the window supplies no armBusChat', async () => {

@@ -20,6 +20,7 @@ import type { AskAgentRequest, AskAgentResult } from '../agentLinks/askAgentServ
 import type { StructuredAnswer } from '../util/questionAnswers';
 import type { UserQuestionSink } from './UserQuestionService';
 import type { UserNotificationSink } from './UserNotificationService';
+import type { RecoveryReplyRoute } from '../agentLinks/pendingAgentReplies';
 
 /** The ask-agent call a facade exposes, with its two progress callbacks. */
 export type AskAgentFacadeHandler = (
@@ -86,6 +87,7 @@ export interface SidebarHostFacadeDeps {
     selection: InboundAgentSelection,
   ) => Promise<InboundAgentTarget>;
   getAgentLink: (conversationId: string, kind: AgentKind) => AgentLink | undefined;
+  setRecoveryReplyRoute: (conversationId: string, route: RecoveryReplyRoute | undefined) => boolean;
   askAgent: AskAgentFacadeHandler;
   showConversationNotice: (conversationId: string, message: string) => void;
   clankerMode: (conversationId: string) => boolean;

@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { BusPaths } from '../agentBus/agentBus';
 import { readEvents } from './exchangeLog';
+import { writeFileAtomicSync } from '../util/atomicWrite';
 
 const EXCHANGE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;
 const VERDICT_DIR = 'verdicts';
@@ -23,10 +24,20 @@ export function verdictEventId(exchangeId: string): string {
  * a read is refused until that event exists, and nothing rescans this folder
  * on restart.
  */
-export function retainVerdict(root: string, source: string, exchangeId: string): string {
+export function retainVerdict(
+  root: string,
+  source: string,
+  exchangeId: string,
+  replace = false,
+): string {
   const target = verdictArtifactPath(root, exchangeId);
   fs.mkdirSync(path.dirname(target), { recursive: true });
   if (fs.existsSync(target)) {
+    if (replace) {
+      writeFileAtomicSync(target, fs.readFileSync(source));
+      fs.unlinkSync(source);
+      return target;
+    }
     // A previous poll moved the full copy already. The duplicate source is
     // expendable; the retained artifact remains readable until acknowledgment.
     fs.unlinkSync(source);

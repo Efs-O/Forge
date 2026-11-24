@@ -197,7 +197,12 @@ export function appendEvent(
           event.type === 'wake' &&
           event.eventId === `wake-${event.exchangeId}` &&
           event.state === current;
-        if (isTerminal(current) && !isWakeAfterVerdict) return false; // terminal except its wake row
+        const isRecoveryVerdict =
+          current === 'completed' &&
+          event.type === 'verdict' &&
+          event.eventId === `recovery-verdict-${event.exchangeId}` &&
+          event.state === 'completed';
+        if (isTerminal(current) && !isWakeAfterVerdict && !isRecoveryVerdict) return false; // terminal except its wake row and the one recovery-route verdict
         // A `verdict` event completes an exchange whose answer is supplied by
         // an agent session, whether its progress reached started or stayed at
         // accepted/observed until the agent writes its verdict

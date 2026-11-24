@@ -3,7 +3,7 @@ import * as path from 'path';
 import type { BusTurnEnd } from '../agentBus/agentInbox';
 import { processIsAlive } from '../agentBus/windowEndpoints';
 import { EXCHANGES_LOG_NAME, appendEvent, type ExchangeLogPaths } from '../agentMesh/exchangeLog';
-import { retainVerdict, verdictEventId } from '../agentMesh/verdictArtifact';
+import { retainVerdict, verdictArtifactPath, verdictEventId } from '../agentMesh/verdictArtifact';
 import { writeFileAtomicSync } from '../util/atomicWrite';
 import type { ForgeHostFacade } from '../sidebar/ForgeHostFacade';
 import type { PendingAgentReply, PendingAgentReplies } from './pendingAgentReplies';
@@ -50,6 +50,94 @@ export function makeAgentReplyLifecycle(options: {
 }) {
   const logPaths = busLogPaths(options.root);
   const handlers = {
+    onConversationTurnFinished: async (conversationId: string, end: BusTurnEnd): Promise<void> => {
+      const facade = options.getFacade();
+      const route = facade.getConversation(conversationId)?.recoveryReplyRoute;
+      if (!route) return;
+      if (route.conversationId !== conversationId) {
+        facade.setRecoveryReplyRoute(conversationId, undefined);
+        return;
+      }
+      if (options.pending.expired(route)) {
+        facade.setRecoveryReplyRoute(conversationId, undefined);
+        facade.showConversationNotice(
+          conversationId,
+          `Recovery reply route for ${agentDisplayName(route.sender.kind)} session "${route.sender.title}" expired after 24 hours.`,
+        );
+        return;
+      }
+      const conversation = facade.getConversation(conversationId);
+      const lastUserMessage = conversation?.messages
+        .slice()
+        .reverse()
+        .find((message) => message.role === 'user');
+      if (
+        !lastUserMessage ||
+        lastUserMessage.internal ||
+        lastUserMessage.midTurn ||
+        lastUserMessage.agentSender ||
+        lastUserMessage.createdAt === undefined ||
+        lastUserMessage.createdAt <= route.createdAt
+      )
+        return;
+      const chatTitle = facade
+        .status()
+        .conversations.find((item) => item.id === conversationId)?.title;
+      if (!chatTitle) {
+        facade.setRecoveryReplyRoute(conversationId, undefined);
+        return;
+      }
+      const finalText = end.finalText?.trim() ? end.finalText : undefined;
+      const text =
+        finalText ??
+        (end.kind === 'completed'
+          ? `Forge (chat "${chatTitle}") finished without a final answer.`
+          : `Forge ${end.kind}: ${end.error ?? 'no final answer'}`);
+      let recorded = false;
+      try {
+        const linked = facade.getAgentLink(conversationId, route.sender.kind);
+        const delivered =
+          linked?.sessionId === route.sender.sessionId &&
+          (await deliverAgentReply(
+            options.runtime,
+            route.sender.kind,
+            linked,
+            end.kind === 'completed' && !finalText
+              ? text
+              : `Forge (chat "${chatTitle}") replied:\n\n${text}`,
+            new AbortController().signal,
+          ));
+        const existingVerdict = fs.existsSync(verdictArtifactPath(options.root, route.exchangeId));
+        if (!delivered || existingVerdict) {
+          const source = path.join(options.root, 'outbox', `${route.exchangeId}-reply.md.tmp`);
+          fs.mkdirSync(path.dirname(source), { recursive: true });
+          writeFileAtomicSync(source, `${text}\n`);
+          retainVerdict(options.root, source, route.exchangeId, existingVerdict);
+        }
+        if (!delivered) {
+          facade.showConversationNotice(
+            conversationId,
+            'Forge reply was not seen live; it is available with forge.sh read-verdict.',
+          );
+        }
+        await appendEvent(logPaths, {
+          eventId: `recovery-verdict-${route.exchangeId}`,
+          ts: Date.now(),
+          exchangeId: route.exchangeId,
+          workspace: route.workspace,
+          conversation: route.conversationId,
+          from: route.sender.kind,
+          type: 'verdict',
+          state: 'completed',
+          detail: delivered
+            ? 'recovery reply delivered to the live sender session'
+            : 'recovery reply retained for read-verdict',
+        });
+        recorded = true;
+      } finally {
+        if (recorded) facade.setRecoveryReplyRoute(conversationId, undefined);
+      }
+    },
     onAgentTurnStarted: (turn: {
       pendingReplyId?: string;
       targetConversationId?: string;
@@ -233,6 +321,20 @@ export function makeAgentReplyLifecycle(options: {
                   kind: 'failed',
                   text: 'Forge restarted before answering.',
                 });
+          if (record.state !== 'finished') {
+            const route = {
+              exchangeId: record.exchangeId,
+              sender: record.sender,
+              conversationId: record.conversationId,
+              workspace: record.workspace,
+              createdAt: record.createdAt,
+            };
+            facade.setRecoveryReplyRoute(record.conversationId, route);
+            facade.showConversationNotice(
+              record.conversationId,
+              `Forge restarted before answering. The next message you send in this chat will send its answer back to the ${agentDisplayName(record.sender.kind)} session "${record.sender.title}".`,
+            );
+          }
           await handlers.onAgentTurnFinished(
             {
               pendingReplyId: recovered.exchangeId,
@@ -241,6 +343,7 @@ export function makeAgentReplyLifecycle(options: {
             },
             {
               kind: recovered.outcome?.kind ?? 'failed',
+              ...(record.state !== 'finished' ? { error: 'Forge restarted before answering' } : {}),
               ...(recovered.outcome?.text ? { finalText: recovered.outcome.text } : {}),
             },
           );

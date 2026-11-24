@@ -228,4 +228,6 @@ export interface AgentRoutesDeps {
    * promise.
    */
   senderIsLive?: (sender: AgentSenderMetadata) => boolean;
+  /** Drop a stale one-turn recovery route when a newer agent message takes the chat. */
+  dropRecoveryReplyRoute?: (conversationId: string) => void;
 }

@@ -192,6 +192,15 @@ export function buildAgentRouteDeps(hosts: AgentRouteDepsHosts): AgentRoutesDeps
     resolveInboundAgent: (sender, selection) => getFacade().routeInboundAgent(sender, selection),
     showAlsoLinkedNotice: (conversationId, message) =>
       getFacade().showConversationNotice(conversationId, message),
+    dropRecoveryReplyRoute: (conversationId) => {
+      const facade = getFacade();
+      if (!facade.getConversation(conversationId)?.recoveryReplyRoute) return;
+      facade.setRecoveryReplyRoute(conversationId, undefined);
+      facade.showConversationNotice(
+        conversationId,
+        'A newer agent message arrived in this chat, so its reply will go to the newer sender instead of the recovered session.',
+      );
+    },
     isFocused,
     configuredModels: () => busModelIds(getConfig()),
     // A sender that is not an agent session is validated by the rule the bus

@@ -17,6 +17,7 @@ import { recentExchanges, type ForgeExchange } from './sessionProjections';
 import type { AgentKind, AgentLink, AgentSender } from '../agentLinks/chatAgentLinks';
 import type { InboundAgentSelection, InboundAgentTarget } from '../agentLinks/inboundAgentRouting';
 import type { StructuredAnswer } from '../util/questionAnswers';
+import type { RecoveryReplyRoute } from '../agentLinks/pendingAgentReplies';
 import type { AskAgentFacadeHandler, SidebarHostFacadeDeps } from './hostFacadeDeps';
 
 export interface ForgeConversationSummary {
@@ -111,6 +112,7 @@ export interface ForgeHostFacade {
   answerQuestion(id: string, text: string): boolean;
   /** The addressed chat record, including one held in the overflow archive. */
   getConversation(conversationId: string): ConversationRuntime | undefined;
+  setRecoveryReplyRoute(conversationId: string, route: RecoveryReplyRoute | undefined): boolean;
   answerQuestionStructured(id: string, answer: StructuredAnswer): boolean;
   skipQuestion(id: string): boolean;
   /** Cancels an outstanding agent question when its remote presentation fails. */
@@ -439,6 +441,10 @@ export class SidebarHostFacade implements ForgeHostFacade {
       ...this.deps.getOpenConversations(),
       ...(this.deps.getArchivedConversations?.() ?? []),
     ].find((conversation) => conversation.id === conversationId);
+  }
+
+  setRecoveryReplyRoute(conversationId: string, route: RecoveryReplyRoute | undefined): boolean {
+    return this.deps.setRecoveryReplyRoute(conversationId, route);
   }
 
   applyAutoTitle(conversationId: string, title: string): boolean {

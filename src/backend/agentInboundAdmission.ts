@@ -63,6 +63,7 @@ export async function admitInboundMessage(options: {
     if (!workspace) throw new AgentRouteHttpError(500, 'workspace is unavailable');
     const pending = deps.pendingReplies.create(routed.sender, routed.conversationId, workspace);
     await deps.recordPendingAccepted?.(pending);
+    deps.dropRecoveryReplyRoute?.(target.conversationId);
     messageOptions.pendingReplyId = pending.exchangeId;
     return { messageOptions, target, pendingReplyId: pending.exchangeId, queuedBehindRunningTurn };
   }

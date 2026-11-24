@@ -14,6 +14,7 @@ import {
   type AgentLinks,
   type AgentSenderMetadata,
 } from '../agentLinks/chatAgentLinks';
+import { recoveryReplyRouteSchema } from '../agentLinks/pendingAgentReplies';
 import { compactionPersistedSchema } from './compactionPersistedSchema';
 import { PLAN_STATUSES, canonicalPlanStatus } from './planStatus';
 export {
@@ -237,6 +238,7 @@ export const conversationPersistedBaseSchema = z.object({
   keep_open: z.boolean().optional(),
   messages: z.array(slimMsgSchema),
   agentLinks: agentLinksSchema.optional(),
+  recovery_reply_route: recoveryReplyRouteSchema.optional(),
   opened_by: z.string().min(1).optional(),
   active_model: z.string().optional(),
   cli_sessions: z.record(z.string(), z.string().min(1)).optional(),
@@ -354,6 +356,7 @@ export interface ConversationRuntime {
   messages: ChatMessage[];
   /** Per-chat agent session links; only chatAgentLinks.ts mutates this field. */
   agentLinks?: AgentLinks;
+  recoveryReplyRoute?: z.infer<typeof recoveryReplyRouteSchema>;
   /** Conversation id that opened this worker through message_chat new_chat. */
   opened_by?: string;
   /** Latest cross-window chat that messaged this chat; intentionally session-only. */

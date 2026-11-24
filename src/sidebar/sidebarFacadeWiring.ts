@@ -134,6 +134,16 @@ export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacad
       );
       return chat ? get(chat, kind) : undefined;
     },
+    setRecoveryReplyRoute: (conversationId, route) => {
+      const conversation =
+        findConversation(deps.getSidebar(), conversationId) ??
+        deps.getSidebar().history.find((item) => item.id === conversationId);
+      if (!conversation) return false;
+      if (route) conversation.recoveryReplyRoute = route;
+      else delete conversation.recoveryReplyRoute;
+      deps.persistConversation(conversationId);
+      return true;
+    },
     askAgent: (conversationId, request, signal, onSessionLinked, onAccepted) =>
       deps.askAgent(conversationId, request, signal, onSessionLinked, onAccepted),
     showConversationNotice: deps.postConversationNotice,
