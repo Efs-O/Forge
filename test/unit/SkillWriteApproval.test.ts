@@ -147,7 +147,7 @@ async function answer(
   decision: 'approve' | 'decline',
 ): Promise<void> {
   const card = await openedCard(probe, 1);
-  probe.service.resolve(card.id, decision);
+  probe.service.resolve(card.id, decision, 'webview');
 }
 
 beforeAll(() => {
@@ -190,7 +190,7 @@ describe('a write into ~/.forge/skills', () => {
     expect(card).not.toHaveProperty('allowForChat');
     expect(card).not.toHaveProperty('alwaysInProject');
 
-    probe.service.resolve(card.id, 'decline');
+    probe.service.resolve(card.id, 'decline', 'webview');
     await run;
     expect(fs.readFileSync(SKILL_FILE, 'utf8')).toBe('the skill as it was\n');
   });
@@ -212,7 +212,7 @@ describe('a write into ~/.forge/skills', () => {
     const probe = harness();
     const first = probe.call('write_file', { path: SKILL_FILE, content: 'first\n' });
     const card = await openedCard(probe, 1);
-    probe.service.resolve(card.id, 'approve');
+    probe.service.resolve(card.id, 'approve', 'webview');
     await first;
     expect(probe.cards()).toHaveLength(1);
 
@@ -223,7 +223,7 @@ describe('a write into ~/.forge/skills', () => {
     });
     const again = await openedCard(probe, 2);
     expect(again.cardReason).toBe(SKILL_WRITE_REASON);
-    probe.service.resolve(again.id, 'approve');
+    probe.service.resolve(again.id, 'approve', 'webview');
     await second;
     expect(fs.readFileSync(SKILL_FILE, 'utf8')).toBe('second\n');
   });

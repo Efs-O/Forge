@@ -100,7 +100,11 @@ export interface ForgeHostFacade {
   addApprovalSink(sink: ToolApprovalSink): { dispose(): void };
   pendingApprovalForConversation(conversationId: string): ToolApprovalRequestEvent | undefined;
   hasPendingQuestion(conversationId: string): boolean;
-  resolveApproval(id: string, decision: import('./approvalMessages').ApprovalDecision): void;
+  resolveApproval(
+    id: string,
+    decision: import('./approvalMessages').ApprovalDecision,
+    source: import('./approvalMessages').ApprovalAnswerSource,
+  ): void;
   resetApprovals(conversationId: string): Promise<boolean>;
   addQuestionSink(sink: UserQuestionSink): { dispose(): void };
   /** Answers an outstanding agent question from a non-local surface. */
@@ -310,8 +314,12 @@ export class SidebarHostFacade implements ForgeHostFacade {
     return this.deps.hasPendingQuestion(conversationId);
   }
 
-  resolveApproval(id: string, decision: import('./approvalMessages').ApprovalDecision): void {
-    this.deps.resolveApproval(id, decision);
+  resolveApproval(
+    id: string,
+    decision: import('./approvalMessages').ApprovalDecision,
+    source: import('./approvalMessages').ApprovalAnswerSource,
+  ): void {
+    this.deps.resolveApproval(id, decision, source);
   }
 
   resetApprovals(conversationId: string): Promise<boolean> {

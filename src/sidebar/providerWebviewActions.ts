@@ -145,7 +145,16 @@ export function createProviderWebviewActions(caps: ProviderWebviewCapabilities):
     openFile: (path, line, beside) => caps.agentLoop.openFile(path, { line, beside }),
     openAttachment: (relativePath) =>
       openAttachment({ store: caps.attachmentStore, view: caps.getView }, relativePath),
-    resolveConfirmation: (id, approved) => caps.agentLoop.resolveConfirmation(id, approved),
+    resolveConfirmation: (id, decision, source) => {
+      // A card belongs to a chat, and this window answers it only while that chat
+      // is the one on screen. An answer for a card the owner is not looking at is
+      // not an answer the owner aimed at it: measured 2026-11-24, a `dangerous`
+      // shell card in a chat that was not on screen came back `declined` 1.3 s
+      // after it opened, and the ledger called it the owner's own answer.
+      const shown = caps.agentLoop.pendingApproval();
+      if (shown?.id === id && shown.conversationId && activeId() !== shown.conversationId) return;
+      caps.agentLoop.resolveConfirmation(id, decision, source);
+    },
     recordWebviewDiagnostic: (message) => logWebviewDiagnostic(message),
     queuedConversationIds: (ids) => {
       caps.webviewQueue.report(ids);

@@ -81,6 +81,9 @@ function resolvedOf(
     approved: reason !== 'cancelled',
     decision: reason === 'resolved' ? 'approve' : 'decline',
     reason,
+    // The queue names the answering surface on every answer it accepts, so the
+    // fixture that stands for one does too.
+    ...(reason === 'resolved' ? { answeredBy: 'webview' as const } : {}),
     ...extra,
   };
 }
@@ -141,11 +144,19 @@ describe('the gate ledger', () => {
     expect(h.rows).toHaveLength(1);
     const row = h.rows[0]!;
     expect(row.kind).toBe('card');
-    expect(row.answered_by).toBe('owner');
+    expect(row.answered_by).toBe('webview');
     expect(row.tool).toBe('shell');
     expect(row.conversation_id).toBe('chat-1');
     expect(row.wait_ms).toBe(90_000);
     expect(row.reason).toBe('writes outside the workspace');
+  });
+
+  it('names the surface that answered a card, so a click and a keystroke differ', () => {
+    const h = harness();
+    const event = card();
+    h.requested(event);
+    h.resolved(resolvedOf(event, 'resolved', { answeredBy: 'telegram' }));
+    expect(h.rows[0]!.answered_by).toBe('telegram');
   });
 
   it('records a card nobody answered as a timeout, never as an approval', () => {
@@ -203,7 +214,7 @@ describe('the gate ledger', () => {
     const h = harness();
     h.resolved(resolvedOf(card(), 'resolved'));
     const row = h.rows[0]!;
-    expect(row.answered_by).toBe('owner');
+    expect(row.answered_by).toBe('webview');
     expect(row.raised_ms).toBeUndefined();
     expect(row.wait_ms).toBeUndefined();
   });

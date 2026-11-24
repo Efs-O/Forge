@@ -1,6 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { ApprovalOffer } from '../../../src/sidebar/approvalMessages';
-import { useDockedDialogEscape } from '../useDockedDialogEscape';
 
 interface Props {
   toolName: string;
@@ -48,17 +47,27 @@ export function ConfirmationDialog({
     return () => window.clearTimeout(timer);
   }, []);
 
-  useEffect(() => {
-    if (actionsEnabled)
-      panelRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
-  }, [actionsEnabled]);
-
-  useDockedDialogEscape(panelRef, onDeny);
+  /**
+   * Escape settles this card only from inside it, and nothing is focused when the
+   * card opens: a card is a decision about one command, so a keystroke that was
+   * meant for the transcript, the composer or another chat must not run it or
+   * refuse it. The owner answers with a button.
+   */
+  const onPanelKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>): void => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      onDeny();
+    },
+    [onDeny],
+  );
 
   return (
     <div
       ref={panelRef}
       className="docked-dialog-panel"
+      tabIndex={-1}
+      onKeyDown={onPanelKeyDown}
       role="dialog"
       aria-labelledby="confirmation-dialog-title"
     >

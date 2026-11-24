@@ -350,7 +350,7 @@ describe('remote owner commands', () => {
       correlationId: prompt!.correlationId!,
     });
     await expect(channel.emit(action)).resolves.toEqual({ kind: 'handled' });
-    expect(forgeHost.resolveApproval).toHaveBeenCalledWith(approvalId, 'approve');
+    expect(forgeHost.resolveApproval).toHaveBeenCalledWith(approvalId, 'approve', 'telegram');
     // A second press of a button Telegram never takes away must not re-resolve.
     await expect(
       channel.emit({ ...action, providerMessageId: 'press-again' }),

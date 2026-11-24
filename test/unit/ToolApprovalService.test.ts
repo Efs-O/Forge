@@ -69,7 +69,7 @@ describe('ToolApprovalService', () => {
     const request = posted.find((message) => message.type === 'confirmRequest');
     expect(request).toMatchObject({ type: 'confirmRequest', cardReason: reason });
     if (request?.type !== 'confirmRequest') throw new Error('confirmation was not posted');
-    service.resolve(request.id, 'decline');
+    service.resolve(request.id, 'decline', 'webview');
     await expect(pending).resolves.toBe('declined');
   });
 
@@ -103,7 +103,7 @@ describe('ToolApprovalService', () => {
     const request = posted.find((message) => message.type === 'confirmRequest');
     expect(request).toMatchObject({ type: 'confirmRequest', toolName: 'web_fetch', isDangerous: true });
     if (request?.type !== 'confirmRequest') throw new Error('protected confirmation was not posted');
-    service.resolve(request.id, 'decline');
+    service.resolve(request.id, 'decline', 'webview');
     await expect(protectedStop).resolves.toBe('declined');
 
     await expect(
@@ -206,7 +206,7 @@ describe('ToolApprovalService', () => {
       const request = posted.find((message) => message.type === 'confirmRequest');
       if (request?.type !== 'confirmRequest') throw new Error('confirmation was not posted');
       expect(request.cardReason).toBe(cardReason);
-      service.resolve(request.id, 'decline');
+      service.resolve(request.id, 'decline', 'webview');
       await expect(pending).resolves.toBe('declined');
     }
   });
@@ -235,7 +235,7 @@ describe('ToolApprovalService', () => {
       );
       expect(request).toBeDefined();
       if (request?.type !== 'confirmRequest') throw new Error('attended confirmation was not posted');
-      service.resolve(request.id, 'approve');
+      service.resolve(request.id, 'approve', 'webview');
       await expect(attended).resolves.toBe('approved');
     } finally {
       marker.dispose();
@@ -279,7 +279,7 @@ describe('ToolApprovalService', () => {
     );
     if (card?.type !== 'confirmRequest')
       throw new Error('a chat that did not arm Clanker was not gated');
-    service.resolve(card.id, 'approve');
+    service.resolve(card.id, 'approve', 'webview');
     await expect(gated).resolves.toBe('approved');
   });
 
@@ -336,7 +336,7 @@ describe('ToolApprovalService', () => {
     const request = posted.find((message) => message.type === 'confirmRequest');
     if (request?.type !== 'confirmRequest') throw new Error('confirmation was not posted');
     // Stands in for a remote transport button: the webview never clicked.
-    service.resolve(request.id, 'approve');
+    service.resolve(request.id, 'approve', 'webview');
     await expect(pending).resolves.toBe('approved');
     expect(posted).toContainEqual({ type: 'confirmResolved', id: request.id });
   });
@@ -363,7 +363,7 @@ describe('ToolApprovalService', () => {
     if (card?.type !== 'confirmRequest') throw new Error('confirmation was not posted');
     expect(card.allowForChat).toEqual(offer);
 
-    service.resolve(card.id, 'allowChat');
+    service.resolve(card.id, 'allowChat', 'webview');
     await expect(pending).resolves.toBe('approved');
     expect(allow).toHaveBeenCalledWith('chat-1', ['cross_chat']);
     expect(resolved).toHaveBeenCalledWith(
@@ -380,7 +380,7 @@ describe('ToolApprovalService', () => {
     const pending = service.request('shell', 'git rebase main', true, 'chat-1');
     const card = posted.find((message) => message.type === 'confirmRequest');
     if (card?.type !== 'confirmRequest') throw new Error('confirmation was not posted');
-    service.resolve(card.id, 'allowChat');
+    service.resolve(card.id, 'allowChat', 'webview');
     await expect(pending).resolves.toBe('declined');
   });
 
@@ -428,8 +428,8 @@ describe('ToolApprovalService', () => {
     const pending = service.request('write_file', 'src/a.ts', false, 'conv');
     expect(requested).toHaveBeenCalledOnce();
     const id = requested.mock.calls[0]?.[0].id as string;
-    service.resolve(id, 'approve');
-    service.resolve(id, 'decline');
+    service.resolve(id, 'approve', 'webview');
+    service.resolve(id, 'decline', 'webview');
     await expect(pending).resolves.toBe('approved');
     expect(resolved).toHaveBeenCalledOnce();
     expect(resolved).toHaveBeenCalledWith(
@@ -455,7 +455,7 @@ describe('ToolApprovalService', () => {
     expect(settled).toBe(false);
     const request = posted.find((message) => message.type === 'confirmRequest');
     if (request?.type !== 'confirmRequest') throw new Error('confirmation was not posted');
-    service.resolve(request.id, 'approve');
+    service.resolve(request.id, 'approve', 'webview');
     await expect(pending).resolves.toBe('approved');
   });
 
@@ -516,13 +516,13 @@ describe('ToolApprovalService', () => {
       (message) => message.type === 'confirmRequest' && message.conversationId === 'conv-2',
     );
     if (active?.type !== 'confirmRequest') throw new Error('other conversation was not prompted');
-    service.resolve(active.id, 'approve');
+    service.resolve(active.id, 'approve', 'webview');
     await expect(other).resolves.toBe('approved');
     const later = posted
       .filter((message) => message.type === 'confirmRequest' && message.conversationId === 'conv-1')
       .at(-1);
     if (later?.type !== 'confirmRequest') throw new Error('next turn was not prompted');
-    service.resolve(later.id, 'approve');
+    service.resolve(later.id, 'approve', 'webview');
     await expect(nextTurn).resolves.toBe('approved');
   });
 
@@ -539,7 +539,7 @@ describe('ToolApprovalService', () => {
     expect(service.pending()?.detail).toBe('after close');
     const pending = service.pending();
     if (!pending) throw new Error('conversation disposal did not clear its timeout latch');
-    service.resolve(pending.id, 'approve');
+    service.resolve(pending.id, 'approve', 'webview');
     await expect(next).resolves.toBe('approved');
   });
 
@@ -580,7 +580,7 @@ describe('ToolApprovalService', () => {
     expect(service.pending()?.conversationId).toBe('first');
     const request = service.pending();
     if (!request) throw new Error('first approval was not active');
-    service.resolve(request.id, 'approve');
+    service.resolve(request.id, 'approve', 'webview');
     await expect(active).resolves.toBe('approved');
     expect(service.pending()?.conversationId).toBe('second');
 
@@ -626,7 +626,7 @@ describe('ToolApprovalService', () => {
     const card = service.pending();
     if (!card) throw new Error('an unrelated approval was silenced by someone else’s timeout');
     expect(card.toolName).toBe('manage_jobs');
-    service.resolve(card.id, 'approve');
+    service.resolve(card.id, 'approve', 'webview');
     await expect(next).resolves.toBe('approved');
   });
 
@@ -645,7 +645,7 @@ describe('ToolApprovalService', () => {
     const card = service.pending();
     if (!card) throw new Error('approval card was not shown');
     await vi.advanceTimersByTimeAsync(5_000);
-    service.resolve(card.id, 'approve');
+    service.resolve(card.id, 'approve', 'webview');
     await expect(pending).resolves.toBe('approved');
     expect(grant.waitedMs).toBe(5_000);
     // A call no card was shown for reports no wait at all.
@@ -655,7 +655,7 @@ describe('ToolApprovalService', () => {
     });
     const second = service.pending();
     if (!second) throw new Error('second approval card was not shown');
-    service.resolve(second.id, 'decline');
+    service.resolve(second.id, 'decline', 'webview');
     await expect(declined).resolves.toBe('declined');
     expect(unanswered.waitedMs).toBeUndefined();
   });
@@ -673,7 +673,7 @@ describe('ToolApprovalService', () => {
     const first = service.request('write_file', 'first', true, 'conv');
     const firstRequest = service.pending();
     if (!firstRequest) throw new Error('first approval was not active');
-    service.resolve(firstRequest.id, 'approve');
+    service.resolve(firstRequest.id, 'approve', 'webview');
     await expect(first).resolves.toBe('approved');
 
     minutes = 2;
@@ -703,7 +703,7 @@ describe('ToolApprovalService', () => {
       );
       const active = service.pending();
       if (!active) throw new Error(`${kind} approval was not active`);
-      if (kind === 'answer') service.resolve(active.id, 'approve');
+      if (kind === 'answer') service.resolve(active.id, 'approve', 'webview');
       else if (kind === 'cancel') service.cancelConversation('conv');
       else if (kind === 'abort') controller.abort();
       else if (kind === 'all') service.cancelAll();

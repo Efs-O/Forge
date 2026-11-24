@@ -95,7 +95,7 @@ export function createSidebarHostFacade(deps: SidebarFacadeDeps): ForgeHostFacad
     pendingApprovalForConversation: (conversationId) =>
       agentLoop.pendingApprovalForConversation(conversationId),
     hasPendingQuestion: (conversationId) => questions.hasPending(conversationId),
-    resolveApproval: (id, approved) => agentLoop.resolveConfirmation(id, approved),
+    resolveApproval: (id, approved, source) => agentLoop.resolveConfirmation(id, approved, source),
     resetApprovals: (conversationId) => slashHandler.resetApprovals(conversationId),
     addQuestionSink: (sink) => questions.addSink(sink),
     answerQuestion: (id, text) => questions.answer(id, text),

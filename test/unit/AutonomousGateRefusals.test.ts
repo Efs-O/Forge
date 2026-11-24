@@ -311,7 +311,7 @@ describe('attended Clanker answers every gate except its three stops', () => {
     expect(card.detail).toContain('GET https://collector.example.net/');
     vi.advanceTimersByTime(30 * 60_000);
     expect(cards(), 'the card is still the owner\'s to answer').toHaveLength(1);
-    service.resolve(card.id, 'decline');
+    service.resolve(card.id, 'decline', 'webview');
     await expect(pending).resolves.toBe('declined');
     vi.useRealTimers();
   });

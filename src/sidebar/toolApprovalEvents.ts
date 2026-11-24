@@ -11,7 +11,7 @@
  */
 
 import type { HostToWebview } from './messageBridge';
-import type { ApprovalDecision, ApprovalOffer } from './approvalMessages';
+import type { ApprovalAnswerSource, ApprovalDecision, ApprovalOffer } from './approvalMessages';
 
 /**
  * The card's offer and the four decisions it may be answered with are the
@@ -19,7 +19,7 @@ import type { ApprovalDecision, ApprovalOffer } from './approvalMessages';
  * here so a consumer of the card contract can read the whole contract from one
  * import, the way this file has always re-exported the event types it owns.
  */
-export type { ApprovalDecision, ApprovalOffer } from './approvalMessages';
+export type { ApprovalAnswerSource, ApprovalDecision, ApprovalOffer } from './approvalMessages';
 
 export interface ToolApprovalRequestEvent {
   id: string;
@@ -75,6 +75,10 @@ export interface ToolApprovalResolvedEvent extends ToolApprovalRequestEvent {
   /** How the card left the queue: the owner's answer, a turn that stopped while
    *  it was open, or the timeout. Nothing else resolves a card. */
   reason: 'resolved' | 'cancelled' | 'timeout';
+  /** Which surface answered, and the only reason the ledger can say so. Set by
+   *  `ToolApprovalService.resolve`, which makes the caller name it; absent on a
+   *  card nobody answered (a timeout, a turn that stopped while it was open). */
+  answeredBy?: ApprovalAnswerSource;
   /** Why a key the card offered could not be stored, when that happened. The call
    *  still ran, because the owner approved it; the owner has to be told the rule
    *  did not land, or they will believe the next call is answered when it is not.

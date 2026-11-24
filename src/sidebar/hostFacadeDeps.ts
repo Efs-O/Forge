@@ -60,7 +60,11 @@ export interface SidebarHostFacadeDeps {
   addApprovalSink: (sink: ToolApprovalSink) => { dispose(): void };
   pendingApprovalForConversation: (conversationId: string) => ToolApprovalRequestEvent | undefined;
   hasPendingQuestion: (conversationId: string) => boolean;
-  resolveApproval: (id: string, decision: import('./approvalMessages').ApprovalDecision) => void;
+  resolveApproval: (
+    id: string,
+    decision: import('./approvalMessages').ApprovalDecision,
+    source: import('./approvalMessages').ApprovalAnswerSource,
+  ) => void;
   resetApprovals?: (conversationId: string) => Promise<boolean>;
   addQuestionSink: (sink: UserQuestionSink) => { dispose(): void };
   answerQuestion: (id: string, text: string) => boolean;

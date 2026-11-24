@@ -68,11 +68,25 @@ export interface GateEventRow {
   answered_ms?: number;
   /** Wall-clock the chat spent blocked: the number the plan actually needs. */
   wait_ms?: number;
-  /** Who answered. `cancel` is a turn that stopped while its card was open.
+  /** Who answered, named by the surface that answered it, so the ledger can tell
+   *  a click the owner aimed at this card from an answer that came from somewhere
+   *  else. `cancel` is a turn that stopped while its card was open.
    *  `chat_rule`, `policy_rule` and `clanker` only appear on an `auto` row: nobody
    *  answered a card, a rule did, and naming which one is the difference between a
-   *  log that can say what an owner allowed and one that cannot. */
-  answered_by?: 'owner' | 'timeout' | 'cancel' | 'chat_rule' | 'policy_rule' | 'clanker';
+   *  log that can say what an owner allowed and one that cannot.
+   *  `owner` is written by no current code path: it is what every build up to
+   *  0.17.216 recorded for any answer it could not tell apart, so it stays in the
+   *  union for rows already in old session logs. */
+  answered_by?:
+    | 'webview'
+    | 'telegram'
+    | 'voice'
+    | 'timeout'
+    | 'cancel'
+    | 'chat_rule'
+    | 'policy_rule'
+    | 'clanker'
+    | 'owner';
   /** The approval key or keys that covered this call (`approvalKey.ts`),
    *  comma-joined. Only an `auto` row carries one: a card was answered by somebody
    *  reading its text, not by a key. */
@@ -324,7 +338,14 @@ export class GateEventLog implements ToolApprovalSink {
     this.raised.delete(event.id);
     const answeredAt = this.deps.now();
     const answeredBy =
-      event.reason === 'timeout' ? 'timeout' : event.reason === 'cancelled' ? 'cancel' : 'owner';
+      event.reason === 'timeout'
+        ? 'timeout'
+        : event.reason === 'cancelled'
+          ? 'cancel'
+          : // `ToolApprovalService.resolve` makes its caller name the surface, so a
+            // card that was answered always arrives with one; the fallback is only
+            // what a hand-fed sink can produce.
+            (event.answeredBy ?? 'webview');
     const row: GateEventRow = {
       type: 'gate',
       kind: 'card',

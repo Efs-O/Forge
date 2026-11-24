@@ -118,7 +118,7 @@ function harness(mode: 'attended' | 'unattended' | 'clanker', conversationId: st
     /** Resolve the card a control call raised, so the scripted turn does not hang. */
     answerCard: (approve: boolean) => {
       const card = cards()[0];
-      if (card) service.resolve(card.id, approve ? 'approve' : 'decline');
+      if (card) service.resolve(card.id, approve ? 'approve' : 'decline', 'webview');
     },
   };
 }

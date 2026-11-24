@@ -7,7 +7,7 @@ import {
   type ToolApprovalResolvedEvent,
   type ToolApprovalSink,
 } from './toolApprovalEvents';
-import type { ApprovalDecision, ApprovalOffer } from './approvalMessages';
+import type { ApprovalAnswerSource, ApprovalDecision, ApprovalOffer } from './approvalMessages';
 import type { ChatRuleApproval } from './chatRuleApproval';
 import type { AlwaysApprovalWriteResult } from './approvalPolicyRules';
 import { applyAlwaysProjectApproval } from './approvalProjectWriter';
@@ -39,7 +39,7 @@ export {
   type ToolApprovalResolvedEvent,
   type ToolApprovalSink,
 };
-export type { ApprovalDecision, ApprovalOffer };
+export type { ApprovalAnswerSource, ApprovalDecision, ApprovalOffer };
 
 interface PendingApproval extends ToolApprovalRequestEvent {
   /** The card's identity and text come from the event type it extends: this adds
@@ -252,8 +252,12 @@ export class ToolApprovalService {
   }
 
   /** Resolve every surface through one queue. Rule decisions store only the keys
-   *  offered on this card; cancellation and timeout never store an allow. */
-  resolve(id: string, decision: ApprovalDecision): void {
+   *  offered on this card; cancellation and timeout never store an allow.
+   *
+   *  The caller has to name the surface it answered from. There is no default:
+   *  the ledger that says who allowed a dangerous call is the one record that has
+   *  to be able to tell a click the owner aimed at the card from anything else. */
+  resolve(id: string, decision: ApprovalDecision, source: ApprovalAnswerSource): void {
     const item = this.findPending(id);
     if (!item || !this.removePending(item)) return;
     // A stale or forged webview cannot turn an Approve/Decline-only card into a
@@ -289,6 +293,7 @@ export class ToolApprovalService {
       answer,
       resolution?.chatRuleErrors,
       resolution?.approvalNotice,
+      source,
     );
     // The wait the model hears about is the owner's, measured from the moment the
     // card was on screen — not the queue's, and not the handler's.
@@ -396,6 +401,7 @@ export class ToolApprovalService {
     decision: ApprovalDecision = 'decline',
     chatRuleErrors?: readonly string[],
     approvalNotice?: string,
+    source?: ApprovalAnswerSource,
   ): void {
     this.emitResolved(
       item,
@@ -404,6 +410,7 @@ export class ToolApprovalService {
       decision,
       chatRuleErrors,
       approvalNotice,
+      source,
     );
     item.resolve(outcome);
   }
@@ -467,12 +474,14 @@ export class ToolApprovalService {
     decision: ApprovalDecision,
     chatRuleErrors?: readonly string[],
     approvalNotice?: string,
+    source?: ApprovalAnswerSource,
   ): void {
     const event = {
       ...this.eventOf(item),
       approved,
       decision,
       reason,
+      ...(source ? { answeredBy: source } : {}),
       ...(item.waitingForOwner ? { waitingForOwner: true } : {}),
       ...(chatRuleErrors ? { chatRuleErrors } : {}),
       ...(approvalNotice ? { approvalNotice } : {}),

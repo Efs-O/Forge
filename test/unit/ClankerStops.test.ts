@@ -302,7 +302,7 @@ describe('Clanker answers every non-protected approval', () => {
     const card = posted.find((message) => message.type === 'confirmRequest');
     expect(card?.type).toBe('confirmRequest');
     if (!card?.id) throw new Error('approval card was not posted');
-    service.resolve(card.id, 'decline');
+    service.resolve(card.id, 'decline', 'webview');
     await expect(pending).resolves.toBe('declined');
   });
 });
@@ -347,7 +347,7 @@ describe('Clanker keeps destructive, owner-only and secret-egress stops', () => 
     const card = posted.find((message) => message.type === 'confirmRequest');
     expect(card?.type).toBe('confirmRequest');
     if (!card?.id) throw new Error('destructive approval card was not posted');
-    service.resolve(card.id, 'decline');
+    service.resolve(card.id, 'decline', 'webview');
     await expect(pending).resolves.toBe('declined');
   });
 

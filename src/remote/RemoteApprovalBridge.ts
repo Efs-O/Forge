@@ -146,6 +146,7 @@ export class RemoteApprovalBridge {
           : event.action === 'allow_chat'
             ? 'allowChat'
             : 'alwaysProject',
+      'telegram',
     );
     return true;
   }
@@ -196,7 +197,7 @@ export class RemoteApprovalBridge {
       return false;
     }
     pending.resolving = true;
-    this.host.resolveApproval(pending.event.id, approve ? 'approve' : 'decline');
+    this.host.resolveApproval(pending.event.id, approve ? 'approve' : 'decline', 'voice');
     return true;
   }
 

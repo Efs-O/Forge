@@ -123,7 +123,7 @@ describe('App docked agent dialogs', () => {
     });
   });
 
-  it('docks approvals, focuses the first control, and preserves question priority order', () => {
+  it('docks approvals without putting a button in the way, and keeps question priority', () => {
     act(() => hostMessage(question('question-pending')));
     vi.useFakeTimers();
     act(() =>
@@ -140,7 +140,9 @@ describe('App docked agent dialogs', () => {
     expect(dialog.classList.contains('docked-dialog-panel')).toBe(true);
     expect(dialog.getAttribute('aria-labelledby')).toBe('confirmation-dialog-title');
     expect(dialog.hasAttribute('aria-modal')).toBe(false);
-    expect(document.activeElement).toBe(container.querySelector('.confirm-btn-deny'));
+    // Nothing is focused on mount: the card's first button is Decline, and a card
+    // that has focus must not be settled by the next Enter or Space.
+    expect(document.activeElement).not.toBe(container.querySelector('.confirm-btn-deny'));
 
     act(() => hostMessage({ type: 'confirmResolved', id: 'approval-1' }));
     dialog = container.querySelector<HTMLElement>('[role="dialog"]')!;
@@ -214,7 +216,7 @@ describe('App docked agent dialogs', () => {
     expect(document.activeElement).not.toBe(container.querySelector('.question-docked-panel'));
   });
 
-  it('keeps Escape available for confirmation and denies the pending approval', () => {
+  it('denies the pending approval only when the Escape belongs to the card', () => {
     act(() =>
       hostMessage({
         type: 'confirmRequest',
@@ -223,10 +225,21 @@ describe('App docked agent dialogs', () => {
         detail: 'Run the command',
       }),
     );
+    // A key aimed at the transcript above the card is not an answer to it: the
+    // measured incident had a card declined 1.3 s after it opened, with no owner
+    // action behind it.
     act(() =>
-      document.activeElement?.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
-      ),
+      container
+        .querySelector<HTMLElement>('#messages')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })),
+    );
+    expect(posted.some((message) => message.type === 'confirmResponse')).toBe(false);
+    expect(container.querySelector('.docked-dialog-panel')).not.toBeNull();
+
+    act(() =>
+      container
+        .querySelector<HTMLElement>('.docked-dialog-panel')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })),
     );
 
     expect(posted).toContainEqual({

@@ -93,7 +93,7 @@ describe('Clanker answers memory and job deletion in attended chats', () => {
       const card = service.pending();
       expect(posted.some((message) => message.type === 'confirmRequest')).toBe(true);
       if (!card) throw new Error('approval card was not queued');
-      service.resolve(card.id, 'approve');
+      service.resolve(card.id, 'approve', 'webview');
       expect(await pending).toBe('approved');
       expect(rows[0]!.kind).toBe('card');
       expect(rows[0]!.reason).toBe(metadata.detail);

@@ -35,7 +35,7 @@ import { writeApprovalAlways } from './approvalPolicyRules';
 import { chatClankerRecords } from './chatClanker';
 import { clearTrashRefusals } from '../tools/trashRefusal';
 import { disposeAgentConversation } from './agentConversationDisposal';
-import type { ApprovalDecision } from './approvalMessages';
+import type { ApprovalAnswerSource, ApprovalDecision } from './approvalMessages';
 import type { ToolApprovalSink, ToolApprovalRequestEvent } from './ToolApprovalService';
 import { recordModelUsage } from './modelManager/usageTracker';
 import type { AgentProgressEvent, AgentProgressListener } from './AgentProgress';
@@ -341,8 +341,8 @@ export class AgentLoop {
   /** Settle a card with the owner's answer, from whichever surface answered it; the
    *  queue alone turns an `allowChat` answer into a chat rule.
    */
-  resolveConfirmation(id: string, decision: ApprovalDecision): void {
-    this.approvals.resolve(id, decision);
+  resolveConfirmation(id: string, decision: ApprovalDecision, source: ApprovalAnswerSource): void {
+    this.approvals.resolve(id, decision, source);
   }
 
   addApprovalSink(sink: ToolApprovalSink): { dispose(): void } {

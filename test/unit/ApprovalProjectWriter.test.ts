@@ -46,7 +46,7 @@ describe('Always in this project approval button', () => {
     if (card?.type !== 'confirmRequest') throw new Error('confirmation was not posted');
     expect(card.alwaysInProject).toEqual(offer);
 
-    service.resolve(card.id, 'alwaysProject');
+    service.resolve(card.id, 'alwaysProject', 'webview');
     await expect(pending).resolves.toBe('approved');
     expect(writeAlways).toHaveBeenCalledWith(['cross_chat']);
     expect(allowChat).not.toHaveBeenCalled();
@@ -81,7 +81,7 @@ describe('Always in this project approval button', () => {
     const card = posted.find((message) => message.type === 'confirmRequest');
     if (card?.type !== 'confirmRequest') throw new Error('confirmation was not posted');
 
-    service.resolve(card.id, 'alwaysProject');
+    service.resolve(card.id, 'alwaysProject', 'webview');
     await expect(pending).resolves.toBe('approved');
     expect(allowChat).toHaveBeenCalledWith('chat-1', ['cross_chat']);
     expect(posted).toContainEqual(
@@ -115,7 +115,7 @@ describe('Always in this project approval button', () => {
     const card = posted.find((message) => message.type === 'confirmRequest');
     if (card?.type !== 'confirmRequest') throw new Error('confirmation was not posted');
 
-    service.resolve(card.id, 'alwaysProject');
+    service.resolve(card.id, 'alwaysProject', 'webview');
     await expect(pending).resolves.toBe('approved');
     expect(allowChat).not.toHaveBeenCalled();
     expect(posted.find((message) => message.type === 'notice')).toMatchObject({

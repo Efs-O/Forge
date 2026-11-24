@@ -72,7 +72,7 @@ describe('remote Always in this project approval', () => {
       correlationId,
     };
     expect(bridge.resolveAction(action, 'nonce-1')).toBe(true);
-    expect(resolveApproval).toHaveBeenCalledWith('gate-1', 'alwaysProject');
+    expect(resolveApproval).toHaveBeenCalledWith('gate-1', 'alwaysProject', 'telegram');
 
     sink?.resolved({
       ...gate,

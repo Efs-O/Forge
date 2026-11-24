@@ -295,7 +295,7 @@ describe('RemoteApprovalBridge', () => {
         'nonce-1',
       ),
     ).toBe(true);
-    expect(resolveApproval).toHaveBeenCalledWith('gate-1', 'allowChat');
+    expect(resolveApproval).toHaveBeenCalledWith('gate-1', 'allowChat', 'telegram');
 
     resolveDecision('allowChat');
     await vi.waitFor(() => expect(channel.sent).toHaveLength(2));
@@ -366,7 +366,15 @@ describe('RemoteApprovalBridge', () => {
         'nonce-1',
       ),
     ).toBe(true);
-    expect(resolveApproval).toHaveBeenCalledWith('gate-1', 'approve');
+    expect(resolveApproval).toHaveBeenCalledWith('gate-1', 'approve', 'telegram');
+  });
+
+  it('records a spoken answer as the voice, so the ledger can tell it from the button', async () => {
+    const { bridge, channel, request, resolveApproval } = rig();
+    request();
+    await vi.waitFor(() => expect(channel.sent).toHaveLength(1));
+    expect(bridge.resolveSpoken('gate-1', false, 'chat-1', 'nonce-1')).toBe(true);
+    expect(resolveApproval).toHaveBeenCalledWith('gate-1', 'decline', 'voice');
   });
 
   it('lets a spoken reply to the approval message name its gate', async () => {

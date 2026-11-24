@@ -68,6 +68,7 @@ export interface WebviewActions {
   resolveConfirmation: (
     id: string,
     decision: import('./approvalMessages').ApprovalDecision,
+    source: import('./approvalMessages').ApprovalAnswerSource,
   ) => void;
   answerQuestion: (id: string, answer: StructuredAnswer) => void;
   skipQuestion: (id: string) => void;
@@ -249,7 +250,7 @@ export function routeWebviewMessage(actions: WebviewActions, msg: WebviewToHost)
       break;
 
     case 'confirmResponse':
-      actions.resolveConfirmation(msg.id, msg.decision);
+      actions.resolveConfirmation(msg.id, msg.decision, 'webview');
       break;
 
     case 'questionResponse':

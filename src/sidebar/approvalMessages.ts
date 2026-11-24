@@ -36,6 +36,14 @@ export interface ApprovalOffer {
  */
 export type ApprovalDecision = 'approve' | 'allowChat' | 'alwaysProject' | 'decline';
 
+/**
+ * Which surface answered a card. Recorded on the gate ledger, because a log that
+ * says only "the owner answered" cannot tell a click the owner aimed at the card
+ * from a keystroke that happened to land on it — which is the difference between
+ * a decision the owner made and one the owner never knew it had to make.
+ */
+export type ApprovalAnswerSource = 'webview' | 'telegram' | 'voice';
+
 export interface ConfirmRequestMsg {
   type: 'confirmRequest';
   id: string;
