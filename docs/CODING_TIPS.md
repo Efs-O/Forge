@@ -34,10 +34,11 @@
 2. `apply_line_edits` on `docs/TOOL_COVERAGE.md` → `ToolHarness.test.ts` diffs it against a fresh generation and normalises only `Generated:`. restore_file it after a demo
 3. `npx prettier --write` on a test file → it rewrites lines nobody touched: `test/` is not prettier-clean. --write only the src files the gate lints
 4. an edit that grows a src file past 500 lines → eslint `max-lines` (`.eslintrc.json`) errors. check `wc -l <file>` first; move the code into a leaf module
+5. hand-copying Strata's Monitor code into `webview-ui/vendor/strata-monitor/monitor.js` → a dropped closing `"` before a backtick parses as a template string, and `node --check` names a later line. diff every source line against the copy
 
 ## TEST
 1. `fs.rmSync` on a killed child's cwd → EPERM is not in `maxRetries`' retried set, so the retries do nothing. use `removeTreeWhenFree` (test/support/removeTempTree.ts): polls until removable
-2. a `ToolApprovalService` card asserted on the posted `confirmRequest` → none arrives: `pump()` posts it only when `getView()` answers truthy. pass a fake view, mock `commands.executeCommand`
+2. a `ToolApprovalService` card asserted on the posted `confirmRequest` → none arrives: `pump()` posts it only when `getView()` answers truthy. pass a fake view. `createProviderWebviewActions` binds `caps.promptRouter.route` at construction, so a fake caps must carry it
 3. a fake-timer test around a sleep → use `sleepOrThrow` from `src/util/abortableSleep.ts`: fake timers patch it
 4. a fact value for `src/agentBus/agentNote.md` written with its own backticks → the template already wraps `__FORGE_CONFIG__` in backticks, so the line renders doubled ones. pass the bare value
 5. a `vi.hoisted` `fs.mkdtempSync(os.tmpdir())` in a test file → teardown fails: `temp leak: <file> left 1 entry in os.tmpdir()`. `test/support/tempGuard.setup.ts` narrows tmpdir per file, so rm it in an `afterAll`
@@ -61,7 +62,6 @@
 23. a row added to `docs/CODING_TIPS.md` that names no repo path and no PC fact → `CodingTipsHome.test.ts` fails `npm run ci`; the shipped table caps each section at 25 rows (`CodingTipsDoc.test.ts`), so merge the row into a neighbour instead of adding a 26th
 24. `resolveRequestModel(cfg, 'm@p')` with `profiles: {p: {...}}` on the model entry → `model.profiles.includes is not a function`: an entry's `profiles` is a list of allowed profile NAMES (`src/config/modelTypes.ts`); the definitions live in the top-level `config.profiles`
 25. a `streamModelChatCompletion` mock answering every round with the same text → the loop runs the tool call twice, so `dispatched` holds 2 rounds. emit the call text on round 0 and `'Done.'` after (`test/unit/ToolCallingLoopProseToolExample.test.ts`)
-
 ## PATHS
 1. `zipfile.ZipFile('test/fixtures/sample.xlsx')` in a scan → FileNotFoundError: that is not where the fixture lives. read the test's `fixture()` helper for the real path first
 2. `wc -l test/unit/BusContent.test.ts` → no such file: busContent's tests live in `test/unit/AgentBus.test.ts`. `ls test/unit | grep -i <topic>` before naming a test file
