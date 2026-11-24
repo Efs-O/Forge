@@ -1,13 +1,12 @@
 import type { RegisteredTool } from './ToolRegistry';
+import { makeGetDiagnosticsTool } from './lspDiagnosticsTools';
+import { makeGetDocumentSymbolsTool, makeGetWorkspaceSymbolsTool } from './lspTools';
 import {
   makeFindImplementationsTool,
   makeFindReferencesTool,
-  makeGetDiagnosticsTool,
-  makeGetDocumentSymbolsTool,
   makeGetHoverTool,
-  makeGetWorkspaceSymbolsTool,
   makeGoToDefinitionTool,
-} from './lspTools';
+} from './lspPositionTools';
 import { getCodeActions } from './codeActionTools';
 
 type Operation =

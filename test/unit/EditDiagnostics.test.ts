@@ -11,7 +11,7 @@ import {
   type ProblemWatcher,
   type ReportedProblem,
 } from '../../src/tools/editDiagnostics';
-import { formatDiagnosticLine } from '../../src/tools/lspTools';
+import { formatDiagnosticLine } from '../../src/tools/lspDiagnosticsTools';
 import { makeEditFileTool } from '../../src/tools/editFileTool';
 import { makeWriteFileTool } from '../../src/tools/builtinTools';
 import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';

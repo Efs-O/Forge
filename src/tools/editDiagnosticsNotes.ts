@@ -11,7 +11,7 @@
  * the dependency runs one way only, so the two cannot form a cycle.
  */
 import * as vscode from 'vscode';
-import { formatDiagnosticLine } from './lspTools';
+import { formatDiagnosticLine } from './lspDiagnosticsTools';
 import type { ReportedProblem } from './editDiagnostics';
 
 /** Errors and warnings only: a `severity` above this is info or hint (Error 0, Warning 1, Information 2, Hint 3). */

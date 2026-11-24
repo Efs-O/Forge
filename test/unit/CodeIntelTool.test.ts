@@ -65,15 +65,17 @@ vi.mock('../../src/tools/symbolSearch', async (importOriginal) => {
 });
 import { makeCodeIntelTool } from '../../src/tools/codeIntelTool';
 import * as vscode from 'vscode';
+import { makeGetDiagnosticsTool } from '../../src/tools/lspDiagnosticsTools';
+import {
+  makeGetDocumentSymbolsTool,
+  makeGetWorkspaceSymbolsTool,
+} from '../../src/tools/lspTools';
 import {
   makeFindImplementationsTool,
   makeFindReferencesTool,
-  makeGetDiagnosticsTool,
-  makeGetDocumentSymbolsTool,
   makeGetHoverTool,
-  makeGetWorkspaceSymbolsTool,
   makeGoToDefinitionTool,
-} from '../../src/tools/lspTools';
+} from '../../src/tools/lspPositionTools';
 
 const operations = [
   'diagnostics',

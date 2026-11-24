@@ -679,7 +679,9 @@ overlaps with an existing owner, extend the owner instead.
 | URL fetch tool: redirects, response limits and tool wiring — the guard itself is owned by the row below | `src/tools/fetchTool.ts` |
 | SSRF primitives + pinned-agent factory shared by `web_fetch` and the render-html preview | `src/tools/webFetchSsrf.ts` |
 | Bounded streamed response text reader (shared web and jobs fetch) | `src/util/readTextCapped.ts` |
-| LSP provider handlers dispatched by `code_intel`, and the `path:line: severity code: message` spelling both diagnostics readers share | `src/tools/lspTools.ts` |
+| `code_intel` symbol listing (document and workspace symbols), and the document priming every language-service call needs | `src/tools/lspTools.ts` |
+| Diagnostics reading for `code_intel`, and the `path:line: severity code: message` spelling both diagnostics readers share | `src/tools/lspDiagnosticsTools.ts` |
+| `code_intel` position operations — hover, definition, references, implementations, with the loading retry and the text-search gap note | `src/tools/lspPositionTools.ts` |
 | LSP location and symbol-result formatting | `src/tools/lspFormat.ts` |
 | Workspace memory store: folder scan, write loop, duplicate healing, migration | `src/memory/memoryStore.ts` |
 | Workspace memory record shape, frontmatter encode/decode, file naming | `src/memory/memoryFileFormat.ts` |

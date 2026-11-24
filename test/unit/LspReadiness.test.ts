@@ -45,7 +45,7 @@ vi.mock('../../src/tools/trashRefusal', () => ({
   rememberTrashRefusal: vi.fn(),
 }));
 
-import { makeFindImplementationsTool, makeFindReferencesTool, makeGetHoverTool, makeGoToDefinitionTool } from '../../src/tools/lspTools';
+import { makeFindImplementationsTool, makeFindReferencesTool, makeGetHoverTool, makeGoToDefinitionTool } from '../../src/tools/lspPositionTools';
 import { makeRenameSymbolTool } from '../../src/tools/fileEditTools';
 
 const baseArgs = { path: 'src/math.ts', line: 0, character: 12 };
