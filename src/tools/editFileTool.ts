@@ -18,6 +18,7 @@ import {
 import { guardTipsWrite, tipsWriteNote } from './tipsWriteGuard';
 import { withFileLengthWarning, type FileLengthWarningGetter } from './fileLengthWarning';
 import { NO_PROBLEM_WATCHER, withProblemNote, type ProblemWatcher } from './editDiagnostics';
+import { guardNulFreeText } from './writeTextGuard';
 
 // ── edit_file ──────────────────────────────────────────────────────────────────
 
@@ -51,6 +52,9 @@ function parseEdits(args: Record<string, unknown>): StringEdit[] {
     if (typeof oldStr !== 'string' || typeof newStr !== 'string') {
       throw new Error('edit_file: provide either edits[], or both old_str and new_str.');
     }
+    // A NUL here is an escape the model meant as source text; the whole call is
+    // refused before the file is read, so nothing is written.
+    guardNulFreeText('edit_file', newStr);
     return [{ oldStr, newStr, replaceAll: replaceAllOf(args['replace_all'], '') }];
   }
   if (!Array.isArray(raw) || raw.length === 0) {
@@ -77,6 +81,7 @@ function parseEdits(args: Record<string, unknown>): StringEdit[] {
         `edit_file: edit ${index + 1} needs string old_str and new_str (it has: ${fields || 'no fields'}).${mixed}`,
       );
     }
+    guardNulFreeText('edit_file', newStr);
     return {
       oldStr,
       newStr,

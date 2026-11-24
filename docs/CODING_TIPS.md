@@ -31,7 +31,6 @@
 4. another lane has package.json dirty and you edit the same file → their `git commit -- package.json` commits the worktree copy, so your line lands in THEIR commit (f994b9d4). Check `git status` before editing a shared manifest, or land yours first
 5. `npm run check:push` before the release tag exists → `no tag v0.17.207 locally`: `scripts/check-push.mjs` verifies `refs/tags/v<version>` locally, so `git tag v<ver>` comes before the push check; push the tag itself only after CI is green
 6. `git add docs/CODING_TIPS.md` while another lane's tips row sits uncommitted in it → your commit carries their row. back the file up, drop their row, commit, restore it byte-identically
-7. `write_file` left NUL bytes inside `test/unit/RemoteRequestOutcome.test.ts` → vitest passes but `git diff --cached --stat` prints `Bin 0 -> 4623 bytes`. count NULs before staging: `python -c "print(open(p,'rb').read().count(chr(0)))"`
 
 ## EDIT
 1. a rename lengthens an identifier, a call takes several args on one line, I hand-split a `.then()`, or a moved block re-indents (6→2) → `prettier/prettier` fails at `.prettierrc` printWidth 100; prettier also joins lines the old indent split. fix: `npx prettier --write <src file>` first

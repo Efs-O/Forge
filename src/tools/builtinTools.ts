@@ -13,6 +13,7 @@ import { guardTipsWrite, tipsWriteNote } from './tipsWriteGuard';
 import { withFileLengthWarning, type FileLengthWarningGetter } from './fileLengthWarning';
 import { NO_PROBLEM_WATCHER, withProblemNote, type ProblemWatcher } from './editDiagnostics';
 import { applyWriteEol, chooseWriteEol, readExistingForWrite } from './writeEol';
+import { guardNulFreeText } from './writeTextGuard';
 
 /**
  * `read_file` moved to `src/tools/readFileTool.ts` on 2026-10-29 (tool-trim
@@ -106,13 +107,17 @@ export function makeWriteFileTool(
           `write_file: mode must be "overwrite" or "append", not ${JSON.stringify(mode)}.`,
         );
       }
+      // A NUL in the text is an escape the model meant as source text, and a file
+      // holding one reads as binary to git while passing every test: refused here,
+      // before the target is read, so a refusal writes nothing in either mode.
+      const content = args['content'] as string;
+      guardNulFreeText('write_file', content);
       const filePath = await resolveRealWorkspacePath(args['path'] as string, undefined, {
         allowMissing: true,
         extraRoots: extraRoots(),
       });
       const appendSnapshot = mode === 'append' ? readAppendSnapshot(filePath) : undefined;
       const existing = mode === 'append' ? appendSnapshot?.text : readExistingForWrite(filePath);
-      const content = args['content'] as string;
       const converted = applyWriteEol(content, await chooseWriteEol(filePath, existing));
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
       // Snapshot before the write, whatever the mode: the append path is where a

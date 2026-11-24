@@ -13,6 +13,7 @@ import {
   throwStaleRefusal,
 } from './structuredEditRefusals';
 import { splitEditTextLines, checkedEditTextLines } from './lineEditText';
+import { guardNulFreeText } from './writeTextGuard';
 
 const MAX_EDIT_OPERATIONS = 20;
 const MAX_EXPECTED_CHARS = 64_000;
@@ -399,6 +400,8 @@ function parseOperations(value: unknown): LineEditOperation[] {
     }
     const expectedText = requireText(record['expected_text'], index, 'expected_text');
     const replacementText = requireText(record['replacement_text'], index, 'replacement_text');
+    // A NUL here is an escape the model meant as source text: refused before the file is read.
+    guardNulFreeText('apply_line_edits', replacementText);
     const expectedLines = splitEditTextLines(expectedText);
     const hasStart = record['start_line'] !== undefined;
     const hasEnd = record['end_line'] !== undefined;
