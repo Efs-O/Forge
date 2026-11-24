@@ -34,7 +34,7 @@
 2. `apply_line_edits` on `docs/TOOL_COVERAGE.md` → `ToolHarness.test.ts` diffs it against a fresh generation and normalises only `Generated:`. restore_file it after a demo
 3. `npx prettier --write` on a test file → it rewrites lines nobody touched: `test/` is not prettier-clean. --write only the src files the gate lints
 4. an edit that grows a src file past 500 lines → eslint `max-lines` (`.eslintrc.json`) errors. check `wc -l <file>` first; move the code into a leaf module
-5. hand-copying Strata's Monitor code into `webview-ui/vendor/strata-monitor/monitor.js` → a dropped closing `"` before a backtick parses as a template string, and `node --check` names a later line. diff every source line against the copy
+5. hand-copying Strata's Monitor JS from `N:/Strata/serve/web/app.js` into `webview-ui/vendor/strata-monitor/monitor.js` → a dropped closing `"` before a backtick parses as a template string, and `node --check` names a later line. diff every source line against the copy
 
 ## TEST
 1. `fs.rmSync` on a killed child's cwd → EPERM is not in `maxRetries`' retried set, so the retries do nothing. use `removeTreeWhenFree` (test/support/removeTempTree.ts): polls until removable

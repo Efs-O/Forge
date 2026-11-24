@@ -46,6 +46,7 @@
   "ignorePatterns": [
     "dist/",
     "node_modules/",
+    "webview-ui/vendor/",
     "*.js",
     "*.mjs"
   ]

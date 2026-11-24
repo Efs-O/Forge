@@ -1,11 +1,105 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="${themeKind}">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${cspSource};">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${cspSource} 'unsafe-inline'; font-src ${cspSource};">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Forge: Monitor</title>
   <link rel="stylesheet" href="${cssUri}">
 </head>
-<body><div id="app"></div><script nonce="${nonce}" src="${jsUri}"></script></body>
+<body>
+<!-- Vendored from Strata (github.com/Niko1221/Strata, MIT License), serve/web/index.html
+     <section id="view-monitor"> at commit afcf3746a0613eb5c21c422ba0ca864ba08fb15b.
+     The MCP server card is not copied; the tab strip, header and other views are not part of this panel. -->
+<div class="monitor">
+  <div class="st-card state-card">
+    <div class="state-card__head">
+      <span class="card-title">Model state</span>
+      <span class="badges" id="state-badges">
+        <span class="st-badge" data-s="idle">Idle</span>
+        <span class="st-badge" data-s="unloaded">Unloaded</span>
+        <span class="st-badge st-badge--reading" data-s="reading">Reading</span>
+        <span class="st-badge st-badge--generating" data-s="generating">Generating</span>
+        <span class="st-badge st-badge--queued" data-s="queued">Queued</span>
+        <span class="st-badge st-badge--error" data-s="error">Error</span>
+      </span>
+      <div class="gpu-selector" id="gpu-selector" hidden>
+        <div class="gpu-selector__seg">
+          <span class="muted small" id="gpu-seg-label">GPU to show</span>
+          <div class="seg gpu-seg" id="gpu-seg" role="radiogroup" aria-label="GPU to show" hidden></div>
+        </div>
+        <label class="gpu-select-wrap" id="gpu-select-wrap" hidden>
+          <span class="muted small">GPU to show</span><select id="gpu-select" aria-label="GPU to show"></select>
+        </label>
+      </div>
+    </div>
+    <div class="state-card__row"><span id="state-label">Waiting for a request</span><span class="muted" id="state-detail"></span></div>
+    <div class="st-progress" id="state-progress"><div class="st-progress__bar" id="state-bar" style="width:0%"></div></div>
+  </div>
+
+  <div class="metric-area" id="metrics">
+    <!-- filled by monitor.js: one grid of every card (METRIC_CARDS); drag a card to any position -->
+    <div class="metric-toolbar" hidden><button class="metric-order-reset" id="reset-card-order" type="button">Reset layout</button></div>
+    <div class="metric-grid" id="metric-cards"></div>
+  </div>
+  <span id="card-position-live" class="visually-hidden" aria-live="polite" aria-atomic="true"></span>
+
+  <div class="monitor-row">
+    <div class="st-card ctx-card">
+      <span class="card-title">Context fill</span>
+      <div class="ctx-gauge">
+        <svg class="st-gauge" viewBox="0 0 120 120" aria-hidden="true">
+          <circle class="st-gauge__track" cx="60" cy="60" r="50" fill="none" stroke-width="10" stroke-linecap="round"
+                  stroke-dasharray="235.6 314.2" transform="rotate(135 60 60)"/>
+          <circle class="st-gauge__fill" id="ctx-fill" cx="60" cy="60" r="50" fill="none" stroke-width="10"
+                  stroke-linecap="round" stroke-dasharray="0 314.2" transform="rotate(135 60 60)"/>
+        </svg>
+        <div class="ctx-gauge__label"><span class="ctx-gauge__pct" id="ctx-pct">0%</span><span class="muted" id="ctx-sub">&ndash;</span></div>
+      </div>
+      <div class="bar-row"><span>Experts in VRAM</span><span class="muted" id="slots-text">&ndash;</span></div>
+      <div class="st-progress"><div class="st-progress__bar" id="slots-bar" style="width:0%"></div></div>
+      <div class="bar-row"><span>System RAM</span><span class="muted" id="ram-text">&ndash;</span></div>
+      <div class="st-progress" id="ram-progress"><div class="st-progress__bar" id="ram-bar" style="width:0%"></div></div>
+      <div class="bar-row"><span>GPU temperature</span><span class="muted" id="temp-text">&ndash;</span></div>
+      <div class="st-progress" data-tone="warn"><div class="st-progress__bar" id="temp-bar" style="width:0%"></div></div>
+      <div class="bar-row"><span>CPU temperature</span><span class="muted" id="cpu-temp-text">&ndash;</span></div>
+      <div class="st-progress" data-tone="warn"><div class="st-progress__bar" id="cpu-temp-bar" style="width:0%"></div></div>
+    </div>
+    <div class="st-card req-card">
+      <div class="req-head"><span class="card-title">Recent requests</span>
+        <div class="req-actions"><button class="st-btn st-btn--secondary" id="req-clear">Clear</button>
+          <button class="st-btn st-btn--secondary" id="req-all" hidden>Show all</button></div></div>
+      <div class="table-wrap" id="req-wrap">
+        <table class="st-table">
+          <thead><tr><th>Time</th><th>Status</th><th class="num">Prompt</th><th class="num">Reused</th>
+            <th class="num" title="time spent reading the new prompt tokens">Prefill</th>
+            <th class="num">Output</th>
+            <th class="num">Tok/s</th><th class="num">Drafts</th>
+            <th class="num" title="While writing the answer: the share of the experts looked up that were already in VRAM. Experts the GPU read over PCIe (--pcie-frac) are not counted in it; their share of all routed experts is shown after it (+N% PCIe)">VRAM hit rate</th>
+            <th class="num">Duration</th></tr></thead>
+          <tbody id="req-body"><tr><td colspan="10" class="muted">No requests yet</td></tr></tbody>
+        </table>
+      </div>
+      <p class="muted req-totals" id="req-totals"></p>
+    </div>
+  </div>
+
+  <div class="st-card cc-card" id="cc-card">
+    <div class="req-head"><span class="card-title">Conversation cache</span><span class="muted small" id="cc-sum"></span></div>
+    <div class="cc-bars" id="cc-bars" hidden>
+      <div><div class="bar-row"><span>Parked conversations</span><span class="muted" id="cc-slots-text">&ndash;</span></div>
+        <div class="st-progress"><div class="st-progress__bar" id="cc-slots-bar" style="width:0%"></div></div></div>
+      <div><div class="bar-row"><span>Their memory (RAM)</span><span class="muted" id="cc-mem-text">&ndash;</span></div>
+        <div class="st-progress"><div class="st-progress__bar" id="cc-mem-bar" style="width:0%"></div></div></div>
+    </div>
+    <dl class="facts" id="cc-facts"></dl>
+    <p class="muted small cc-note" id="cc-note"></p>
+  </div>
+
+  <p class="monitor-credit">Monitor page from Strata (github.com/Niko1221/Strata), MIT License.</p>
+</div>
+
+${sprite}
+<script nonce="${nonce}" src="${jsUri}"></script>
+</body>
 </html>

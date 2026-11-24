@@ -307,18 +307,16 @@ overlaps with an existing owner, extend the owner instead.
 | Panel lifecycle + message dispatch (singleton) | `src/sidebar/modelManager/ModelManagerPanel.ts` |
 | Panel HTML/CSP/nonce builder                   | `src/sidebar/modelManager/panelHtml.ts`         |
 | Monitor panel lifecycle and visibility polling  | `src/monitor/MonitorPanel.ts`                  |
-| Monitor panel HTML/CSP builder                 | `src/monitor/monitorHtml.ts`                   |
-| Monitor source polling and cancellation        | `src/monitor/monitorPollers.ts`                |
-| llama.cpp slots and Prometheus metrics         | `src/monitor/llamaServerStats.ts`              |
-| Strata JSON metrics reader                     | `src/monitor/strataStats.ts`                   |
+| Monitor panel HTML/CSP builder (inlines the sprite) | `src/monitor/monitorHtml.ts`               |
+| Monitor reading: poll and cancellation          | `src/monitor/monitorPollers.ts`                |
+| llama.cpp slots and Prometheus metrics          | `src/monitor/llamaServerStats.ts`              |
+| Strata `GET /metrics` pass-through              | `src/monitor/strataStats.ts`                   |
 | NUT UPS client                                  | `src/monitor/nutClient.ts`                     |
-| LibreHardwareMonitor CPU sensors               | `src/monitor/lhmCpuStats.ts`                   |
-| Model-server-ready signal for the Monitor      | `src/backend/modelServerReady.ts`              |
-| Monitor panel message and snapshot types       | `src/monitor/monitorTypes.ts`                  |
-| Shared webview nonce generation                | `src/util/webviewNonce.ts`                     |
-| Monitor webview entry and card display         | `webview-ui/src/monitor/App.tsx`               |
-| Monitor webview entry point                    | `webview-ui/src/monitor/index.tsx`             |
-| Monitor webview theme styles                   | `webview-ui/styles/monitor.css`                |
+| LibreHardwareMonitor CPU sensors                | `src/monitor/lhmCpuStats.ts`                   |
+| Model-server-ready signal for the Monitor       | `src/backend/modelServerReady.ts`              |
+| Monitor message and `GET /metrics`-shaped types | `src/monitor/monitorTypes.ts`                  |
+| Shared webview nonce generation                 | `src/util/webviewNonce.ts`                     |
+| The Monitor page itself: vendored Strata JavaScript, CSS, sprite and fonts (its `README.md` lists every change) | `webview-ui/vendor/strata-monitor/` |
 | Full-state assembly (stateless view contract)  | `src/sidebar/modelManager/modelSnapshot.ts`     |
 | Group/defaults merge + inherited-key detection | `src/sidebar/modelManager/resolvedView.ts`      |
 | Field edit / remove / purge write path         | `src/sidebar/modelManager/editOps.ts`           |

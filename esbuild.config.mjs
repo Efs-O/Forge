@@ -69,11 +69,7 @@ const modelManagerConfig = {
   jsxImportSource: 'react',
 };
 
-const monitorConfig = {
-  ...modelManagerConfig,
-  entryPoints: ['webview-ui/src/monitor/index.tsx'],
-  outfile: 'dist/webview/monitor.js',
-};
+
 
 const CSS_PARTIALS = [
   'webview-ui/styles/base.css',
@@ -101,7 +97,10 @@ const MODEL_MANAGER_CSS_PARTIALS = [
   'webview-ui/styles/model-manager.css',
   'webview-ui/styles/model-manager-detail.css',
 ];
-const MONITOR_CSS_PARTIALS = ['webview-ui/styles/base.css', 'webview-ui/styles/monitor.css'];
+// The Monitor panel is vendored Strata JavaScript, not a bundle: its files are copied
+// as they are and only the three stylesheets are joined into the one the HTML links.
+const STRATA_MONITOR_DIR = 'webview-ui/vendor/strata-monitor';
+const STRATA_MONITOR_CSS_PARTIALS = ['tokens.css', 'components.css', 'monitor.css'];
 
 function copyWebviewAssets() {
   mkdirSync('dist/webview', { recursive: true });
@@ -112,8 +111,25 @@ function copyWebviewAssets() {
   const modelManagerCss = MODEL_MANAGER_CSS_PARTIALS.map((f) => readFileSync(f, 'utf8')).join('\n');
   writeFileSync('dist/webview/modelManager.css', modelManagerCss);
   copyFileSync('webview-ui/modelManager.html', 'dist/webview/modelManager.html');
-  writeFileSync('dist/webview/monitor.css', MONITOR_CSS_PARTIALS.map((f) => readFileSync(f, 'utf8')).join('\n'));
+  copyStrataMonitorAssets();
   copyFileSync('webview-ui/monitor.html', 'dist/webview/monitor.html');
+}
+
+// `webview-ui/vendor/strata-monitor/` ships as-is (license files and fonts included);
+// the only build step is the single stylesheet the panel's HTML links.
+function copyStrataMonitorAssets() {
+  const dest = 'dist/webview/strata-monitor';
+  mkdirSync(dest, { recursive: true });
+  cpSync(STRATA_MONITOR_DIR, dest, { recursive: true });
+  const css = STRATA_MONITOR_CSS_PARTIALS
+    .map((f) => readFileSync(`${STRATA_MONITOR_DIR}/${f}`, 'utf8'))
+    .join('\n');
+  writeFileSync(`${dest}/monitor.css`, css);
+  // The React Monitor bundle this replaced is not built any more; leaving it in
+  // dist/ would ship a dead file in every VSIX (dist/webview/** is allowed there).
+  for (const stale of ['dist/webview/monitor.js', 'dist/webview/monitor.js.map', 'dist/webview/monitor.css']) {
+    rmSync(stale, { force: true });
+  }
 }
 
 // B4: playwright-core is external and shipped intact next to the bundle, where
@@ -145,8 +161,7 @@ async function build() {
     const extCtx = await esbuild.context(extensionConfig);
     const webCtx = await esbuild.context(webviewConfig);
     const mmCtx = await esbuild.context(modelManagerConfig);
-    const monitorCtx = await esbuild.context(monitorConfig);
-    await Promise.all([extCtx.watch(), webCtx.watch(), mmCtx.watch(), monitorCtx.watch()]);
+    await Promise.all([extCtx.watch(), webCtx.watch(), mmCtx.watch()]);
     copyWebviewAssets();
     console.log('Watching for changes…');
     return;
@@ -155,7 +170,6 @@ async function build() {
   if (webviewOnly) {
     await esbuild.build(webviewConfig);
     await esbuild.build(modelManagerConfig);
-    await esbuild.build(monitorConfig);
     copyWebviewAssets();
     console.log('Webview built.');
     return;
@@ -171,7 +185,6 @@ async function build() {
   if (buildAll) {
     await esbuild.build(webviewConfig);
     await esbuild.build(modelManagerConfig);
-    await esbuild.build(monitorConfig);
     copyWebviewAssets();
     console.log('Webview built.');
   }

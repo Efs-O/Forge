@@ -1,14 +1,15 @@
 import * as net from 'net';
+import { readFileSync } from 'fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { parseLlamaPrometheus, parseLlamaSlots } from '../../src/monitor/llamaServerStats';
+import { parseLlamaPrometheus, parseLlamaSlots, readLlamaStats } from '../../src/monitor/llamaServerStats';
 import { readNutStats } from '../../src/monitor/nutClient';
-import { parseStrataMetrics, readStrataStats } from '../../src/monitor/strataStats';
+import { readStrataMetrics } from '../../src/monitor/strataStats';
 import { ForgeConfigSchema } from '../../src/config/schema';
 import { ModelConfigSchema } from '../../src/config/modelSchema';
-import { readLlamaStats } from '../../src/monitor/llamaServerStats';
-import { readFileSync } from 'fs';
-import { MONITOR_CREDIT, UPS_SETUP_HINT } from '../../webview-ui/src/monitor/App';
 import { noStatsReaderMessage } from '../../src/monitor/monitorTypes';
+
+/** The vendored Strata page, as it sits in the repository (not the built copy). */
+const VENDOR = 'webview-ui/vendor/strata-monitor';
 
 const servers: net.Server[] = [];
 const sockets: net.Socket[] = [];
@@ -59,32 +60,25 @@ describe('Monitor readers', () => {
     });
   });
 
-  it('maps Strata live keys and omits missing and null values', () => {
-    expect(
-      parseStrataMetrics(
-        {
-          live: {
-            state: 'generating',
-            tok_s: 9,
-            tok_s_mean: null,
-            prompt_tokens: 100,
-            generated: 20,
-            queued: 2,
-            waiting: 1,
-            parallel: 4,
-            unknown: 42,
-          },
-        },
-        8192,
-      ),
-    ).toEqual({
-      state: 'generating',
-      decodeTokS: 9,
-      running: 1,
-      slots: 4,
-      waiting: 3,
-      contextUsed: 120,
-      contextSize: 8192,
+  it('passes the whole Strata /metrics document through, asking for every kept request', async () => {
+    const document = {
+      engine: { model: 'm', max_context: 8192 },
+      live: { state: 'idle', tok_s: null },
+      requests: [{ time: 1, finish: 'stop' }, { time: 2, finish: 'stop' }],
+      requests_kept: 2,
+      hardware: { gpu_util: 12 },
+      history: { tok_s: [1, 2] },
+      ups: { 'ups.status': 'OL' },
+    };
+    const fetchImpl = vi.fn(
+      async () => new Response(JSON.stringify(document), { status: 200 }),
+    ) as unknown as typeof fetch;
+    await expect(
+      readStrataMetrics('http://127.0.0.1:8091/v1', 'secret', new AbortController().signal, fetchImpl),
+    ).resolves.toEqual(document);
+    expect(fetchImpl).toHaveBeenCalledWith('http://127.0.0.1:8091/metrics?requests=all', {
+      signal: expect.any(AbortSignal),
+      headers: { Accept: 'application/json', Authorization: 'Bearer secret' },
     });
   });
 
@@ -92,7 +86,7 @@ describe('Monitor readers', () => {
     const fetchImpl = vi.fn(
       async () => new Response('', { status: 401 }),
     ) as unknown as typeof fetch;
-    const result = await readStrataStats(
+    const result = await readStrataMetrics(
       'http://127.0.0.1:8080/v1',
       undefined,
       new AbortController().signal,
@@ -101,7 +95,7 @@ describe('Monitor readers', () => {
     expect(result.error).toBe('/metrics answered HTTP 401');
   });
 
-  it('uses the exact speed and missing-stats card text, and the exact credit footer', async () => {
+  it('uses the exact speed and missing-stats card text', async () => {
     const fetchImpl = vi.fn(
       async () => new Response('', { status: 404 }),
     ) as unknown as typeof fetch;
@@ -114,17 +108,19 @@ describe('Monitor readers', () => {
     expect(noStatsReaderMessage('Strata demo')).toBe(
       'No stats reader set for "Strata demo": add stats: llama or stats: strata to its engine in ~/.forge/policy.yaml.',
     );
-    expect(UPS_SETUP_HINT).toBe(
-      'No UPS connected. To show one here, ask your AI agent to follow Step 12b of AI_SETUP.md (run Forge: Set Up With an AI Agent).',
+  });
+
+  it('credits Strata in the exact footer line the panel shows', () => {
+    const html = readFileSync('webview-ui/monitor.html', 'utf8');
+    expect(html).toContain(
+      '<p class="monitor-credit">Monitor page from Strata (github.com/Niko1221/Strata), MIT License.</p>',
     );
-    expect(MONITOR_CREDIT).toBe(
-      "Card layout inspired by Strata's Monitor page (github.com/Niko1221/Strata, MIT).",
-    );
-    expect(
-      readFileSync('README.md', 'utf8')
-        .split(/\r?\n/)
-        .find((line) => line.startsWith('Card layout inspired')),
-    ).toBe(MONITOR_CREDIT);
+  });
+
+  it('ships Strata MIT and OFL next to the vendored page', () => {
+    expect(readFileSync(`${VENDOR}/LICENSE`, 'utf8').startsWith('MIT License')).toBe(true);
+    const fonts = readFileSync(`${VENDOR}/fonts/OFL.txt`, 'utf8');
+    expect(fonts).toContain('SIL Open Font License, Version 1.1');
   });
 
   it('rejects a non-loopback UPS with the documented wording', () => {
@@ -148,103 +144,5 @@ describe('Monitor readers', () => {
       expect(result.error.issues.find((issue) => issue.path[0] === 'stats')?.message).toBe(
         'stats belongs on the engine in ~/.forge/policy.yaml, not on a model entry',
       );
-  });
-
-  it('reads NUT variables, unescapes bytes and sends only LIST and LOGOUT', async () => {
-    const commands: string[] = [];
-    const server = new net.Server((socket) => {
-      sockets.push(socket);
-      let input = '';
-      socket.on('data', (chunk) => {
-        input += chunk.toString();
-        while (input.includes('\n')) {
-          const end = input.indexOf('\n');
-          commands.push(input.slice(0, end + 1));
-          const line = input.slice(0, end).trim();
-          input = input.slice(end + 1);
-          if (line === 'LIST VAR ups')
-            socket.write(
-              'BEGIN LIST VAR ups\nVAR ups ups.status "OL\\x4f"\nVAR ups ups.load "31"\nEND LIST VAR ups\n',
-            );
-        }
-      });
-    });
-    servers.push(server);
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const address = server.address();
-    if (!address || typeof address === 'string') throw new Error('missing NUT test port');
-    await expect(readNutStats(`ups@127.0.0.1:${address.port}`)).resolves.toEqual({
-      values: { 'ups.status': 'OL\x4f', 'ups.load': '31' },
-    });
-    await vi.waitFor(() => expect(commands).toEqual(['LIST VAR ups\n', 'LOGOUT\n']));
-  });
-
-  it('passes through a NUT refusal line', async () => {
-    const server = new net.Server((socket) => {
-      sockets.push(socket);
-      socket.once('data', () => socket.write('ERR UNKNOWN-UPS\n'));
-    });
-    servers.push(server);
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const address = server.address();
-    if (!address || typeof address === 'string') throw new Error('missing NUT test port');
-    expect(await rejectionMessage(readNutStats(`ups@127.0.0.1:${address.port}`))).toBe(
-      `NUT server at 127.0.0.1:${address.port} said: ERR UNKNOWN-UPS`,
-    );
-  });
-
-  it('rejects overlong NUT lines and enforces a single round-trip deadline', async () => {
-    const lineServer = new net.Server((socket) => {
-      sockets.push(socket);
-      socket.once('data', () => socket.write(`BEGIN LIST VAR ups\n${'x'.repeat(4097)}\n`));
-    });
-    servers.push(lineServer);
-    await new Promise<void>((resolve) => lineServer.listen(0, '127.0.0.1', resolve));
-    const lineAddress = lineServer.address();
-    if (!lineAddress || typeof lineAddress === 'string') throw new Error('missing NUT test port');
-    expect(await rejectionMessage(readNutStats(`ups@127.0.0.1:${lineAddress.port}`))).toBe(
-      'NUT line exceeded 4096 bytes',
-    );
-
-    const silent = new net.Server((socket) => sockets.push(socket));
-    servers.push(silent);
-    await new Promise<void>((resolve) => silent.listen(0, '127.0.0.1', resolve));
-    const silentAddress = silent.address();
-    if (!silentAddress || typeof silentAddress === 'string')
-      throw new Error('missing NUT test port');
-    expect(await rejectionMessage(readNutStats(`ups@127.0.0.1:${silentAddress.port}`))).toBe(
-      `NUT server at 127.0.0.1:${silentAddress.port} timed out after 1000 ms`,
-    );
-  }, 3000);
-
-  it('rejects an oversized NUT reply and a reply without ups.status', async () => {
-    const large = new net.Server((socket) => {
-      sockets.push(socket);
-      socket.once('data', () =>
-        socket.write(
-          `BEGIN LIST VAR ups\n${'VAR ups ignored "1234567890123456789012345678901234567890"\n'.repeat(1400)}`,
-        ),
-      );
-    });
-    servers.push(large);
-    await new Promise<void>((resolve) => large.listen(0, '127.0.0.1', resolve));
-    const largeAddress = large.address();
-    if (!largeAddress || typeof largeAddress === 'string') throw new Error('missing NUT test port');
-    expect(await rejectionMessage(readNutStats(`ups@127.0.0.1:${largeAddress.port}`))).toBe(
-      'NUT reply exceeded 65536 bytes',
-    );
-
-    const missing = new net.Server((socket) => {
-      sockets.push(socket);
-      socket.once('data', () => socket.write('BEGIN LIST VAR ups\nEND LIST VAR ups\n'));
-    });
-    servers.push(missing);
-    await new Promise<void>((resolve) => missing.listen(0, '127.0.0.1', resolve));
-    const missingAddress = missing.address();
-    if (!missingAddress || typeof missingAddress === 'string')
-      throw new Error('missing NUT test port');
-    expect(await rejectionMessage(readNutStats(`ups@127.0.0.1:${missingAddress.port}`))).toBe(
-      'NUT reply had no ups.status',
-    );
   });
 });

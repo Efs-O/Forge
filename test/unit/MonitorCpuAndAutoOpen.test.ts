@@ -1,8 +1,7 @@
 /**
  * The Monitor's two additions of 2026-11-24: CPU package readings from
- * LibreHardwareMonitor (`src/monitor/lhmCpuStats.ts`, its config key and its
- * poller back-off), and the panel opening itself when a model server starts
- * (`src/backend/modelServerReady.ts`).
+ * LibreHardwareMonitor (`src/monitor/lhmCpuStats.ts` and its config key), and the
+ * panel opening itself when a model server starts (`src/backend/modelServerReady.ts`).
  *
  * The sensor-tree tests are the port's contract with Strata's `_LhmCpu`
  * (`serve/telemetry.py`, branch `monitor/cards-gpu-selector`): the same tree has
@@ -35,7 +34,6 @@ vi.mock('vscode', async (importOriginal) => {
 });
 
 import { readLhmCpuStats, readLhmCpuTree } from '../../src/monitor/lhmCpuStats';
-import { createMonitorPollers } from '../../src/monitor/monitorPollers';
 import {
   notifyModelServerReady,
   setModelServerReadyListener,
@@ -43,8 +41,6 @@ import {
 import { registerSidebarCommands } from '../../src/vscode/sidebarCommands';
 import { ForgeConfigSchema } from '../../src/config/schema';
 import type { ForgeConfig } from '../../src/config/types';
-import type { IBackendPool } from '../../src/backend/BackendPool';
-import type { MonitorSnapshot } from '../../src/monitor/monitorTypes';
 
 afterEach(() => {
   createOrShow.mockClear();
@@ -174,118 +170,6 @@ describe('the monitor.cpu config key', () => {
         monitor: { cpus: 'http://127.0.0.1:8085/data.json' },
       }).success,
     ).toBe(false);
-  });
-});
-
-describe('the CPU poller', () => {
-  const startCpuPoller = (fetchImpl: typeof fetch) => {
-    const snapshots: MonitorSnapshot[] = [];
-    const pollers = createMonitorPollers({
-      getConfig: () =>
-        ({
-          models: [],
-          monitor: { cpu: 'http://127.0.0.1:8085/data.json' },
-        }) as unknown as ForgeConfig,
-      pool: { isLoaded: () => false, modelBaseUrl: () => null } as unknown as IBackendPool,
-      getStats: () => ({}) as never,
-      getSecret: async () => undefined,
-      probeGpus: async () => [],
-      post: (snapshot) => snapshots.push(snapshot),
-    });
-    vi.stubGlobal('fetch', fetchImpl);
-    pollers.start();
-    return { pollers, snapshots };
-  };
-
-  it('publishes the package reading and backs off for 30 s after a failure', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(0));
-    let alive = false;
-    const fetchImpl = vi.fn(async () => {
-      if (alive)
-        return new Response(
-          '[{"SensorId":"/intelcpu/0/temperature/10","Text":"CPU Package","Value":"60.0 °C"}]',
-          { status: 200 },
-        );
-      return new Response('nope', { status: 503 });
-    }) as unknown as typeof fetch;
-    const { pollers, snapshots } = startCpuPoller(fetchImpl);
-
-    await vi.advanceTimersByTimeAsync(0);
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(snapshots.at(-1)?.cpu).toEqual({
-      tempC: null,
-      powerW: null,
-      error: 'LibreHardwareMonitor at http://127.0.0.1:8085/data.json answered 503',
-    });
-
-    // The dead server costs one attempt, not one every 2 s tick.
-    await vi.advanceTimersByTimeAsync(28_000);
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-
-    alive = true;
-    await vi.advanceTimersByTimeAsync(2_000);
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-    expect(snapshots.at(-1)?.cpu).toEqual({ tempC: 60, powerW: null });
-    pollers.dispose();
-  });
-
-  it('treats an abort from hiding the panel as nothing: no error, no back-off', async () => {
-    vi.useFakeTimers();
-    let first = true;
-    const fetchImpl = vi.fn((_url: string, init?: { signal?: AbortSignal }) => {
-      if (!first) {
-        return Promise.resolve(
-          new Response(
-            '[{"SensorId":"/intelcpu/0/temperature/10","Text":"CPU Package","Value":"60.0 °C"}]',
-            {
-              status: 200,
-            },
-          ),
-        );
-      }
-      first = false;
-      // What a real fetch does when the panel is hidden mid-request.
-      return new Promise<Response>((_resolve, reject) =>
-        init?.signal?.addEventListener('abort', () =>
-          reject(new DOMException('The operation was aborted.', 'AbortError')),
-        ),
-      );
-    }) as unknown as typeof fetch;
-    const { pollers, snapshots } = startCpuPoller(fetchImpl);
-
-    await vi.advanceTimersByTimeAsync(0);
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    for (const controller of pollers.diagnostics().controllers) controller.abort();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(snapshots.every((snapshot) => snapshot.cpu === undefined)).toBe(true);
-
-    await vi.advanceTimersByTimeAsync(2_000);
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-    expect(snapshots.at(-1)?.cpu).toEqual({ tempC: 60, powerW: null });
-    pollers.dispose();
-  });
-
-  it('posts no cpu block at all when the config names no cpu URL', async () => {
-    const fetchImpl = vi.fn(
-      async () => new Response('[]', { status: 200 }),
-    ) as unknown as typeof fetch;
-    const snapshots: MonitorSnapshot[] = [];
-    const pollers = createMonitorPollers({
-      getConfig: () => ({ models: [] }) as unknown as ForgeConfig,
-      pool: { isLoaded: () => false, modelBaseUrl: () => null } as unknown as IBackendPool,
-      getStats: () => ({}) as never,
-      getSecret: async () => undefined,
-      probeGpus: async () => [],
-      post: (snapshot) => snapshots.push(snapshot),
-    });
-    vi.stubGlobal('fetch', fetchImpl);
-    vi.useFakeTimers();
-    pollers.start();
-    await vi.advanceTimersByTimeAsync(6_000);
-    expect(fetchImpl).not.toHaveBeenCalled();
-    expect(snapshots.every((snapshot) => snapshot.cpu === undefined)).toBe(true);
-    pollers.dispose();
   });
 });
 

@@ -1,37 +1,12 @@
-import type { ControlStats } from '../backend/controlStats';
 import type { GpuInfo } from '../system/systemProbes';
+
+/** The GPU rows a reading carries beside the engine's own numbers. */
+export type GpuProbeResult = { gpus: GpuInfo[]; error?: string };
 
 export interface SlotStats {
   active: number;
   total: number;
   slots: Array<{ used: number | null; size: number | null }>;
-}
-export interface LlamaStats {
-  slots?: SlotStats;
-  promptTokensPerSecond?: number;
-  predictedTokensPerSecond?: number;
-  requestsProcessing?: number;
-  requestsDeferred?: number;
-  error?: string;
-}
-export interface StrataStats {
-  state?: string;
-  decodeTokS?: number;
-  decodeTokSMean?: number;
-  prefillTokSMean?: number;
-  promptRead?: number;
-  promptTotal?: number;
-  running?: number;
-  waiting?: number;
-  slots?: number;
-  contextUsed?: number;
-  contextSize?: number;
-  error?: string;
-}
-export interface EngineMonitor {
-  name: string;
-  provider: string;
-  engine?: LlamaStats | StrataStats | { error: string };
 }
 export interface UpsStats {
   values: Record<string, string>;
@@ -43,16 +18,34 @@ export interface CpuStats {
   powerW: number | null;
   error?: string;
 }
-export type GpuProbeResult = { gpus: GpuInfo[]; error?: string };
-export interface MonitorSnapshot {
-  gpus: GpuProbeResult;
-  engines: EngineMonitor[];
-  forge: ControlStats;
-  ups?: UpsStats;
-  cpu?: CpuStats;
+/**
+ * One Monitor reading, in the shape Strata's `GET /metrics` answers: the page is
+ * Strata's, so the host sends Strata's document. With a Strata engine the host passes
+ * the server's JSON through whole; for a llama.cpp engine `llamaMetricsShape.ts`
+ * builds the same keys from what Forge can read. A key with no source stays absent —
+ * the page hides the card rather than showing a made-up zero.
+ */
+export interface MetricsDocument {
+  engine?: Record<string, unknown>;
+  live?: Record<string, unknown>;
+  requests?: unknown[];
+  requests_kept?: number;
+  conversation_cache?: Record<string, unknown> | null;
+  totals?: Record<string, unknown>;
+  monitor_totals?: Record<string, unknown>;
+  monitor_totals_reset?: boolean;
+  hardware?: Record<string, unknown>;
+  hardware_static?: Record<string, unknown>;
+  history?: Record<string, unknown>;
+  time?: number;
+  forge?: Record<string, unknown>;
+  ups?: Record<string, unknown> | null;
+  /** Set instead of metrics when there is nothing to show, so the page can say why. */
+  error?: string;
+  [key: string]: unknown;
 }
 export type MonitorPanelToHost = { type: 'ready' };
-export type MonitorHostToPanel = { type: 'monitorSnapshot'; snapshot: MonitorSnapshot };
+export type MonitorHostToPanel = { type: 'monitorMetrics'; metrics: MetricsDocument };
 
 export function noStatsReaderMessage(model: string): string {
   return `No stats reader set for "${model}": add stats: llama or stats: strata to its engine in ~/.forge/policy.yaml.`;

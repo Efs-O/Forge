@@ -323,7 +323,9 @@ server. Set `stats: strata` on the engine in `~/.forge/policy.yaml` to read a
 managed Strata engine. Configure `monitor.ups` in `.forge/config.yaml` only
 when a local NUT server is available.
 
-Card layout inspired by Strata's Monitor page (github.com/Niko1221/Strata, MIT).
+The page itself is Strata's Monitor page, vendored as JavaScript and CSS from
+github.com/Niko1221/Strata (MIT License); see
+`webview-ui/vendor/strata-monitor/README.md`.
 
 ## Use Forge from another computer
 

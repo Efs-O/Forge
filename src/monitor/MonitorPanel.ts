@@ -5,7 +5,6 @@ import type { ControlStats } from '../backend/controlStats';
 import { createMonitorPollers, type MonitorPollers } from './monitorPollers';
 import { buildMonitorHtml } from './monitorHtml';
 import type { MonitorHostToPanel, MonitorPanelToHost } from './monitorTypes';
-import type { GpuInfo } from '../system/systemProbes';
 
 export interface MonitorPanelOptions {
   extensionUri: vscode.Uri;
@@ -13,7 +12,6 @@ export interface MonitorPanelOptions {
   getConfig: () => ForgeConfig;
   getStats: () => ControlStats;
   getSecret: (name: string) => Promise<string | undefined>;
-  probeGpus?: (signal: AbortSignal) => Promise<GpuInfo[]>;
 }
 
 export class MonitorPanel implements vscode.Disposable {
@@ -40,7 +38,7 @@ export class MonitorPanel implements vscode.Disposable {
     this.panel.webview.html = buildMonitorHtml(options.extensionUri, this.panel.webview);
     this.pollers = createMonitorPollers({
       ...options,
-      post: (snapshot) => this.post({ type: 'monitorSnapshot', snapshot }),
+      post: (metrics) => this.post({ type: 'monitorMetrics', metrics }),
     });
     this.panel.webview.onDidReceiveMessage((raw: unknown) => {
       const message = raw as MonitorPanelToHost;
