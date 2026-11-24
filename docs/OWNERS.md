@@ -339,6 +339,7 @@ overlaps with an existing owner, extend the owner instead.
 | Concern                                       | Owner                                           |
 | --------------------------------------------- | ----------------------------------------------- |
 | Extension-scoped transport lifecycle          | `src/remote/RemoteRuntime.ts`                   |
+| The runtime's handoff wiring: coordinator, bundle, window watch | `src/remote/remoteRuntimeHandoffWiring.ts` |
 | A config reload that keeps the transports up  | `src/remote/remoteRuntimeInPlaceUpdate.ts`      |
 | Transport start/stop, lease takeover          | `src/remote/RemoteTransportManager.ts`          |
 | Telegram window reload reservation and `/reload` recovery | `src/remote/remoteReloadReservation.ts` |

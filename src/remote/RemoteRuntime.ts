@@ -12,7 +12,7 @@ import { RemoteAuditLog } from './RemoteAuditLog';
 import { RemoteAttachmentStore } from './RemoteAttachmentStore';
 import { RemoteTransportManager } from './RemoteTransportManager';
 import { type RemoteControllerOptionsDeps } from './remoteControllerOptions';
-import { RemoteHandoffCoordinator } from './RemoteHandoffCoordinator';
+import type { RemoteHandoffCoordinator } from './RemoteHandoffCoordinator';
 import { RemoteCompactionNoticeBuffers } from './compactionNoticeBuffer';
 import {
   canUpdateTransportsInPlace,
@@ -21,15 +21,13 @@ import {
 import { RemoteStartRetry } from './RemoteStartRetry';
 import {
   claimWorkspaceArrivals,
-  createAnnounceGate,
-  releaseTransportsAfterRollback,
   switchRemoteWorkspace,
   switchWorkspacePreflight,
   takeTransportsForActivation,
-  takeTransportsForRollback,
   type WorkspaceHandoffRuntimeDeps,
 } from './remoteWorkspaceSwitch';
-import { createRemoteWindowWatch, RemoteWindowWatch } from './RemoteWindowWatch';
+import { buildRemoteRuntimeHandoff } from './remoteRuntimeHandoffWiring';
+import type { RemoteWindowWatch } from './RemoteWindowWatch';
 import { buildRemoteValidationStatus } from './remoteValidationStatus';
 import { sendRemoteWorkspaceFile } from './remoteFileDelivery';
 import {
@@ -49,7 +47,12 @@ export type {
   RemoteChannelFactoryContext,
 };
 
-/** Extension-scoped, serially reconfigurable owner of all remote transports. */
+/**
+ * Extension-scoped, serially reconfigurable owner of all remote transports.
+ * Past the 350-line soft threshold by choice: it is the one owner of that
+ * lifecycle (`docs/OWNERS.md`), and every other seam in it is indirection
+ * rather than separation — see `docs/plans/REMOTE_RUNTIME_SPLIT_PLAN.md`.
+ */
 export class RemoteRuntime {
   private readonly auth: RemoteAuth;
   private readonly store: RemoteRequestStore;
@@ -106,54 +109,19 @@ export class RemoteRuntime {
       (controller) => this.compactionBuffers.onTransportStopped(controller),
       () => this.notifyStatus(),
     );
-    this.coordinator = new RemoteHandoffCoordinator({
-      store: this.store,
+    const { coordinator, handoff, windowWatch } = buildRemoteRuntimeHandoff({
+      options,
       storePath,
-      workspaceId: options.workspaceId,
-      serialize: (task) => this.enqueue(task),
-      claimArrivals: () => claimWorkspaceArrivals(this.handoff),
-      takeTransports: () => takeTransportsForRollback(this.handoff),
-      releaseTransports: () => releaseTransportsAfterRollback(this.handoff),
-      sendToChat: (channel, chatId, text) =>
-        this.manager
-          .get(channel)
-          ?.channel.send(chatId, text)
-          .then(() => undefined) ?? Promise.resolve(),
-      notifyLocal: options.notifyLocal,
-      ...(options.handoffWatch ?? {}),
-    });
-    this.handoff = {
       store: this.store,
       manager: this.manager,
-      coordinator: this.coordinator,
-      workspaceId: options.workspaceId,
-      ...(options.workspaceRoot ? { workspaceRoot: options.workspaceRoot } : {}),
-      host: options.host,
+      auth: this.auth,
+      serialize: (task) => this.enqueue(task),
       isDisposed: () => this.disposed,
       requestedConfig: () => this.requestedConfig,
-      activeTransports: () => this.manager.names(),
-      announceOnce: createAnnounceGate(),
-      totpEnrolled: (channel) => this.auth.totpEnrolled(channel),
-      notifyLocal: options.notifyLocal,
-      stopTransports: () => this.manager.stopActive(),
-      globalStoragePath: options.storageDirectory,
-      userConfigFileSetting: () => options.userConfigFileSetting?.() ?? undefined,
-      ...(options.openWorkspace ? { openWorkspace: options.openWorkspace } : {}),
-      ...(options.closeWindow ? { closeWindow: options.closeWindow } : {}),
-      ...(options.hasUnsavedEditors ? { hasUnsavedEditors: options.hasUnsavedEditors } : {}),
-    };
-    // The whole watch, deps included, is built in `RemoteWindowWatch.ts`: this
-    // file is at the ESLint line stop and the plan says the room for phase 3 has
-    // to come from extracting the runtime's bodies, not from widening them.
-    this.windowWatch = createRemoteWindowWatch({
-      handoff: this.handoff,
-      // Through the lifecycle chain, or a retry could interleave a second
-      // `startAll` over the active map and leak a lease.
-      serialize: (task) => this.enqueue(task),
-      ...(options.handoffWatch?.pollIntervalMs
-        ? { tickIntervalMs: options.handoffWatch.pollIntervalMs }
-        : {}),
     });
+    this.coordinator = coordinator;
+    this.handoff = handoff;
+    this.windowWatch = windowWatch;
   }
 
   /**
