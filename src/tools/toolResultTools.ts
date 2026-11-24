@@ -10,7 +10,7 @@ const MODE_GUIDANCE =
 function rawResult(
   messages: readonly ChatMessage[] | undefined,
   toolCallId: string,
-): { toolCallId: string; text: string } | undefined {
+): { toolCallId: string; text: string; matchedBy?: string } | undefined {
   const results =
     messages?.filter(
       (message) =>
@@ -28,8 +28,22 @@ function rawResult(
       typeof message.tool_call_id === 'string' && message.tool_call_id.startsWith(toolCallId),
   );
   const match = matches.length === 1 ? matches[0] : undefined;
-  return match && typeof match.tool_call_id === 'string' && typeof match.content === 'string'
-    ? { toolCallId: match.tool_call_id, text: match.content }
+  if (match && typeof match.tool_call_id === 'string' && typeof match.content === 'string') {
+    return { toolCallId: match.tool_call_id, text: match.content };
+  }
+  // A tool NAME where an id belongs: `{"tool_call_id": "read_file"}` (measured
+  // 2026-11-22, session cf3c7470-749c-4de5-b7ff-f4de886edc62.jsonl row 372,
+  // after the model had just read code with read_file). The name is what the
+  // model has, so answer it with the last result that tool produced and say so
+  // in the header — the id it read is named there, so nothing is hidden.
+  const byName = results.filter((message) => message.name === toolCallId);
+  const last = byName[byName.length - 1];
+  return last && typeof last.tool_call_id === 'string' && typeof last.content === 'string'
+    ? {
+        toolCallId: last.tool_call_id,
+        text: last.content,
+        matchedBy: `the most recent ${toolCallId} result`,
+      }
     : undefined;
 }
 
@@ -99,7 +113,8 @@ function readRange(args: Record<string, unknown>, context?: ToolHandlerContext):
     return `${clampNote}Tool result ${canonicalToolCallId}: requested offset ${range.offset} is beyond its ${text.length} characters.`;
   }
   const end = Math.min(text.length, range.offset + range.maxChars);
-  return `${clampNote}Tool result ${canonicalToolCallId}, chars ${range.offset}-${end} of ${text.length}:\n${text.slice(range.offset, end)}`;
+  const matched = result.matchedBy ? ` (${result.matchedBy})` : '';
+  return `${clampNote}Tool result ${canonicalToolCallId}${matched}, chars ${range.offset}-${end} of ${text.length}:\n${text.slice(range.offset, end)}`;
 }
 
 function readMessage(
@@ -287,7 +302,8 @@ export function makeReadToolResultTool(): RegisteredTool {
             tool_call_id: {
               type: 'string',
               minLength: 1,
-              description: 'Tool-result mode: exact ID or unique prefix (8+ characters).',
+              description:
+                'Tool-result mode: exact ID, unique prefix (8+ characters), or a tool name — its latest result is read.',
             },
             query: {
               type: 'string',

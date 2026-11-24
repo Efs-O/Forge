@@ -39,6 +39,38 @@ describe('a tool_call_id that misses', () => {
       'Tool result call-live, chars 0-20 of 20:\nthe live result text',
     );
   });
+
+  it('answers a tool NAME with that tool\'s most recent result, naming the id', async () => {
+    // Session cf3c7470-749c-4de5-b7ff-f4de886edc62.jsonl row 372: the model had
+    // just read code with read_file and asked for `{"tool_call_id":"read_file"}`
+    // — the name is the handle it has, not an id.
+    const named: ChatMessage[] = [
+      { role: 'tool', name: 'read_file', tool_call_id: 'call-old', content: 'first file text' },
+      { role: 'tool', name: 'read_file', tool_call_id: 'call-new', content: 'second file text' },
+      { role: 'tool', name: 'shell', tool_call_id: 'call-shell', content: 'exit 0' },
+    ];
+    const tool = makeReadToolResultTool();
+
+    expect(
+      await tool.handler(
+        { tool_call_id: 'read_file' },
+        { beforeMutate: () => undefined, conversationMessages: named },
+      ),
+    ).toBe(
+      'Tool result call-new (the most recent read_file result), chars 0-16 of 16:\nsecond file text',
+    );
+  });
+
+  it('refuses a tool name that produced no text result here', async () => {
+    const tool = makeReadToolResultTool();
+    const missed = String(
+      await tool.handler(
+        { tool_call_id: 'grep_search' },
+        { beforeMutate: () => undefined, conversationMessages: messages },
+      ),
+    );
+    expect(missed).toMatch(/^Error: no text tool result with call ID "grep_search"/u);
+  });
 });
 
 describe('read_tool_result shape recovery', () => {
@@ -86,7 +118,7 @@ describe('read_tool_result shape recovery', () => {
       'Search result limit (1 to 10); defaults to 6.',
     );
     expect(fn.parameters?.properties['tool_call_id']?.description).toBe(
-      'Tool-result mode: exact ID or unique prefix (8+ characters).',
+      'Tool-result mode: exact ID, unique prefix (8+ characters), or a tool name — its latest result is read.',
     );
     expect(fn.parameters?.properties['message_index']?.description).toBe(
       'Exact-message mode: zero-based conversation message index, including tool results.',
