@@ -166,7 +166,7 @@ export function makeApplyLineEditsTool(
       function: {
         name: 'apply_line_edits',
         description:
-          'Atomically apply non-overlapping replacements to one file using one-based inclusive line ranges; operations are applied in line order. Read the file first and copy the current lines of the range exactly into expected_text, one line per newline. replacement_text is the new text for that range ("" deletes it). Stale or out-of-range edits are rejected. Give start_line, end_line, or both; a missing one is derived from the number of lines in expected_text. The file goes at the top level once, not inside each operation.',
+          'Atomically apply non-overlapping replacements to one file using one-based inclusive line ranges; operations are applied in line order. Read the file first and copy the current lines of the range exactly into expected_text, one line per newline. replacement_text is the new text for that range ("" deletes it). Stale or out-of-range edits are rejected. Give start_line, end_line, or both; a missing one is derived from the number of lines in expected_text. The file goes at the top level once, not inside each operation. If operations arrives as text instead of an array, its escape slips are repaired and it is read as the array.',
         parameters: {
           type: 'object',
           properties: {

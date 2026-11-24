@@ -996,10 +996,12 @@ describe('manage_jobs — pre-approval refusal', () => {
     );
   });
 
-  it('refuses update with a string definition before checking job', () => {
-    expect(registry.invalidArgs(tool, { action: 'update', job: 'disk', definition: '{}' })).toBe(
-      'Error: manage_jobs: `update` needs `definition`, the job definition as a JSON object, not a string. Nothing ran.',
-    );
+  // 2026-11-25: `definition` as text is now read as the object the schema declares
+  // (src/tools/jsonArgumentRepair.ts), so `update` is no longer refused for its type.
+  it('reads a string update definition as the object it declares', () => {
+    const args: Record<string, unknown> = { action: 'update', job: 'disk', definition: '{}' };
+    expect(registry.invalidArgs(tool, args)).toBeUndefined();
+    expect(args['definition']).toEqual({});
   });
 
   it('refuses pause without a job', () => {

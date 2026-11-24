@@ -807,11 +807,12 @@ describe('ToolRegistry.invalidArgs refuses quoted JSON types', () => {
     },
   } as never);
 
-  it('refuses operations sent as a JSON string with the array example', () => {
-    expect(registry.invalidArgs(editTool, { operations: '[{"path":"scene.js"}]' })).toBe(
-      'Error: apply_line_edits: "operations" must be a JSON array, not a string. ' +
-        'Resend the call with operations as [].',
-    );
+  // 2026-11-25: text that parses is read as the declared array (jsonArgumentRepair.ts);
+  // only text that does not parse keeps a refusal, with the position named.
+  it('reads operations sent as a JSON string as the array', () => {
+    const args: Record<string, unknown> = { operations: '[{"path":"scene.js"}]' };
+    expect(registry.invalidArgs(editTool, args)).toBeUndefined();
+    expect(args['operations']).toEqual([{ path: 'scene.js' }]);
   });
 
   it('refuses malformed array JSON without repairing its backslashes', () => {
@@ -907,16 +908,15 @@ describe('an argument that swallowed the markup after it', () => {
     );
   });
 
-  it('does not diagnose a stringified array as a cut-off block', () => {
+  it('reads a pretty-printed array sent as text, and never calls it a cut-off block', () => {
     // The other mistake this could be confused with: a pretty-printed array sent
     // as a string, which can hold a `<` inside its own text.
     const tool = makeBoolTool('apply_line_edits', {
       operations: { type: 'array', items: { type: 'object' } },
     } as never);
-    expect(registry.invalidArgs(tool, { operations: '[\n  {"old_str": "a < b"}\n]' })).toBe(
-      'Error: apply_line_edits: "operations" must be a JSON array, not a string. ' +
-        'Resend the call with operations as [].',
-    );
+    const args: Record<string, unknown> = { operations: '[\n  {"old_str": "a < b"}\n]' };
+    expect(registry.invalidArgs(tool, args)).toBeUndefined();
+    expect(args['operations']).toEqual([{ old_str: 'a < b' }]);
   });
 
   it('quotes at most 120 characters of a runaway value', () => {

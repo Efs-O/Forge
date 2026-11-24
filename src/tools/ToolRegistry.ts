@@ -9,6 +9,7 @@ import {
 import { repairParameterMarkup } from './toolArgumentMarkup';
 import { applyArgumentRewrites, unknownArgumentRefusal } from './argumentAliases';
 import { editFileStringError } from './editsJsonError';
+import { repairDeclaredJsonArguments } from './jsonArgumentRepair';
 /** The declarations live in `toolContract.ts`; re-exported from here so every
  *  consumer that has always imported them from the registry keeps working. */
 export {
@@ -251,6 +252,13 @@ export class ToolRegistry {
         else if (lowercase === 'false') present[key] = false;
       }
     }
+    // An array or object argument that arrived as hand-written JSON text is the
+    // same call with one slip in it. Repair the three escape slips whose meaning
+    // is certain and re-read the text; the handler then gets the real value and
+    // the call runs. Everything else stays a refusal, with the position named.
+    // See `jsonArgumentRepair.ts` for the measurement and why the structural
+    // slips are not repaired.
+    repairDeclaredJsonArguments(parameters.properties, present);
     const preApproval = tool.refuseBeforeApproval?.(present, context);
     if (preApproval) return preApproval;
     if (name === 'edit_file') {

@@ -525,16 +525,18 @@ describe('the file named inside the operations', () => {
     expect(tool.mutation?.paths({ operations: [{ start_line: 1 }] })).toEqual([]);
   });
 
-  it('refuses operations sent as a JSON string and leaves the file unchanged', async () => {
+  // 2026-11-25: an `operations` argument that arrives as text is read as the array
+  // it declares (src/tools/jsonArgumentRepair.ts), so a call whose JSON was valid
+  // all along runs instead of being refused. Only text that does not parse keeps a
+  // refusal, and that one names the character position.
+  it('reads operations sent as a JSON string as the array, and writes nothing', async () => {
     const { tool, relative, file, cleanup } = fixture();
     try {
-      const message = new ToolRegistry().invalidArgs(tool, {
+      const args: Record<string, unknown> = {
         operations: JSON.stringify([{ path: relative, start_line: 1 }]),
-      });
-      expect(message).toBe(
-        'Error: apply_line_edits: "operations" must be a JSON array, not a string. ' +
-          'Resend the call with operations as [].',
-      );
+      };
+      expect(new ToolRegistry().invalidArgs(tool, args)).toBeUndefined();
+      expect(args['operations']).toEqual([{ path: relative, start_line: 1 }]);
       expect(fs.readFileSync(file, 'utf8')).toBe('one\ntwo\nthree\n');
     } finally {
       cleanup();
