@@ -92,6 +92,31 @@ function foldFindFilesPath(
 }
 
 /**
+ * `ask_user_1` is how a model numbers the question this tool calls `prompt`.
+ * Measured 2026-11-23 in session 6de9dc67-b750-424a-8a52-26678e98d6dc.jsonl row
+ * 1184: the call carried the question text under `ask_user_1` beside a real
+ * `options` list, so the text the user was meant to see was already on the wire
+ * and the call died on the key. Rewritten only when it is the only numbered key,
+ * its value is the question text, and `prompt` is absent — two numbered keys
+ * beside one option list is a disagreement about which options belong to which
+ * question, and `prompt` beside a numbered one is a disagreement about the text.
+ */
+function foldAskUserPromptKey(
+  properties: Record<string, unknown>,
+  present: Record<string, unknown>,
+): void {
+  if (!Object.hasOwn(properties, 'prompt') || present['prompt'] !== undefined) return;
+  const numbered = Object.keys(present).filter((key) => /^ask_user_\d+$/u.test(key));
+  if (numbered.length !== 1) return;
+  const key = numbered[0];
+  if (!key) return;
+  const value = present[key];
+  if (typeof value !== 'string' || value.trim() === '') return;
+  present['prompt'] = value;
+  delete present[key];
+}
+
+/**
  * Rename every wrong-but-equivalent key onto its declared argument, in place on
  * the live `args` object, so the handler and the schema checks both see the real
  * name. A key is rewritten only when its value is a string, the target is a
@@ -107,6 +132,7 @@ export function applyArgumentRewrites(
 ): void {
   if (typeof properties !== 'object' || properties === null) return;
   if (name === 'find_files') foldFindFilesPath(properties as Record<string, unknown>, present);
+  if (name === 'ask_user') foldAskUserPromptKey(properties as Record<string, unknown>, present);
   const rewrites = ARG_REWRITES[name];
   if (!rewrites) return;
   for (const [wrong, target] of Object.entries(rewrites)) {
