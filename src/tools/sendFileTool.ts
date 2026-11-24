@@ -14,13 +14,15 @@ import type { RegisteredTool, ToolHandlerContext } from './ToolRegistry';
 const PATH_REFUSAL =
   "Error: path must be in the workspace or this conversation's screenshot directory.";
 /**
- * The same refusal, for a path outside both roots. The mega-bench chat refused
- * seven renders this way in one run and improvised nothing: the plain refusal
- * names the rule but no way forward, and the files were one `cp` away.
+ * The same refusal, for a path outside every allowed root. The mega-bench chat
+ * refused seven renders this way in one run and improvised nothing: the plain
+ * refusal names the rule but no way forward, and the files were one `cp` away.
  */
 const OUTSIDE_REFUSAL =
-  "Error: path must be in the workspace or this conversation's screenshot directory. To send a " +
-  'file from elsewhere, copy it into the workspace first (for example with the shell tool) and send the copy.';
+  'Error: path must be in the workspace, a folder listed in extra_file_roots, or this ' +
+  "conversation's screenshot directory. To send a file from elsewhere, copy it into the " +
+  'workspace first (for example with the shell tool) and send the copy, or ask the user to add ' +
+  'its folder to extra_file_roots.';
 
 export interface SendFileDeps {
   notifications: UserNotificationService;
@@ -30,14 +32,23 @@ export interface SendFileDeps {
    * "did you mean" suggestion looks where generated images are actually saved.
    */
   getConfig?: () => ForgeConfig;
+  /**
+   * config.yaml `extra_file_roots` plus Forge's own folders, the same getter
+   * every file-writing tool is handed. The mega-bench chat had just read and
+   * written its renders under `N:/vs code apps/Blender` — a folder the owner
+   * sanctioned — and send_file refused all seven because it was the one tool
+   * that did not ask. A getter, so a config reload applies without re-register.
+   */
+  extraRoots?: () => readonly string[];
 }
 
 async function resolveFilePath(
   requestedPath: string,
   conversationId: string | undefined,
+  extraRoots: readonly string[],
 ): Promise<string | undefined> {
   try {
-    return await resolveRealWorkspacePath(requestedPath);
+    return await resolveRealWorkspacePath(requestedPath, undefined, { extraRoots });
   } catch {
     return resolveScreenshotFile(requestedPath, conversationId);
   }
@@ -134,10 +145,12 @@ async function missingWorkspaceFile(
   requestedPath: string,
   conversationId: string | undefined,
   imageOutputDir: string,
+  extraRoots: readonly string[],
 ): Promise<MissingWorkspaceFile | undefined> {
   try {
     const candidate = await resolveRealWorkspacePath(requestedPath, undefined, {
       allowMissing: true,
+      extraRoots,
     });
     try {
       await fs.stat(candidate);
@@ -155,7 +168,12 @@ async function missingWorkspaceFile(
       conversationId,
       imageOutputDir,
     );
-    return { relativePath, ...(suggestion ? { suggestion } : {}) };
+    // A file in an extra root is not under the workspace folder, so the
+    // relative form would read `../../renders/x.png`: name the real path there.
+    // The comparison is against `/` because `relativePath` is normalized above.
+    const shown =
+      relativePath === '..' || relativePath.startsWith('../') ? candidate : relativePath;
+    return { relativePath: shown, ...(suggestion ? { suggestion } : {}) };
   } catch {
     return undefined;
   }
@@ -168,7 +186,7 @@ export function makeSendFileTool(deps: SendFileDeps): RegisteredTool {
       function: {
         name: 'send_file',
         description:
-          "Send a file from the workspace (or this conversation's screenshot directory) to the remote chat watching this turn. Use for files produced by other means: Pillow composites, browser screenshots, reports, PDFs, markdown. render_html_to_image and generate_image deliver their own output automatically — use send_file for anything else. Send only files you created or the user asked for; the copy persists on Telegram's servers, so never send credentials, keys, or config.",
+          "Send a file from the workspace, from a folder listed in `extra_file_roots`, or from this conversation's screenshot directory to the remote chat watching this turn. Use for files produced by other means: Pillow composites, browser screenshots, reports, PDFs, markdown. render_html_to_image and generate_image deliver their own output automatically — use send_file for anything else. Send only files you created or the user asked for; the copy persists on Telegram's servers, so never send credentials, keys, or config.",
         parameters: {
           type: 'object',
           properties: {
@@ -176,7 +194,7 @@ export function makeSendFileTool(deps: SendFileDeps): RegisteredTool {
               type: 'string',
               minLength: 1,
               description:
-                'Workspace-relative path, or an absolute path inside this conversation’s screenshot directory.',
+                'Workspace-relative path, or an absolute path inside the workspace, an `extra_file_roots` folder, or this conversation’s screenshot directory.',
             },
             caption: {
               type: 'string',
@@ -206,12 +224,14 @@ export function makeSendFileTool(deps: SendFileDeps): RegisteredTool {
         return 'Error: caption must be text no longer than 1024 characters.';
       }
 
-      const absolute = await resolveFilePath(requestedPath, context?.conversationId);
+      const extraRoots = deps.extraRoots?.() ?? [];
+      const absolute = await resolveFilePath(requestedPath, context?.conversationId, extraRoots);
       if (!absolute) {
         const missing = await missingWorkspaceFile(
           requestedPath,
           context?.conversationId,
           deps.getConfig?.().image_generation?.output_dir ?? DEFAULT_IMAGE_OUTPUT_DIR,
+          extraRoots,
         );
         if (!missing) return OUTSIDE_REFUSAL;
         return (

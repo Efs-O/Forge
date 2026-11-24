@@ -181,7 +181,10 @@ import { makeMaximalRegistry } from '../support/maximalToolRegistry';
 // 2026-11-23: 68,457 (+4) after `load_tool_group`'s description stopped promising the
 // next tools array (true only in normal mode) and said the result explains how to call
 // its tools, which is true in both modes (tool_groups.schemas_in_result, Lane A).
-const MEASURED_CHARS = 68_435;
+// 2026-11-25: 68,531 (+96) after send_file said which roots a path may come from: the
+// scan refused a sanctioned sibling project seven times because the schema named only
+// the workspace and the screenshot directory.
+const MEASURED_CHARS = 68_531;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.

@@ -49,9 +49,18 @@ async function screenshotPath(conversationId: string, name: string): Promise<str
   return writeFile(path.join(home, '.forge', 'screenshots', conversationId, name));
 }
 
-function makeTool(deliverFile = vi.fn(async () => ({ kind: 'queued' as const, chats: 0 }))) {
+function makeTool(
+  deliverFile = vi.fn(async () => ({ kind: 'queued' as const, chats: 0 })),
+  extra: { extraRoots?: () => readonly string[] } = {},
+) {
   const service = { deliverFile } as unknown as UserNotificationService;
-  return { tool: makeSendFileTool({ notifications: service }), service };
+  return {
+    tool: makeSendFileTool({
+      notifications: service,
+      ...(extra.extraRoots ? { extraRoots: extra.extraRoots } : {}),
+    }),
+    service,
+  };
 }
 
 beforeEach(async () => {
@@ -167,19 +176,81 @@ describe('send_file', () => {
     }
   });
 
-  it('refuses paths outside both roots and names the way forward', async () => {
+  it('refuses paths outside every root and names the way forward', async () => {
     const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-outside-'));
     const file = await writeFile(path.join(outside, 'secret.txt'));
     const { tool } = makeTool();
     try {
       const result = await tool.handler({ path: file }, context('conv-a'));
       expect(result).toBe(
-        "Error: path must be in the workspace or this conversation's screenshot directory. " +
-          'To send a file from elsewhere, copy it into the workspace first (for example with the '
-          + 'shell tool) and send the copy.',
+        "Error: path must be in the workspace, a folder listed in extra_file_roots, or this " +
+          "conversation's screenshot directory. To send a file from elsewhere, copy it into the " +
+          'workspace first (for example with the shell tool) and send the copy, or ask the user to ' +
+          'add its folder to extra_file_roots.',
       );
     } finally {
       await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('sends a file from an extra_file_roots folder', async () => {
+    // The seven refusals this fixes: a Blender chat had just written its renders
+    // under `N:/vs code apps/Blender/renders/...`, a folder the owner has in
+    // `extra_file_roots` and every file tool reaches, and send_file refused all
+    // seven of them.
+    const renders = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-send-extra-'));
+    const file = path.join(renders, 'pagoda_look', 'corner.png');
+    try {
+      await writeFile(file);
+      const deliverFile = vi.fn(async () => ({ kind: 'queued' as const, chats: 1 }));
+      const { tool } = makeTool(deliverFile, { extraRoots: () => [renders] });
+
+      const result = await tool.handler({ path: file }, context('conv-a'));
+
+      expect(result).toBe('Queued corner.png for 1 remote chat(s).');
+      expect(deliverFile).toHaveBeenCalledWith(
+        expect.objectContaining({ imagePath: await fs.realpath(file) }),
+      );
+    } finally {
+      await fs.rm(renders, { recursive: true, force: true });
+    }
+  });
+
+  it('still refuses a junction inside an extra root that points past every root', async () => {
+    // The extra root widens where a file may come from; it does not widen what
+    // that folder can reach through a link. Same guard as the workspace arm.
+    const renders = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-send-extra-'));
+    const escaped = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-send-escaped-'));
+    try {
+      await writeFile(path.join(escaped, 'stolen.txt'));
+      await fs.symlink(escaped, path.join(renders, 'link'), 'junction');
+      const { tool } = makeTool(vi.fn(), { extraRoots: () => [renders] });
+
+      const result = await tool.handler(
+        { path: path.join(renders, 'link', 'stolen.txt') },
+        context('conv-a'),
+      );
+
+      expect(result).toContain('path must be in the workspace');
+    } finally {
+      await fs.rm(renders, { recursive: true, force: true });
+      await fs.rm(escaped, { recursive: true, force: true });
+    }
+  });
+
+  it('names a missing file in an extra root by its real path, not a ../ path', async () => {
+    const renders = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-send-extra-'));
+    try {
+      const { tool } = makeTool(vi.fn(), { extraRoots: () => [renders] });
+
+      const result = await tool.handler(
+        { path: path.join(renders, 'gone.png') },
+        context('conv-a'),
+      );
+
+      expect(result).toBe(`Error: no file at ${path.join(await fs.realpath(renders), 'gone.png')}`);
+    } finally {
+      await fs.rm(renders, { recursive: true, force: true });
     }
   });
 
@@ -345,6 +416,18 @@ describe('send_file', () => {
     expect(tool.definition.function.description).toContain(
       'Send only files you created or the user asked for',
     );
+  });
+
+  it('says in the schema which roots a path may come from', () => {
+    const { tool } = makeTool();
+    expect(tool.definition.function.description).toContain(
+      'from a folder listed in `extra_file_roots`',
+    );
+    const properties = tool.definition.function.parameters['properties'] as Record<
+      string,
+      { description?: string }
+    >;
+    expect(properties['path']?.description).toContain('an absolute path inside the workspace');
   });
 
   it('uses fetch permission without additional permissions', () => {
