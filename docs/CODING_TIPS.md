@@ -14,7 +14,7 @@
 ## RUN
 1. `npx eslint test/unit/x.test.ts` → "none of those TSConfigs include this file": the lint script is `eslint src webview-ui`, so tests have no typed-lint config. lint `src` only
 2. `npx tsc --noEmit` → checks `src` only: the root tsconfig excludes `webview-ui` and `test`. a webview-ui change needs `npx tsc --noEmit -p webview-ui/tsconfig.json`
-3. `npm run check:changed -- src/tools/webFetchSsrf.ts test/unit/WebFetchSsrf.test.ts` → imports cannot lead to the affected tests, so it runs the FULL suite and the known load class goes red on an unrelated commit. rerun those files alone and report it as contention
+3. `npm run check:changed -- <2 src> <2 test>` → `scripts/check-changed.mjs` counts every listed path as a code file, so 4 print `Full CI required: 4 code files changed (more than 3)`; the load class then goes red on an unrelated file. rerun that file alone and report contention
 4. `cwd: "n:/vs code/apps/Forge"` → `does not exist`: this workspace root has a space, `N:/vs code apps/Forge`. a typo'd cwd refuses the whole call, and a background one loses the job it was starting
 5. editing `src/` while `npm run ci` runs → its `build` step bundles the half-edited tree: `No matching export in "src/util/powershellScratchDir.ts" for import "powershellScratchEnv"` and `ci exit: 1` on a tree that is fine. finish the edits, then run the gate
 6. `npm run type-check` or `check:changed` in a shared tree → stops at the other lane's half-edited file, so the webview pass and tests never run. grep the log for your paths, then run `npx tsc -p webview-ui/tsconfig.json --noEmit` and `rg -l <file> test`'s tests yourself
@@ -22,6 +22,7 @@
 8. `python -m py_compile resources/skills/<skill>/scripts/*.py` → leaves `__pycache__/*.pyc` inside the shipped skill: `ShippedSkills.test.ts` and `MediaInspectSkill.test.ts` go red and `check-vsix-contents.mjs` refuses the `.pyc`. delete it before CI and before committing
 9. `curl https://cdn.jsdelivr.net/...` answering 200 here → `render_html_to_image` preview still times out at 10 s: this PC's IPv6 default route blackholes and DNS answers AAAA first. prove it with `curl -6` (6 s timeout) against `curl -4` (60 ms) before blaming `src/tools/webFetchSsrf.ts`
 10. moving a block of `src/sidebar/SendPipeline.ts` that already calls `deps.requestChains.run(chain, …)` into a module and wrapping the new call in `run` again → `Forge: request chain conv-1 is already running` thrown at the inner call. the wrapper moves with the block
+11. python reading a git blob with `subprocess(text=True)` → this PC's cp1253 turns `—` into mojibake, so a verbatim-move scan of `src/sidebar/ModelTurn.ts` against `git show` reports false differences. read bytes: `.stdout.decode("utf-8")`
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green and the tree stood still: never run `record-ci-pass.mjs` by hand — the `ci:steps` chain writes it
@@ -30,9 +31,10 @@
 4. another lane has package.json dirty and you edit the same file → their `git commit -- package.json` commits the worktree copy, so your line lands in THEIR commit (f994b9d4). Check `git status` before editing a shared manifest, or land yours first
 5. `npm run check:push` before the release tag exists → `no tag v0.17.207 locally`: `scripts/check-push.mjs` verifies `refs/tags/v<version>` locally, so `git tag v<ver>` comes before the push check; push the tag itself only after CI is green
 6. `git add docs/CODING_TIPS.md` while another lane's tips row sits uncommitted in it → your commit carries their row. back the file up, drop their row, commit, restore it byte-identically
+7. `write_file` left NUL bytes inside `test/unit/RemoteRequestOutcome.test.ts` → vitest passes but `git diff --cached --stat` prints `Bin 0 -> 4623 bytes`. count NULs before staging: `python -c "print(open(p,'rb').read().count(chr(0)))"`
 
 ## EDIT
-1. a rename lengthens an identifier, a call takes several arguments on one line, or I hand-split a `.then()` chain → the `prettier/prettier` gate fails at `.prettierrc` printWidth 100. fix: `npx prettier --write <src file>` before the gate
+1. a rename lengthens an identifier, a call takes several args on one line, I hand-split a `.then()`, or a moved block re-indents (6→2) → `prettier/prettier` fails at `.prettierrc` printWidth 100; prettier also joins lines the old indent split. fix: `npx prettier --write <src file>` first
 2. `apply_line_edits` on `docs/TOOL_COVERAGE.md` → `ToolHarness.test.ts` diffs it against a fresh generation and normalises only `Generated:`. restore_file it after a demo
 3. `npx prettier --write` on a test file → it rewrites lines nobody touched: `test/` is not prettier-clean. --write only the src files the gate lints
 4. an edit that grows a src file past 500 lines → eslint `max-lines` (`.eslintrc.json`) errors. check `wc -l <file>` first; move the code into a leaf module
