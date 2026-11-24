@@ -17,6 +17,7 @@
 10. `rg --include='*.ts'` or `grep --no-ignore` → unrecognized flag: each is the other tool's spelling. rg filters with `-g '*.ts'`; GNU grep has no ignore flag
 11. an `rg` pattern with a look-around (`(?=`, `(?!`, `(?<=`) → `look-around ... is not supported`. add `--pcre2`
 12. `grep --include` to skip a folder, or `grep -g` → `--include` filters names not dirs; `-g` is rg-only (`unknown option -- g`). exclude folders with rg `--glob '!dir/**'`
+13. `gh api -H ...raw ... | grep -n x` → prints nothing, and gh dies `write /dev/stdout: The pipe is being closed`; `grep` on the saved file can still find 0 where python counts 6. save with `> f.md`, then search it with python
 
 ## RUN
 1. `node -e '… /regex/ …'` under bash → quoting dies through bash → node → regex. use plain string comparisons, or a script file
@@ -85,6 +86,7 @@
 18. a function with a default parameter, tested for "no value" by calling it with an explicit `undefined` → the default takes it, so the test proves nothing. omit the argument, or pass a value that means none
 19. a `toContain` failure whose received value is a whole document (AI_SETUP.md, README) → the log holds the entire text (40 KB). grep the log for `- Expected` and the `test/…:NN:` line, never read the log whole
 20. a file-age test with `now = Date.now() + threshold + 1` → flaky on Windows: a new file's mtime can be stamped ahead of `Date.now()`, so the age lands under the threshold. give a whole threshold of margin, never 1 ms
+21. a control run whose "fixed" backup was copied AFTER the control edit → the restore brings the control back (lint: `Unexpected constant condition`). copy the file before the control edit, or restore from the known text
 
 ## PATHS
 1. `~/.forge/sessions/<short-id>.jsonl` → no such file: logs carry the full 8-4-4-4-12 chat id. resolve a short id with a prefix glob
