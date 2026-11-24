@@ -1,5 +1,12 @@
 # Forge — Recent Changes
 
+## 0.17.214
+
+**0.17.213 is released as 0.17.214.** 0.17.213 stopped before publishing, because a Windows test of
+Codex message delivery hung on GitHub's runner. That test now stops the delivery after 10 seconds,
+says whether the fake Codex ran, and retries twice. Only the test changed. Everything in 0.17.213
+below ships in this version.
+
 ## 0.17.213
 
 **Models get their earlier thinking back by default.** Forge now sends each earlier assistant turn's
