@@ -1,7 +1,14 @@
+import * as net from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MAX_WEB_FETCH_BYTES, makeWebFetchTool } from '../../src/tools/fetchTool';
 import { guardedFetchResource } from '../../src/tools/renderHtml/previewFetch';
 import type { ForgeConfig } from '../../src/config/types';
+import {
+  createPinnedAgent,
+  defaultPinnedFetch,
+  type ResolvedAddress,
+} from '../../src/tools/webFetchSsrf';
+import { listenLoopback } from '../support/listenLoopback';
 
 describe('web_fetch DNS SSRF protection', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -372,5 +379,74 @@ describe('web_fetch DNS SSRF protection', () => {
     expect(fetch.mock.calls.map(([url]) => url)).not.toContain(
       'https://inside.example.test/secret',
     );
+  });
+});
+
+// The guard vetted every DNS answer but the pinned connection was handed only
+// the first, which starves the failover `net.connect` does between addresses.
+// On a line whose IPv6 route blackholes that is total: every IPv6-first host
+// failed at the 10 s hop limit while its A record answered in 60 ms (measured
+// 2026-11-24 — `curl -6 https://cdn.jsdelivr.net/npm/three/package.json` timed
+// out, `curl -4` answered 200). These two cases run the real connector against
+// a loopback listener, so they need no network.
+describe('pinned connection (webFetchSsrf)', () => {
+  const init = (signal: AbortSignal): Parameters<typeof defaultPinnedFetch>[2] => ({
+    redirect: 'manual',
+    signal,
+    method: 'GET',
+    headers: {},
+  });
+
+  it('connects through a live vetted address when the first one is dead', async () => {
+    const sockets = new Set<net.Socket>();
+    const server = net.createServer((socket) => {
+      sockets.add(socket);
+      socket.on('close', () => sockets.delete(socket));
+      socket.end('HTTP/1.1 204 No Content\r\nconnection: close\r\n\r\n');
+    });
+    // Bound to 127.0.0.1 only, so ::1 on the same port is refused at once.
+    const port = await listenLoopback(server);
+    const vetted: ResolvedAddress[] = [
+      { address: '::1', family: 6 },
+      { address: '127.0.0.1', family: 4 },
+    ];
+    const agent = createPinnedAgent(new Map([['pinned.test', vetted]]));
+    try {
+      const response = await defaultPinnedFetch(
+        `http://pinned.test:${port}/`,
+        vetted[0] as ResolvedAddress,
+        init(AbortSignal.timeout(5_000)),
+        agent,
+      );
+      await response.body?.cancel();
+      expect(response.status).toBe(204);
+    } finally {
+      await agent.close();
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('refuses a host it was never given a vetted address for', async () => {
+    const agent = createPinnedAgent(new Map<string, ResolvedAddress[]>());
+    try {
+      // undici wraps any connector error as `TypeError: fetch failed`, so the
+      // refusal this test is about lives on `cause`.
+      const failure = await defaultPinnedFetch(
+        'http://unpinned.test/',
+        { address: '8.8.8.8', family: 4 },
+        init(AbortSignal.timeout(5_000)),
+        agent,
+      ).then(
+        () => undefined,
+        (err: unknown) => err as Error,
+      );
+      expect(failure).toBeInstanceOf(Error);
+      expect(String((failure as Error).cause ?? failure)).toMatch(
+        /no vetted address for unpinned\.test/i,
+      );
+    } finally {
+      await agent.close();
+    }
   });
 });

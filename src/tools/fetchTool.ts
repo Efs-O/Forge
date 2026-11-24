@@ -275,7 +275,7 @@ async function fetchPublicPage(
   hostGate?: (url: URL) => Promise<string | undefined>,
 ): Promise<{ response: Response; body: string; bytesRead: number; truncated: boolean }> {
   let currentUrl = url;
-  const pins = new Map<string, ResolvedAddress>();
+  const pins = new Map<string, ResolvedAddress[]>();
   const agent = createPinnedAgent(pins);
   try {
     for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop += 1) {
@@ -306,7 +306,9 @@ async function fetchPublicPage(
         }
       }
       const pinned = addresses[0] as ResolvedAddress;
-      pins.set(hostname, pinned);
+      // The agent is pinned to every vetted address, not just `pinned`, so a
+      // blackholed DNS answer cannot hang the hop while a live one sits unused.
+      pins.set(hostname, addresses);
       const response = await pinnedFetch(
         currentUrl,
         pinned,

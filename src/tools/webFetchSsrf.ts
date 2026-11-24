@@ -176,17 +176,34 @@ export function defaultPinnedFetch(
   } as unknown as Parameters<typeof undiciFetch>[1]) as unknown as Promise<Response>;
 }
 
-export function createPinnedAgent(pins: Map<string, ResolvedAddress>): Agent {
+/**
+ * Hand the connector EVERY address the guard vetted, not just the first one.
+ * `net.connect` fails over between the addresses a lookup returns (Happy
+ * Eyeballs), so a host whose first answer is blackholed still connects; given
+ * one address, it cannot. Handing one made every IPv6-first host unreachable
+ * on a line with a broken IPv6 route — `curl -6 https://cdn.jsdelivr.net/...`
+ * timing out while `curl -4` answered 200 in 60 ms, and the preview reporting
+ * `net::ERR_FAILED` after the 10 s hop limit (measured 2026-11-24). Nothing new
+ * is resolved here: the list is exactly what `blockedResolvedAddress` accepted.
+ */
+export function createPinnedAgent(pins: Map<string, ResolvedAddress[]>): Agent {
   return new Agent({
     connect: {
       lookup: (hostname, options, callback) => {
-        const pin = pins.get(hostname.toLowerCase());
-        if (!pin) {
+        const vetted = pins.get(hostname.toLowerCase());
+        if (!vetted || vetted.length === 0) {
           callback(new Error(`No vetted address for ${hostname}`), '', 0);
           return;
         }
-        if (options.all) callback(null, [{ address: pin.address, family: pin.family }]);
-        else callback(null, pin.address, pin.family);
+        if (options.all)
+          callback(
+            null,
+            vetted.map((pin) => ({ address: pin.address, family: pin.family })),
+          );
+        else {
+          const first = vetted[0] as ResolvedAddress;
+          callback(null, first.address, first.family);
+        }
       },
     },
   });

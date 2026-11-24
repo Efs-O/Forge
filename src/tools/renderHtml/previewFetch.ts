@@ -100,7 +100,9 @@ async function fetchResourceHop(
     if (reason) throw new ToolError(`web_fetch: ${reason}`);
   }
   const pinned = addresses[0] as ResolvedAddress;
-  const agent = createPinnedAgent(new Map([[hostname, pinned]]));
+  // Every vetted address goes to the agent, not just `pinned`: the connector
+  // fails over between them, so one dead answer cannot hang the hop.
+  const agent = createPinnedAgent(new Map([[hostname, addresses]]));
   try {
     const response = await (dependencies.fetch ?? defaultPinnedFetch)(
       url,
