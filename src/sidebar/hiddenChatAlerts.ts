@@ -17,6 +17,11 @@ export interface HiddenChatAlertDeps {
   };
   view(): vscode.WebviewView | undefined;
   switchConversation(id: string): void;
+  /** Whether this window is the one the owner is typing in. `WebviewView.visible`
+   *  says a view is part of the layout, not that anyone can see it: a card raised
+   *  while the owner sits in another window or another program is a card nobody
+   *  saw, and treating it as seen is how a blocking approval goes unnoticed. */
+  windowFocused(): boolean;
 }
 
 /** VS Code notifications for requests and outcomes belonging to off-screen chats. */
@@ -97,9 +102,16 @@ export class HiddenChatAlerts implements vscode.Disposable {
     const actions = conversationId ? ['Open chat'] : [];
     void vscode.window.showInformationMessage(message, ...actions).then((action) => {
       if (action !== 'Open chat' || !conversationId) return;
-      void vscode.commands.executeCommand('workbench.view.extension.forge-sidebar').then(() => {
-        this.deps.switchConversation(conversationId);
-      });
+      this.reveal(conversationId);
+    });
+  }
+
+  /** Bring the sidebar forward and show THIS chat in it, in that order: a reveal
+   *  that leaves another chat on screen shows the owner a chat they did not ask
+   *  about, and the card or question they have to answer is nowhere in it. */
+  private reveal(conversationId: string): void {
+    void vscode.commands.executeCommand('workbench.view.extension.forge-sidebar').then(() => {
+      this.deps.switchConversation(conversationId);
     });
   }
 
@@ -117,9 +129,7 @@ export class HiddenChatAlerts implements vscode.Disposable {
     const message = `${this.subject(conversationId)} needs your approval: ${event.toolName} ${target}`;
     void vscode.window.showWarningMessage(message, 'Show').then((action) => {
       if (action !== 'Show' || !conversationId) return;
-      void vscode.commands.executeCommand('workbench.view.extension.forge-sidebar').then(() => {
-        this.deps.switchConversation(conversationId);
-      });
+      this.reveal(conversationId);
     });
   }
 
@@ -137,6 +147,7 @@ export class HiddenChatAlerts implements vscode.Disposable {
   private isOnScreen(conversationId: string): boolean {
     return (
       this.deps.view()?.visible === true &&
+      this.deps.windowFocused() &&
       this.deps.sidebar().activeConversationId === conversationId
     );
   }

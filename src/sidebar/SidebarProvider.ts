@@ -206,6 +206,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       sidebar: () => this.sidebar,
       view: () => this.view,
       switchConversation: (id) => this.tabs.switch(id),
+      // `visible` says the view is in the layout; only this says the owner can
+      // see it, and a card raised while another window has focus is unseen.
+      windowFocused: () => vscode.window.state.focused,
     });
     this.hostFacade = createSidebarHostFacade({
       runtime,

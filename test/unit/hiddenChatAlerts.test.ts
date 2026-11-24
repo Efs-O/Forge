@@ -36,6 +36,7 @@ function fixture(onFinished?: NonNullable<ReturnType<typeof makeEvents>['onGener
   } = onFinished ? { onGenerationFinished: onFinished } : {};
   let active = 'visible';
   let visible = true;
+  let focused = true;
   const switchChat = vi.fn();
   const alerts = new HiddenChatAlerts({
     events,
@@ -53,6 +54,7 @@ function fixture(onFinished?: NonNullable<ReturnType<typeof makeEvents>['onGener
     }),
     view: () => ({ visible }) as vscode.WebviewView,
     switchConversation: switchChat,
+    windowFocused: () => focused,
   });
   return {
     alerts,
@@ -65,6 +67,9 @@ function fixture(onFinished?: NonNullable<ReturnType<typeof makeEvents>['onGener
     },
     setVisible: (value: boolean) => {
       visible = value;
+    },
+    setFocused: (value: boolean) => {
+      focused = value;
     },
   };
 }
@@ -116,6 +121,40 @@ describe('HiddenChatAlerts', () => {
     state.events.onGenerationFinished?.('model', 'long', undefined, 'completed');
     state.events.onTurnFailed?.(undefined, 'backend stopped');
     expect(toast).toHaveBeenCalledTimes(2);
+    state.alerts.dispose();
+  });
+
+  /** The measured incident (chat 14cd7203, 2026-11-24): a dangerous card opened
+   *  in a chat the owner was not looking at and was answered 1.3 s later with no
+   *  owner action. `WebviewView.visible` was true and the chat was the active tab,
+   *  so the old rule called the card seen — in another window, or another program,
+   *  nobody had seen anything. */
+  it('alerts for the active visible chat while the window itself is not focused', () => {
+    const state = fixture();
+    const toast = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    state.approval().requested({ conversationId: 'visible' });
+    expect(toast).not.toHaveBeenCalled();
+    state.setFocused(false);
+    state.approval().requested({ conversationId: 'visible' });
+    expect(toast).toHaveBeenCalledOnce();
+    state.alerts.dispose();
+  });
+
+  it('warns for an owner-only card in an unfocused window too', () => {
+    const state = fixture();
+    const warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined);
+    state.setActive('background');
+    state.setFocused(false);
+    state
+      .approval()
+      .waitingForOwner?.({
+        id: 'gate-1',
+        toolName: 'shell',
+        detail: 'rm -rf the build folder',
+        dangerous: true,
+        conversationId: 'background',
+      });
+    expect(warn).toHaveBeenCalledOnce();
     state.alerts.dispose();
   });
 

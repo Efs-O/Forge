@@ -125,6 +125,8 @@ export const window = {
   /** What showTextDocument was last called with, for tools that only open. */
   lastShown: undefined as { document: unknown; options?: unknown } | undefined,
   visibleTextEditors: [] as Array<{ document: { uri: { fsPath: string } } }>,
+  /** A test host is the window the owner is in. */
+  state: { focused: true, active: true, transient: false },
   tabGroups: { all: [] as Array<{ tabs: Array<{ input?: unknown }> }> },
   createOutputChannel: () => ({
     appendLine: () => undefined,
