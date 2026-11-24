@@ -1,6 +1,6 @@
 import { HtmlDocumentBoilerplateStripper } from '../llm/HtmlDocumentBoilerplateStripper';
 import { ThinkingChannelStripper } from '../llm/ThinkingChannelStripper';
-import type { ChatCompletionRequest, ToolCall } from '../llm/types';
+import type { ToolCall } from '../llm/types';
 import { StructuredOutputStripper } from '../tools/StructuredOutputParser';
 import { extractTextCalls } from '../tools/textCallDefinitions';
 import {
@@ -8,17 +8,11 @@ import {
   NATIVE_ONLY_PARSE_ERROR,
   textToolCallForms,
 } from '../tools/TextToolCallMode';
-import { MIN_ROUND_HEADROOM_TOKENS, reasoningReserve } from '../util/contextBudget';
 import { getLogger } from '../util/logger';
-import {
-  loopRecoveryNudge,
-  MAX_LOOP_RECOVERIES,
-  ToolLoopDetectedError,
-  ToolLoopGuard,
-} from './ToolLoopGuard';
 import { nudgeBrokenToolCall } from './brokenToolCallMarkup';
+import { RoundContextPlan } from './RoundContextPlan';
+import { RoundToolDispatch } from './RoundToolDispatch';
 import { StreamedAssistantTurn } from './StreamedAssistantTurn';
-import { buildRoundRequest } from './buildRoundRequest';
 import { sanitizeText, streamOnce } from './toolCallingStream';
 import type { ToolCallingLoopOptions, ToolCallingLoopResult } from './toolCallingLoopTypes';
 
@@ -28,13 +22,10 @@ import {
   asTruncation,
   CONTEXT_INPUT_EXHAUSTED_MESSAGE,
   CONTEXT_EXHAUSTED_MESSAGE,
-  contextExhaustionReason,
-  holdSchemaPropertiesUntilTruncation,
   isLlamaContextExhaustion,
   isNativeToolJsonParseError,
   serverReportedOutputRoom,
   MAX_MID_TURN_COMPACTIONS,
-  MID_TURN_COMPACTION_RESET_ROUNDS,
   MAX_ROUNDS_MESSAGE_PREFIX,
   OUTPUT_BUDGET_EXHAUSTED_NOTICE,
   earlyServerLengthStopNotice,
@@ -58,127 +49,22 @@ export async function runToolCallingLoop(
   options: ToolCallingLoopOptions,
 ): Promise<ToolCallingLoopResult> {
   let finalText = '';
-  let loopGuard = new ToolLoopGuard();
-  let loopRecoveries = 0;
-  let truncationRecoveries = 0;
-  // Sticky for the turn: the recovery's write + append chunks span several rounds,
-  // so once one call is cut off the held schema properties stay offered.
-  let truncatedThisTurn = false;
   let reasoningStopRetries = 0;
-  let midTurnCompactions = 0;
-  let lastCompactionRound = 0;
-  // Set when truncation retries ran out: the next round compacts or the turn fails.
-  let forceCompaction = false;
-  // The room a server's own context 400 stated; caps the retry of that round.
-  let serverRoom: number | undefined;
   const logger = getLogger();
+  // The turn's context budget: what the next round may send, and how many
+  // truncation recoveries and compactions it has spent. See `RoundContextPlan`.
+  const plan = new RoundContextPlan(options);
+  // One round's tool calls, and the repetition guard over their results.
+  // See `RoundToolDispatch`.
+  const toolRound = new RoundToolDispatch(options);
 
   for (let round = 0; round < options.maxRounds; round++) {
     options.signal.throwIfAborted();
-    // A recovery round runs with thinking off, so the reasoning reserve does
-    // not apply to it — see `contextExhaustionReason` and `suppressThinking`.
-    const suppressesThinking =
-      (truncationRecoveries > 0 || reasoningStopRetries > 0) &&
-      (options.canUseThinkingKwargs ?? false);
-    const toolDefinitions = holdSchemaPropertiesUntilTruncation(
-      options.getToolDefinitions(),
-      options.holdUntilTruncation,
-      truncatedThisTurn,
-    );
-    const offeredToolNames = toolDefinitions.map((definition) => definition.function.name);
-    const textDefs = options.getTextCallDefinitions?.() ?? [];
-    const measureOutput = (request: ChatCompletionRequest) => {
-      const budget = options.getOutputRoom?.(request.messages, request.tools ?? []);
-      const estimated = typeof budget === 'object' ? budget.outputRoom : budget;
-      return {
-        outputRoom:
-          serverRoom === undefined ? estimated : Math.min(serverRoom, estimated ?? serverRoom),
-        extraMarginTokens: typeof budget === 'object' ? budget.extraMarginTokens : 0,
-        sentForecast: typeof budget === 'object' ? budget.used : undefined,
-      };
-    };
-    const measure = () => {
-      const preparedResult = options.prepareMessages
-        ? options.prepareMessages([...options.messages])
-        : [...options.messages];
-      const messages = Array.isArray(preparedResult) ? preparedResult : preparedResult.messages;
-      // Measure the normalized messages/tools we will send, including fallback
-      // instructions, rather than the earlier prepared transcript.
-      const built = buildRoundRequest({
-        model: options.model,
-        prepared: messages,
-        toolDefinitions,
-        nativeTools: options.nativeTools,
-        stripAllTools: options.stripAllTools,
-        includeUsage: options.includeUsage,
-        maxOutputTokens: options.maxOutputTokens,
-        canUseThinkingKwargs: options.canUseThinkingKwargs,
-        suppressThinking: suppressesThinking,
-        outputRoom: undefined,
-      });
-      return {
-        built,
-        ...measureOutput(built.request),
-        ...(Array.isArray(preparedResult)
-          ? {}
-          : { rawUsed: preparedResult.rawUsed, trimmedUsed: preparedResult.trimmedUsed }),
-        trimAdvanced: !Array.isArray(preparedResult) && preparedResult.trimAdvanced,
-      };
-    };
-    let { built, outputRoom, extraMarginTokens, rawUsed, trimmedUsed, sentForecast, trimAdvanced } =
-      measure();
-    const exhaustion = (): string | undefined =>
-      contextExhaustionReason({
-        outputRoom,
-        extraMarginTokens,
-        reasoningReserve: reasoningReserve(options.model),
-        suppressesThinking,
-        truncationRecoveries,
-        minRoundHeadroom: MIN_ROUND_HEADROOM_TOKENS,
-      });
-    // Check context between rounds: post-turn compaction can miss a turn that
-    // grows from 60% to exhaustion before it ends.
-    if (round - lastCompactionRound >= MID_TURN_COMPACTION_RESET_ROUNDS) midTurnCompactions = 0;
-    if (options.compactMidTurn && midTurnCompactions < MAX_MID_TURN_COMPACTIONS) {
-      const exhausted = forceCompaction || exhaustion() !== undefined;
-      if (
-        await options.compactMidTurn({
-          exhausted,
-          rawUsed,
-          trimmedUsed,
-          sentForecast,
-          trimAdvanced,
-        })
-      ) {
-        midTurnCompactions++;
-        lastCompactionRound = round;
-        // Room changed, so a pending retry starts a fresh (thinking-off) streak.
-        truncationRecoveries = Math.min(truncationRecoveries, 1);
-        options.onMessagesChanged?.();
-        serverRoom = undefined;
-        ({
-          built,
-          outputRoom,
-          extraMarginTokens,
-          rawUsed,
-          trimmedUsed,
-          sentForecast,
-          trimAdvanced,
-        } = measure());
-      } else if (forceCompaction) {
-        throw new Error(CONTEXT_EXHAUSTED_MESSAGE);
-      }
-    } else if (forceCompaction) {
-      throw new Error(CONTEXT_EXHAUSTED_MESSAGE);
-    }
-    forceCompaction = false;
-    const refusal = exhaustion();
-    if (refusal) throw new Error(refusal);
-    // A recovery round must not re-think. Measured on a live turn, thinking ate
-    // ~4k tokens before the tool call even began — so the retry started with
-    // LESS room than the attempt that just failed, and cut at the identical
-    // byte. Spending the whole budget on the write is the point of the retry.
-    let request = applyOutputCap(built.request, outputRoom, extraMarginTokens);
+    const planned = await plan.preflight(round, reasoningStopRetries);
+    const { built, toolDefinitions, offeredToolNames, textDefs } = planned;
+    // `request` is reassigned below when a native tool call's JSON fails to
+    // parse and the round is re-streamed without tools.
+    let request = planned.request;
     let rawAssistant = '';
     let rawReasoning = '';
     const streamedAssistant = new StreamedAssistantTurn(options.messages);
@@ -224,16 +110,16 @@ export async function runToolCallingLoop(
       // remains authoritative. Convert its 400 into Forge's recoverable path
       // instead of surfacing a raw provider failure.
       const reportedRoom = serverReportedOutputRoom(err);
-      if (reportedRoom !== undefined && serverRoom === undefined) {
+      if (reportedRoom !== undefined && plan.serverRoom === undefined) {
         // Resend with the server's count; the pre-flight compacts if it is too thin.
-        serverRoom = reportedRoom;
+        plan.serverRoom = reportedRoom;
         continue;
       }
       if (isLlamaContextExhaustion(err) || reportedRoom !== undefined) {
-        if (!options.compactMidTurn || midTurnCompactions >= MAX_MID_TURN_COMPACTIONS) {
+        if (!options.compactMidTurn || plan.midTurnCompactions >= MAX_MID_TURN_COMPACTIONS) {
           throw new Error(CONTEXT_INPUT_EXHAUSTED_MESSAGE);
         }
-        forceCompaction = true;
+        plan.forceCompaction = true;
         continue;
       }
       // Truncation is checked first: it shares llama-server's parse-error
@@ -242,14 +128,14 @@ export async function runToolCallingLoop(
       // oversized output — the retry that turned one lost call into a lost turn.
       const truncation = asTruncation(err);
       if (truncation) {
-        truncatedThisTurn = true;
-        if (++truncationRecoveries > MAX_TRUNCATION_RECOVERIES) {
+        plan.truncatedThisTurn = true;
+        if (++plan.truncationRecoveries > MAX_TRUNCATION_RECOVERIES) {
           // Retrying in the same space failed; only more space can help. Let
           // the next round compact first, or fail there if it cannot.
-          if (!options.compactMidTurn || midTurnCompactions >= MAX_MID_TURN_COMPACTIONS) {
+          if (!options.compactMidTurn || plan.midTurnCompactions >= MAX_MID_TURN_COMPACTIONS) {
             throw new Error(CONTEXT_EXHAUSTED_MESSAGE);
           }
-          forceCompaction = true;
+          plan.forceCompaction = true;
         }
         // Deliberately NOT counted as a tool failure: running out of context is
         // not the model failing at tool calls, and repeated truncations used to
@@ -261,7 +147,7 @@ export async function runToolCallingLoop(
         options.messages.push(
           ...truncationRecoveryMessages(
             truncation,
-            truncationGuidance(truncation, outputRoom, options.writeChunkLimit),
+            truncationGuidance(truncation, plan.outputRoom, options.writeChunkLimit),
           ),
         );
         options.onMessagesChanged?.();
@@ -283,8 +169,8 @@ export async function runToolCallingLoop(
       thinking = options.stripThinkingChannels ? new ThinkingChannelStripper() : null;
       structured = new StructuredOutputStripper(forms);
       html = new HtmlDocumentBoilerplateStripper();
-      ({ outputRoom, extraMarginTokens } = measureOutput(built.fallbackRequest));
-      const fallbackRefusal = exhaustion();
+      const { outputRoom, extraMarginTokens } = plan.measureOutput(built.fallbackRequest);
+      const fallbackRefusal = plan.exhaustion();
       if (fallbackRefusal) throw new Error(fallbackRefusal);
       request = applyOutputCap(built.fallbackRequest, outputRoom, extraMarginTokens);
       streamed = await streamOnce(
@@ -297,8 +183,8 @@ export async function runToolCallingLoop(
     }
     // Only reached when the round streamed to completion — the truncation path
     // above continues. Recoveries are consecutive, so a good round clears them.
-    truncationRecoveries = 0;
-    serverRoom = undefined;
+    plan.truncationRecoveries = 0;
+    plan.serverRoom = undefined;
 
     const trailingTool = structured.flush();
     const trailingHtml = html.push(trailingTool) + html.flush();
@@ -337,61 +223,7 @@ export async function runToolCallingLoop(
     if (calls?.length) {
       // The retry produced real work, so the next round may think again.
       reasoningStopRetries = 0;
-      // Carry this round's reasoning on the tool-call turn. rawReasoning resets
-      // every round, so dropping it here discarded the model's thinking for every
-      // round that ended in a tool call — only the final round's survived, and
-      // the sidebar's reasoning bubbles collapsed to one when the turn ended.
-      // A model may narrate its next action before emitting the tool call. That
-      // commentary has already streamed into the sidebar, so retain it on the
-      // protocol turn as well; otherwise the next session sync replaces the
-      // live row with `content: null` and the visible text disappears.
-      streamedAssistant.completeToolCall(calls, assistantContent, assistantReasoning);
-      options.onMessagesChanged?.();
-      // A question is the boundary of this round. Keep any pre-question
-      // commentary in the transcript, but do not send it as a separate remote
-      // notification while the user is waiting for the question itself. Only a
-      // round that is *purely* a question suppresses the narration: a mixed
-      // round (e.g. write_file + ask_user) did real work the user should hear
-      // about, so its commentary still reaches remote surfaces.
-      const isQuestionOnlyRound = calls.every((call) => call.function.name === 'ask_user');
-      if (assistantContent.trim() && !isQuestionOnlyRound)
-        options.onRoundNarration?.(assistantContent);
-      const beforeDispatch = options.messages.length;
-      await options.dispatchToolCalls(calls, options.messages);
-      let recoverLoop = false;
-      try {
-        loopGuard.afterRound(calls, options.messages.slice(beforeDispatch), options.isMutatingTool);
-      } catch (error) {
-        if (error instanceof ToolLoopDetectedError && loopRecoveries < MAX_LOOP_RECOVERIES) {
-          loopRecoveries++;
-          loopGuard = new ToolLoopGuard();
-          options.messages.push({
-            role: 'user',
-            content: loopRecoveryNudge(error.message, MAX_LOOP_RECOVERIES - loopRecoveries),
-          });
-          recoverLoop = true;
-        } else {
-          if (error instanceof ToolLoopDetectedError) options.onRepeatedCall?.();
-          throw error;
-        }
-      } finally {
-        // The guard may prepend a warning to a tool result. Persist after that
-        // mutation so the session row matches the result the next request sees.
-        options.onMessagesChanged?.();
-      }
-      if (recoverLoop) continue;
-      const drained = await options.drainTells?.();
-      if (drained && drained.messages.length > 0) {
-        options.messages.push(...drained.messages);
-        options.onMessagesChanged?.();
-      }
-      // Settle always runs when present, even with no messages: a failing tell
-      // source yields no messages but still must surface its error, so the
-      // rethrow from settle cannot be skipped by an empty drain. When messages
-      // were pushed, persist ran above, so the claim is settled only once the
-      // injected turn is durable; if that persist threw we never reach here and
-      // the record stays `running` for the store's restart recovery.
-      await drained?.settle?.();
+      await toolRound.run(streamedAssistant, calls, assistantContent, assistantReasoning);
       continue;
     }
 

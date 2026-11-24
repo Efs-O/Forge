@@ -548,6 +548,8 @@ overlaps with an existing owner, extend the owner instead.
 | Cloud relay provider forwarding, header filtering and stream scrubbing | `src/llm/CloudRelayForward.ts` |
 | Local/cloud route classification             | `src/llm/ModelRouteClassifier.ts`            |
 | Shared native/fallback tool-calling loop     | `src/agent/ToolCallingLoop.ts`               |
+| Per-turn context budget: the round's measurement, mid-turn compaction, the exhaustion refusal | `src/agent/RoundContextPlan.ts` |
+| One round's tool calls: dispatch, repetition guard, tell drain | `src/agent/RoundToolDispatch.ts` |
 | Mid-turn tell inbox                          | `src/agent/MidTurnInbox.ts`                  |
 | Mid-turn tell composer (sidebar + remote)    | `src/agent/MidTurnTellDrain.ts`              |
 | Undelivered tells at turn end (batch, restore, Send now) | `src/sidebar/undeliveredTells.ts`     |
