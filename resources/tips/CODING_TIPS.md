@@ -87,6 +87,7 @@
 19. a `toContain` failure whose received value is a whole document (AI_SETUP.md, README) → the log holds the entire text (40 KB). grep the log for `- Expected` and the `test/…:NN:` line, never read the log whole
 20. a file-age test with `now = Date.now() + threshold + 1` → flaky on Windows: a new file's mtime can be stamped ahead of `Date.now()`, so the age lands under the threshold. give a whole threshold of margin, never 1 ms
 21. a control run whose "fixed" backup was copied AFTER the control edit → the restore brings the control back (lint: `Unexpected constant condition`). copy the file before the control edit, or restore from the known text
+22. `rejects.toThrow(/the real reason/)` on an undici `fetch` → the message is `fetch failed`: undici wraps every connector and custom-`lookup` error. assert on `err.cause`, or on the value from a `.then(()=>undefined,(e)=>e)`
 
 ## PATHS
 1. `~/.forge/sessions/<short-id>.jsonl` → no such file: logs carry the full 8-4-4-4-12 chat id. resolve a short id with a prefix glob
