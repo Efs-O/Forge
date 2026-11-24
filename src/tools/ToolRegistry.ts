@@ -1,6 +1,11 @@
 import type { ToolDefinition } from '../llm/types';
 import { recordNativeLazyTool } from './lazyToolGroups';
-import { advertisedValues, cutOffArgumentMismatch, missingArgumentError } from './toolErrorText';
+import {
+  advertisedValues,
+  brokenJsonArgumentMismatch,
+  cutOffArgumentMismatch,
+  missingArgumentError,
+} from './toolErrorText';
 import { repairParameterMarkup } from './toolArgumentMarkup';
 import { applyArgumentRewrites, unknownArgumentRefusal } from './argumentAliases';
 import { editFileStringError } from './editsJsonError';
@@ -346,6 +351,8 @@ export class ToolRegistry {
             : '';
         const cutOff = cutOffArgumentMismatch(name, key, expected, range, present[key]);
         if (cutOff) return cutOff;
+        const broken = brokenJsonArgumentMismatch(name, key, expected, present[key]);
+        if (broken) return broken;
         return (
           `Error: ${name}: "${key}" must be a JSON ${expected}${range}, not ${jsonTypeName(present[key])}. ` +
           `Resend the call with ${key} as ${example}.`

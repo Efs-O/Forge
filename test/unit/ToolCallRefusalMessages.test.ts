@@ -784,10 +784,30 @@ describe('ToolRegistry.invalidArgs refuses quoted JSON types', () => {
 
   it('refuses malformed array JSON without repairing its backslashes', () => {
     const value = String.raw`[{"prompt":"Use N:\vs code apps\Forge"}]`;
-    expect(registry.invalidArgs(askTool, { questions: value })).toBe(
-      'Error: ask_user: "questions" must be a JSON array, not a string. ' +
-        'Resend the call with questions as [].',
+    const message = registry.invalidArgs(askTool, { questions: value }) as string;
+    // Still refused, and the bad escape is not silently repaired: the refusal
+    // now points at the character it broke on instead of calling the value a
+    // string, which is what made the model resend the same broken text.
+    expect(message).toContain('"questions" was written as a JSON array but is not valid JSON');
+    expect(message).toContain(
+      // The model's own text, backslash and all, quoted around the break.
+      JSON.stringify(String.raw`[{"prompt":"Use N:\v`),
     );
+    expect(message).toContain('then resend the call with questions as one valid JSON array');
+    expect(message).not.toContain('must be a JSON array, not a string');
+  });
+
+  it('names where a broken array argument breaks instead of calling it a string', () => {
+    // Session 0dd5c224: a 2,616-character `operations` array one `]` short. The
+    // old sentence said "not a string" — untrue — and the retry was the same text.
+    const message = registry.invalidArgs(editTool, {
+      operations: '[{"path":"a.ts","start_line":1}',
+    }) as string;
+    expect(message).toContain('"operations" was written as a JSON array but is not valid JSON');
+    expect(message).toMatch(/The parser stopped at character \d+: /u);
+    expect(message).toContain('Check the brackets and quotes there');
+    expect(message).toContain('then resend the call with operations as one valid JSON array');
+    expect(message).not.toContain('must be a JSON array, not a string');
   });
 
   it('refuses quoted non-boolean strings using the JSON boolean example', () => {

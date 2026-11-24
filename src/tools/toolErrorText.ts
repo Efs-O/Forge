@@ -104,6 +104,57 @@ export function cutOffArgumentMismatch(
   );
 }
 
+/**
+ * The refusal for an argument the model wrote as a JSON array or object that is
+ * one bracket or quote short of parsing, so it arrived as a string.
+ *
+ * The type sentence calls this "not a string" mistake, and for half of these the
+ * model agrees with itself: it DID write an array, it just failed to close it.
+ * `apply_line_edits` was refused a 2,616-character `operations` this way on
+ * 2026-11-24 (session 0dd5c224) — one `]` short at the end, and the retry was
+ * the same text. So this names the character the parser stopped at and quotes
+ * the text around it: the mistake is visible without counting brackets by hand.
+ *
+ * Only a value that *looks* like the expected shape gets this sentence: a plain
+ * string such as `abc` is a quoted-string mistake, not a broken one, and a
+ * string that parses is the old mistake this replaced. Nothing is repaired here
+ * — the tool contract is unchanged, only the wording of the refusal.
+ */
+export function brokenJsonArgumentMismatch(
+  name: string,
+  key: string,
+  expected: string,
+  value: unknown,
+): string | undefined {
+  if (expected !== 'array' && expected !== 'object') return undefined;
+  if (typeof value !== 'string') return undefined;
+  if (!value.trimStart().startsWith(expected === 'array' ? '[' : '{')) return undefined;
+  let message: string;
+  try {
+    JSON.parse(value);
+    return undefined;
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+  const lead =
+    `Error: ${name}: "${key}" was written as a JSON ${expected} but is not valid JSON, so it ` +
+    'arrived as a string and nothing ran. ';
+  const at = /at position (\d+)/u.exec(message);
+  if (at === null) {
+    return (
+      `${lead}The parser said: ${message}. Check the brackets and quotes, then resend the call ` +
+      `with ${key} as one valid JSON ${expected}.`
+    );
+  }
+  const pos = Number(at[1]);
+  const near = JSON.stringify(value.slice(Math.max(0, pos - 60), pos + 1));
+  return (
+    `${lead}The parser stopped at character ${pos}: ${message}. The text just before that point ` +
+    `is ${near}. Check the brackets and quotes there, then resend the call with ${key} as one ` +
+    `valid JSON ${expected}.`
+  );
+}
+
 /** One issue from a Zod refusal, narrowed to the fields the sentences read. */
 interface ZodIssueLike {
   code?: unknown;
