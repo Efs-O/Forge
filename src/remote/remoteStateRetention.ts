@@ -24,3 +24,22 @@ export function pruneRemoteState(draft: RemoteStoreState, now = Date.now()): voi
   draft.workspaceHandoffs = draft.workspaceHandoffs.filter((item) => item.expiresAt >= now);
   pruneContactState(draft, cutoff, now);
 }
+
+/**
+ * The request table is capped: when it grows past `MAX_RECORDS`, drop the rows
+ * that can no longer do anything. A `queued` or `running` row is never
+ * removable, so the cap cannot strand work another window still owes. Moved
+ * verbatim out of `RemoteRequestStore.enqueue`, where it was the one retention
+ * rule not living with the rest; it still reassigns `draft.requests`, so the
+ * array the schema parse and the write see is the trimmed one.
+ */
+export function trimRequestsToRecordCap(draft: RemoteStoreState): void {
+  if (draft.requests.length > MAX_RECORDS) {
+    const removable = draft.requests.filter((item) =>
+      ['completed', 'failed', 'cancelled', 'unknown'].includes(item.state),
+    );
+    for (const old of removable.slice(0, draft.requests.length - MAX_RECORDS)) {
+      draft.requests = draft.requests.filter((item) => item.id !== old.id);
+    }
+  }
+}

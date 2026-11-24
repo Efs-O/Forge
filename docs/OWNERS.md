@@ -367,6 +367,8 @@ overlaps with an existing owner, extend the owner instead.
 | Pure remote question step state and transitions | `src/remote/RemoteQuestionSteps.ts` |
 | RFC 6238 generation/verification              | `src/remote/RemoteTotp.ts`                      |
 | Durable requests, bindings, cursors, outbox   | `src/remote/RemoteRequestStore.ts`              |
+| Request terminal outcome: row, reply, announce | `src/remote/remoteRequestOutcome.ts`           |
+| Age pruning and the request/outbox record caps  | `src/remote/remoteStateRetention.ts`            |
 | Host outbox notification draft mutation        | `src/remote/remoteOutboxDraft.ts`               |
 | Pure request and outbox health queries        | `src/remote/remoteStoreQueries.ts`              |
 | Remote owner command behavior                 | `src/remote/RemoteCommandHandler.ts`            |

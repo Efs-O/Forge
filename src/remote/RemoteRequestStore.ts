@@ -7,7 +7,6 @@ import type {
 } from './types';
 import {
   EMPTY_REMOTE_STATE,
-  MAX_RECORDS,
   RemoteStateSchema,
   type RemoteSelection,
   type RemoteStoreState,
@@ -42,7 +41,8 @@ import {
   removeSelection,
   replaceSelection,
 } from './RemoteSelectionState';
-import { pruneRemoteState } from './remoteStateRetention';
+import { pruneRemoteState, trimRequestsToRecordCap } from './remoteStateRetention';
+import { finishRequestInDraft, type RemoteRequestFinishPayload } from './remoteRequestOutcome';
 import { appendHostNotification, updateOutboxStates } from './remoteOutboxDraft';
 import { recoverDeadClaims, recoverInterruptedRemoteState } from './remoteClaimLiveness';
 import {
@@ -54,6 +54,7 @@ import {
 
 export { remoteDedupKey } from './remoteStoreQueries';
 
+/** One class, one shared durable file: past 350 lines everything here is the persistence boundary and the wrappers over the draft modules that own the transitions. */
 export class RemoteRequestStore {
   private state: RemoteStoreState = structuredClone(EMPTY_REMOTE_STATE);
   private mutationTail: Promise<void> = Promise.resolve();
@@ -295,14 +296,7 @@ export class RemoteRequestStore {
       if (draft.requests.some((item) => item.dedupKey === record.dedupKey)) return;
       draft.requests.push(record);
       inserted = true;
-      if (draft.requests.length > MAX_RECORDS) {
-        const removable = draft.requests.filter((item) =>
-          ['completed', 'failed', 'cancelled', 'unknown'].includes(item.state),
-        );
-        for (const old of removable.slice(0, draft.requests.length - MAX_RECORDS)) {
-          draft.requests = draft.requests.filter((item) => item.id !== old.id);
-        }
-      }
+      trimRequestsToRecordCap(draft);
     });
     return inserted;
   }
@@ -364,48 +358,9 @@ export class RemoteRequestStore {
   async finish(
     id: string,
     state: Extract<RemoteExecutionState, 'completed' | 'failed' | 'cancelled'>,
-    payload: {
-      finalText?: string;
-      error?: string;
-      notification: string;
-      announceConversationId?: string;
-      /** Deleted from the chat after the command-reply delay, like a transient reply. */
-      ephemeral?: boolean;
-      /** This turn's speed line; see `OutboxSchema`. It is never part of `text`. */
-      speedLine?: string;
-      telegramReply?: RemoteOutboxRecord['telegramReply'];
-    },
+    payload: RemoteRequestFinishPayload,
   ): Promise<void> {
-    await this.mutate((draft) => {
-      const request = draft.requests.find((item) => item.id === id);
-      if (!request) throw new Error(`Forge: remote request ${id} is missing.`);
-      request.state = state;
-      delete request.claimOwner;
-      request.updatedAt = Date.now();
-      if (payload.finalText) request.finalText = payload.finalText;
-      if (payload.error) request.error = payload.error;
-      draft.outbox.push({
-        id: randomUUID(),
-        requestId: request.id,
-        channel: request.channel,
-        chatId: request.chatId,
-        text: payload.notification,
-        state: 'pending',
-        attempts: 0,
-        updatedAt: Date.now(),
-        ...(payload.ephemeral ? { ephemeral: true } : {}),
-        ...(payload.speedLine ? { speedLine: payload.speedLine } : {}),
-        ...(payload.telegramReply ? { telegramReply: payload.telegramReply } : {}),
-      });
-      if (payload.announceConversationId) {
-        const binding = draft.bindings.find(
-          (item) => item.channel === request.channel && item.chatId === request.chatId,
-        );
-        if (binding && binding.conversationId === payload.announceConversationId) {
-          binding.announcedConversationId = payload.announceConversationId;
-        }
-      }
-    });
+    await this.mutate((draft) => finishRequestInDraft(draft, id, state, payload));
   }
 
   async markOutbox(id: string, state: RemoteOutboxRecord['state']): Promise<void> {
