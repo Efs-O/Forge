@@ -652,6 +652,7 @@ overlaps with an existing owner, extend the owner instead.
 | Hints appended to a command's result (PowerShell vs POSIX syntax, missing git identity) | `src/tools/commandHints.ts` |
 | Background-execution registry (~/.forge/background-execs/, reaped after a killed host) | `src/tools/backgroundRegistry.ts` |
 | Shell command classification (read-only/normal/dangerous/refused) | `src/tools/shellPolicy.ts` |
+| Shell grouping syntax scanned for nested commands: command substitution, backticks, brace and paren blocks | `src/tools/shellNestedBlocks.ts` |
 | Shell scripts read and added to command classification | `src/tools/shellScriptFiles.ts` |
 | Which token lists are read-only invocations (the program table + argument checks) | `src/tools/shellReadOnlyRules.ts` |
 | Shell program names and Git global-option tokens | `src/tools/shellCommandTokens.ts` |

@@ -19,6 +19,7 @@ import { firstOwnerOnlyRedirect } from './ownerPaths';
 import { commonFolderOf } from '../sidebar/approvalKeyGrammar';
 import { ownerOnlySetForGuard, ownerOnlyShellRule } from './shellOwnerRule';
 import { commandStartsElevation, scriptNestedCommands } from './shellScriptFiles';
+import { nestedShellCommands } from './shellNestedBlocks';
 import type { ForgeConfig } from '../config/types';
 
 type ShellClass = 'read_only' | 'normal' | 'dangerous' | 'refused';
@@ -91,91 +92,6 @@ export interface ShellClassification {
 
 function precedence(classification: ShellClass): number {
   return { read_only: 0, normal: 1, dangerous: 2, refused: 3 }[classification];
-}
-
-function findBalanced(
-  source: string,
-  start: number,
-  open: string,
-  close: string,
-  shell: ShellKind,
-): { value: string; end: number } | undefined {
-  let depth = 0;
-  let quote: string | undefined;
-  let escaped = false;
-  for (let index = start; index < source.length; index += 1) {
-    const char = source[index] ?? '';
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (quote) {
-      if (shell === 'bash' && char === '\\') escaped = true;
-      else if (char === quote) quote = undefined;
-      continue;
-    }
-    if (char === "'" || char === '"') {
-      quote = char;
-      continue;
-    }
-    if (char === open) depth += 1;
-    if (char === close && --depth === 0)
-      return { value: source.slice(start + 1, index), end: index };
-  }
-  return undefined;
-}
-
-function nestedShellCommands(command: string, shell: ShellKind): string[] {
-  const nested: string[] = [];
-  let quote: string | undefined;
-  let escaped = false;
-  for (let index = 0; index < command.length; index += 1) {
-    const char = command[index] ?? '';
-    const next = command[index + 1] ?? '';
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (quote === '"' && char === '$' && next === '(') {
-      // `"$(...)"` still runs its command in both shells.
-      const block = findBalanced(command, index + 1, '(', ')', shell);
-      if (block) (nested.push(block.value), (index = block.end));
-      continue;
-    }
-    if (shell === 'bash' && char === '`' && quote !== "'") {
-      const end = command.indexOf('`', index + 1);
-      if (end > index) (nested.push(command.slice(index + 1, end)), (index = end));
-      continue;
-    }
-    if (quote) {
-      if (shell === 'bash' && char === '\\') escaped = true;
-      else if (char === quote) quote = undefined;
-      continue;
-    }
-    if (char === "'" || char === '"') {
-      quote = char;
-      continue;
-    }
-    // bash: `${VAR}` and `{a,b}` expand words; only `{ cmd; }` groups commands.
-    if (shell === 'bash' && char === '{' && !/\s/u.test(next)) continue;
-    let opener = char;
-    let offset = index;
-    if (shell !== 'bash' && char === '$' && next === '(') {
-      opener = '(';
-      offset = index + 1;
-    } else if (shell !== 'bash' && char === '`' && next === '(') {
-      opener = '(';
-      offset = index + 1;
-    }
-    if (opener === '{' || opener === '(') {
-      const block = findBalanced(command, offset, opener, opener === '{' ? '}' : ')', shell);
-      if (block) {
-        nested.push(block.value);
-        index = block.end;
-      }
-    }
-  }
-  return nested;
 }
 
 export function classifyShellCommand(
