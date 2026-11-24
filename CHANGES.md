@@ -1,5 +1,19 @@
 # Forge — Recent Changes
 
+## 0.17.213
+
+**Models get their earlier thinking back by default.** Forge now sends each earlier assistant turn's
+thinking back to the model (as `reasoning_content`, with the template setting `preserve_thinking`)
+without any per-model flag. Before, a model entry without `sampling.preserve_thinking: true` forgot
+what it had concluded a round earlier and investigated again. This covers llama.cpp models and
+OpenAI-compatible servers on this machine, such as Strata and Maya. A remote OpenAI-compatible
+endpoint stays off, because strict cloud APIs reject the field; set `preserve_thinking: true` on it
+to turn it on. Set `preserve_thinking: false` on a model whose template handles earlier thinking
+badly. Named cloud providers (OpenRouter, OpenAI) and Ollama are unchanged.
+
+**The Blender skill test passes on Linux and macOS.** The test for BL-051 crashed before it ran on
+those systems. Only the test changed; the skill was never affected.
+
 ## 0.17.212
 
 **Forge Monitor reads llama.cpp and Strata stats in one panel.** Run **Forge: Open Monitor**. The
