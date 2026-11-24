@@ -62,6 +62,7 @@
 9. `old_str` for a line inside a template literal, typed with bare backticks → refused: not found. the file has them escaped: `\``. copy the physical line from the newest read, escapes and all
 10. `sed -i 'A,Bd'` with B on a block's closing brace → the blank line after the block stays, so its neighbours end up two blank lines apart. delete through B+1, or re-read the seam after the delete
 11. an `old_str` that ends in a trailing comma and a `new_str` that does not → the object or array literal loses its separator and the file stops compiling. end both on the same character
+12. `edit_file` `old_str` copied from a brief that quotes a JSDoc line with its leading ` * ` (` * endpoint gets it when…`), where that text sits mid-line on disk → refused: not found. anchor at the line's real start, or drop the ` * ` prefix and match the fragment alone
 
 ## TEST
 1. a harness that only emits calls, or a threshold measured by a script whose pair list differs from the gate's → the number certifies neither. dispatch the calls; measure with the gate's own list
