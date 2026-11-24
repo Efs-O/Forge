@@ -43,9 +43,15 @@ its place in the file:
    copied. In `renderMonitor` the state pills and the state sentence therefore follow the
    engine's own `live.state` alone, with no page-local "Loading"/"Unloading" guess — this
    panel cannot start or stop the model.
-5. **`Clear` stays client-side.** Strata also POSTs `metrics/reset` and re-polls; that
-   server call is gone. The button keeps Strata's `reqClearedAfter` cutoff, which hides
-   the rows already shown in this view.
+5. **`Clear` asks the host to reset the totals.** Strata's Clear hides the rows already
+   shown (`reqClearedAfter` — kept) and POSTs `metrics/reset` to its own server, then
+   re-polls (our patch db4d3018c, "Monitor Clear resets the Monitor totals"). Here the
+   button posts `{type:'monitorClear'}` and the host does the reset: for a Strata engine
+   the same `POST metrics/reset` against the base it already polls, for a llama.cpp engine
+   the rings `src/monitor/llamaMetricsShape.ts` owns. Either way the host answers with one
+   fresh reading, so the page repaints with the reset totals. A reset the engine refused
+   comes back as `clear_error` on the next reading and is said on the totals line — this
+   page has no toasts, so the failure has nowhere else to go.
 6. **Hide-when-absent** (added for the llama.cpp engine, so a card with no source is
    hidden instead of showing dashes): `gpu` hides when util, mem, temp and power are all
    absent; `vram` when both mem figures are absent; `temp` when `gpu_temp` is absent;
@@ -64,3 +70,11 @@ images, About, MCP, drawer and settings rules were not copied.
 `sprite.svg` — trimmed to the ten symbols used (`gpu`, `cpu`, `disk`, `thermometer`,
 `bolt`, `link`, `clock`, `gauge`, `layers`, `copy`). The `forge` and `close` icons are
 inline in `icon()` upstream, so they are not needed here.
+
+## Beside the vendored copy
+
+`webview-ui/monitor.html` carries one thing this folder does not: a header row with the
+Forge chip mark and the word `Forge`, using the vendored `.st-header` and
+`.st-header__brand` rules so it matches Strata's wordmark in weight, size and font. It is
+not clickable and has no tabs. The chip's orange is the one constant `--forge-chip`
+(`#E8912D`) in that file's own `<style>` block, so the vendored CSS stays a pure copy.

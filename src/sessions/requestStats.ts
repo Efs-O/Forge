@@ -65,6 +65,31 @@ export interface RequestCapture {
 
 export type RequestStatsHandler = (capture: RequestCapture) => void;
 
+/** Live readers that want every finished request without being the session-log writer
+ *  (today: the Monitor panel's request table). A Set, so one reader cannot displace
+ *  another, and a no-op when nothing is subscribed. */
+const captureSinks = new Set<RequestStatsHandler>();
+
+/** Subscribe to finished requests; the returned function unsubscribes. */
+export function subscribeRequestCaptures(sink: RequestStatsHandler): () => void {
+  captureSinks.add(sink);
+  return () => {
+    captureSinks.delete(sink);
+  };
+}
+
+/** Never throws: a live reader that failed must not cost the session log its row. */
+function notifyRequestCaptures(capture: RequestCapture): void {
+  if (captureSinks.size === 0) return;
+  for (const sink of captureSinks) {
+    try {
+      sink(capture);
+    } catch {
+      // A reader's failure is its own; the request already finished.
+    }
+  }
+}
+
 export interface RequestStatsReporter {
   complete(finishReason: string | null): void;
   fail(error: Error): void;
@@ -265,6 +290,9 @@ export function createRequestStatsReporter(input: {
         client: input.clientClock.finish(),
       },
     };
+    // Every finished request also reaches the live readers, whether or not this call
+    // site has a session-log writer: the Monitor's table reads the same rows.
+    notifyRequestCaptures(capture);
     if (!input.handler) return;
     try {
       input.handler(capture);

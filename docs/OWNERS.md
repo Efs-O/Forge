@@ -232,7 +232,7 @@ overlaps with an existing owner, extend the owner instead.
 | The gate ledger: one `gate` row per card, timeout, guard refusal | `src/sidebar/gateEventLog.ts` |
 | Replay-aware session-log row reading                 | `src/sessions/sessionLogRows.ts`         |
 | Per-request prompt-head fingerprint (`request_prefix` rows: hashes and counts, no text) | `src/sessions/requestFingerprint.ts` |
-| Per-request server/client stats (`request_stats` rows: numbers only) | `src/sessions/requestStats.ts` |
+| Per-request server/client stats (`request_stats` rows: numbers only), and the live-reader bus they also reach (`subscribeRequestCaptures`) | `src/sessions/requestStats.ts` |
 | Recovering the session-log write cursor after a window reload | `src/sessions/sessionCursor.ts` |
 | Per-turn server timings summed into one speed line, and the rule that a turn with no server timings gets no line | `src/sessions/turnSpeedTotals.ts` |
 | Opt-in request-body dump writes, pruning and conversation deletion | `src/sessions/requestDump.ts` |
@@ -310,6 +310,7 @@ overlaps with an existing owner, extend the owner instead.
 | Monitor panel HTML/CSP builder (inlines the sprite) | `src/monitor/monitorHtml.ts`               |
 | Monitor reading: poll and cancellation          | `src/monitor/monitorPollers.ts`                |
 | llama.cpp slots and Prometheus metrics          | `src/monitor/llamaServerStats.ts`              |
+| The `GET /metrics`-shaped document built for a llama.cpp engine (rings for history and requests) | `src/monitor/llamaMetricsShape.ts` |
 | Strata `GET /metrics` pass-through              | `src/monitor/strataStats.ts`                   |
 | NUT UPS client                                  | `src/monitor/nutClient.ts`                     |
 | LibreHardwareMonitor CPU sensors                | `src/monitor/lhmCpuStats.ts`                   |

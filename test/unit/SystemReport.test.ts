@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { parseNvidiaSmiCsv, parseWindowsProbe } from '../../src/system/systemProbes';
+import type { CpuInfo } from 'os';
+import {
+  createCpuLoadSampler,
+  parseNvidiaSmiCsv,
+  parseWindowsProbe,
+} from '../../src/system/systemProbes';
 import {
   buildVramProcesses,
   collectSystemReport,
@@ -57,6 +62,60 @@ describe('parseNvidiaSmiCsv', () => {
     expect(parsed[0].memoryUsedMb).toBeNull();
     expect(parsed[0].utilizationPercent).toBeNull();
     expect(parsed[0].memoryTotalMb).toBe(12288);
+  });
+
+  it('reads the power and PCIe fields the Monitor asks for', () => {
+    // Captured from this machine on 2026-11-24 with the full query.
+    const parsed = parseNvidiaSmiCsv(
+      '0, NVIDIA GeForce RTX 5060 Ti, 14633, 16311, 37, 49, 65.04, 153.00, 3, 3, 8',
+    );
+
+    expect(parsed[0]).toMatchObject({
+      powerDrawW: 65.04,
+      powerLimitW: 153,
+      pcieGenCurrent: 3,
+      pcieGenMax: 3,
+      pcieWidthCurrent: 8,
+    });
+  });
+
+  it('leaves the added fields absent for a six-field row, rather than zeroed', () => {
+    const parsed = parseNvidiaSmiCsv('0, NVIDIA GeForce RTX 3060, 0, 12288, 0, 42');
+
+    expect('powerDrawW' in parsed[0]).toBe(false);
+    expect('pcieWidthCurrent' in parsed[0]).toBe(false);
+  });
+});
+
+describe('createCpuLoadSampler', () => {
+  /** One core whose counters the test moves by hand. */
+  function core(state: { busy: number; idle: number }): CpuInfo {
+    return {
+      model: 'test',
+      times: { user: state.busy, nice: 0, sys: 0, idle: state.idle, irq: 0 },
+    } as unknown as CpuInfo;
+  }
+
+  it('names the share of cores busy between two readings, and nothing before that', () => {
+    const state = { busy: 100, idle: 100 };
+    const sampler = createCpuLoadSampler(() => [core(state)]);
+
+    // A rate needs two readings: the first says "unknown", not 0 %.
+    expect(sampler.sample()).toBeNull();
+    state.busy += 30;
+    state.idle += 70;
+    expect(sampler.sample()).toBeCloseTo(30);
+    // Counters that did not move are still unknown, never a plausible 0 %.
+    expect(sampler.sample()).toBeNull();
+  });
+
+  it('stays null when a core reports counters that went backwards', () => {
+    const state = { busy: 100, idle: 100 };
+    const sampler = createCpuLoadSampler(() => [core(state)]);
+    sampler.sample();
+    state.busy = 10;
+    state.idle = 10;
+    expect(sampler.sample()).toBeNull();
   });
 });
 

@@ -43,6 +43,7 @@ export class MonitorPanel implements vscode.Disposable {
     this.panel.webview.onDidReceiveMessage((raw: unknown) => {
       const message = raw as MonitorPanelToHost;
       if (message.type === 'ready' && this.panel.visible) this.pollers.start();
+      else if (message.type === 'monitorClear') this.pollers.clear();
     });
     this.panel.onDidChangeViewState(({ webviewPanel }) => {
       if (webviewPanel.visible) this.pollers.start();

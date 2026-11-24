@@ -117,6 +117,20 @@ describe('Monitor readers', () => {
     );
   });
 
+  it('carries the Forge header row: the chip mark and the word, nothing clickable', () => {
+    const html = readFileSync('webview-ui/monitor.html', 'utf8');
+    expect(html).toContain('<header class="st-header">');
+    expect(html).toContain('<span class="st-header__brand">Forge</span>');
+    // The chip is inlined so the CSP needs no image source, and one constant colours it.
+    expect(html).toContain('--forge-chip: #E8912D');
+    expect(html).toContain('class="forge-header__mark"');
+    expect(html).toContain('fill="currentColor"');
+    // No tabs, no links: the header is a wordmark, not a navigation strip.
+    expect(html).not.toContain('st-tabs');
+    expect(html).not.toContain('role="tablist"');
+    expect(html.slice(0, html.indexOf('<div class="monitor">'))).not.toContain('<a ');
+  });
+
   it('ships Strata MIT and OFL next to the vendored page', () => {
     expect(readFileSync(`${VENDOR}/LICENSE`, 'utf8').startsWith('MIT License')).toBe(true);
     const fonts = readFileSync(`${VENDOR}/fonts/OFL.txt`, 'utf8');

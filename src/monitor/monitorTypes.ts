@@ -42,9 +42,12 @@ export interface MetricsDocument {
   ups?: Record<string, unknown> | null;
   /** Set instead of metrics when there is nothing to show, so the page can say why. */
   error?: string;
+  /** Set on the reading that follows a Clear whose reset the engine refused, so the page
+   *  can say the totals did not reset instead of swallowing the failure. */
+  clear_error?: string;
   [key: string]: unknown;
 }
-export type MonitorPanelToHost = { type: 'ready' };
+export type MonitorPanelToHost = { type: 'ready' } | { type: 'monitorClear' };
 export type MonitorHostToPanel = { type: 'monitorMetrics'; metrics: MetricsDocument };
 
 export function noStatsReaderMessage(model: string): string {

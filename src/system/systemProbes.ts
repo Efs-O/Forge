@@ -39,6 +39,15 @@ export interface GpuInfo {
   memoryTotalMb: number | null;
   utilizationPercent: number | null;
   temperatureC: number | null;
+  /** Watts now, and the card's power limit. `null` means the driver would not
+   *  say (`[N/A]`), which is not the same as a card drawing no watts. */
+  powerDrawW?: number | null;
+  powerLimitW?: number | null;
+  /** The PCIe link: the generation in use, the generation the slot can do, and
+   *  the lane width in use. Read by the Monitor's PCIe card. */
+  pcieGenCurrent?: number | null;
+  pcieGenMax?: number | null;
+  pcieWidthCurrent?: number | null;
 }
 
 interface VramSample {
@@ -70,7 +79,9 @@ export interface WindowsProbe {
 
 // ── nvidia-smi ────────────────────────────────────────────────────────────────
 
-const NVIDIA_SMI_QUERY = 'index,name,memory.used,memory.total,utilization.gpu,temperature.gpu';
+const NVIDIA_SMI_QUERY =
+  'index,name,memory.used,memory.total,utilization.gpu,temperature.gpu,power.draw,power.limit,' +
+  'pcie.link.gen.current,pcie.link.gen.max,pcie.link.width.current';
 
 function parseNumericField(raw: string): number | null {
   const value = Number(raw);
@@ -96,6 +107,17 @@ export function parseNvidiaSmiCsv(stdout: string): GpuInfo[] {
       memoryTotalMb: parseNumericField(cells[3]),
       utilizationPercent: parseNumericField(cells[4]),
       temperatureC: parseNumericField(cells[5]),
+      // The extra fields are read positionally, so a row from an older six-field
+      // query still parses: they stay absent rather than becoming a zero.
+      ...(cells.length > 6
+        ? {
+            powerDrawW: parseNumericField(cells[6]),
+            powerLimitW: parseNumericField(cells[7]),
+            pcieGenCurrent: parseNumericField(cells[8]),
+            pcieGenMax: parseNumericField(cells[9]),
+            pcieWidthCurrent: parseNumericField(cells[10]),
+          }
+        : {}),
     });
   }
   return gpus;
@@ -130,6 +152,48 @@ export function describeProbeFailure(err: unknown): string {
     return `${err.program} is not on PATH`;
   }
   return err instanceof Error ? err.message : String(err);
+}
+
+// ── CPU load ─────────────────────────────────────────────────────────────────
+
+export interface CpuLoadSampler {
+  /** Percent of all cores busy since the last call. `null` the first time and
+   *  whenever the counters did not move: a rate needs two readings, and the
+   *  Monitor hides a card rather than drawing a measured zero it did not make. */
+  sample(): number | null;
+}
+
+/**
+ * Percent of CPU busy, from the per-core counters Node exposes. Stateful by
+ * design: call it once per poll and keep the sampler between polls.
+ */
+export function createCpuLoadSampler(cpus: () => os.CpuInfo[] = () => os.cpus()): CpuLoadSampler {
+  let previous: { busy: number; total: number } | undefined;
+  return {
+    sample(): number | null {
+      let busy = 0;
+      let total = 0;
+      for (const cpu of cpus()) {
+        const times = cpu.times;
+        const idle = times.idle;
+        const irq = times.irq ?? 0;
+        const nice = times.nice ?? 0;
+        const values = [times.user, times.sys, idle, irq, nice];
+        if (values.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
+          return null;
+        }
+        busy += times.user + times.sys + irq + nice;
+        total += times.user + times.sys + idle + irq + nice;
+      }
+      const before = previous;
+      previous = { busy, total };
+      if (!before || total <= before.total) return null;
+      const busyDelta = busy - before.busy;
+      const totalDelta = total - before.total;
+      if (busyDelta < 0 || totalDelta <= 0) return null;
+      return Math.min(100, Math.max(0, (100 * busyDelta) / totalDelta));
+    },
+  };
 }
 
 // ── Windows performance counters + CIM ────────────────────────────────────────

@@ -942,7 +942,11 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept, forge
   all.hidden = kept <= 12;
   all.textContent = reqShowAll ? "Show fewer" : `Show all (${kept})`;
   $("req-wrap").classList.toggle("all", reqShowAll);
-  $("req-totals").textContent = renderTotals(totals);
+  // Forge: a Clear the engine refused says so here, beside the totals it did not reset.
+  const totalsLine = renderTotals(totals);
+  const clearNote = lastMetrics && lastMetrics.clear_error
+    ? `${totalsLine ? " · " : ""}totals not reset: ${lastMetrics.clear_error}` : "";
+  $("req-totals").textContent = totalsLine + clearNote;
   renderStats(eng, hw, st, h, visibleRequests, totals, forge, ups, totalsReset);
 }
 
@@ -952,11 +956,14 @@ function facts(el, rows) {
 }
 
 $("req-all").addEventListener("click", () => { reqShowAll = !reqShowAll; if (lastMetrics) render(lastMetrics); });
-// Forge: Strata's Clear also POSTs metrics/reset to its own server and re-polls.
-// The host owns the fetch here, so the button keeps only what it does to this
-// view: the client-side cutoff (reqClearedAfter) that hides the rows already shown.
+// Forge: Strata's Clear hides the rows already shown and POSTs metrics/reset so the
+// totals start again (our patch db4d3018c). This panel has no server of its own, so the
+// host does the reset — for a Strata engine against the /metrics base it already polls,
+// for a llama.cpp engine the rings behind the shaped document — and answers with a fresh
+// reading, which repaints the page. A reset the engine refused comes back as clear_error.
 $("req-clear").addEventListener("click", () => {
   const rows = lastMetrics && Array.isArray(lastMetrics.requests) ? lastMetrics.requests : [];
   reqClearedAfter = rows.length ? Math.max(...rows.map((r) => r.time)) : Date.now() / 1000;
   if (lastMetrics) render(lastMetrics);
+  vscode.postMessage({type: "monitorClear"});
 });

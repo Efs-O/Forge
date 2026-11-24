@@ -103,6 +103,25 @@ function stubMetricsFetch(signals: AbortSignal[], body: unknown = METRICS) {
   return fetchImpl;
 }
 
+/** A fetch that answers the panel's `/metrics` read and records the reset POST beside it. */
+function stubResetFetch(
+  signals: AbortSignal[],
+  reset: { status: number; body?: string } = { status: 200, body: '{}' },
+): { calls: Array<{ url: string; init: Record<string, unknown> }> } {
+  const calls: Array<{ url: string; init: Record<string, unknown> }> = [];
+  const fetchImpl = vi.fn((url: string, init?: Record<string, unknown>) => {
+    const signal = init?.signal as AbortSignal | undefined;
+    if (signal) signals.push(signal);
+    if (init?.method === 'POST') {
+      calls.push({ url, init });
+      return Promise.resolve(new Response(reset.body ?? '', { status: reset.status }));
+    }
+    return Promise.resolve(new Response(JSON.stringify(METRICS), { status: 200 }));
+  }) as unknown as typeof fetch;
+  vi.stubGlobal('fetch', fetchImpl);
+  return { calls };
+}
+
 afterEach(() => {
   MonitorPanel.current?.dispose();
   state.panel = undefined;
@@ -114,6 +133,42 @@ afterEach(() => {
 });
 
 describe('MonitorPanel lifecycle', () => {
+  it('Clear posts metrics/reset once, then repaints with the engine numbers', async () => {
+    const { context, options, signals } = setup();
+    const reset = stubResetFetch(signals);
+    MonitorPanel.createOrShow(context, options);
+    state.onState?.({ webviewPanel: { visible: true } });
+    await vi.waitFor(() => expect(postedMessages(state.panel).length).toBeGreaterThan(0));
+    const before = postedMessages(state.panel).length;
+    state.onMessage?.({ type: 'monitorClear' });
+    await vi.waitFor(() => expect(reset.calls).toHaveLength(1));
+    expect(reset.calls[0]?.url).toBe('http://127.0.0.1:8091/metrics/reset');
+    expect(reset.calls[0]?.init.method).toBe('POST');
+    expect(reset.calls[0]?.init.body).toBe('{}');
+    expect((reset.calls[0]?.init.headers as Record<string, string>)['Content-Type']).toBe(
+      'application/json',
+    );
+    // The repaint: a fresh reading arrives without waiting for the next poll tick.
+    await vi.waitFor(() => expect(postedMessages(state.panel).length).toBeGreaterThan(before));
+    expect(reset.calls).toHaveLength(1);
+  });
+
+  it('shows a reset the engine refused instead of swallowing it', async () => {
+    const { context, options, signals } = setup();
+    stubResetFetch(signals, { status: 500, body: 'nope' });
+    MonitorPanel.createOrShow(context, options);
+    state.onState?.({ webviewPanel: { visible: true } });
+    await vi.waitFor(() => expect(postedMessages(state.panel).length).toBeGreaterThan(0));
+    state.onMessage?.({ type: 'monitorClear' });
+    await vi.waitFor(() =>
+      expect(
+        postedMessages(state.panel)
+          .map((message) => message.metrics?.clear_error)
+          .some((value) => value === 'The server answered 500: nope'),
+      ).toBe(true),
+    );
+  });
+
   it('uses one panel instance and hiding clears timers and aborts the read in flight', async () => {
     vi.useFakeTimers();
     const { context, options, signals } = setup();
@@ -145,11 +200,14 @@ describe('MonitorPanel lifecycle', () => {
     const opened = MonitorPanel.createOrShow(context, options);
     state.onState?.({ webviewPanel: { visible: true } });
     await vi.waitFor(() => expect(signals.length).toBeGreaterThan(0));
+    // The panel is also listening for Forge's own finished requests, for the table.
+    expect(diagnosticsOf(opened).capturing).toBe(true);
     opened.dispose();
     expect(signals[0].aborted).toBe(true);
     const diagnostics = diagnosticsOf(opened);
     expect(diagnostics.timers).toBe(0);
     expect(diagnostics.controllers).toHaveLength(0);
+    expect(diagnostics.capturing).toBe(false);
     expect(MonitorPanel.current).toBeUndefined();
   });
 
@@ -218,10 +276,14 @@ function postedMessages(
     .filter((value) => value !== undefined);
 }
 
-function diagnosticsOf(panel: unknown): { timers: number; controllers: AbortController[] } {
+function diagnosticsOf(
+  panel: unknown,
+): { timers: number; controllers: AbortController[]; capturing: boolean } {
   return (
     panel as unknown as {
-      pollers: { diagnostics(): { timers: number; controllers: AbortController[] } };
+      pollers: {
+        diagnostics(): { timers: number; controllers: AbortController[]; capturing: boolean };
+      };
     }
   ).pollers.diagnostics();
 }
