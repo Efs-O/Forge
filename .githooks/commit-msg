@@ -1,0 +1,7 @@
+#!/bin/sh
+# The Fix-level gate for a new commit: a fix(tools) or fix(prompt) commit must
+# name the level that removed the cause (CLAUDE.md § "Tool errors: fix the
+# cause"). Install once per clone with:
+#   git config core.hooksPath .githooks
+# See scripts/check-push.mjs for what it refuses and why.
+node scripts/check-push.mjs --commit-msg "$1"

@@ -52,7 +52,9 @@ describe('push hygiene gate', () => {
     });
   }
 
-  const good = 'fix(tools): a saved file waits for its lock\n\nCo-Authored-By: Forge <forge@evolvlabs.dev>';
+  // A `fix(tools)` subject carries a Fix-level line, as the rule below requires.
+  const good =
+    'fix(tools): a saved file waits for its lock\n\nFix-level: shape\n\nCo-Authored-By: Forge <forge@evolvlabs.dev>';
 
   it('accepts a shaped subject with exactly one Forge trailer', () => {
     repoWith(good);
@@ -97,8 +99,8 @@ describe('push hygiene gate', () => {
     ['a subject ending in a period', 'fix(tools): saves the file.', 'ends with a period'],
     ['work-in-progress anywhere', 'fix: wip the save path', 'work-in-progress'],
     ['a review-process subject', 'fix(tools): review fixes for the save path', 'names the process'],
-    ['no Forge trailer', 'fix(tools): a saved file waits for its lock', 'found 0'],
-    ['two Forge trailers', `${good}\n${'Co-Authored-By: Forge <forge@evolvlabs.dev>'}`, 'found 2'],
+    ['no Forge trailer', 'fix(tools): a saved file waits for its lock', 'Co-Authored-By: Forge <forge@evolvlabs.dev>` trailer, found 0'],
+    ['two Forge trailers', `${good}\n${'Co-Authored-By: Forge <forge@evolvlabs.dev>'}`, 'Co-Authored-By: Forge <forge@evolvlabs.dev>` trailer, found 2'],
     ['the trailer not last', 'fix(tools): a saved file\n\nCo-Authored-By: Forge <forge@evolvlabs.dev>\n\nNote after it.', 'last line'],
   ])('refuses %s', (_name, message, needle) => {
     repoWith(message);
@@ -133,5 +135,114 @@ describe('push hygiene gate', () => {
     const run = gate(['--pre-push'], `refs/heads/other ${otherSha} refs/heads/main ${mainSha}\n`);
     expect(run.status).toBe(1);
     expect(run.stderr).toContain('wip: not finished');
+  });
+
+  /**
+   * The Fix-level rule (CLAUDE.md § "Tool errors: fix the cause"): a
+   * `fix(tools)` or `fix(prompt)` commit must name the level that removed the
+   * cause. Checked at commit time by .githooks/commit-msg and again over the
+   * pushed range, by the same code path in scripts/check-push.mjs.
+   */
+  const RULE =
+    'fix(tools)/fix(prompt): the commit body must hold exactly one ' +
+    '`Fix-level: shape|description|prompt|forge-bug|safety-net` line, plus ' +
+    '`Cause-fix: <sha>` naming an existing commit when the level is safety-net ' +
+    '(CLAUDE.md § Tool errors: fix the cause)';
+  const CO = 'Co-Authored-By: Forge <forge@evolvlabs.dev>';
+
+  /** The commit-time path: the same rule, run on the message file before the commit. */
+  function commitMsgGate(message: string) {
+    const file = path.join(root!, 'MSG');
+    fs.writeFileSync(file, message);
+    return spawnSync(process.execPath, [script, '--commit-msg', file], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+  }
+
+  const fixLevelRefusals: Array<[string, string, string]> = [
+    [
+      'no Fix-level line at all',
+      `fix(tools): a saved file waits for its lock\n\n${CO}`,
+      'found 0 Fix-level lines',
+    ],
+    [
+      'a Fix-level value outside the list',
+      `fix(tools): a saved file waits for its lock\n\nFix-level: wording\n\n${CO}`,
+      'Fix-level value "wording" is not one of shape|description|prompt|forge-bug|safety-net',
+    ],
+    [
+      'two Fix-level lines',
+      `fix(tools): a saved file waits for its lock\n\nFix-level: shape\nFix-level: description\n\n${CO}`,
+      'found 2 Fix-level lines',
+    ],
+    [
+      'safety-net with no Cause-fix',
+      `fix(tools): a saved file waits for its lock\n\nFix-level: safety-net\n\n${CO}`,
+      'Fix-level: safety-net needs exactly one Cause-fix line (found 0)',
+    ],
+    [
+      'a Cause-fix naming a sha that does not exist',
+      `fix(tools): a saved file waits for its lock\n\nFix-level: safety-net\nCause-fix: deadbeefdeadbeef\n\n${CO}`,
+      'Cause-fix deadbeefdeadbeef is not a commit that exists in this repository',
+    ],
+    [
+      'the only Fix-level line hidden in a git comment',
+      `fix(tools): a saved file waits for its lock\n\n# Fix-level: shape\n\n${CO}`,
+      'found 0 Fix-level lines',
+    ],
+  ];
+
+  it.each(fixLevelRefusals)('refuses a fix(tools) commit for %s', (_name, message, detail) => {
+    repoWith(message);
+    const atCommit = commitMsgGate(message);
+    expect(atCommit.stderr).toBe(`check-push: ${RULE} — ${detail}\n`);
+    expect(atCommit.status).toBe(1);
+    const pushed = gate(['HEAD~1..HEAD']);
+    expect(pushed.status).toBe(1);
+    expect(pushed.stderr).toContain(`: ${RULE} — ${detail}`);
+  });
+
+  it.each([
+    ['fix(tools) naming shape', `fix(tools): a saved file waits for its lock\n\nFix-level: shape\n\n${CO}`],
+    [
+      'fix(tools,sidebar) naming description',
+      `fix(tools,sidebar): a saved file waits for its lock\n\nFix-level: description\n\n${CO}`,
+    ],
+    ['fix(prompt) naming prompt', `fix(prompt): the setup note names the voice\n\nFix-level: prompt\n\n${CO}`],
+    ['fix(tools) naming forge-bug', `fix(tools): a saved file waits for its lock\n\nFix-level: forge-bug\n\n${CO}`],
+    ['feat(tools) with no Fix-level line', `feat(tools): a saved file waits for its lock\n\n${CO}`],
+    ['docs(tips) with no Fix-level line', `docs(tips): the table names the new gate\n\n${CO}`],
+    ['fix(sidebar) with no Fix-level line', `fix(sidebar): the send button clears the draft\n\n${CO}`],
+    ['fix(model-turn) with no Fix-level line', `fix(model-turn): the retry backs off\n\n${CO}`],
+  ])('allows %s', (_name, message) => {
+    repoWith(message);
+    expect(commitMsgGate(message).status).toBe(0);
+    const pushed = gate(['HEAD~1..HEAD']);
+    expect(pushed.stderr).not.toContain('Fix-level');
+    expect(pushed.status).toBe(0);
+  });
+
+  it('allows safety-net backed by a Cause-fix naming a real commit', () => {
+    const base = 'fix(tools): a saved file waits for its lock\n\nFix-level: shape\n\n' + CO;
+    repoWith(base);
+    const cause = git(['rev-parse', 'HEAD~1']);
+    const message = `fix(tools): a saved file waits for its lock\n\nFix-level: safety-net\nCause-fix: ${cause}\n\n${CO}`;
+    expect(commitMsgGate(message).status).toBe(0);
+    const pushed = gate(['HEAD~1..HEAD']);
+    expect(pushed.stderr).not.toContain('Fix-level');
+    expect(pushed.status).toBe(0);
+  });
+
+  it('names the rule and the CLAUDE.md section in the refusal', () => {
+    repoWith('fix(prompt): the setup note names the voice\n\n' + CO);
+    const run = commitMsgGate('fix(prompt): the setup note names the voice\n\n' + CO);
+    expect(run.stderr).toContain('CLAUDE.md § Tool errors: fix the cause');
+    expect(run.stderr).toContain('shape|description|prompt|forge-bug|safety-net');
+  });
+
+  it('installs the rule as .githooks/commit-msg', () => {
+    const hook = fs.readFileSync(path.resolve('.githooks/commit-msg'), 'utf8');
+    expect(hook).toContain('node scripts/check-push.mjs --commit-msg "$1"');
   });
 });

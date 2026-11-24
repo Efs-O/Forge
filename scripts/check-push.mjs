@@ -14,6 +14,7 @@
  *   node scripts/check-push.mjs                       # the upstream range
  *   node scripts/check-push.mjs origin/main..HEAD     # an explicit range
  *   node scripts/check-push.mjs --pre-push            # from .githooks/pre-push
+ *   node scripts/check-push.mjs --commit-msg <file>   # from .githooks/commit-msg
  *   node scripts/check-push.mjs --record-ci           # report whether a green run is recorded
  */
 import { execFileSync } from 'node:child_process';
@@ -50,11 +51,103 @@ const SCRIB_FILE = '.secrets-patterns.txt';
 
 const args = process.argv.slice(2);
 const prePush = args.includes('--pre-push');
+const commitMsg = args.includes('--commit-msg');
 const recordCi = args.includes('--record-ci');
 const rangeArg = args.find((a) => a.includes('..'));
 
 function git(...cmd) {
   return execFileSync('git', cmd, { encoding: 'utf8' });
+}
+
+// --- The Fix-level rule (CLAUDE.md § "Tool errors: fix the cause") ---
+// A `fix(tools)` or `fix(prompt)` commit must name the level that removed the
+// cause, so a commit whose only change is refusal wording cannot pass as a fix
+// (measured 2026-11-09 to 2026-11-24: about two thirds of them did exactly
+// that and the failure rate did not drop). One rule, used by `--commit-msg`
+// before the commit is made and by the pushed-range check below.
+const FIX_LEVEL_SCOPES = new Set(['tools', 'prompt']);
+const FIX_LEVEL_ALLOWED = 'shape|description|prompt|forge-bug|safety-net';
+const FIX_LEVEL_RE = /^Fix-level: (?:shape|description|prompt|forge-bug|safety-net)$/u;
+const CAUSE_FIX_RE = /^Cause-fix: ([0-9a-f]{7,40})$/u;
+const FIX_LEVEL_WHY = 'CLAUDE.md § Tool errors: fix the cause';
+const FIX_LEVEL_RULE =
+  'fix(tools)/fix(prompt): the commit body must hold exactly one ' +
+  `\`Fix-level: ${FIX_LEVEL_ALLOWED}\` line, plus \`Cause-fix: <sha>\` naming an existing commit ` +
+  `when the level is safety-net (${FIX_LEVEL_WHY})`;
+
+/** True for `fix(tools): …`, `fix(prompt): …`, `fix(tools,sidebar): …` only. */
+function isFixLevelSubject(subject) {
+  const scope = /^fix\(([^()]*)\): /u.exec(subject);
+  if (!scope) return false;
+  return scope[1].split(',').some((s) => FIX_LEVEL_SCOPES.has(s.trim()));
+}
+
+/**
+ * The verdict for one commit message. Returns null when the rule does not
+ * apply or the message satisfies it, otherwise the refusal text (no sha
+ * prefix: the caller adds one where it names a commit).
+ */
+function fixLevelProblems(subject, body, shaExists) {
+  if (!isFixLevelSubject(subject)) return null;
+  const lines = body
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l !== '' && !l.startsWith('#'));
+  const levelLines = lines.filter((l) => /^Fix-level:/u.test(l));
+  if (levelLines.length !== 1) {
+    return `${FIX_LEVEL_RULE} — found ${String(levelLines.length)} Fix-level lines`;
+  }
+  const level = levelLines[0];
+  if (!FIX_LEVEL_RE.test(level)) {
+    const value = level.replace(/^Fix-level:\s*/u, '');
+    return `${FIX_LEVEL_RULE} — Fix-level value "${value}" is not one of ${FIX_LEVEL_ALLOWED}`;
+  }
+  if (!level.endsWith('safety-net')) return null;
+  const causeLines = lines.filter((l) => /^Cause-fix:/u.test(l));
+  if (causeLines.length !== 1) {
+    return `${FIX_LEVEL_RULE} — Fix-level: safety-net needs exactly one Cause-fix line (found ${String(causeLines.length)})`;
+  }
+  const cause = causeLines[0];
+  const match = CAUSE_FIX_RE.exec(cause);
+  if (!match) {
+    return `${FIX_LEVEL_RULE} — Cause-fix value "${cause.replace(/^Cause-fix:\s*/u, '')}" is not a 7-40 character lowercase commit sha`;
+  }
+  if (!shaExists(match[1])) {
+    return `${FIX_LEVEL_RULE} — Cause-fix ${match[1]} is not a commit that exists in this repository`;
+  }
+  return null;
+}
+
+function shaExists(sha) {
+  try {
+    // stdio: ignore, so git's own complaint does not land in the refusal text.
+    execFileSync('git', ['cat-file', '-e', `${sha}^{commit}`], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// `--commit-msg <file>` is the whole gate for a new commit: the Fix-level rule
+// and nothing else, so it stays fast and cannot fail for a reason the author
+// is about to fix (an untagged version, an unrecorded CI pass).
+if (commitMsg) {
+  const msgPath = args[args.indexOf('--commit-msg') + 1];
+  if (!msgPath || msgPath.startsWith('-')) {
+    console.error('check-push: --commit-msg needs the message file path as its next argument');
+    process.exit(2);
+  }
+  const raw = readFileSync(msgPath, 'utf8');
+  const visible = raw.split(/\r?\n/).filter((l) => !l.startsWith('#'));
+  const at = visible.findIndex((l) => l.trim() !== '');
+  const subject = at === -1 ? '' : visible[at].trim();
+  const body = at === -1 ? '' : visible.slice(at + 1).join('\n');
+  const refusal = fixLevelProblems(subject, body, shaExists);
+  if (refusal) {
+    console.error(`check-push: ${refusal}`);
+    process.exit(1);
+  }
+  process.exit(0);
 }
 
 // The pre-push hook tells us on stdin exactly what is being pushed:
@@ -193,6 +286,8 @@ for (const { sha, subject, body, author } of records) {
   } else if (!CO_AUTHOR.test(lines[lines.length - 1] ?? '')) {
     problems.push(`${short}: the Forge co-author trailer must be the last line of the message`);
   }
+  const fixLevel = fixLevelProblems(subject, body, shaExists);
+  if (fixLevel) problems.push(`${short}: ${fixLevel}`);
   if (/^(claude|codex|qwopus|forge agent)\b/iu.test(author)) {
     problems.push(`${short}: author is "${author}" — commits carry the owner's identity`);
   }
