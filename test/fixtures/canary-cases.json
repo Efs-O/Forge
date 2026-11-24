@@ -62,5 +62,21 @@
     "replace": "      if (replayLength >= 3) {",
     "test": "test/unit/SessionLogRows.property.test.ts",
     "expect": "collapses a repeated contiguous run"
+  },
+  {
+    "id": "web-fetch-checks-every-dns-answer",
+    "file": "src/tools/fetchTool.ts",
+    "find": "for (const address of addresses) {",
+    "replace": "for (const address of addresses.slice(0, 1)) {",
+    "test": "test/unit/WebFetchSsrf.test.ts",
+    "expect": "rejects a public-looking host when any DNS answer is loopback"
+  },
+  {
+    "id": "preview-fetch-refuses-loopback-answer",
+    "file": "src/tools/renderHtml/previewFetch.ts",
+    "find": "const reason = blockedResolvedAddress(address);",
+    "replace": "const reason = address.address === '' ? 'planted' : undefined;",
+    "test": "test/unit/WebFetchSsrf.test.ts",
+    "expect": "uses the same DNS guard for routed preview resources, including rebinding names"
   }
 ]
