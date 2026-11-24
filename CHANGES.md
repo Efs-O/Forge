@@ -1,5 +1,33 @@
 # Forge — Recent Changes
 
+## 0.17.216
+
+**The Monitor is Strata's own Monitor page.** Forge's Monitor panel now runs the Monitor page from
+Strata (MIT License, credited at the bottom of the panel), with a Forge header. It works for a Strata
+engine and for a llama.cpp engine. For llama.cpp, Forge builds the same data from its own readings:
+GPU, CPU, UPS, slots, speed and its finished requests. Cards with no data behind them are hidden,
+never shown as zero. **Clear** resets the totals: on Strata through Strata's own reset, on llama.cpp
+in Forge, and a refused reset is shown on the page.
+
+**An approval card can no longer be declined by a stray key.** A card declined on any Escape pressed
+anywhere in the chat panel, and put the keyboard on its Decline button 600 ms after it opened, so an
+Enter or Space typed elsewhere declined it too. A card now takes Escape only from inside itself,
+nothing is focused when it opens, and the sidebar ignores an answer for a card whose chat is not on
+screen. The session log now records which surface answered a card (`webview`, `telegram` or `voice`)
+instead of `owner` for every answer.
+
+**A card in a window you are not looking at now tells you.** The "needs your approval" notice
+treated a VS Code window in the background as one you could see, so it stayed silent. It now also
+checks that the window has focus.
+
+**The sidebar shows the chat it was brought forward for.** When a prompt from another agent or an
+approval card brought the Forge sidebar forward, it showed the chat that was last on screen. It now
+shows the chat the prompt or card belongs to.
+
+**Web fetch and HTML preview work where IPv6 is broken.** A preview fetch pinned a single DNS answer,
+so on a machine with a dead IPv6 route every public host timed out. Each answer is now tried, and
+every one of them still has to pass the private-address check.
+
 ## 0.17.215
 
 **The Monitor shows CPU temperature and power, and opens by itself.** With LibreHardwareMonitor's
