@@ -100,7 +100,7 @@
 1. pairing calls with results → pair the `tool_calls` row with the `tool` rows that follow it, positionally; the rendered chat hides tool failures entirely
 2. reading the newest row of a session log → the newest rows are metadata (`type: request`, `written_count`) with no `role`. judge the newest row that has a `role`
 3. scripting over `tool_calls` rows → the keys are `name`, `input`, `raw_arguments`. guessing `args` returns null — print one row's keys first
-4. attributing a log row or a file write to one chat → other chats share the workspace and the files. attribute by session id, read from the row, before counting
+4. attributing a log row or a file write to one chat → other chats share the workspace and the files, and this chat's own rows are still being written. attribute by session id from the row; counting hits, exclude the live log: `max(files, key=os.path.getmtime)`
 5. reading a `tool_calls` row printed via `json.dumps` → `\n` there is a real newline in the argument. read the raw value before calling a call malformed
 6. a session-log pattern that matches nothing → a backtick-anchored one hits only the template (agents write `- tool:`); `"tool": "x"` misses: rows are compact JSON. anchor on `tool:`
 7. blaming a mistake on a filtered log window from memory → the rows I "remember" may be hours older. print each hit's wall-clock time before attributing it

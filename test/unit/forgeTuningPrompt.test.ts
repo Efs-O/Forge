@@ -102,8 +102,12 @@ describe('builtin execute template', () => {
     // The scope guard read as "stay minimal" on one-shot builds (pelican run 5 vs 0.17.0).
     expect(prompt).not.toContain('Do not refactor, clean up');
     expect(prompt).toContain('- Within the task, do the work completely and very well.');
+    // A tool round ends on a tool result, and the Strata models kept reading that as
+    // "the user hasn't asked anything" (docs/plans/NO_TASK_THINKING_PLAN.md).
     expect(prompt).toContain(
-      'After each result, determine what specific information or action is still required. If something necessary remains, continue.',
+      '- After each result, determine what specific information or action is still required. ' +
+        'If something necessary remains, continue. A tool result is not a new user message: ' +
+        'the task from the last real user message still stands, so carry on with it.',
     );
     expect(prompt).toContain('Search the workspace or a named folder, never a whole drive.');
     // Review before the render: run 9 rendered, saw unattached legs, and the task's no-iterate rule blocked the fix.

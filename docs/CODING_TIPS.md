@@ -29,6 +29,7 @@
 3. `git status` showing `M docs/CODING_TIPS.md` after a tips edit → it is tracked (re-admitted in .gitignore), not a local file: only docs/plans and docs/reports are untracked. Name it in the report or it rides along uncommitted
 4. another lane has package.json dirty and you edit the same file → their `git commit -- package.json` commits the worktree copy, so your line lands in THEIR commit (f994b9d4). Check `git status` before editing a shared manifest, or land yours first
 5. `npm run check:push` before the release tag exists → `no tag v0.17.207 locally`: `scripts/check-push.mjs` verifies `refs/tags/v<version>` locally, so `git tag v<ver>` comes before the push check; push the tag itself only after CI is green
+6. `git add docs/CODING_TIPS.md` while another lane's tips row sits uncommitted in it → your commit carries their row. back the file up, drop their row, commit, restore it byte-identically
 
 ## EDIT
 1. a rename lengthens an identifier, a call takes several arguments on one line, or I hand-split a `.then()` chain → the `prettier/prettier` gate fails at `.prettierrc` printWidth 100. fix: `npx prettier --write <src file>` before the gate
@@ -76,5 +77,6 @@
 2. `rg -c "Status: open" docs/FORGE_TOOL_BUGS.md` → the count includes the template line `- Status: open | by design | wont fix | fixed in …`. subtract it, or count per `## ` block with `^- Status: open\s*$`
 3. counting shell failures by hand with `^exit \d+` → it matches `exit 0 · 0.6 s` too, so 5,000 instead of 168. mirror `bucket()` in `scripts/session-scan/scan_logs.py`, which only counts a non-zero exit
 4. a `docs/reports/BUG_LEDGER.md` row that does not end with a trailing `|` → `tableRows` in `test/unit/BugLedgerFormat.test.ts` drops it, so the gate passes while the row is invisible; a raw `|` inside the Fix column splits it into 10 cells. count the cells in python before trusting the test
+5. reading a `request_prefix` row in `~/.forge/sessions/*.jsonl` → `messages` is the message COUNT, not an array; the body is only hashes. the real body: `~/.forge/requests/<convId>/`, pruned after `keepHours`
 
 <!-- tips reviewed: f8eac265 97af9238 67b1edfc b55029a9 2a94ed91 5cf0951d c82a643f dd752e43 ab3cf873 72b55522 d7090058 c39efea2 7a5852b5 163024b3 02f1ebe2 2b1f3a19 cd48aee3 729096bb 7714eff6 b3232f10 4a1e36aa 15bb8e3b 70303c19 e1c2165e be095f5f bf7cd99b d6f92da7 9cfe17b9 f3c889de 0b3dc93a 9ebd9496 8f836529 7a5468d8 7bf95f08 d087747c 3f5798c5 ae84fc58 05c316aa 6e0e1daf 571066cd 8719d5be c728429e bdf3d251 85fff279 099f7edf 2e16f48a 42f7863e -->

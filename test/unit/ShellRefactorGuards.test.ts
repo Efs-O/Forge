@@ -138,10 +138,16 @@ describe('shell/core-group refactor guards', () => {
   // leftover kinds, the change-request trigger words, and "whitespace exact" for an
   // edit anchor — which is 45 bytes (the file is 9,845); `FORGE.md` lost about
   // 2.6 KB of duplicated prose with them.
-  it('config/templates/builtin/execute.njk is at most 9,900 bytes', () => {
+  // 2026-11-24: raised to 10,000 (a 10 KB ceiling, not another arbitrary number).
+  // "A tool result is not a new user message" is +116 bytes (the file is 9,962);
+  // it is the fix for the "the user hasn't asked anything" thinking blocks that
+  // 0.47% of Strata reasoning rows opened with — see
+  // docs/plans/NO_TASK_THINKING_PLAN.md. Nothing was cut to fit: every candidate
+  // rule is pinned by DelegationPromptBlock.test.ts or carries its own detail.
+  it('config/templates/builtin/execute.njk is at most 10,000 bytes', () => {
     const file = path.join(root, 'config', 'templates', 'builtin', 'execute.njk');
     const size = fs.statSync(file).size;
-    expect(size, `execute.njk is ${size} bytes; the cap is 9900`).toBeLessThanOrEqual(9900);
+    expect(size, `execute.njk is ${size} bytes; the cap is 10000`).toBeLessThanOrEqual(10_000);
   });
 
   it('the dead src/templates/builtin copy is deleted', () => {
