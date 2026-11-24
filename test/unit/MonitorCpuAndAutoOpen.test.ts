@@ -138,14 +138,11 @@ describe('readLhmCpuStats', () => {
 describe('the monitor.cpu config key', () => {
   // The schema wants a real config around the key under test.
   const base = () => ({
-    models: [
-      { name: 'demo', provider: 'openai-compatible', endpoint: 'http://127.0.0.1:8090/v1' },
-    ],
+    models: [{ name: 'demo', provider: 'openai-compatible', endpoint: 'http://127.0.0.1:8090/v1' }],
     active_model: 'demo',
     llama_server: {},
   });
-  const parse = (cpu: string) =>
-    ForgeConfigSchema.safeParse({ ...base(), monitor: { cpu } });
+  const parse = (cpu: string) => ForgeConfigSchema.safeParse({ ...base(), monitor: { cpu } });
 
   it.each([
     'http://127.0.0.1:8085/data.json',
@@ -233,6 +230,42 @@ describe('the CPU poller', () => {
     pollers.dispose();
   });
 
+  it('treats an abort from hiding the panel as nothing: no error, no back-off', async () => {
+    vi.useFakeTimers();
+    let first = true;
+    const fetchImpl = vi.fn((_url: string, init?: { signal?: AbortSignal }) => {
+      if (!first) {
+        return Promise.resolve(
+          new Response(
+            '[{"SensorId":"/intelcpu/0/temperature/10","Text":"CPU Package","Value":"60.0 °C"}]',
+            {
+              status: 200,
+            },
+          ),
+        );
+      }
+      first = false;
+      // What a real fetch does when the panel is hidden mid-request.
+      return new Promise<Response>((_resolve, reject) =>
+        init?.signal?.addEventListener('abort', () =>
+          reject(new DOMException('The operation was aborted.', 'AbortError')),
+        ),
+      );
+    }) as unknown as typeof fetch;
+    const { pollers, snapshots } = startCpuPoller(fetchImpl);
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    for (const controller of pollers.diagnostics().controllers) controller.abort();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(snapshots.every((snapshot) => snapshot.cpu === undefined)).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(snapshots.at(-1)?.cpu).toEqual({ tempC: 60, powerW: null });
+    pollers.dispose();
+  });
+
   it('posts no cpu block at all when the config names no cpu URL', async () => {
     const fetchImpl = vi.fn(
       async () => new Response('[]', { status: 200 }),
@@ -304,6 +337,13 @@ describe('the model-server-ready signal', () => {
     for (const subscription of context.subscriptions) subscription.dispose();
     notifyModelServerReady('maya-maya-s24');
     expect(createOrShow).not.toHaveBeenCalled();
+  });
+
+  it('swallows a listener that throws, so a failed panel never fails a start', () => {
+    setModelServerReadyListener(() => {
+      throw new Error('webview refused to open');
+    });
+    expect(() => notifyModelServerReady('m')).not.toThrow();
   });
 
   it('reaches the listener the window set, and nothing once it is cleared', () => {

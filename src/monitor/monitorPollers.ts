@@ -122,6 +122,12 @@ export function createMonitorPollers(options: MonitorPollerOptions): MonitorPoll
           try {
             cpu = await readLhmCpuStats(options.getConfig().monitor!.cpu!, signal);
           } catch (error) {
+            // Hiding the panel aborts the read in flight. That is not a broken
+            // sensor: keep the last reading and do not park the reader, or the
+            // panel comes back to "This operation was aborted" for 30 s. A real
+            // failure still counts here, including the 1500 ms timeout, which
+            // aborts the combined signal and leaves `signal` alone.
+            if (signal.aborted) return;
             cpu = {
               tempC: null,
               powerW: null,
