@@ -32,8 +32,10 @@ const NUL = String.fromCharCode(0);
 
 /** The pinned sentence, exactly as the model reads it (Error: is added by dispatch). */
 const refusal = (tool: string, count: number, first: number): string =>
-  `${tool}: the new text holds ${count} NUL character(s) (\\u0000), the first at character ` +
-  `${first}; a source file never contains one. Nothing was written. Resend the text without them.`;
+  `${tool}: the new text holds ${count} NUL character(s) (U+0000), the first at character ` +
+  `${first}; a source file never contains one, so nothing was written. If you meant the escape ` +
+  `text \\u0000 in the file (for example a string separator in code), the JSON argument must ` +
+  `carry the backslash doubled: write \\\\u0000. Otherwise resend the text without them.`;
 
 /** The message a synchronous throw carries, so the wording can be pinned with toBe. */
 function thrownMessage(run: () => unknown): string {
@@ -97,6 +99,21 @@ describe('the shared NUL check', () => {
     expect(thrownMessage(() => guardNulFreeText('edit_file', 'clean text'))).toBe(
       '(did not throw)',
     );
+  });
+
+  it('names the doubled backslash, so the model can fix the escape instead of deleting it', () => {
+    const message = nulTextRefusal('write_file', `fake${NUL}chat`) ?? '';
+    expect(message).toBe(
+      'write_file: the new text holds 1 NUL character(s) (U+0000), the first at character 4; ' +
+        'a source file never contains one, so nothing was written. If you meant the escape text ' +
+        '\\u0000 in the file (for example a string separator in code), the JSON argument must ' +
+        'carry the backslash doubled: write \\\\u0000. Otherwise resend the text without them.',
+    );
+    // The first mention is the escape text itself: one backslash. The spelling it must
+    // put in a JSON argument carries it doubled: two backslashes, and not the one.
+    expect(message.includes('escape text \\u0000 in the file')).toBe(true);
+    expect(message.includes('write \\\\u0000.')).toBe(true);
+    expect(message.includes('write \\u0000.')).toBe(false);
   });
 });
 
@@ -232,8 +249,10 @@ describe('the sentence lives in one place', () => {
     );
     expect(built.size).toBe(1);
     expect([...built][0]).toBe(
-      'the new text holds 1 NUL character(s) (\\u0000), the first at character 0; ' +
-        'a source file never contains one. Nothing was written. Resend the text without them.',
+      'the new text holds 1 NUL character(s) (U+0000), the first at character 0; a source file ' +
+        'never contains one, so nothing was written. If you meant the escape text \\u0000 in the ' +
+        'file (for example a string separator in code), the JSON argument must carry the backslash ' +
+        'doubled: write \\\\u0000. Otherwise resend the text without them.',
     );
   });
 });

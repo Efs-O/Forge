@@ -17,8 +17,11 @@
  * Refusing rather than stripping is the useful half. A NUL that reaches a file
  * is invisible in every view the agent has, so a silent strip would move the
  * mistake from the diff to the model's own text, and the model would never know
- * its escape was wrong. The refusal says how many, where the first one is, and
- * that nothing was written, so one round fixes it.
+ * its escape was wrong. The refusal says how many, where the first one is, that
+ * nothing was written, and — because "resend it without them" would have the
+ * model delete a separator it needed (`fake\u0000chat\u0000${id}`) — the doubled
+ * backslash that fixes the escape instead. One round, and the code still means
+ * what it meant.
  *
  * The offset is inside the text the tool was given — the content, the `new_str`,
  * the `replacement_text` — not inside the file: that is the string the model has
@@ -36,8 +39,10 @@ export function nulTextRefusal(tool: string, text: string): string | undefined {
   let count = 0;
   for (let at = first; at !== -1; at = text.indexOf(NUL, at + 1)) count++;
   return (
-    `${tool}: the new text holds ${count} NUL character(s) (\\u0000), the first at character ` +
-    `${first}; a source file never contains one. Nothing was written. Resend the text without them.`
+    `${tool}: the new text holds ${count} NUL character(s) (U+0000), the first at character ` +
+    `${first}; a source file never contains one, so nothing was written. If you meant the escape ` +
+    `text \\u0000 in the file (for example a string separator in code), the JSON argument must ` +
+    `carry the backslash doubled: write \\\\u0000. Otherwise resend the text without them.`
   );
 }
 
