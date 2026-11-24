@@ -188,7 +188,13 @@ import { makeMaximalRegistry } from '../support/maximalToolRegistry';
 // assembled five documentation paths itself and all five came back 404, one round each.
 // 2026-11-25: 68,745 (+84) after view_image said there is no size or scale argument:
 // the model sent `max_size: 960` to a tool that takes path and pages only.
-const MEASURED_CHARS = 68_745;
+// 2026-11-25: 68,959 (+214) after edit_file and apply_line_edits said their array
+// argument is read as the array even when it arrives as text: the escape slips are
+// repaired (src/tools/jsonArgumentRepair.ts), so the schema names what happens.
+// 2026-11-25: 69,057 (+98) after monitor_execution and stop_execution said a unique
+// prefix of a retained id resolves: a session sent the `exec-92bfe375` it had written in
+// its own notes instead of the full id the shell had returned.
+const MEASURED_CHARS = 69_057;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.

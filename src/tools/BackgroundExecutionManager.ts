@@ -321,7 +321,20 @@ export class BackgroundExecutionManager {
   }
 
   private get(id: string): BackgroundExecution {
-    const execution = this.executions.get(id);
+    // A model that copied an id out of its own notes sends the short form it
+    // wrote there: `exec-92bfe375` where the job is
+    // `exec-92bfe375-c54a-4a6f-aa4b-21fee8c28be3` (measured 2026-11-22, session
+    // a028c492-0817-424c-86bc-344da8a8b75a: row 14310 returned the full id, row
+    // 14383 sent the short one). A prefix of exactly one retained job resolves;
+    // the result names the job it picked, so the widening is never silent.
+    const exact = this.executions.get(id);
+    const matches = exact ? [id] : [...this.executions.keys()].filter((key) => key.startsWith(id));
+    if (matches.length > 1)
+      throw new Error(
+        `execution id "${id}" is a prefix of ${String(matches.length)} retained jobs (` +
+          `${matches.slice(0, 4).join(', ')}). Pass the full id from \`list_executions\`.`,
+      );
+    const execution = matches.length === 1 ? this.executions.get(matches[0] ?? '') : undefined;
     if (!execution)
       // A bare "unknown execution id" named nothing the agent could act on, so the
       // refusal says how an id dies and which tool lists the ids that do exist.

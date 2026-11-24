@@ -50,7 +50,8 @@ export function makeMonitorExecutionTool(): RegisteredTool {
           properties: {
             execution_id: {
               type: 'string',
-              description: 'ID returned by shell with background=true.',
+              description:
+                'ID returned by shell with background=true; a unique prefix of a retained id resolves to it.',
             },
             wait_ms: {
               type: 'integer',
@@ -136,7 +137,8 @@ export function makeStopExecutionTool(): RegisteredTool {
           properties: {
             execution_id: {
               type: 'string',
-              description: 'ID returned by shell with background=true.',
+              description:
+                'ID returned by shell with background=true; a unique prefix of a retained id resolves to it.',
             },
           },
           required: ['execution_id'],
