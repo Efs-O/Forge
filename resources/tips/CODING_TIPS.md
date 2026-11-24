@@ -15,7 +15,7 @@
 8. `search_sessions` returning `total_matches: 0` → not proof the archive lacks the topic. probe with a term you expect to hit and check `date_from` before reporting a gap
 9. a follow-up search that drops one alternative from the `rg -l "a|b"` that listed the file → it matched the other one, so the narrow search is empty. repeat the whole pattern
 10. `rg --include='*.ts'` or `grep --no-ignore` → unrecognized flag: each is the other tool's spelling. rg filters with `-g '*.ts'`; GNU grep has no ignore flag
-11. an `rg` pattern with a look-around (`(?=`, `(?!`, `(?<=`) → `look-around ... is not supported`. add `--pcre2`
+11. an `rg` pattern ripgrep refuses: a look-around (`(?=`, `(?!`, `(?<=`) → `look-around ... is not supported`, add `--pcre2`; a newline escape → `the literal "\n" is not allowed in a regex`, drop it or pass `-U`
 12. `grep --include` to skip a folder, or `grep -g` → `--include` filters names not dirs; `-g` is rg-only (`unknown option -- g`). exclude folders with rg `--glob '!dir/**'`
 13. `gh api -H ...raw ... | grep -n x` → prints nothing, and gh dies `write /dev/stdout: The pipe is being closed`; `grep` on the saved file can still find 0 where python counts 6. save with `> f.md`, then search it with python
 
