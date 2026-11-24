@@ -1288,9 +1288,15 @@ agent_links:
 # because otherwise an agent could add a model that sends the chat anywhere.
 # model_hosts: [100.64.0.10]
 
-# Optional UPS status from a local NUT server. Forge only connects to loopback.
+# Optional Monitor readings: UPS status from a local NUT server, and the CPU
+# package temperature and power from LibreHardwareMonitor's web server (start it,
+# then Options → Remote Web Server, port 8085). Forge only connects to loopback.
+# auto_open defaults to true: the Monitor opens itself, without taking keyboard
+# focus, the first time this window brings a model server up.
 # monitor:
 #   ups: "ups@127.0.0.1:3493"
+#   cpu: http://127.0.0.1:8085/data.json   # LibreHardwareMonitor web server
+#   auto_open: true                        # open the Monitor when a model server starts
 
 # Optional local video and music generation. With enabled: false, generation
 # tools are not registered. Paths are machine-local and models are never

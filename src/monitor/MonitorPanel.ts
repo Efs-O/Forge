@@ -22,11 +22,15 @@ export class MonitorPanel implements vscode.Disposable {
   private readonly pollers: MonitorPollers;
   private disposed = false;
 
-  private constructor(options: MonitorPanelOptions) {
+  private constructor(options: MonitorPanelOptions, background: boolean) {
     this.panel = vscode.window.createWebviewPanel(
       'forge.monitor',
       'Forge: Monitor',
-      vscode.ViewColumn.Active,
+      // An auto-opened panel must not steal the keyboard from the editor, so it
+      // opens in the background; an opened-by-hand panel takes focus as before.
+      background
+        ? { viewColumn: vscode.ViewColumn.Active, preserveFocus: true }
+        : vscode.ViewColumn.Active,
       {
         enableScripts: true,
         retainContextWhenHidden: false,
@@ -52,12 +56,15 @@ export class MonitorPanel implements vscode.Disposable {
   static createOrShow(
     context: vscode.ExtensionContext,
     options: MonitorPanelOptions,
+    show?: { background?: boolean },
   ): MonitorPanel {
     if (MonitorPanel.current) {
-      MonitorPanel.current.panel.reveal();
+      // A background open never brings an existing panel forward: the owner may
+      // have moved it away or hidden it on purpose.
+      if (!show?.background) MonitorPanel.current.panel.reveal();
       return MonitorPanel.current;
     }
-    const instance = new MonitorPanel(options);
+    const instance = new MonitorPanel(options, show?.background === true);
     MonitorPanel.current = instance;
     context.subscriptions.push(instance);
     return instance;

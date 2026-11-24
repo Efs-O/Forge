@@ -4,12 +4,22 @@ import type { ControlStats } from '../backend/controlStats';
 import { isManagedExternalModel } from '../backend/ExternalModelServers';
 import { describeProbeFailure, probeGpus } from '../system/systemProbes';
 import { readLlamaStats } from './llamaServerStats';
+import { readLhmCpuStats } from './lhmCpuStats';
 import { readNutStats } from './nutClient';
 import { readStrataStats } from './strataStats';
 import { mergeGroupsIntoModel } from '../config/ConfigResolver';
-import type { EngineMonitor, GpuProbeResult, MonitorSnapshot, UpsStats } from './monitorTypes';
+import type {
+  CpuStats,
+  EngineMonitor,
+  GpuProbeResult,
+  MonitorSnapshot,
+  UpsStats,
+} from './monitorTypes';
 import { noStatsReaderMessage } from './monitorTypes';
 import type { GpuInfo } from '../system/systemProbes';
+
+/** How long a failed LibreHardwareMonitor read is left alone, as in Strata's `_LhmCpu`. */
+const CPU_RETRY_MS = 30_000;
 
 export interface MonitorPollerOptions {
   getConfig: () => ForgeConfig;
@@ -37,9 +47,12 @@ export function createMonitorPollers(options: MonitorPollerOptions): MonitorPoll
   let engines: EngineMonitor[] = [];
   let forge = options.getStats();
   let ups: UpsStats | undefined;
+  let cpu: CpuStats | undefined;
+  let cpuRetryAt = 0;
 
   const post = (): void => {
-    if (active && !disposed) options.post({ gpus, engines, forge, ...(ups ? { ups } : {}) });
+    if (active && !disposed)
+      options.post({ gpus, engines, forge, ...(ups ? { ups } : {}), ...(cpu ? { cpu } : {}) });
   };
   const poll = (
     key: string,
@@ -98,6 +111,23 @@ export function createMonitorPollers(options: MonitorPollerOptions): MonitorPoll
             ups = await readNutStats(options.getConfig().monitor!.ups!, signal);
           } catch (error) {
             ups = { values: {}, error: error instanceof Error ? error.message : String(error) };
+          }
+        });
+      }
+      if (options.getConfig().monitor?.cpu) {
+        poll('cpu', 2000, async (signal) => {
+          // A dead LibreHardwareMonitor must not cost a connection attempt every
+          // tick: the failure parks the reader for CPU_RETRY_MS instead.
+          if (Date.now() < cpuRetryAt) return;
+          try {
+            cpu = await readLhmCpuStats(options.getConfig().monitor!.cpu!, signal);
+          } catch (error) {
+            cpu = {
+              tempC: null,
+              powerW: null,
+              error: error instanceof Error ? error.message : String(error),
+            };
+            cpuRetryAt = Date.now() + CPU_RETRY_MS;
           }
         });
       }

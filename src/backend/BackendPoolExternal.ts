@@ -27,6 +27,7 @@ import {
   type SharedSlotRecord,
 } from './poolAcquisition';
 import type { PoolSlot } from './poolSlots';
+import { notifyModelServerReady } from './modelServerReady';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
@@ -140,6 +141,7 @@ export async function prepareExternalForRequest(
   try {
     await external.ensureStarted(key);
     external.markInUse(key);
+    notifyModelServerReady(key);
   } finally {
     claim.release();
   }

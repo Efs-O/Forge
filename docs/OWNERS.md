@@ -312,6 +312,8 @@ overlaps with an existing owner, extend the owner instead.
 | llama.cpp slots and Prometheus metrics         | `src/monitor/llamaServerStats.ts`              |
 | Strata JSON metrics reader                     | `src/monitor/strataStats.ts`                   |
 | NUT UPS client                                  | `src/monitor/nutClient.ts`                     |
+| LibreHardwareMonitor CPU sensors               | `src/monitor/lhmCpuStats.ts`                   |
+| Model-server-ready signal for the Monitor      | `src/backend/modelServerReady.ts`              |
 | Monitor panel message and snapshot types       | `src/monitor/monitorTypes.ts`                  |
 | Shared webview nonce generation                | `src/util/webviewNonce.ts`                     |
 | Monitor webview entry and card display         | `webview-ui/src/monitor/App.tsx`               |

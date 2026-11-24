@@ -37,12 +37,19 @@ export interface UpsStats {
   values: Record<string, string>;
   error?: string;
 }
+/** CPU package sensors from LibreHardwareMonitor's local web server. */
+export interface CpuStats {
+  tempC: number | null;
+  powerW: number | null;
+  error?: string;
+}
 export type GpuProbeResult = { gpus: GpuInfo[]; error?: string };
 export interface MonitorSnapshot {
   gpus: GpuProbeResult;
   engines: EngineMonitor[];
   forge: ControlStats;
   ups?: UpsStats;
+  cpu?: CpuStats;
 }
 export type MonitorPanelToHost = { type: 'ready' };
 export type MonitorHostToPanel = { type: 'monitorSnapshot'; snapshot: MonitorSnapshot };

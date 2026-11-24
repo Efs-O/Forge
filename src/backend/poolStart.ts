@@ -14,6 +14,7 @@ import { LlamaTerminationError } from './llamaProcess';
 import type { ForgeConfig } from '../config/types';
 import type { SharedRuntimeRegistry } from './SharedRuntimeRegistry';
 import type { PoolSlot, PortClaim } from './poolSlots';
+import { notifyModelServerReady } from './modelServerReady';
 import { getLogger } from '../util/logger';
 
 const log = getLogger();
@@ -82,6 +83,7 @@ export function startSlot(
       }
       resolveStart();
       log.info(`[BackendPool] slot ready: ${modelName} on port ${port}`);
+      notifyModelServerReady(modelName);
     })
     .catch((err: unknown) => {
       if (evictionFailed && evicted && claim.evictedModel) {

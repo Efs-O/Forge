@@ -3,7 +3,8 @@ import type { IBackendPool } from '../backend/BackendPool';
 import type { ForgeConfig } from '../config/types';
 import type { SidebarProvider } from '../sidebar/SidebarProvider';
 import { ModelManagerPanel } from '../sidebar/modelManager/ModelManagerPanel';
-import { MonitorPanel } from '../monitor/MonitorPanel';
+import { MonitorPanel, type MonitorPanelOptions } from '../monitor/MonitorPanel';
+import { setModelServerReadyListener } from '../backend/modelServerReady';
 import type { ControlStats } from '../backend/controlStats';
 
 export interface SidebarCommandDeps {
@@ -34,6 +35,14 @@ export function registerSidebarCommands(
   context: vscode.ExtensionContext,
   deps: SidebarCommandDeps,
 ): void {
+  const monitorOptions = (): MonitorPanelOptions => ({
+    extensionUri: context.extensionUri,
+    pool: deps.pool,
+    getConfig: deps.getConfig,
+    getStats: deps.getStats,
+    getSecret: deps.getSecret,
+  });
+
   context.subscriptions.push(
     vscode.commands.registerCommand('forge.openSidebar', () => {
       void vscode.commands.executeCommand('workbench.view.extension.forge-sidebar');
@@ -50,13 +59,7 @@ export function registerSidebarCommands(
     }),
 
     vscode.commands.registerCommand('forge.openMonitor', () => {
-      MonitorPanel.createOrShow(context, {
-        extensionUri: context.extensionUri,
-        pool: deps.pool,
-        getConfig: deps.getConfig,
-        getStats: deps.getStats,
-        getSecret: deps.getSecret,
-      });
+      MonitorPanel.createOrShow(context, monitorOptions());
     }),
 
     vscode.commands.registerCommand('forge.showBackendConsole', () => {
@@ -81,4 +84,15 @@ export function registerSidebarCommands(
       deps.sidebar.newConversation();
     }),
   );
+
+  // The Monitor shows itself once per window, the first time this window brings
+  // a model server up — the owner should see the panel exactly when there is
+  // something to read on it. Closing it is an answer, so it never comes back.
+  let autoOpened = false;
+  setModelServerReadyListener(() => {
+    if (autoOpened || deps.getConfig().monitor?.auto_open === false) return;
+    autoOpened = true;
+    MonitorPanel.createOrShow(context, monitorOptions(), { background: true });
+  });
+  context.subscriptions.push({ dispose: () => setModelServerReadyListener(undefined) });
 }

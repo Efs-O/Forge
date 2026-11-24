@@ -8,6 +8,14 @@ export const MONITOR_CREDIT =
 export const UPS_SETUP_HINT =
   'No UPS connected. To show one here, ask your AI agent to follow Step 12b of AI_SETUP.md (run Forge: Set Up With an AI Agent).';
 
+export const CPU_SETUP_HINT =
+  'No CPU sensors. Run LibreHardwareMonitor with its web server on (Options → Remote Web Server, port 8085), then add monitor: { cpu: http://127.0.0.1:8085/data.json } to .forge/config.yaml.';
+
+/** A whole-number reading, or an em dash when the sensor had nothing to say. */
+export function wholeNumber(value: number | null): string {
+  return value === null ? '—' : String(Math.round(value));
+}
+
 export function App(): React.JSX.Element {
   const [snapshot, setSnapshot] = useState<MonitorSnapshot>();
   useEffect(() => {
@@ -92,6 +100,27 @@ export function App(): React.JSX.Element {
                 {snapshot.forge.today.turn_errors} / {snapshot.forge.today.turns_without_end}
               </span>
             </div>
+          </section>
+        ) : null}
+        {snapshot ? (
+          <section className="monitor-card">
+            <h2>CPU</h2>
+            {!snapshot.cpu ? (
+              <p>{CPU_SETUP_HINT}</p>
+            ) : snapshot.cpu.error ? (
+              <p>{snapshot.cpu.error}</p>
+            ) : (
+              <>
+                <div className="monitor-row">
+                  <b>Package temperature</b>
+                  <span>{wholeNumber(snapshot.cpu.tempC)} °C</span>
+                </div>
+                <div className="monitor-row">
+                  <b>Package power</b>
+                  <span>{wholeNumber(snapshot.cpu.powerW)} W</span>
+                </div>
+              </>
+            )}
           </section>
         ) : null}
         {snapshot ? (
