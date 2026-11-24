@@ -7,6 +7,7 @@ import * as vscode from 'vscode';
 vi.mock('vscode', () => ({ workspace: { workspaceFolders: undefined } }));
 
 import { MAX_VIEW_IMAGE_BYTES, makeViewImageTool } from '../../src/tools/imageTool';
+import { MISSING_FOLDER_LISTING } from '../../src/tools/imageTool';
 
 let root: string;
 
@@ -102,6 +103,50 @@ describe('view_image', () => {
       'view_image: the file is not a PNG, JPEG, GIF, BMP or WebP image (it may be a web page or ' +
         'another format saved with an image extension). Check what it is with the shell tool before ' +
         'viewing it again.',
+    );
+  });
+
+  it('names the folder and its contents when the file is not there', async () => {
+    // The Godot case: a guessed save path came back as Node's own ENOENT line,
+    // with no tool name in it and nothing to act on.
+    const missing = path.join(root, 'shots', 'pagoda_00.png');
+    fs.mkdirSync(path.join(root, 'shots'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'shots', 'pagoda_01.png'), pngBytes());
+
+    expect(await refusalFor(missing)).toBe(
+      `view_image: no file at ${missing}. That folder holds: pagoda_01.png`,
+    );
+  });
+
+  it('says when neither the file nor its folder exists', async () => {
+    const missing = path.join(root, 'shots-missing', 'pagoda_00.png');
+
+    expect(await refusalFor(missing)).toBe(
+      `view_image: no file at ${missing}, and no folder at ${path.join(root, 'shots-missing')} either. ` +
+        'Find the real path (find_files, or the shell tool) before viewing it again.',
+    );
+  });
+
+  it('lists at most 15 names of a crowded folder and says how many are there', async () => {
+    const missing = path.join(root, 'gone.png');
+    for (let index = 0; index < 20; index += 1) {
+      fs.writeFileSync(path.join(root, `shot-${String(index).padStart(2, '0')}.png`), pngBytes());
+    }
+
+    const message = await refusalFor(missing);
+
+    const listing = message.slice(
+      'That folder holds: '.length,
+      message.indexOf(', … ('),
+    );
+    expect(listing.split(', ')).toHaveLength(MISSING_FOLDER_LISTING);
+    expect(message).toContain('(20 entries in total)');
+  });
+
+  it('says there is no size or scale argument, so the model does not invent one', async () => {
+    // `max_size: 960` was sent to a tool that takes path and pages only.
+    expect(makeViewImageTool().definition.function.description).toContain(
+      'sent to the model exactly as they are on disk — there is no size or scale argument',
     );
   });
 

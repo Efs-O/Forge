@@ -92,12 +92,53 @@ function workspaceRoot(): string {
   return root;
 }
 
+/** How many names a missing-file refusal lists. */
+export const MISSING_FOLDER_LISTING = 15;
+
+/**
+ * A missing file used to reach the model as Node's own error:
+ * `Error: ENOENT: no such file or directory, realpath 'C:\Users\...'` — neither
+ * the tool's name nor anything it could act on. Measured 2026-11-23 in session
+ * 6de9dc67-b750-424a-8a52-26678e98d6dc.jsonl row 3153: the model had run Godot,
+ * guessed where its screenshots land, and got that one line back. The refusal
+ * now says which folder it did look in and what is there, so the next call is
+ * the right path instead of another guess.
+ */
+async function missingFileMessage(requestedPath: string, candidate: string): Promise<string> {
+  const parent = path.dirname(candidate);
+  let entries: string[];
+  try {
+    entries = (await fs.readdir(parent, { withFileTypes: true })).map((entry) =>
+      entry.isDirectory() ? `${entry.name}${path.sep}` : entry.name,
+    );
+  } catch {
+    return (
+      `view_image: no file at ${requestedPath}, and no folder at ${parent} either. ` +
+      'Find the real path (find_files, or the shell tool) before viewing it again.'
+    );
+  }
+  const shown = entries.slice(0, MISSING_FOLDER_LISTING).join(', ');
+  if (entries.length === 0) {
+    return `view_image: no file at ${requestedPath}, and ${parent} is empty.`;
+  }
+  const rest =
+    entries.length > MISSING_FOLDER_LISTING
+      ? `, … (${String(entries.length)} entries in total)`
+      : '';
+  return `view_image: no file at ${requestedPath}. That folder holds: ${shown}${rest}`;
+}
+
 async function resolveImagePath(requestedPath: string): Promise<{ root: string; file: string }> {
   if (!requestedPath.trim()) throw new Error('view_image: path must not be empty.');
   const root = workspaceRoot();
   // Reading is not gated to the workspace, as for read_file.
   const candidate = resolveWorkspacePath(requestedPath);
-  const [realRoot, realFile] = await Promise.all([fs.realpath(root), fs.realpath(candidate)]);
+  const realFile = await fs.realpath(candidate).catch(async (error: unknown) => {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error;
+    throw new Error(await missingFileMessage(requestedPath, candidate));
+  });
+  const realRoot = await fs.realpath(root);
   return { root: realRoot, file: realFile };
 }
 
@@ -140,7 +181,7 @@ export function makeViewImageTool(
       function: {
         name: 'view_image',
         description:
-          'Load an image or PDF page so you can see it. Needs a vision model; on a text-only model report that you cannot see it and ask the user to switch models. The path may be workspace-relative or absolute. Images: PNG, JPEG, GIF, BMP, WebP, maximum 10 MB. For PDF, pages is optional (default 1), a page or range such as "2-4", at most 4 pages per call.',
+          'Load an image or PDF page so you can see it. Needs a vision model; on a text-only model report that you cannot see it and ask the user to switch models. The path may be workspace-relative or absolute. Images: PNG, JPEG, GIF, BMP, WebP, maximum 10 MB, sent to the model exactly as they are on disk — there is no size or scale argument. For PDF, pages is optional (default 1), a page or range such as "2-4", at most 4 pages per call.',
         parameters: {
           type: 'object',
           properties: {
