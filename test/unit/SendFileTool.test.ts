@@ -51,13 +51,17 @@ async function screenshotPath(conversationId: string, name: string): Promise<str
 
 function makeTool(
   deliverFile = vi.fn(async () => ({ kind: 'queued' as const, chats: 0 })),
-  extra: { extraRoots?: () => readonly string[] } = {},
+  extra: {
+    extraRoots?: () => readonly string[];
+    getConfig?: () => ForgeConfig;
+  } = {},
 ) {
   const service = { deliverFile } as unknown as UserNotificationService;
   return {
     tool: makeSendFileTool({
       notifications: service,
       ...(extra.extraRoots ? { extraRoots: extra.extraRoots } : {}),
+      ...(extra.getConfig ? { getConfig: extra.getConfig } : {}),
     }),
     service,
   };
@@ -214,6 +218,54 @@ describe('send_file', () => {
     } finally {
       await fs.rm(renders, { recursive: true, force: true });
     }
+  });
+
+  it('refuses a secret under an extra_file_roots folder, with the workspace\'s own text', async () => {
+    // `extra_file_roots` here is `N:/vs code apps`, which holds every other
+    // project, so B1's widening also widened what could leave the machine:
+    // `send_file` warned about credentials in its description and checked
+    // nothing. One guard, one text, whichever root the file came from.
+    const extra = await fs.mkdtemp(path.join(os.tmpdir(), 'forge-send-secret-'));
+    try {
+      const inExtra = path.join(extra, 'other-project', '.env');
+      const inWorkspace = path.join(root, 'sub', '.env');
+      await writeFile(inExtra, 'API_TOKEN=secret');
+      await writeFile(inWorkspace, 'API_TOKEN=secret');
+      const deliverFile = vi.fn(async () => ({ kind: 'queued' as const, chats: 1 }));
+      const { tool } = makeTool(deliverFile, { extraRoots: () => [extra] });
+
+      const extraRefusal = await tool.handler({ path: inExtra }, context('conv-a'));
+      const workspaceRefusal = await tool.handler({ path: inWorkspace }, context('conv-a'));
+
+      const tail =
+        ' matched the secret-path pattern `**/.env`. The copy persists on the remote server, ' +
+        'so ask the owner to add this exact file to permissions.secret_paths_allow in ' +
+        'config.yaml if it must be sent.';
+      expect(extraRefusal).toContain(tail);
+      expect(workspaceRefusal).toContain(tail);
+      // Same words after the path: the roots do not change the refusal.
+      expect((extraRefusal as string).slice((extraRefusal as string).indexOf(' matched'))).toBe(
+        (workspaceRefusal as string).slice((workspaceRefusal as string).indexOf(' matched')),
+      );
+      expect(deliverFile).not.toHaveBeenCalled();
+    } finally {
+      await fs.rm(extra, { recursive: true, force: true });
+    }
+  });
+
+  it('sends a secret the owner put in permissions.secret_paths_allow', async () => {
+    const inWorkspace = path.join(root, 'deploy', '.env');
+    await writeFile(inWorkspace, 'API_TOKEN=secret');
+    const allowed = await fs.realpath(inWorkspace);
+    const deliverFile = vi.fn(async () => ({ kind: 'queued' as const, chats: 1 }));
+    const { tool } = makeTool(deliverFile, {
+      getConfig: () =>
+        ({ permissions: { secret_paths_allow: [allowed] } }) as unknown as ForgeConfig,
+    });
+
+    expect(await tool.handler({ path: inWorkspace }, context('conv-a'))).toBe(
+      'Queued .env for 1 remote chat(s).',
+    );
   });
 
   it('still refuses a junction inside an extra root that points past every root', async () => {

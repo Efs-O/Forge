@@ -1,4 +1,5 @@
 import * as fs from 'fs/promises';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { DEFAULT_IMAGE_OUTPUT_DIR } from '../config/imageGenerationSchema';
@@ -8,6 +9,7 @@ import { codePointLength } from '../util/codePoints';
 import { fileDeliveryRefusal, inspectFileForDelivery } from '../util/fileDeliveryValidation';
 import { isPathInside } from '../util/pathContainment';
 import { resolveRealWorkspacePath } from '../util/WorkspacePaths';
+import { matchesSecretPattern, secretPathAllowListFor, secretPatternsFor } from './secretPaths';
 import { screenshotRoot } from './browser/screenshotPaths';
 import type { RegisteredTool, ToolHandlerContext } from './ToolRegistry';
 
@@ -40,6 +42,27 @@ export interface SendFileDeps {
    * that did not ask. A getter, so a config reload applies without re-register.
    */
   extraRoots?: () => readonly string[];
+}
+
+/**
+ * A secret never leaves the machine: the copy persists on the remote chat's
+ * server. `send_file` checked none of this — the warning sat in the tool
+ * description only — so a `.env` in any folder the owner listed in
+ * `extra_file_roots` (here `N:/vs code apps`, which holds every other project)
+ * was exactly as sendable as one in the workspace. One refusal, one text,
+ * whichever root the file came from; the owner's `permissions.secret_paths`
+ * additions and `secret_paths_allow` escapes apply as everywhere else.
+ */
+function secretSendRefusal(absolute: string, config: ForgeConfig | undefined): string | undefined {
+  const pattern = matchesSecretPattern(absolute, secretPatternsFor(config), {
+    allow: secretPathAllowListFor(config, os.homedir()),
+  });
+  if (!pattern) return undefined;
+  return (
+    `Error: send_file does not send secrets: ${absolute} matched the secret-path pattern ` +
+    `\`${pattern}\`. The copy persists on the remote server, so ask the owner to add this ` +
+    'exact file to permissions.secret_paths_allow in config.yaml if it must be sent.'
+  );
 }
 
 async function resolveFilePath(
@@ -239,6 +262,9 @@ export function makeSendFileTool(deps: SendFileDeps): RegisteredTool {
           (missing.suggestion ? ` (did you mean ${missing.suggestion}?)` : '')
         );
       }
+
+      const secret = secretSendRefusal(absolute, deps.getConfig?.());
+      if (secret) return secret;
 
       const inspected = await inspectFileForDelivery(absolute);
       if (!inspected.ok) {
