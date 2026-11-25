@@ -63,14 +63,17 @@ describe('web_fetch status text in a refusal', () => {
     expect(message).not.toContain('tail');
   });
 
-  it('tells the model where a URL should come from, before it writes one', () => {
+  it('keeps the url description to the one line it had, because the tip already carries the advice', () => {
+    // The 404 guidance lives in the result (pinned above) and in the tool's own
+    // tips row — `resources/tips/CODING_TIPS.md` FORGE_TOOLS row 5, which
+    // `splitToolTips`/`withToolTips` (src/llm/toolTips.ts, wired at
+    // src/sidebar/codingTipsPin.ts:78) append to this tool's description at
+    // request time. A second copy in the schema changed nothing in the session
+    // where the model guessed five paths, so it is gone.
     const properties = makeWebFetchTool().definition.function.parameters['properties'] as Record<
       string,
       { description?: string }
     >;
-    expect(properties['url']?.description).toBe(
-      'URL to fetch (must be https:// or http://). Take it from a search result, a link on a ' +
-        'page you already fetched, or the user: a path you invent is a guess and comes back 404.',
-    );
+    expect(properties['url']?.description).toBe('URL to fetch (must be https:// or http://).');
   });
 });

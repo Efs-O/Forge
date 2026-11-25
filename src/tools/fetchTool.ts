@@ -97,11 +97,7 @@ export function makeWebFetchTool(dependencies: WebFetchDependencies = {}): Regis
         parameters: {
           type: 'object',
           properties: {
-            url: {
-              type: 'string',
-              description:
-                'URL to fetch (must be https:// or http://). Take it from a search result, a link on a page you already fetched, or the user: a path you invent is a guess and comes back 404.',
-            },
+            url: { type: 'string', description: 'URL to fetch (must be https:// or http://).' },
             max_chars: {
               type: 'integer',
               minimum: 1,
