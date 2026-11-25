@@ -1,7 +1,8 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { writeFileAtomicSync } from '../util/atomicWrite';
+import { ASYNC_RENAME_BUDGET_MS, writeFileAtomic, writeFileAtomicSync } from '../util/atomicWrite';
+import { defaultState, mergedStateJson } from './jobStatePatch';
 import { clearStaged } from './actions/stagedBuild';
 import { deleteOutboxItem } from './JobOutbox';
 import { removeConfigBackup } from './agentTaskState';
@@ -27,25 +28,8 @@ export function isJobDefinitionName(name: string): boolean {
   return name.endsWith('.json') && !name.endsWith('.lease.json');
 }
 
-/** The default state for a job that has never run. */
-export function defaultState(): JobState {
-  return {
-    last_run_at: null,
-    last_ok_at: null,
-    last_observation: null,
-    consecutive_failures: 0,
-    next_due_at: null,
-    conversation_id: null,
-    summary_pending: false,
-    summary_failures: 0,
-    summary_retry_at: null,
-    task_run: null,
-    task_pending: false,
-    task_pending_reason: null,
-    task_pending_since: null,
-    task_pending_observation: null,
-  };
-}
+/** `defaultState` lives in `jobStatePatch.ts`; re-exported so existing importers keep working. */
+export { defaultState } from './jobStatePatch';
 
 /**
  * The on-disk store for persistent agent jobs.
@@ -221,17 +205,21 @@ export class JobStore {
    * Pause or resume a job. Pausing leaves `next_due_at` where it was, so a
    * resume must move a time that passed meanwhile: otherwise every job paused
    * past its slot fires the moment it is resumed. A future time is kept, and
-   * runs missed while paused are not replayed.
+   * runs missed while paused are not replayed. The state patch goes first, on
+   * purpose: it is the write that can lose to a sibling window's open read, and
+   * a paused job holding an advanced `next_due_at` is inert, so a failure there
+   * leaves nothing half-applied.
    */
   async setEnabled(jobFile: JobFile, enabled: boolean, now: Date = new Date()): Promise<void> {
-    await this.saveJob({ ...jobFile.job, enabled, updated_at: now.getTime() });
-    if (!enabled) return;
-    const due = (await this.readState(jobFile.job.id)).next_due_at;
-    if (due === null || due <= now.getTime()) {
-      this.patchState(jobFile.job.id, {
-        next_due_at: nextDue(jobFile.job.schedule, now).getTime(),
-      });
+    if (enabled) {
+      const due = (await this.readState(jobFile.job.id)).next_due_at;
+      if (due === null || due <= now.getTime()) {
+        await this.patchStateAsync(jobFile.job.id, {
+          next_due_at: nextDue(jobFile.job.schedule, now).getTime(),
+        });
+      }
     }
+    await this.saveJob({ ...jobFile.job, enabled, updated_at: now.getTime() });
   }
 
   /** A gone definition means `delete()` ran (any window): writes must not revive its artifacts. */
@@ -264,32 +252,44 @@ export class JobStore {
    * finished in the meantime.
    */
   patchState(id: string, patch: Partial<JobState>): void {
-    if (this.isDeleted(id)) return;
+    const read = this.readForPatch(id);
+    if (read === undefined) return;
+    writeFileAtomicSync(read.file, mergedStateJson(read.raw, patch));
+    this.notifyLocalChange();
+  }
+
+  /**
+   * {@link patchState} for async callers: the same read-modify-write, but the
+   * rename gets `ASYNC_RENAME_BUDGET_MS` (30 s) instead of the 2.5 s a sync
+   * write can afford, because this caller waits without blocking the host. A
+   * `manage_jobs` resume needs that: Windows refuses a rename onto a file
+   * another window still has open for reading (`EPERM … held by <pid> Visual
+   * Studio Code`) and that read ends in seconds. The read-to-rename gap is
+   * wider here, so use it only where a same-job write is already excluded.
+   */
+  async patchStateAsync(id: string, patch: Partial<JobState>): Promise<void> {
+    const read = this.readForPatch(id);
+    if (read === undefined) return;
+    await writeFileAtomic(read.file, mergedStateJson(read.raw, patch), {
+      retryBudgetMs: ASYNC_RENAME_BUDGET_MS,
+    });
+    this.notifyLocalChange();
+  }
+
+  /** Read a job's state file for a patch. Undefined means do not write: the
+   *  job was deleted here, or it has no definition to attach a new state file to. */
+  private readForPatch(id: string): { file: string; raw: string } | undefined {
+    if (this.isDeleted(id)) return undefined;
     const full = path.join(this.stateDir, `${id}.json`);
-    let raw: string;
     try {
-      raw = fs.readFileSync(full, 'utf8');
+      return { file: full, raw: fs.readFileSync(full, 'utf8') };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
       // No state file: creating one for a job with no definition would revive
       // `state/<id>.json` for good (`delete()` is the only thing that removes it).
-      if (!this.hasDefinition(id)) return;
-      raw = JSON.stringify(defaultState());
+      if (!this.hasDefinition(id)) return undefined;
+      return { file: full, raw: JSON.stringify(defaultState()) };
     }
-    let current: JobState;
-    try {
-      const result = JobStateSchema.safeParse(JSON.parse(raw));
-      // State corruption is recoverable everywhere else in this store: a
-      // malformed state merely makes the next job run establish a new
-      // baseline.  Keep patchState consistent with readState.
-      current = result.success ? result.data : defaultState();
-    } catch (err) {
-      if (err instanceof SyntaxError) current = defaultState();
-      else throw err;
-    }
-    const next = JobStateSchema.parse({ ...current, ...patch });
-    writeFileAtomicSync(full, `${JSON.stringify(next, null, 2)}\n`);
-    this.notifyLocalChange();
   }
 
   /** Read a job's state, or a default when the file is absent. */
