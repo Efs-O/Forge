@@ -10,6 +10,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { makeEditFileTool } from '../../src/tools/editFileTool';
+import { makeApplyLineEditsTool } from '../../src/tools/structuredEditTool';
 import { ToolRegistry } from '../../src/tools/ToolRegistry';
 import {
   parseJsonArgumentText,
@@ -120,6 +121,94 @@ describe('repairDeclaredJsonArguments', () => {
     const args: Record<string, unknown> = { meta: 'no braces here' };
     expect(repairDeclaredJsonArguments(properties, args).replacedKeys).toEqual([]);
     expect(args['meta']).toBe('no braces here');
+  });
+});
+
+/**
+ * Nine refusals in the session archive had one more shape than an escape slip:
+ * the declared array was complete and valid, and what followed it was the end of
+ * the whole tool call the model was still writing. `apply_line_edits`
+ * `operations` with `], "path": "…"}` after the array (2c3d8f4c ×2, 571eaf46 —
+ * `path` was absent from the call, so the model had nowhere else to put it), and
+ * `ask_user` `questions` with one extra `}` — the call object's own brace (6).
+ * The two tails are read; everything else is still refused.
+ */
+describe('the end of the tool call written inside an array value', () => {
+  const applyLineEdits = { path: { type: 'string' }, operations: { type: 'array' } };
+  const askUser = { prompt: { type: 'string' }, questions: { type: 'array' } };
+  const TAIL_PHRASE =
+    "the end of the tool call, written inside this value, was read as the call's own arguments";
+
+  it('reads the apply_line_edits shape and recovers path from the tail', () => {
+    const args: Record<string, unknown> = {
+      operations:
+        '[{"expected_lines": ["| a |"], "start_line": 29, "end_line": 29}], "path": "HANDOFF.md"}',
+    };
+    const report = repairDeclaredJsonArguments(applyLineEdits, args);
+    expect(args).toEqual({
+      operations: [{ expected_lines: ['| a |'], start_line: 29, end_line: 29 }],
+      path: 'HANDOFF.md',
+    });
+    expect(report.replacedKeys).toEqual(['operations', 'path']);
+    expect(report.repairs).toContain(TAIL_PHRASE);
+    expect(report.total).toBe(1);
+  });
+
+  it('reads the ask_user shape, where the tail is the call object’s own brace', () => {
+    const args: Record<string, unknown> = {
+      questions: '[{"prompt": "which?", "options": ["a", "b"]}]}',
+    };
+    const report = repairDeclaredJsonArguments(askUser, args);
+    expect(args).toEqual({ questions: [{ prompt: 'which?', options: ['a', 'b'] }] });
+    expect(report.replacedKeys).toEqual(['questions']);
+    expect(report.repairs).toContain(TAIL_PHRASE);
+    expect(report.total).toBe(1);
+  });
+
+  it('still applies the existing escape repair to the head it reads', () => {
+    const args: Record<string, unknown> = { edits: '[{"old_str": "x\\d y"}]}' };
+    const report = repairDeclaredJsonArguments({ edits: { type: 'array' } }, args);
+    expect(args).toEqual({ edits: [{ old_str: 'x\\d y' }] });
+    expect(report.replacedKeys).toEqual(['edits']);
+    expect(report.total).toBe(2); // the backslash slip, plus the tail
+  });
+
+  it('lets the apply_line_edits call through the registry instead of refusing it', () => {
+    const args: Record<string, unknown> = {
+      operations:
+        '[{"start_line": 29, "end_line": 29, "expected_text": "| a |", "replacement_text": "| b |"}], "path": "HANDOFF.md"}',
+    };
+    expect(new ToolRegistry().invalidArgs(makeApplyLineEditsTool(), args)).toBeUndefined();
+    expect(args['path']).toBe('HANDOFF.md');
+    expect(Array.isArray(args['operations'])).toBe(true);
+  });
+
+  it.each([
+    ['a stray period', '[{"a": "x"}].'],
+    ['a doubled close', '[{"a": "x"}]}]'],
+    ['an undeclared key in the tail', '[{"a": "x"}], "nope": 1}'],
+    ['a tail that does not parse', '[{"a": "x"}], "path": }'],
+    ['brackets that never close', '[{"a": "x"}'],
+    ['markup', '[{"a": "x"}]</parameter>'],
+  ])('leaves %s alone so the existing refusal still runs', (_label, value) => {
+    const args: Record<string, unknown> = { operations: value };
+    expect(repairDeclaredJsonArguments(applyLineEdits, args).replacedKeys).toEqual([]);
+    expect(args['operations']).toBe(value);
+  });
+
+  it('leaves the tail alone when the call already carries that key', () => {
+    const value = '[{"a": "x"}], "path": "other"}';
+    const args: Record<string, unknown> = { operations: value, path: 'a.ts' };
+    expect(repairDeclaredJsonArguments(applyLineEdits, args).replacedKeys).toEqual([]);
+    expect(args['operations']).toBe(value);
+    expect(args['path']).toBe('a.ts');
+  });
+
+  it('leaves the tail alone when the head is not valid JSON on its own', () => {
+    const value = '[{"a": "x["y"}], "path": "p"}';
+    const args: Record<string, unknown> = { operations: value };
+    expect(repairDeclaredJsonArguments(applyLineEdits, args).replacedKeys).toEqual([]);
+    expect(args['operations']).toBe(value);
   });
 });
 

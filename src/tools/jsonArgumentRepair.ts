@@ -33,7 +33,10 @@
  * character is the same character either way. The structural slips keep the
  * existing refusal, which names the character position — a tolerant reader that
  * guesses where a string ends would fix them too, but it can silently mis-parse
- * a long list of edits and write wrong code, and a refusal cannot.
+ * a long list of edits and write wrong code, and a refusal cannot. One structural
+ * shape is read after all, because nothing is guessed there: the value before the
+ * tail is complete, valid JSON, and the tail is the end of the whole tool call the
+ * model was still writing (`]}` or `], "path": "x"}`) — see `readCallTail`.
  *
  * Nothing here runs unless the value is a string that starts like the shape the
  * schema declares, and it changes nothing unless the repaired text parses.
@@ -160,6 +163,92 @@ export function repairJsonStringEscapes(text: string): RepairResult | undefined 
 }
 
 /**
+ * The end of the tool call, written inside the value: the model finished the
+ * array and went on writing the call around it. Measured 9 times in the session
+ * archive — `apply_line_edits` `operations` with `], "path": "…"}` after the
+ * array (2c3d8f4c ×2, 571eaf46, and `path` was absent from the call, so the
+ * model had nowhere else to put it), and `ask_user` `questions` with one extra
+ * `}` — the call object's own brace (6 calls). Only these two tails are read:
+ * the head must parse as JSON on its own, every key the tail carries must be a
+ * declared parameter the call lacks, and any other tail is refused as before.
+ */
+const CALL_TAIL_REPAIR =
+  "the end of the tool call, written inside this value, was read as the call's own arguments";
+
+/**
+ * Index of the bracket that closes the JSON value starting at `from`, or -1 when
+ * the brackets never close. Strings are skipped (a `"` toggles, a `\` inside a
+ * string skips the next character), so a bracket inside a string is not a bracket.
+ */
+function firstJsonValueEnd(text: string, from: number): number {
+  let depth = 0;
+  for (let at = from; at < text.length; at++) {
+    const char = text[at];
+    if (char === '"') {
+      at += 1;
+      while (at < text.length) {
+        if (text[at] === '\\') {
+          at += 2;
+          continue;
+        }
+        if (text[at] === '"') break;
+        at += 1;
+      }
+      continue;
+    }
+    if (char === '[' || char === '{') {
+      depth += 1;
+      continue;
+    }
+    if (char === ']' || char === '}') {
+      depth -= 1;
+      if (depth === 0) return at;
+      if (depth < 0) return -1;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Read `value` as the declared argument plus the end of the call that followed
+ * it. Returns undefined for every other tail, so the caller leaves the argument
+ * alone and the existing refusal names the position.
+ */
+function readCallTail(
+  value: string,
+  key: string,
+  declared: Record<string, { type?: unknown }>,
+  present: Record<string, unknown>,
+): { parsed: RepairedJsonArgument; extra: Record<string, unknown> } | undefined {
+  const end = firstJsonValueEnd(value, value.length - value.trimStart().length);
+  if (end < 0) return undefined;
+  const head = value.slice(0, end + 1);
+  const parsed = parseJsonArgumentText(head);
+  if (parsed === undefined) return undefined;
+  const rest = value.slice(end + 1).trim();
+  if (rest === '}') return { parsed, extra: {} };
+  if (!rest.startsWith(',') || !rest.endsWith('}')) return undefined;
+  let tail: unknown;
+  try {
+    tail = JSON.parse('{' + rest.slice(1)) as unknown;
+  } catch {
+    return undefined;
+  }
+  if (tail === null || typeof tail !== 'object' || Array.isArray(tail)) return undefined;
+  const extra: Record<string, unknown> = {};
+  for (const [extraKey, extraValue] of Object.entries(tail as Record<string, unknown>)) {
+    const usable =
+      extraKey !== key &&
+      Object.hasOwn(declared, extraKey) &&
+      present[extraKey] === undefined &&
+      extraValue !== undefined;
+    if (!usable) return undefined;
+    extra[extraKey] = extraValue;
+  }
+  return { parsed, extra };
+}
+
+/**
  * Repair every declared array or object argument that arrived as text, in place
  * on the live `args` object, so the handler receives the real value. Only keys
  * the tool declares with `type: 'array'` or `'object'` are touched, and only
@@ -179,22 +268,39 @@ export function repairDeclaredJsonArguments(
 ): JsonArgumentRepairReport {
   if (typeof properties !== 'object' || properties === null)
     return { replacedKeys: [], repairs: [], total: 0 };
+  const declared = properties as Record<string, { type?: unknown }>;
   const replacedKeys: string[] = [];
   const allRepairs: string[] = [];
   let total = 0;
-  for (const [key, schema] of Object.entries(properties as Record<string, { type?: unknown }>)) {
+  for (const [key, schema] of Object.entries(declared)) {
     const expected = schema?.type;
     if (expected !== 'array' && expected !== 'object') continue;
     const value = present[key];
     if (typeof value !== 'string') continue;
     const opens = expected === 'array' ? '[' : '{';
     if (!value.trimStart().startsWith(opens)) continue;
-    const parsed = parseJsonArgumentText(value);
-    if (parsed === undefined) continue;
-    present[key] = parsed.value;
+    let repaired = parseJsonArgumentText(value);
+    let callTail: Record<string, unknown> | undefined;
+    if (repaired === undefined) {
+      // The text did not parse as it stands. Before giving up, look for the end
+      // of the call written after a complete value.
+      const tail = readCallTail(value, key, declared, present);
+      if (tail === undefined) continue;
+      repaired = tail.parsed;
+      callTail = tail.extra;
+    }
+    present[key] = repaired.value;
     replacedKeys.push(key);
-    allRepairs.push(...parsed.repairs);
-    total += parsed.total;
+    allRepairs.push(...repaired.repairs);
+    total += repaired.total;
+    if (callTail !== undefined) {
+      for (const [extraKey, extraValue] of Object.entries(callTail)) {
+        present[extraKey] = extraValue;
+        replacedKeys.push(extraKey);
+      }
+      allRepairs.push(CALL_TAIL_REPAIR);
+      total += 1;
+    }
   }
   return { replacedKeys, repairs: allRepairs, total };
 }

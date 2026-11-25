@@ -42,6 +42,7 @@
 5. hand-copying Strata's Monitor JS from `N:/Strata/serve/web/app.js` into `webview-ui/vendor/strata-monitor/monitor.js` → a dropped closing `"` before a backtick parses as a template string, and `node --check` names a later line. diff every source line against the copy
 6. `CommandNamesExist.test.ts` scans `docs/*.md` for a backticked single slash-word as a command a reader types → a bare metrics path in `docs/OWNERS.md` fails it. name the method first (`GET` then the path) or leave the path unbackicked
 7. `const { a, b } = fn()` where one member is reassigned later → `prefer-const` (from `eslint:recommended` in `.eslintrc.json`) errors on every never-reassigned member. bind the result once, destructure the const members, `let` only the reassigned one
+8. rewording `config/templates/builtin/execute.njk` and `resources/instructions/FORGE.starter.md` with the same rule → `InstructionSourceOverlap.test.ts` `over 0.45 is the same claim twice`; keep the two homes worded differently
 
 ## TEST
 1. `fs.rmSync` on a killed child's cwd → EPERM is not in `maxRetries`' retried set, so the retries do nothing. use `removeTreeWhenFree` (test/support/removeTempTree.ts): polls until removable
