@@ -1,5 +1,33 @@
 # Forge — Recent Changes
 
+## 0.17.217
+
+**A broken list of edits is read correctly when only its backslashes are wrong.** The model writes
+normal text arguments as plain text, and the engine builds the JSON; only a list (edit_file's
+`edits`, apply_line_edits' `operations`) has to be written as JSON by hand. When that JSON held a raw
+line break or a backslash JSON does not allow, such as `\d` in a regex, a line ending in `\`, or
+`N:\Logs`, the whole call was refused. Such a backslash is now kept as a real backslash, which is
+what the code needed in every case in the session archive, and the result tells the model what was
+read that way. 24 of the 60 broken lists ever recorded now go through; the rest are still refused
+with the position of the break.
+
+**send_file sends from the extra folders you allowed, and never sends a secret.** A path under
+`extra_file_roots` was refused although reading it was allowed. And send_file never checked for
+secret files at all, in the workspace or anywhere: a `.env` or a key file could be sent to Telegram
+after an ordinary approval. It now refuses every path the secret-path rule covers.
+
+**A shortened id finds its job.** monitor_execution and stop_execution accept the start of an
+execution id when it fits exactly one job, and read_tool_result accepts a tool name for that tool's
+latest result. The answer always names the full id it used.
+
+**A failed job resume no longer leaves the job half-changed.** The job's state is now written
+before its definition, so a refused write leaves the job paused instead of enabled with a stale
+due time.
+
+**Tool fixes must say what kind of fix they are.** A `fix(tools)` or `fix(prompt)` commit is
+refused, at commit and at push, unless it names its level: the tool's shape, its description, a
+prompt rule, a Forge bug, or a safety net that names the fix it backs.
+
 ## 0.17.216
 
 **The Monitor is Strata's own Monitor page.** Forge's Monitor panel now runs the Monitor page from
