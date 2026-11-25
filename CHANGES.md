@@ -1,5 +1,27 @@
 # Forge — Recent Changes
 
+## 0.17.218
+
+**A failed tool call no longer resets the prompt cache.** When the model printed tool-call markup
+instead of making a call, Forge's request to try again was treated as the message that opened the
+turn, so the turn context moved onto it and off it again on the next turn. That changed a message in
+the middle of the conversation, and the engine had to read everything after it again. Forge's own
+notes inside a turn are also no longer labelled as sent by the user.
+
+**manage_jobs names the real fault in a broken definition.** A job definition sent as text with
+broken JSON was refused as "not a string", so the model sent the same text again. The refusal now
+quotes the JSON error. The tool also says that an agent task reports only failures and changes
+unless `report` is `always`.
+
+**A parameter folded into another one is split back out.** When the engine's parser put a second
+parameter block inside the first one's value, the call failed (a read_file ran on the path with
+markup attached). When the folded block names a parameter the tool declares and the call lacks,
+Forge now splits it out and runs the call. The leak check also catches `<parameter NAME>` written
+with a space.
+
+**notify_user says where the ping goes.** It reaches the phone only on a Remote or Unattended turn;
+from a desktop session it stays in the VS Code window. The prompt rule now says so.
+
 ## 0.17.217
 
 **A broken list of edits is read correctly when only its backslashes are wrong.** The model writes
