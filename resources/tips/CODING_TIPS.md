@@ -25,7 +25,7 @@
 3. an f-string containing `\|` or `\n` inside `{…}` on Python 3.10 → SyntaxError: f-string expression part cannot include a backslash. build the escaped text into a variable first
 4. a Python scan printing × or reading a child (`subprocess.run(text=True)`) → charmap codec error. first line: `sys.stdout.reconfigure(encoding="utf-8")`; give it `encoding='utf-8', errors='replace'`; `cat -A` in Git Bash prints CRLF as plain `$` — check endings with `open(..., newline='')`
 5. `json.loads` on every line of a session log → one bad line kills the scan halfway. guard each line with `try/except` and keep going
-6. `cd ../other && { … ; } > rel/file.txt; tail rel/file.txt` → the `cd` moves the cwd for every later command, so `tail` reads the wrong folder. give later commands absolute paths
+6. `cd ../other && { … ; } > rel/file.txt; tail rel/file.txt` → the `cd` moves the cwd for every later command, so `tail` reads the wrong folder; a `curl > /tmp/x` whose reader names `./.forge/x` prints nothing. one absolute path for the write and the read
 7. a bash double-quoted string holding backticks → bash runs them as command substitution. wrap the body in single quotes or a quoted heredoc
 8. `probe && next && next` where the probe is meant to fail → the chain stops and the later commands never run. join probes with `;`
 9. a 2nd gated call after one card expired → `... needs the approval that went unanswered earlier in this turn, so no new card was shown` → only the first card waits
@@ -176,5 +176,5 @@
 59. `edit_file` · a path outside the workspace → `Path is outside the workspace ... outside extra_file_roots`, though `read_file`, `open_file` and shell reach it. edit it with a script through `shell`, or ask for the folder in `extra_file_roots`
 60. `monitor_execution` · an execution id shortened from a note or summary → `unknown execution id "exec-92bfe375"`: ids are the full `exec-<8>-<4>-<4>-<4>-<12>`. call `list_executions` for the live one, or read the job's own log file
 61. `manage_jobs` · `resume` on a job whose state file another VS Code window holds → `EPERM: operation not permitted, rename ... held by <pid> Visual Studio Code`, job unchanged. wait ~8 s and resend the same call
-62. `shell` · `gh api --jq` with `\(user.login)` inside the string → `function not defined: user/0`, escaped as `\user` → `invalid escape sequence "\u"`. keep jq dot-only: `.[] | .user.login + ": " + (.body | .[0:600])`
+62. `shell` · `gh api --jq` strings: `\(user.login)` → `function not defined: user/0`, `\user` → `invalid escape sequence "\u"`; keep them dot-only (`.user.login + ": " + .body`). `search/code?q=...+in:README.md` → 422 `unable to parse query`; fetch the raw file instead
 63. `edit_file` · an anchor as short as `});` → the edit lands at the FIRST of its 18 copies, inside the wrong block; the result names the count too late. anchor on the closing line plus the distinct line above it

@@ -218,7 +218,9 @@ export function makeNotifyUserTool(
         description:
           'Ping the user -- THE tool for "ping me", "notify me", "let me know", or ' +
           '"tell me when". Reaches the VS Code window and the remote chat that started ' +
-          'the turn. Fire-and-forget: does not wait for a reply (use ask_user for that).',
+          'the turn; with neither a Remote nor an Unattended line in the turn context, ' +
+          'only the VS Code window. Fire-and-forget: does not wait for a reply (use ' +
+          'ask_user for that).',
         parameters: {
           type: 'object',
           properties: {

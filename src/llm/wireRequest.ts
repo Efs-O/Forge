@@ -1,11 +1,19 @@
 import type { ChatCompletionRequest, ChatMessage } from './types';
 
-const MID_TURN_WIRE_LABEL =
+/** What the wire says in front of a real mid-turn user tell. Exported so the
+ * tests pin the label the model reads, rather than retyping it. */
+export const MID_TURN_WIRE_LABEL =
   '[Sent by the user while you were working. If it changes the task, adjust; otherwise acknowledge it in one line and continue.]';
 
 export function wireMessageContent(
-  message: Pick<ChatMessage, 'content' | 'midTurn'>,
+  message: Pick<ChatMessage, 'content' | 'midTurn' | 'internal'>,
 ): ChatMessage['content'] {
+  // The label is a sentence about the user. Forge's own internal notes (the
+  // elapsed-time note, the file-change reminder, the broken-markup nudge) are
+  // mid-turn, but no user sent them: labelled, the model is told to "adjust" to
+  // a message it cannot answer, and a rewrite here would change the wire bytes
+  // of messages already in the cached prefix.
+  if (message.internal === true) return message.content;
   if (!message.midTurn || typeof message.content !== 'string') return message.content;
   return `${MID_TURN_WIRE_LABEL}\n\n${message.content}`;
 }

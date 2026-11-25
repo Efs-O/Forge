@@ -52,8 +52,20 @@ export function nudgeBrokenToolCall(messages: ChatMessage[], content: string): b
   )
     return false;
   // Internal: the model and the session log need it; the sidebar must not
-  // render Forge's nudge as something the user typed.
-  messages.push({ role: 'user', content: BROKEN_TOOL_CALL_NUDGE, internal: true });
+  // render Forge's nudge as something the user typed. Mid-turn as well, for the
+  // prompt cache: the Layer C finders (`turnContext.ts`, `forgeInstructionsPin.ts`)
+  // look for the last NON-midTurn user message, and the nudge is not one — the
+  // turn opened before it. Found anyway, the live turn-context block folded into
+  // the nudge, and left it again on the next turn: the wire bytes of a message in
+  // the middle of the conversation changed, and every cached token behind it with
+  // them (session 22f64367, `first_changed: 137`). Same pair of flags as the
+  // elapsed-time note and the file-change reminder.
+  messages.push({
+    role: 'user',
+    content: BROKEN_TOOL_CALL_NUDGE,
+    internal: true,
+    midTurn: true,
+  });
   return true;
 }
 

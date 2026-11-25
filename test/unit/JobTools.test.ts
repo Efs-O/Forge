@@ -1004,6 +1004,40 @@ describe('manage_jobs — pre-approval refusal', () => {
     expect(args['definition']).toEqual({});
   });
 
+  // 2026-11-25, session 22f64367 row 270: the text carried a stray `"` before its
+  // closing braces, so the repair above could not read it, and the refusal blamed
+  // the string shape — which Forge accepts. Name the fault the model can fix.
+  it('names the broken JSON when a text definition does not parse', () => {
+    const broken = '{"action": {"kind": "agent_task", "task": "x""}}';
+    let parserMessage = '';
+    try {
+      JSON.parse(broken);
+    } catch (error) {
+      parserMessage = error instanceof Error ? error.message : String(error);
+    }
+    expect(
+      registry.invalidArgs(tool, {
+        action: 'update',
+        job: 'hy4-flash-readiness-watch',
+        definition: broken,
+      }),
+    ).toBe(
+      `Error: manage_jobs: \`update\`: \`definition\` arrived as text that is not valid JSON (${parserMessage}), so it could not be read as the job definition. Nothing ran. Send \`definition\` as a JSON object.`,
+    );
+  });
+
+  it('still says not a string for a definition that is no JSON at all', () => {
+    expect(registry.invalidArgs(tool, { action: 'create', definition: 'weekly' })).toBe(
+      'Error: manage_jobs: `create` needs `definition`, the job definition as a JSON object, not a string. Nothing ran.',
+    );
+  });
+
+  it('does not refuse a text definition that parses', () => {
+    expect(
+      registry.invalidArgs(tool, { action: 'update', job: 'x', definition: '{"name": "n"}' }),
+    ).toBeUndefined();
+  });
+
   it('refuses pause without a job', () => {
     expect(registry.invalidArgs(tool, { action: 'pause' })).toBe(
       'Error: manage_jobs: `pause` needs `job`, the id or name of an existing job (list them with {action:"list"}). Nothing ran.',

@@ -69,5 +69,5 @@ Fill in the blanks below; delete any rule that does not fit this project.
 ## Working rules
 - Add durable conventions, safety constraints, and facts you had to discover the hard way here, so the next session does not rediscover them.
 - A plan whose feature writes state that outlives its turn lists every artifact — a file, a registry entry, a config field, a lease, a queue item — and covers create, delete, pause or disable, crash mid-write, owner-process death, and expiry. A plan with no durable state says so explicitly. If a plan you are about to implement lacks this or its acceptance criteria, write them first; do not ask and do not code around the gap.
-- Long unattended work: send checkpoints with `notify_user` and do not stop on `ask_user` (it blocks with no timeout); state the assumption and continue.
+- Long unattended work: a `notify_user` ping reaches the phone only on a Remote or Unattended turn — from a desktop session it never leaves this window. Never block on `ask_user` (no timeout): write the assumption down and carry on.
 - On Windows, Git Bash turns a leading `/flag` into a path (`icacls f /deny …`): write `//flag` or set `MSYS_NO_PATHCONV=1` for that command.

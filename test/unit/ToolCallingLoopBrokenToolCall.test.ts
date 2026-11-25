@@ -97,7 +97,14 @@ describe('nudgeBrokenToolCall', () => {
   it('pushes the nudge once and reports the retry', () => {
     const messages: ChatMessage[] = [{ role: 'user', content: 'go' }];
     expect(nudgeBrokenToolCall(messages, BROKEN_ANSWER)).toBe(true);
-    expect(messages[1]).toEqual({ role: 'user', content: BROKEN_TOOL_CALL_NUDGE, internal: true });
+    expect(messages[1]).toEqual({
+      role: 'user',
+      content: BROKEN_TOOL_CALL_NUDGE,
+      internal: true,
+      // midTurn: the nudge is not the message that opened the turn, so the
+      // Layer C finders must not pick it (BrokenNudgeWireStability.test.ts).
+      midTurn: true,
+    });
     expect(nudgeBrokenToolCall(messages, BROKEN_ANSWER)).toBe(false);
     expect(messages).toHaveLength(2);
   });
@@ -144,12 +151,14 @@ describe('ToolCallingLoop broken tool-call markup', () => {
       role: 'user',
       content: BROKEN_TOOL_CALL_NUDGE,
       internal: true,
+      midTurn: true,
     });
     // The model saw the nudge before it was asked again.
     expect(requests[2]).toContainEqual({
       role: 'user',
       content: BROKEN_TOOL_CALL_NUDGE,
       internal: true,
+      midTurn: true,
     });
     // The broken markup is on the transcript as the round's answer.
     expect(messages[1]).toMatchObject({ role: 'assistant', content: BROKEN_ANSWER });

@@ -38,6 +38,7 @@ vi.mock('vscode', () => {
 // Assembled from parts so this file's own text never reads as tool-call markup.
 const CLOSE = '<' + '/parameter>';
 const OPEN = '<' + 'parameter=';
+const OPEN_SP = '<' + 'parameter ';
 
 /**
  * The engine's tool-call parser can fold a second parameter block into the value
@@ -188,5 +189,84 @@ describe('a tool call whose value swallowed a parameter block', () => {
 
     expect(handler).toHaveBeenCalled();
     expect(messages[1]?.content).toBe('ok');
+  });
+
+  // 2026-11-25, session 22f64367: the model wrote `<parameter numbered>` with a
+  // space, and the block landed inside `path`. `read_file` ran on the markup and
+  // failed with ENOENT. A folded block naming a declared parameter that is not in
+  // the call is not a guess, so the call is split back out and runs.
+  it('splits a folded block naming a declared parameter and runs the call', async () => {
+    const handler = vi.fn().mockResolvedValue('read');
+    register(
+      'read_file',
+      {
+        path: { type: 'string' },
+        start_line: { type: 'integer' },
+        end_line: { type: 'integer' },
+        numbered: { type: 'boolean' },
+      },
+      handler,
+    );
+
+    const messages = await call('read_file', {
+      path: `docs/CODING_TIPS.md\n${CLOSE}\n${OPEN_SP}numbered>\ntrue`,
+      start_line: 7,
+      end_line: 13,
+    });
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler.mock.calls[0]?.[0]).toEqual({
+      path: 'docs/CODING_TIPS.md',
+      numbered: true,
+      start_line: 7,
+      end_line: 13,
+    });
+    expect(messages[1]?.content).toBe('read');
+    expect(failureTracker.recordNativeParseFailure).not.toHaveBeenCalled();
+  });
+
+  it('still refuses a folded block naming a parameter the tool does not declare', async () => {
+    const handler = vi.fn().mockResolvedValue('read');
+    register(
+      'read_file',
+      { path: { type: 'string' }, numbered: { type: 'boolean' } },
+      handler,
+    );
+
+    const messages = await call('read_file', { path: `a.md\n${CLOSE}\n${OPEN_SP}nosuch>\nx` });
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(messages[1]?.content).toContain('the value of "path"');
+    expect(failureTracker.recordNativeParseFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it('still refuses a folded block naming a parameter the call already carries', async () => {
+    const handler = vi.fn().mockResolvedValue('read');
+    register(
+      'read_file',
+      { path: { type: 'string' }, numbered: { type: 'boolean' } },
+      handler,
+    );
+
+    const messages = await call('read_file', {
+      path: `a.md\n${CLOSE}\n${OPEN_SP}numbered>\ntrue`,
+      numbered: false,
+    });
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(messages[1]?.content).toContain('the value of "path"');
+    expect(failureTracker.recordNativeParseFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs a write_file body that mentions an opening tag mid-line', async () => {
+    const handler = vi.fn().mockResolvedValue('written');
+    register('write_file', { path: { type: 'string' }, content: { type: 'string' } }, handler);
+
+    const content = `The engine reads ${OPEN}path>\nsrc/a.ts\n${CLOSE} for the file to change.`;
+    const messages = await call('write_file', { path: 'doc.md', content });
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler.mock.calls[0]?.[0]).toEqual({ path: 'doc.md', content });
+    expect(messages[1]?.content).toBe('written');
   });
 });

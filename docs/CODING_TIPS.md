@@ -10,6 +10,7 @@
 3. `grep_search` `include:"eslint.config.*"` → no matches: this repo's ESLint config is the dotfile `.eslintrc.json` (prettier: `.prettierrc`). glob the dotfile's real name
 4. `grep_search` for a phrase copied from a lane brief → hits the brief itself in `.forge/tmp/lanes/*.md` plus all of `coverage/`. anchor it: `include: "src/**"`
 5. `grep -n "interface RegisteredTool" src/tools/ToolRegistry.ts` → empty: the tool contract (`permission`, `untrustedResult`, `unknownEffects`, `approval`) is declared in `src/tools/toolContract.ts`; ToolRegistry only stores and validates them
+6. `web_fetch` of a public `huggingface.co/<repo>/raw/main/README.md` → `HTTP 401 Unauthorized` here, and the model page returns the card JSON, not files. For GGUF file sizes (the N:/Strata model picks) use `huggingface.co/api/models/<repo>/tree/main`
 
 ## RUN
 1. `npx eslint test/unit/x.test.ts` → "none of those TSConfigs include this file": the lint script is `eslint src webview-ui`, so tests have no typed-lint config. lint `src` only

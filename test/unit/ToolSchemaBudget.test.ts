@@ -196,7 +196,10 @@ import { makeMaximalRegistry } from '../support/maximalToolRegistry';
 // its own notes instead of the full id the shell had returned.
 // 2026-11-25: 68,969 (-130) after dropping the web_fetch `url` description sentence: the
 // advice was already this tool's tips row, which lands in the description anyway.
-const MEASURED_CHARS = 68_969;
+// 2026-11-25: 69,189 (+220) from the two description fixes out of the Hy4 session: manage_jobs
+// now states the `report` default a watch job silently obeys, and notify_user says when it
+// reaches nobody but this window (session 22f64367).
+const MEASURED_CHARS = 69_189;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.

@@ -6,7 +6,7 @@ import {
   cutOffArgumentMismatch,
   missingArgumentError,
 } from './toolErrorText';
-import { repairParameterMarkup } from './toolArgumentMarkup';
+import { recoverFoldedParameters, repairParameterMarkup } from './toolArgumentMarkup';
 import { applyArgumentRewrites, unknownArgumentRefusal } from './argumentAliases';
 import { editFileStringError } from './editsJsonError';
 import { repairDeclaredJsonArguments, type JsonArgumentRepairReport } from './jsonArgumentRepair';
@@ -239,6 +239,7 @@ export class ToolRegistry {
     const present: Record<string, unknown> = typeof args === 'object' && args !== null ? args : {};
     const markupError = repairParameterMarkup(name, parameters.properties, present);
     if (markupError) return markupError;
+    recoverFoldedParameters(parameters.properties, present); // leftovers: the leak refusal
     // The advertised schema, not the static one: `describe()` is what the model
     // was shown this turn, so a rename must target an argument it could really
     // have used. The unknown-key refusal below reads the same object.

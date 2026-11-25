@@ -99,7 +99,7 @@ export function makeManageJobsTool(deps: ManageJobsDeps): RegisteredTool {
                 '`check` ({kind:github_release,repo,asset_pattern?} | {kind:github_issue,repo,issue_number} ' +
                 '| {kind:hf_discussion,repo,repo_type?,discussion_number} (needs huggingface.co in jobs.allowed_hosts) ' +
                 '| {kind:disk_space,path,min_free_gb} | {kind:tool_usage} (writes daily tool-usage files, never notifies) | {kind:none} (no observation, so on_change delivers nothing)), `on_change` ({kind:notify} | {kind:summarize,focus[]}), ' +
-                '`action` (null | {kind:llamacpp_update,mode,asset_pattern} | {kind:agent_task,task,model?,max_minutes?,report?}).',
+                '`action` (null | {kind:llamacpp_update,mode,asset_pattern} | {kind:agent_task,task,model?,max_minutes?,report?}). `report` defaults to failures_and_changes: a run that finds nothing new delivers nothing; set always when every run must report.',
             },
           },
           required: ['action'],
@@ -176,6 +176,19 @@ export function makeManageJobsTool(deps: ManageJobsDeps): RegisteredTool {
       if (action === 'create' || action === 'update') {
         const definition = args['definition'];
         if (definition === null || typeof definition !== 'object' || Array.isArray(definition)) {
+          // A text definition that IS valid JSON was already read as the object
+          // the schema declares (`repairDeclaredJsonArguments`, upstream of this
+          // check), so a string reaching here is one that did not parse. Say what
+          // broke: the old refusal blamed the string shape, which Forge accepts,
+          // and the model resent the same broken text.
+          if (typeof definition === 'string' && definition.trim().startsWith('{')) {
+            try {
+              JSON.parse(definition);
+            } catch (error) {
+              const parserMessage = error instanceof Error ? error.message : String(error);
+              return `Error: manage_jobs: \`${action}\`: \`definition\` arrived as text that is not valid JSON (${parserMessage}), so it could not be read as the job definition. Nothing ran. Send \`definition\` as a JSON object.`;
+            }
+          }
           // "not a string" only when it is one; a missing definition is simply missing.
           const asString = typeof definition === 'string' ? ', not a string' : '';
           const job = args['job'];

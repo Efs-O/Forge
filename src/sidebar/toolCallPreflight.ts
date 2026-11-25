@@ -98,10 +98,18 @@ function collectStringValues(
   }
 }
 
+/** A closing tag followed by the next parameter's opening tag, in any spelling. */
+const FOLDED_PARAMETER_TAG = /<\/parameter>\n<parameter(?:=| name=| )/u;
+/** A value that begins on an opening tag rather than on its own text. */
+const OPENS_WITH_PARAMETER_TAG = /^<parameter(?:=| name=| )/u;
+
 function isLeakedMarkupValue(raw: string, paramNames: readonly string[]): boolean {
   const value = raw.replace(/\r\n/gu, '\n');
-  if (value.includes('</parameter>\n<parameter=')) return true;
-  if (value.trimStart().startsWith('<parameter=')) return true;
+  // Three spellings of the same opening tag: `<parameter=x>`, `<parameter x>`
+  // (session 22f64367, where the space form slipped through and the read ran on
+  // `docs/CODING_TIPS.md\n</parameter>…`), and `<parameter name=x>`.
+  if (FOLDED_PARAMETER_TAG.test(value)) return true;
+  if (OPENS_WITH_PARAMETER_TAG.test(value.trimStart())) return true;
   if (value.trimEnd().endsWith('</parameter>') && value.includes('<parameter=')) return true;
   return paramNames.some((param) => value.includes(`\n<parameter=${param}>`));
 }
