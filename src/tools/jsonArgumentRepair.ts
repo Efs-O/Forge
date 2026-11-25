@@ -24,16 +24,16 @@
  * **What the slips are** (counted inside the strings of those 60): an
  * unescaped double quote from the code the model is quoting (the largest class,
  * 19+), a wrong nesting brace (5), a value left unquoted (3), and three escape
- * slips that have exactly one reading each — a backslash before a single quote
- * (`\'`, 13), a backslash standing right before a real line break (8), and a
- * raw control character inside a string (216 across the 60). This module repairs
- * only those last three, because they are the only ones whose meaning is
- * certain: the escape classes become what the model's own refusal says they
- * mean, and a raw line break becomes a line break either way. The structural
- * slips keep the existing refusal, which names the character position — a
- * tolerant reader that guesses where a string ends would fix them too, but it
- * can silently mis-parse a long list of edits and write wrong code, and a
- * refusal cannot.
+ * slips that have exactly one reading each — any backslash that does not start
+ * a valid JSON escape (the model meant a literal backslash: `\'`, `\d`, `\`
+ * before a real line break, 21 cases), and a raw control character inside a
+ * string (216 across the 60). This module repairs only those, because they are
+ * the only ones whose meaning is certain: a backslash JSON cannot read was
+ * typed by the model as source text, so it stays a backslash; a raw control
+ * character is the same character either way. The structural slips keep the
+ * existing refusal, which names the character position — a tolerant reader that
+ * guesses where a string ends would fix them too, but it can silently mis-parse
+ * a long list of edits and write wrong code, and a refusal cannot.
  *
  * Nothing here runs unless the value is a string that starts like the shape the
  * schema declares, and it changes nothing unless the repaired text parses.
@@ -44,6 +44,8 @@ export interface RepairedJsonArgument {
   value: unknown;
   /** What was repaired, in short phrases; capped, and empty when the text parsed as it stood. */
   repairs: string[];
+  /** Total repair count, including those beyond the reporting cap. */
+  total: number;
 }
 
 /** The most repair positions one call may report. */
@@ -67,12 +69,12 @@ const CONTROL_ESCAPES = new Map([
  */
 export function parseJsonArgumentText(text: string): RepairedJsonArgument | undefined {
   const direct = tryParse(text);
-  if (direct !== undefined) return { value: direct, repairs: [] };
+  if (direct !== undefined) return { value: direct, repairs: [], total: 0 };
   const repaired = repairJsonStringEscapes(text);
   if (repaired === undefined) return undefined;
   const value = tryParse(repaired.text);
   if (value === undefined) return undefined;
-  return { value, repairs: repaired.repairs };
+  return { value, repairs: repaired.repairs, total: repaired.total };
 }
 
 function tryParse(text: string): unknown | undefined {
@@ -86,28 +88,30 @@ function tryParse(text: string): unknown | undefined {
 interface RepairResult {
   text: string;
   repairs: string[];
+  total: number;
 }
 
 /**
  * Rewrite the inside of JSON strings only; everything outside a string is
  * copied through, so the structure the caller checks is never touched.
  *
- * - `\` before a real line break → `\n` (or `\r`): the model wrote the break
- *   for real where JSON wants its escape.
- * - `\` before a single quote → `'`: JSON has no `\'`; the model carried the
- *   JavaScript spelling into the argument.
- * - a raw control character inside a string → its escape. The decoded text is
+ * - A backslash not followed by one of `" \ / b f n r t u` becomes `\\` (a
+ *   literal backslash). The next character is processed normally: a real line
+ *   break after it is then escaped by the control-character rule, a single
+ *   quote passes through, a regex escape like `\d` keeps its backslash.
+ * - A raw control character inside a string → its escape. The decoded text is
  *   the same character either way; this is what lets the strict re-read pass.
  *
- * Any other invalid escape is left alone, which keeps the result unparseable and
- * the refusal honest.
+ * Valid JSON escapes are passed through unchanged.
  */
 export function repairJsonStringEscapes(text: string): RepairResult | undefined {
   const out: string[] = [];
   const repairs: string[] = [];
+  let total = 0;
   let inString = false;
   let at = 0;
   const note = (message: string, offset: number): void => {
+    total += 1;
     if (repairs.length >= MAX_REPORTED_REPAIRS) return;
     repairs.push(`${message} at character ${offset + 1}`);
   };
@@ -121,30 +125,16 @@ export function repairJsonStringEscapes(text: string): RepairResult | undefined 
     }
     if (char === '\\') {
       const next = at + 1 < text.length ? text[at + 1] : '';
-      if (next === '\n') {
-        out.push('\\n');
-        note('a line break written after a backslash became \\n', at);
-        at += 2;
-        continue;
-      }
-      if (next === '\r') {
-        out.push('\\r');
-        note('a carriage return written after a backslash became \\r', at);
-        at += 2;
-        continue;
-      }
-      if (next === "'") {
-        out.push("'");
-        note('a backslash before a single quote was dropped', at);
-        at += 2;
-        continue;
-      }
       if (next !== '' && '"\\/bfnrtu'.includes(next)) {
         out.push('\\', next);
         at += 2;
         continue;
       }
-      out.push('\\');
+      // Any other character (including a real line break, a single quote, or
+      // end-of-text): the model meant a literal backslash. Double it so JSON
+      // sees one; the next character is then processed normally.
+      out.push('\\', '\\');
+      note('a backslash with no valid escape was kept as a literal backslash', at);
       at += 1;
       continue;
     }
@@ -165,8 +155,8 @@ export function repairJsonStringEscapes(text: string): RepairResult | undefined 
     out.push(char);
     at += 1;
   }
-  if (repairs.length === 0) return undefined;
-  return { text: out.join(''), repairs };
+  if (total === 0) return undefined;
+  return { text: out.join(''), repairs, total };
 }
 
 /**
@@ -174,14 +164,24 @@ export function repairJsonStringEscapes(text: string): RepairResult | undefined 
  * on the live `args` object, so the handler receives the real value. Only keys
  * the tool declares with `type: 'array'` or `'object'` are touched, and only
  * when the string starts with the bracket that shape opens — a plain string
- * value is never a candidate. Returns the keys it replaced, in declaration order.
+ * value is never a candidate. Returns the keys it replaced, the repair phrases,
+ * and the total repair count.
  */
+export interface JsonArgumentRepairReport {
+  replacedKeys: string[];
+  repairs: string[];
+  total: number;
+}
+
 export function repairDeclaredJsonArguments(
   properties: unknown,
   present: Record<string, unknown>,
-): string[] {
-  if (typeof properties !== 'object' || properties === null) return [];
-  const replaced: string[] = [];
+): JsonArgumentRepairReport {
+  if (typeof properties !== 'object' || properties === null)
+    return { replacedKeys: [], repairs: [], total: 0 };
+  const replacedKeys: string[] = [];
+  const allRepairs: string[] = [];
+  let total = 0;
   for (const [key, schema] of Object.entries(properties as Record<string, { type?: unknown }>)) {
     const expected = schema?.type;
     if (expected !== 'array' && expected !== 'object') continue;
@@ -192,7 +192,22 @@ export function repairDeclaredJsonArguments(
     const parsed = parseJsonArgumentText(value);
     if (parsed === undefined) continue;
     present[key] = parsed.value;
-    replaced.push(key);
+    replacedKeys.push(key);
+    allRepairs.push(...parsed.repairs);
+    total += parsed.total;
   }
-  return replaced;
+  return { replacedKeys, repairs: allRepairs, total };
+}
+
+/**
+ * The one-line note the model reads when a repair replaced a value.
+ * Returns undefined when nothing was replaced.
+ */
+export function jsonArgumentRepairNote(report: JsonArgumentRepairReport): string | undefined {
+  if (report.replacedKeys.length === 0) return undefined;
+  const keys = report.replacedKeys.join(', ');
+  const count = report.total;
+  const phrases =
+    report.repairs.length > 0 ? report.repairs.join(', ') : 'the text was re-read as JSON';
+  return `Note: ${keys} arrived as JSON text with ${count} escape slip${count === 1 ? '' : 's'}; read as: ${phrases}`;
 }

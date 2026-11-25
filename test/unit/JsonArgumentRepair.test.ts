@@ -14,6 +14,7 @@ import { ToolRegistry } from '../../src/tools/ToolRegistry';
 import {
   parseJsonArgumentText,
   repairDeclaredJsonArguments,
+  jsonArgumentRepairNote,
 } from '../../src/tools/jsonArgumentRepair';
 
 vi.mock('vscode', () => ({
@@ -35,18 +36,22 @@ describe('parseJsonArgumentText', () => {
     const edits = parsed?.value as Array<{ old_str: string; new_str: string }>;
     expect(Array.isArray(edits)).toBe(true);
     expect(edits).toHaveLength(1);
-    // The line breaks the model wrote after a backslash survive as line breaks,
-    // and the `\n` escapes it wrote correctly survive as line breaks too.
-    expect(edits[0].new_str).toContain("toEqual([\n      'skills-lab/media-inspect/SKILL.md',\n    ]);");
+    // The backslash before a real line break survives as a literal backslash,
+    // and the line break itself survives as a line break. The `\n` escapes the
+    // model wrote correctly also survive as line breaks.
+    expect(edits[0].new_str).toContain(
+      "toEqual([\\\n      'skills-lab/media-inspect/SKILL.md',\\\n    ]);",
+    );
     expect(edits[0].new_str).toContain('\n  });');
-    expect(parsed?.repairs).toHaveLength(2);
-    expect(parsed?.repairs[0]).toContain('became \\n at character');
+    expect(parsed?.repairs).toHaveLength(4);
+    expect(parsed?.repairs[0]).toContain('kept as a literal backslash at character');
+    expect(parsed?.repairs[1]).toContain('raw control character inside a string was escaped at character');
   });
 
-  it('drops the backslash of a JavaScript-style apostrophe escape', () => {
+  it('keeps the backslash of a JavaScript-style apostrophe escape as a literal backslash', () => {
     const parsed = parseJsonArgumentText('[{"old_str": "GitHub\\\'s", "new_str": "x"}]');
-    expect((parsed?.value as Array<{ old_str: string }>)[0].old_str).toBe("GitHub's");
-    expect(parsed?.repairs[0]).toContain("single quote was dropped at character 21");
+    expect((parsed?.value as Array<{ old_str: string }>)[0].old_str).toBe("GitHub\\'s");
+    expect(parsed?.repairs[0]).toContain('kept as a literal backslash at character 21');
   });
 
   it('escapes a raw control character inside a string so the strict re-read passes', () => {
@@ -54,13 +59,36 @@ describe('parseJsonArgumentText', () => {
     expect((parsed?.value as Array<{ old_str: string }>)[0].old_str).toBe('a\nb');
   });
 
-  it('leaves an ambiguous escape broken, so the refusal still names the position', () => {
-    expect(parseJsonArgumentText('[{"old_str": "\\const X = 1", "new_str": "x"}]')).toBeUndefined();
+  it('reads an ambiguous escape as a literal backslash plus the text', () => {
+    const parsed = parseJsonArgumentText('[{"old_str": "\\const X = 1", "new_str": "x"}]');
+    expect(parsed).toBeDefined();
+    expect((parsed?.value as Array<{ old_str: string }>)[0].old_str).toBe('\\const X = 1');
   });
 
   it('returns the parsed value when the text was valid JSON all along', () => {
     const parsed = parseJsonArgumentText('[{"old_str": "a", "new_str": "b"}]');
-    expect(parsed).toEqual({ value: [{ old_str: 'a', new_str: 'b' }], repairs: [] });
+    expect(parsed).toEqual({ value: [{ old_str: 'a', new_str: 'b' }], repairs: [], total: 0 });
+  });
+
+  it('keeps a Python line continuation: backslash before a real newline stays a backslash + newline', () => {
+    const parsed = parseJsonArgumentText('[{"old_str": "x = 1 + \\\n2", "new_str": "y"}]');
+    expect((parsed?.value as Array<{ old_str: string }>)[0].old_str).toBe('x = 1 + \\\n2');
+  });
+
+  it('keeps a JS single-quote escape: backslash-apostrophe stays a backslash-apostrophe', () => {
+    const parsed = parseJsonArgumentText('[{"old_str": "\'it\\\'s\'", "new_str": "y"}]');
+    expect((parsed?.value as Array<{ old_str: string }>)[0].old_str).toBe("'it\\'s'");
+  });
+
+  it('keeps regex escapes: \d, \. and \p{L} all survive with their backslashes', () => {
+    const parsed = parseJsonArgumentText('[{"old_str": "/\\d+\\.\\p{L}/u", "new_str": "y"}]');
+    expect((parsed?.value as Array<{ old_str: string }>)[0].old_str).toBe('/\\d+\\.\\p{L}/u');
+  });
+
+  it('passes valid JSON escapes through unchanged', () => {
+    const parsed = parseJsonArgumentText('[{"old_str": "a\\nb\\"c\\\\dA", "new_str": "y"}]');
+    expect(parsed?.total).toBe(0);
+    expect((parsed?.value as Array<{ old_str: string }>)[0].old_str).toBe('a\nb"c\\dA');
   });
 });
 
@@ -73,8 +101,9 @@ describe('repairDeclaredJsonArguments', () => {
 
   it('replaces a declared array that arrived as text, in place', () => {
     const args: Record<string, unknown> = { path: 'a.ts', edits: '[{"old_str": "a\'b"}]' };
-    expect(repairDeclaredJsonArguments(properties, args)).toEqual(['edits']);
-    expect(args['edits']).toEqual([{ old_str: 'a\'b' }]);
+    const report = repairDeclaredJsonArguments(properties, args);
+    expect(report.replacedKeys).toEqual(['edits']);
+    expect(args['edits']).toEqual([{ old_str: "a\'b" }]);
   });
 
   it('never touches a declared string, nor an array-shaped value already parsed', () => {
@@ -82,14 +111,14 @@ describe('repairDeclaredJsonArguments', () => {
       path: '[looks like an array]',
       edits: [{ old_str: 'a' }],
     };
-    expect(repairDeclaredJsonArguments(properties, args)).toEqual([]);
+    expect(repairDeclaredJsonArguments(properties, args).replacedKeys).toEqual([]);
     expect(args['path']).toBe('[looks like an array]');
     expect(args['edits']).toEqual([{ old_str: 'a' }]);
   });
 
   it('leaves a string that does not open like the declared shape', () => {
     const args: Record<string, unknown> = { meta: 'no braces here' };
-    expect(repairDeclaredJsonArguments(properties, args)).toEqual([]);
+    expect(repairDeclaredJsonArguments(properties, args).replacedKeys).toEqual([]);
     expect(args['meta']).toBe('no braces here');
   });
 });
@@ -121,5 +150,22 @@ describe('the verbatim failing call through the registry and the tool', () => {
     const broken = '[{"new_str": "B["stone"]", "old_str": "y"}]';
     const refusal = new ToolRegistry().invalidArgs(tool, { path: target, edits: broken });
     expect(refusal).toContain('`edits` is not valid JSON at character');
+  });
+});
+
+describe('jsonArgumentRepairNote', () => {
+  it('names the key, the slip count and the repair phrases', () => {
+    const report = {
+      replacedKeys: ['edits'],
+      repairs: ['a backslash with no valid escape was kept as a literal backslash at character 41'],
+      total: 1,
+    };
+    expect(jsonArgumentRepairNote(report)).toBe(
+      'Note: edits arrived as JSON text with 1 escape slip; read as: a backslash with no valid escape was kept as a literal backslash at character 41',
+    );
+  });
+
+  it('returns undefined when nothing was replaced', () => {
+    expect(jsonArgumentRepairNote({ replacedKeys: [], repairs: [], total: 0 })).toBeUndefined();
   });
 });

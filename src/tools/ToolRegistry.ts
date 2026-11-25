@@ -9,7 +9,7 @@ import {
 import { repairParameterMarkup } from './toolArgumentMarkup';
 import { applyArgumentRewrites, unknownArgumentRefusal } from './argumentAliases';
 import { editFileStringError } from './editsJsonError';
-import { repairDeclaredJsonArguments } from './jsonArgumentRepair';
+import { repairDeclaredJsonArguments, type JsonArgumentRepairReport } from './jsonArgumentRepair';
 /** The declarations live in `toolContract.ts`; re-exported from here so every
  *  consumer that has always imported them from the registry keeps working. */
 export {
@@ -189,6 +189,18 @@ function missingPathError(name: string): string {
  */
 export class ToolRegistry {
   private readonly tools = new Map<string, RegisteredTool>();
+  private _lastJsonArgumentRepairs: JsonArgumentRepairReport = {
+    replacedKeys: [],
+    repairs: [],
+    total: 0,
+  };
+
+  /** Read and clear the JSON-argument repairs recorded by the last `invalidArgs` call. */
+  takeLastJsonArgumentRepairs(): JsonArgumentRepairReport {
+    const r = this._lastJsonArgumentRepairs;
+    this._lastJsonArgumentRepairs = { replacedKeys: [], repairs: [], total: 0 };
+    return r;
+  }
 
   register(tool: RegisteredTool): void {
     const name = tool.definition.function.name;
@@ -258,7 +270,7 @@ export class ToolRegistry {
     // the call runs. Everything else stays a refusal, with the position named.
     // See `jsonArgumentRepair.ts` for the measurement and why the structural
     // slips are not repaired.
-    repairDeclaredJsonArguments(parameters.properties, present);
+    this._lastJsonArgumentRepairs = repairDeclaredJsonArguments(parameters.properties, present);
     const preApproval = tool.refuseBeforeApproval?.(present, context);
     if (preApproval) return preApproval;
     if (name === 'edit_file') {

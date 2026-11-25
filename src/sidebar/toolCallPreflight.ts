@@ -3,6 +3,7 @@ import type { ToolCall } from '../llm/types';
 import type { ToolBudget } from '../tools/ToolBudget';
 import type { RegisteredTool, ToolHandlerResult, ToolPermission } from '../tools/ToolRegistry';
 import type { ToolRegistry } from '../tools/ToolRegistry';
+import type { JsonArgumentRepairReport } from '../tools/jsonArgumentRepair';
 import { unknownToolResult } from './retiredTools';
 import { applyToolNameAlias, recordToolNameAliasHit } from '../tools/toolNameAliases';
 
@@ -130,7 +131,12 @@ export type ToolCallPreflight =
        *  that switches the chat to text tool calls. */
       protocolFailure?: boolean;
     }
-  | { kind: 'ready'; args: Record<string, unknown>; reg: RegisteredTool };
+  | {
+      kind: 'ready';
+      args: Record<string, unknown>;
+      reg: RegisteredTool;
+      repairs: JsonArgumentRepairReport;
+    };
 
 export function preflightToolCall(
   tc: ToolCall,
@@ -216,6 +222,7 @@ export function preflightToolCall(
     ...(input.convId !== undefined ? { conversationId: input.convId } : {}),
     clankerMode: input.clankerMode,
   });
+  const repairs = input.toolRegistry.takeLastJsonArgumentRepairs();
   if (invalid) {
     return { kind: 'refused', result: invalid };
   }
@@ -233,5 +240,5 @@ export function preflightToolCall(
     return { kind: 'refused', result: budgetBlock };
   }
 
-  return { kind: 'ready', args, reg };
+  return { kind: 'ready', args, reg, repairs };
 }

@@ -44,18 +44,8 @@ describe('edit_file batch cap', () => {
         new_str: 'after',
       }),
     ).rejects.toThrow(
-      'edit 1 needs string old_str and new_str (or old_text and new_text) (it has: old_str, newStr). Top-level old_str/new_str were sent too',
+      'edit 1 needs string old_str and new_str (it has: old_str, newStr). Top-level old_str/new_str were sent too',
     );
-  });
-
-  it('accepts old_text/new_text aliases inside edits[]', async () => {
-    fs.writeFileSync(target, 'hello world');
-    const result = await makeEditFileTool().handler({
-      path: target,
-      edits: [{ old_text: 'hello', new_text: 'goodbye' }],
-    });
-    expect(fs.readFileSync(target, 'utf8')).toBe('goodbye world');
-    expect(result).toContain('Replaced in');
   });
 });
 

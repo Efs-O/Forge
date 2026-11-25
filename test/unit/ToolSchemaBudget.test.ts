@@ -196,7 +196,7 @@ import { makeMaximalRegistry } from '../support/maximalToolRegistry';
 // its own notes instead of the full id the shell had returned.
 // 2026-11-25: 69,099 (+42) after read_tool_result said a tool NAME resolves too: the
 // model asked for `tool_call_id: "read_file"`, the handle it actually had.
-const MEASURED_CHARS = 69_216;
+const MEASURED_CHARS = 69_099;
 // 2026-11-09: 64,954 (+64) after read_tool_result clarified that message_index
 // reads tool results and tool_call_id accepts a unique prefix.
 // Phase 3 STOP: the historical full 88-tool wire schema was 67,128 chars.

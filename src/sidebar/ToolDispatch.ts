@@ -10,6 +10,7 @@ import type { RegisteredTool, ToolHandlerResult, ToolPermission } from '../tools
 import { ToolApprovalRefusal } from '../tools/toolContract';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import { repairTrailingPathSpace, trailingPathSpaceNote } from '../tools/pathArgTrim';
+import { jsonArgumentRepairNote } from '../tools/jsonArgumentRepair';
 import { ToolFailureTracker } from '../tools/StripTools';
 import type { ToolBudget } from '../tools/ToolBudget';
 import type { DiffDecorations } from './DiffDecorations';
@@ -194,6 +195,7 @@ export class ToolDispatch {
         args = pre.args;
         const handlerArgs = pre.args;
         const reg = pre.reg;
+        const jsonArgRepairs = pre.repairs;
         // The queue writes the owner's answer time into this box; the call's own
         // result then says a human was asked and what the wait cost (BUG-14).
         const grant: ApprovalGrantRecord = {};
@@ -258,6 +260,8 @@ export class ToolDispatch {
         // model cannot see is a lie by omission, and on POSIX a trailing space is legal.
         const pathNote = trailingPathSpaceNote(repairedPathArgs);
         if (pathNote && typeof result === 'string') result = `${result}\n${pathNote}`;
+        const repairNote = jsonArgumentRepairNote(jsonArgRepairs);
+        if (repairNote && typeof result === 'string') result = `${result}\n${repairNote}`;
         // A card the owner answered: say so, and how long it cost, next to the
         // result it unlocked. Without this the model has seen a 5-minute card and
         // reports "auto-approved, no card" to whoever asks what the run cost.

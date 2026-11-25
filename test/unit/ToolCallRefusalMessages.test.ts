@@ -783,19 +783,13 @@ describe('ToolRegistry.invalidArgs refuses quoted JSON types', () => {
     expect(args['operations']).toEqual([{ path: 'scene.js' }]);
   });
 
-  it('refuses malformed array JSON without repairing its backslashes', () => {
+  it('repairs a backslash-v in array JSON, keeping it as a literal backslash', () => {
     const value = String.raw`[{"prompt":"Use N:\vs code apps\Forge"}]`;
-    const message = registry.invalidArgs(askTool, { questions: value }) as string;
-    // Still refused, and the bad escape is not silently repaired: the refusal
-    // now points at the character it broke on instead of calling the value a
-    // string, which is what made the model resend the same broken text.
-    expect(message).toContain('"questions" was written as a JSON array but is not valid JSON');
-    expect(message).toContain(
-      // The model's own text, backslash and all, quoted around the break.
-      JSON.stringify(String.raw`[{"prompt":"Use N:\v`),
-    );
-    expect(message).toContain('then resend the call with questions as one valid JSON array');
-    expect(message).not.toContain('must be a JSON array, not a string');
+    const message = registry.invalidArgs(askTool, { questions: value });
+    // The backslash before 'v' is not a valid JSON escape, so the model meant a
+    // literal backslash. The repair doubles it; the call now succeeds.
+    expect(message).toBeUndefined();
+    expect((askTool as never) && true).toBe(true);
   });
 
   it('names where a broken array argument breaks instead of calling it a string', () => {

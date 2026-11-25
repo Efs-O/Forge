@@ -65,8 +65,8 @@ function parseEdits(args: Record<string, unknown>): StringEdit[] {
   }
   return raw.map((entry, index) => {
     const record = entry as Record<string, unknown>;
-    const oldStr = record?.['old_str'] ?? record?.['old_text'];
-    const newStr = record?.['new_str'] ?? record?.['new_text'];
+    const oldStr = record?.['old_str'];
+    const newStr = record?.['new_str'];
     if (typeof oldStr !== 'string' || typeof newStr !== 'string') {
       // Name what arrived: a model that sent `newStr`, or both shapes at once
       // (a placeholder edits[] plus the real top-level pair, seen 2026-11-05),
@@ -78,7 +78,7 @@ function parseEdits(args: Record<string, unknown>): StringEdit[] {
           ? ' Top-level old_str/new_str were sent too: use edits[] or the top-level pair, not both.'
           : '';
       throw new Error(
-        `edit_file: edit ${index + 1} needs string old_str and new_str (or old_text and new_text) (it has: ${fields || 'no fields'}).${mixed}`,
+        `edit_file: edit ${index + 1} needs string old_str and new_str (it has: ${fields || 'no fields'}).${mixed}`,
       );
     }
     guardNulFreeText('edit_file', newStr);
@@ -158,15 +158,12 @@ export function makeEditFileTool(
                 'of an array, its escape slips are repaired and it is read as the array.',
               items: {
                 type: 'object',
-                description:
-                  'Each edit needs old_str and new_str (or the aliases old_text and new_text).',
                 properties: {
                   old_str: { type: 'string' },
                   new_str: { type: 'string' },
-                  old_text: { type: 'string' },
-                  new_text: { type: 'string' },
                   replace_all: { type: 'boolean' },
                 },
+                required: ['old_str', 'new_str'],
                 additionalProperties: false,
               },
             },
