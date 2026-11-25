@@ -1,0 +1,14 @@
+#!/bin/sh
+# Copies the gitignored rule files into a new worktree (git reads hooks from .githooks, core.hooksPath).
+# CLAUDE.md and AGENTS.md are gitignored, so a new `git worktree add` folder
+# starts without them. Copy them in from the main checkout when missing.
+# Codex reads AGENTS.md, Claude Code reads CLAUDE.md.
+main="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+here="$(git rev-parse --show-toplevel)"
+[ "$main" = "$here" ] && exit 0
+for f in CLAUDE.md AGENTS.md; do
+  if [ -f "$main/$f" ] && [ ! -e "$here/$f" ]; then
+    cp "$main/$f" "$here/$f" && echo "post-checkout: copied $f from $main"
+  fi
+done
+exit 0
