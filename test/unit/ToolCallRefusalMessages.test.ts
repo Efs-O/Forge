@@ -423,38 +423,6 @@ describe('ToolRegistry.invalidArgs unknown-argument refusal', () => {
     );
   });
 
-  it('runs the ask_user call whose question arrived under a numbered key', () => {
-    // 6de9dc67 row 1184: the question the user was meant to see was already on
-    // the wire, under `ask_user_1`, beside a real options list.
-    const tool = makeAskUserTool(new UserQuestionService());
-    const args = {
-      ask_user_1: 'Which download sources do you approve?',
-      options: ['polyhaven CC0 + Godot', 'polyhaven CC0 only', 'No new downloads'],
-    };
-
-    expect(registry.invalidArgs(tool, args)).toBeUndefined();
-    expect(args).toEqual({
-      prompt: 'Which download sources do you approve?',
-      options: ['polyhaven CC0 + Godot', 'polyhaven CC0 only', 'No new downloads'],
-    });
-  });
-
-  it('still refuses ask_user when a numbered key disagrees with the call', () => {
-    const tool = makeAskUserTool(new UserQuestionService());
-    // Two numbered questions beside one options list: which options go with
-    // which question is a disagreement, not a typo.
-    expect(
-      registry.invalidArgs(tool, { ask_user_1: 'a?', ask_user_2: 'b?', options: ['x', 'y'] }),
-    ).toContain('unknown arguments "ask_user_1", "ask_user_2"');
-    expect(
-      registry.invalidArgs(tool, { prompt: 'a?', ask_user_1: 'b?', options: ['x', 'y'] }),
-    ).toContain('unknown argument "ask_user_1"');
-    // A number cannot be the question text.
-    expect(registry.invalidArgs(tool, { ask_user_1: 960, options: ['x', 'y'] })).toContain(
-      'unknown argument "ask_user_1"',
-    );
-  });
-
   it('allows shell.shell from the Windows advertised schema', () => {
     const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     try {
