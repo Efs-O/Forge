@@ -228,3 +228,12 @@ Entry shape (copy it, fill it, newest entry last):
 - Should: retry longer than the 2500 ms it already spent (an editor/watcher holding a file releases in seconds), or report `resume deferred: state file held by <pid>, retry` instead of an Error, so the caller does not read it as a failed operation
 - Workaround: `wait` 8 s and resend the identical `resume`; it applied on the second try
 - Status: open
+
+## `shell` refuses a read-only handle query over `~/.forge/jobs/state`
+
+- Seen: 2026-11-25, Forge 0.17.216, chat 740d9587-89e6-49fa-b5f6-d40e32d608bb
+- Tool: `shell`, running `powershell.exe -File .forge/tmp/b8-holders.ps1`
+- Did: `refuses to change Forge's own files (C:\Users\efso office\.forge\jobs\state) (deny list)`. The script only enumerated open handles on those files (Restart Manager `RmGetList`) and wrote nothing there; the guard matched a path inside the script's own text rather than a write in the command line.
+- Should: allow a command whose only access to a `~/.forge` path is a read, or name the write it inferred so the caller can answer for it.
+- Workaround: the rule says tell the user, so the live holder question was answered from the code plus `~/.forge/sessions` logs instead of a live handle scan.
+- Status: open
