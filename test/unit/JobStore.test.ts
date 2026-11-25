@@ -422,33 +422,15 @@ describe('JobStore setEnabled', () => {
     // job was in fact enabled with a stale `next_due_at`.
     await store.saveJob(job({ enabled: false, schedule: daily }));
     const loaded = (await store.load('disk'))!;
-    const refusal = new Error(
-      "EPERM: operation not permitted, rename 'state/.disk.json.forge-x.tmp' -> 'state/disk.json'",
-    );
-    const spy = vi.spyOn(store, 'patchStateAsync').mockRejectedValue(refusal);
+    const spy = vi.spyOn(store, 'patchState').mockImplementation(() => {
+      throw new Error(
+        "EPERM: operation not permitted, rename 'state/.disk.json.forge-x.tmp' -> 'state/disk.json'",
+      );
+    });
     await expect(store.setEnabled(loaded, true, now)).rejects.toThrow('operation not permitted');
     spy.mockRestore();
     expect((await store.load('disk'))!.job.enabled).toBe(false);
   });
-
-  it('waits out a read that still holds the state file instead of giving up', async () => {
-    // Measured on this machine: a rename onto a file any handle still has open
-    // for reading fails EPERM, so a sibling window reading the state file
-    // blocks a resume's write for as long as that read lasts. The synchronous
-    // write gave up after 2.5 s; this one must still be waiting when the read
-    // ends at 2.8 s, and then apply.
-    await store.saveJob(job({ enabled: false, schedule: daily }));
-    const stateFile = path.join(root, 'state', 'disk.json');
-    const past = new Date(2026, 9, 1, 8, 0).getTime();
-    await store.saveState('disk', { ...((await store.load('disk'))!.state), next_due_at: past });
-    const held = fs.openSync(stateFile, 'r');
-    setTimeout(() => fs.closeSync(held), 2_800);
-    const loaded = (await store.load('disk'))!;
-    await store.setEnabled(loaded, true, now);
-    const after = (await store.load('disk'))!;
-    expect(after.job.enabled).toBe(true);
-    expect(after.state.next_due_at).toBe(new Date(2026, 9, 2, 8, 0).getTime());
-  }, 30_000);
 });
 
 describe('JobStore local change listeners', () => {

@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { ASYNC_RENAME_BUDGET_MS, writeFileAtomic, writeFileAtomicSync } from '../util/atomicWrite';
+import { writeFileAtomicSync } from '../util/atomicWrite';
 import { defaultState, mergedStateJson } from './jobStatePatch';
 import { clearStaged } from './actions/stagedBuild';
 import { deleteOutboxItem } from './JobOutbox';
@@ -206,15 +206,15 @@ export class JobStore {
    * resume must move a time that passed meanwhile: otherwise every job paused
    * past its slot fires the moment it is resumed. A future time is kept, and
    * runs missed while paused are not replayed. The state patch goes first, on
-   * purpose: it is the write that can lose to a sibling window's open read, and
-   * a paused job holding an advanced `next_due_at` is inert, so a failure there
-   * leaves nothing half-applied.
+   * purpose: it is the write that has failed with EPERM while another process
+   * held the file, and a paused job holding an advanced `next_due_at` is inert,
+   * so a failure there leaves nothing half-applied.
    */
   async setEnabled(jobFile: JobFile, enabled: boolean, now: Date = new Date()): Promise<void> {
     if (enabled) {
       const due = (await this.readState(jobFile.job.id)).next_due_at;
       if (due === null || due <= now.getTime()) {
-        await this.patchStateAsync(jobFile.job.id, {
+        this.patchState(jobFile.job.id, {
           next_due_at: nextDue(jobFile.job.schedule, now).getTime(),
         });
       }
@@ -255,24 +255,6 @@ export class JobStore {
     const read = this.readForPatch(id);
     if (read === undefined) return;
     writeFileAtomicSync(read.file, mergedStateJson(read.raw, patch));
-    this.notifyLocalChange();
-  }
-
-  /**
-   * {@link patchState} for async callers: the same read-modify-write, but the
-   * rename gets `ASYNC_RENAME_BUDGET_MS` (30 s) instead of the 2.5 s a sync
-   * write can afford, because this caller waits without blocking the host. A
-   * `manage_jobs` resume needs that: Windows refuses a rename onto a file
-   * another window still has open for reading (`EPERM … held by <pid> Visual
-   * Studio Code`) and that read ends in seconds. The read-to-rename gap is
-   * wider here, so use it only where a same-job write is already excluded.
-   */
-  async patchStateAsync(id: string, patch: Partial<JobState>): Promise<void> {
-    const read = this.readForPatch(id);
-    if (read === undefined) return;
-    await writeFileAtomic(read.file, mergedStateJson(read.raw, patch), {
-      retryBudgetMs: ASYNC_RENAME_BUDGET_MS,
-    });
     this.notifyLocalChange();
   }
 
