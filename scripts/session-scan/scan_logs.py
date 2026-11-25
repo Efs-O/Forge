@@ -77,6 +77,8 @@ sigc_outside = collections.Counter()
 by_model = collections.Counter()
 by_day = collections.Counter()
 toolres_total = collections.Counter()
+toolres_by_model = collections.Counter()
+tool_fails_by_model = collections.Counter()
 model_calls = collections.Counter()
 model_fails_prod = collections.Counter()
 toolres_prod = collections.Counter()
@@ -150,6 +152,7 @@ for path in session_files(opts.sessions):
             mdl = r.get('model') or '?'
             day = time.strftime('%a %d', time.localtime(ts / 1000))
             toolres_total[nm] += 1
+            toolres_by_model[(mdl, nm)] += 1
             model_calls[mdl] += 1
             by_day_calls[day] += 1
             if not excluded(sid, PROBE):
@@ -192,6 +195,7 @@ for path in session_files(opts.sessions):
             by_model[(mdl, b)] += 1
             by_day[day] += 1
             tool_fails_all[name] += 1
+            tool_fails_by_model[(mdl, name)] += 1
             if not excluded(sid, PROBE):
                 tool_fails_prod[name] += 1
                 by_day_fail_prod[day] += 1
@@ -225,6 +229,22 @@ with writer(opts.out, 'rate') as rf:
     rf.write('tool\tcalls\tfailures\trate%\n')
     for nm, calls_n, fails_n, rate in rate_rows:
         rf.write('%s\t%d\t%d\t%.1f\n' % (nm, calls_n, fails_n, rate))
+
+# Per-model rates use the same tool-result population and failure buckets as the
+# all-model file. `mdl` is the full model string from each tool row; the raw file
+# deliberately keeps its existing 40-character display limit.
+model_rate_rows = []
+for mdl, nm in set(toolres_by_model) | set(tool_fails_by_model):
+    calls_n = toolres_by_model[(mdl, nm)]
+    fails_n = tool_fails_by_model[(mdl, nm)]
+    model_rate_rows.append(
+        (mdl, nm, calls_n, fails_n, fails_n * 100.0 / calls_n if calls_n else 0.0)
+    )
+model_rate_rows.sort(key=lambda x: (x[0], 0 if x[2] >= 10 else 1, -x[4], x[1]))
+with writer(opts.out, 'rate_by_model') as rf:
+    rf.write('model\ttool\tcalls\tfailures\trate%\n')
+    for mdl, nm, calls_n, fails_n, rate in model_rate_rows:
+        rf.write('%s\t%s\t%d\t%d\t%.1f\n' % (mdl, nm, calls_n, fails_n, rate))
 
 with writer(opts.out, 'summary') as sf:
     sf.write('CUTOFF %s\n' % time.strftime('%Y-%m-%d %H:%M', time.localtime(CUT_E)))

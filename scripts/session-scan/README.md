@@ -8,10 +8,10 @@ error.
 They came out of `scratch/`, where the sessions folder, the output folder, the
 window start and the set of probe chats were hard-coded to one machine and one
 week, so the whole thing was lost whenever `scratch/` was cleaned. They now take
-all four as arguments so a weekly job can run them. `scratch/` keeps its copies —
+arguments so a twice-weekly job can run them. `scratch/` keeps its copies —
 the owner's one-off report still builds from those.
 
-## Arguments (all four scripts)
+## Arguments (the core scan scripts)
 
 | Flag | Meaning |
 | --- | --- |
@@ -24,15 +24,18 @@ the owner's one-off report still builds from those.
 
 ## What each script reads and writes
 
-Run them in this order, with the **same** `--sessions`, `--out` and `--since` on
-every line — they share the raw rows and the frozen cutoff.
+Run the scan scripts in this order, with the **same** `--sessions`, `--out` and
+window arguments — they share the raw rows and the frozen cutoff.
 
 1. `scan_logs.py` — reads the logs. Writes `failed_tools_raw.txt` (one tab-separated
    row per failed call), `failed_tools_sig.txt` (failure signatures, most common
    first), `failed_tools_sig_outside.txt`, `failed_tools_rate.txt` (per tool: `tool`, `calls`, `failures`, `rate%`,
    tab-separated — the tools with at least 10 calls first, worst rate on top, ties
    broken by name, then the rare ones in the same order; this is what answers "which
-   tool fails more than a third of its calls"), `scan_summary.txt` (the counts, plus
+   tool fails more than a third of its calls"),
+   `failed_tools_rate_by_model.txt` (tab-separated `model`, `tool`, `calls`,
+   `failures`, `rate%`; sorted by full model name and then the same call-count/rate/name
+   order as the all-model file), `scan_summary.txt` (the counts, plus
    `WINDOW_START` so the next run can start where this one ended and `MIN_VERSION`
    so the build the numbers measure is on the record), and `scan_cutoff.txt`.
    `failed_tools_raw.txt` columns, tab-separated: `time`, `kind`, `tool`, `model`,
@@ -51,6 +54,24 @@ every line — they share the raw rows and the frozen cutoff.
    failure class × Forge version, and per-session counts.
 4. `spot.py` — reads the logs only. Writes `failed_tools_spot.txt`: up to three
    full examples (arguments and error text) for each recurring error string.
+
+5. `rate_history.py` — run after `scan_logs.py`. It appends each row of
+   `failed_tools_rate.txt` to a durable TSV history, using the scan's
+   `WINDOW_START`, `CUTOFF`, and `MIN_VERSION`. Pass `--out` once for each folder
+   being added or backfilled; folders are processed by cutoff. Re-running is safe:
+   a cutoff already in the history prints `ALREADY` and adds no rows. A folder with
+   no `MIN_VERSION` line is skipped. Keep the history file outside the dated scan
+   folders so cleanup of old folders does not delete it.
+6. `fix_levels.py` — run after updating rate history. It reads commits with
+   `Fix-level:` lines since the requested date, matches tool names as whole words
+   in commit subjects and bodies, and writes `fix_levels.txt` beside the history.
+   Each commit × tool compares the last history window ending before the commit
+   date with the first window starting the day after it, then summarizes outcomes
+   by fix level. Commits with no history tool name appear under `# no tool named`.
+
+The session logs record a model name that includes the **weight quant** (such as
+`...-iq3_xxs`), which is retained in the per-model rate file. They do not record
+the KV-cache quant, so these reports cannot attribute rates to a KV quant.
 
 ## tips_repeats.py
 
@@ -77,6 +98,14 @@ row is deleted, which is what keeps the tables short.
 ```
 python scripts/session-scan/scan_logs.py    --out .forge/tmp/scan-p4-lane --since 2026-11-01
 python scripts/session-scan/tips_repeats.py --out .forge/tmp/scan-p4-lane --since 2026-11-01
+```
+
+For a new scan folder, run `rate_history.py` after the scanner, then run
+`fix_levels.py` against the durable history after adding the scan window:
+
+```text
+python scripts/session-scan/rate_history.py --out .forge/tmp/scan-p4-lane --history .forge/tmp/rate_history.tsv
+python scripts/session-scan/fix_levels.py --history .forge/tmp/rate_history.tsv --since 2026-11-09
 ```
 
 ## The frozen cutoff

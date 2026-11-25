@@ -34,6 +34,7 @@ OUT_FILES = {
     'versions': 'failed_tools_versions.txt',
     'repeats': 'tips_repeats.txt',
     'rate': 'failed_tools_rate.txt',
+    'rate_by_model': 'failed_tools_rate_by_model.txt',
     'sig_outside': 'failed_tools_sig_outside.txt',
 }
 
