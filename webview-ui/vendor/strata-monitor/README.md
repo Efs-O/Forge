@@ -1,8 +1,8 @@
 # strata-monitor — vendored code
 
 Everything in this folder is copied from **Strata** (https://github.com/Niko1221/Strata,
-MIT License), commit `afcf3746a0613eb5c21c422ba0ca864ba08fb15b`, taken from
-`serve/web/` on 2026-11-24. It stays **JavaScript and CSS**: nothing here is converted
+MIT License), commit `0f439164ed28d10a39c05031682f310a8b09f17`, taken from
+`serve/web/` on 2026-11-25. It stays **JavaScript and CSS**: nothing here is converted
 to TypeScript or React, so upstream fixes can be read across line by line.
 
 | File | Source | What it is |

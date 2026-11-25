@@ -438,7 +438,7 @@ function render(m) {
   const live = m.live || {}, hw = m.hardware || {}, st = m.hardware_static || {}, eng = m.engine || {}, h = m.history || {};
   const last = (m.requests || [])[0];
   renderMonitor(live, hw, st, eng, h, last, m.requests || [],
-    m.monitor_totals || m.totals, m.requests_kept, m.forge, m.ups, m.monitor_totals_reset);
+    m.monitor_totals || m.totals, m.requests_kept, m.forge, m.ups, m.monitor_totals_reset, m.batch_drafts);
   renderConvCache(m.conversation_cache);
 }
 
@@ -548,7 +548,7 @@ function upsStateWords(status) {
 // hours and minutes separately the two parts could disagree, and 7199 s came out as "1 h 60 min".
 const upsDuration = (s) => { const m = Math.round(s / 60);
   return m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ""}` : m >= 1 ? `${m} min` : "<1 min"; };
-function renderStats(eng, hw, st, h, requests, totals, forge, ups, totalsReset) {
+function renderStats(eng, hw, st, h, requests, totals, forge, ups, totalsReset, batchDrafts) {
   const cpuTempMissing = hw.cpu_temp == null;
   const cpuTempNotice = cpuTempMissing && st.os === "windows";
   const cpuTempHint = "Run LibreHardwareMonitor with its web server on (Options > Remote Web Server, port 8085), or set STRATA_LHM_URL.";
@@ -565,10 +565,16 @@ function renderStats(eng, hw, st, h, requests, totals, forge, ups, totalsReset) 
   const specEnabled = Number(eng && eng.spec) > 0;
   const specSeries = rows.slice().reverse().filter((r) => Number.isFinite(r.drafts_offered) && r.drafts_offered > 0 &&
     Number.isFinite(r.drafts_accepted)).map((r) => pct(r.drafts_accepted, r.drafts_offered));
-  const specValue = newest && pct(newest.drafts_accepted, newest.drafts_offered);
+  const requestSpecValue = newest && pct(newest.drafts_accepted, newest.drafts_offered);
+  const parallelRun = Boolean(requestSpecValue == null && newest && newest.batch_slot && batchDrafts &&
+    batchDrafts.last && batchDrafts.last.offered > 0);
+  const specValue = requestSpecValue == null && parallelRun
+    ? pct(batchDrafts.last.accepted, batchDrafts.last.offered) : requestSpecValue;
   const specSince = pct(acceptedTotal, offeredTotal);
   setStat("speculation", noRequests || specValue == null ? null : fmt(specValue, 1), "%",
-    noRequests ? "" : specSince == null ? "" : `since ${totalsReset ? "clear" : "start"} ${fmt(specSince, 1)}%`, specSeries, 100,
+    noRequests ? "" : parallelRun ? specSince == null ? "parallel run" :
+      `parallel run · since ${totalsReset ? "clear" : "start"} ${fmt(specSince, 1)}%`
+      : specSince == null ? "" : `since ${totalsReset ? "clear" : "start"} ${fmt(specSince, 1)}%`, specSeries, 100,
     {hidden: !specEnabled, mutedValue: noRequests ? "No requests yet" : !(offeredTotal > 0) ? "No drafts yet" : ""});
 
   const reuseSeries = rows.slice().reverse().filter((r) => Number.isFinite(r.prompt_tokens) && r.prompt_tokens > 0 &&
@@ -734,7 +740,7 @@ function renderStats(eng, hw, st, h, requests, totals, forge, ups, totalsReset) 
   setStat("forge", forge ? fmt(forgeToday.turns || 0) : null, "turns", forgeSub,
     undefined, undefined, {hidden: !forge, cardTitle: forgeTitle});
 }
-function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept, forge, ups, totalsReset) {
+function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept, forge, ups, totalsReset, batchDrafts) {
   const gpu = gpuMetricData(hw, h, updateGpuSelector(hw, st));
   const ghw = gpu.hw, gh = gpu.history, cards = gpu.cards, selected = gpu.selected;
   const engineCards = gpu.engineCards, otherCards = gpu.otherCards;
@@ -925,9 +931,12 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept, forge
       const hit = r.hit_rate == null ? "–" : `${(r.hit_rate * 100).toFixed(1)}%` +
         (r.pcie_share ? ` <span class="muted" title="routed experts the GPU read over PCIe (--pcie-frac) or another GPU computed">+${(r.pcie_share * 100).toFixed(1)}% PCIe</span>` : "");
       const prefill = r.prompt_ms == null ? "–" : `${fmt(r.prompt_ms / 1000, 1)} s`;
-      const drafts = Number.isFinite(r.drafts_offered) && r.drafts_offered > 0 && Number.isFinite(r.drafts_accepted)
-        ? `${fmt(100 * r.drafts_accepted / r.drafts_offered, 1)}%` : "–";
-      const draftTitle = drafts === "–" ? "No draft tokens offered"
+      const hasDrafts = Number.isFinite(r.drafts_offered) && r.drafts_offered > 0 && Number.isFinite(r.drafts_accepted);
+      const drafts = hasDrafts ? `${fmt(100 * r.drafts_accepted / r.drafts_offered, 1)}%`
+        : r.batch_slot ? "parallel" : "–";
+      const draftTitle = r.batch_slot && !hasDrafts
+        ? "Drafts in parallel runs are counted per run, not per request: see the Speculation card."
+        : drafts === "–" ? "No draft tokens offered"
         : `${fmt(r.drafts_accepted)} accepted / ${fmt(r.drafts_offered)} offered`;
       return `<tr><td>${esc(t)}</td><td><span class="st-badge ${cls}">${esc(text)}</span>${proj}</td><td class="num">${fmt(r.prompt_tokens)}</td>
         <td class="num">${fmt(r.reused)}</td>
@@ -947,7 +956,7 @@ function renderMonitor(live, hw, st, eng, h, last, requests, totals, kept, forge
   const clearNote = lastMetrics && lastMetrics.clear_error
     ? `${totalsLine ? " · " : ""}totals not reset: ${lastMetrics.clear_error}` : "";
   $("req-totals").textContent = totalsLine + clearNote;
-  renderStats(eng, hw, st, h, visibleRequests, totals, forge, ups, totalsReset);
+  renderStats(eng, hw, st, h, visibleRequests, totals, forge, ups, totalsReset, batchDrafts);
 }
 
 function facts(el, rows) {

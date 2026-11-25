@@ -63,6 +63,8 @@ function loadPage(): { sent: unknown[]; run: (metrics: MetricsDocument) => void 
 const text = (id: string): string => document.getElementById(id)?.textContent ?? '';
 const card = (key: string): HTMLElement =>
   document.querySelector(`[data-card-key="${key}"]`) as HTMLElement;
+const oneDecimal = (value: number): string =>
+  value.toLocaleString(undefined, { maximumFractionDigits: 1, minimumFractionDigits: 1 });
 
 const GPU: GpuInfo[] = [
   {
@@ -220,6 +222,34 @@ describe('the vendored Monitor page', () => {
     expect(card('ups')?.hidden).toBe(false);
     expect(card('disk')?.hidden).toBe(false);
     expect(text('mv-disk')).toMatch(/^1[23]/);
+    expect(text('sv-speculation')).toBe(`${oneDecimal(75)}%`);
+    expect(text('ss-speculation')).toBe(`since start ${oneDecimal(75)}%`);
+    expect(document.querySelector('#req-body td[title="30 accepted / 40 offered"]')?.textContent).toBe(`${oneDecimal(75)}%`);
+  });
+
+  it('labels batch drafts per run and shows the last run rate', () => {
+    const page = loadPage();
+    const parallelDocument: MetricsDocument = {
+      ...STRATA_DOCUMENT,
+      requests: [{ ...(STRATA_DOCUMENT.requests?.[0] as Record<string, unknown>), batch_slot: true,
+        drafts_offered: null, drafts_accepted: null }],
+      totals: { ...STRATA_DOCUMENT.totals, requests: 2, drafts_offered: 1402, drafts_accepted: 893 },
+      batch_drafts: { last: { accepted: 773, offered: 1202, at: 1795519930 }, runs: 2, accepted: 893, offered: 1402 },
+    };
+    page.run(parallelDocument);
+    expect(text('sv-speculation')).toBe(`${oneDecimal((773 / 1202) * 100)}%`);
+    expect(text('ss-speculation')).toBe(`parallel run · since start ${oneDecimal((893 / 1402) * 100)}%`);
+    expect(document.querySelector('#req-body td[title="Drafts in parallel runs are counted per run, not per request: see the Speculation card."]')?.textContent).toBe('parallel');
+  });
+
+  it('keeps an unreported solo request draft cell as a dash', () => {
+    const page = loadPage();
+    page.run({
+      ...STRATA_DOCUMENT,
+      requests: [{ ...(STRATA_DOCUMENT.requests?.[0] as Record<string, unknown>), batch_slot: false,
+        drafts_offered: null, drafts_accepted: null }],
+    });
+    expect(document.querySelector('#req-body td[title="No draft tokens offered"]')?.textContent).toBe('–');
   });
 
   it('a llama.cpp reading fills what Forge can measure and hides what it cannot', () => {
