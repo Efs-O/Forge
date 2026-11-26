@@ -72,7 +72,7 @@
 25. a `streamModelChatCompletion` mock answering every round with the same text → the loop runs the tool call twice, so `dispatched` holds 2 rounds. emit the call text on round 0 and `'Done.'` after (`test/unit/ToolCallingLoopProseToolExample.test.ts`)
 ## PATHS
 1. `zipfile.ZipFile('test/fixtures/sample.xlsx')` in a scan → FileNotFoundError: that is not where the fixture lives. read the test's `fixture()` helper for the real path first
-2. `wc -l test/unit/BusContent.test.ts` → no such file: busContent's tests live in `test/unit/AgentBus.test.ts`. find the file first with `find_files "test/**/*<topic>*.test.ts"`; `ls test/unit | grep` aborts here (exit 134, no listing)
+2. `wc -l test/unit/BusContent.test.ts` → no such file: busContent's tests live in `test/unit/AgentBus.test.ts`. find the file first with `find_files "test/**/*<topic>*.test.ts"`; `ls <any dir> | grep` aborts here (exit 134, no listing)
 3. `grep_search` include `src/tools/memoryStore.ts` → `nothing at it exists under the workspace root`: the store is `src/memory/memoryStore.ts`, `src/tools/memoryTools.ts` is only its tool wrapper. glob `**/memoryStore.ts` before naming a src path
 4. `os.path.exists("V:/vs code apps/Blender/assets/textures")` → False: the Blender *project* is `N:/vs code apps/Blender`, only the program is `V:/Tools/Blender`. a `texture_set` miss prints the folder you passed, so it reads like a naming bug
 
