@@ -129,6 +129,31 @@ function printResult(result) {
   console.log(`${mark.padEnd(4)} ${result.tool}${detail}`);
 }
 
+export function runListMode(
+  definitions,
+  { coverageReport, modelEvidence, capabilityEvidence, list },
+  log = console.log,
+) {
+  const sorted = [...definitions].sort((a, b) =>
+    a.function.name.localeCompare(b.function.name),
+  );
+  if (coverageReport) {
+    writeCoverageReport(
+      coverageReport,
+      sorted,
+      readJsonEvidence(modelEvidence),
+      readJsonEvidence(capabilityEvidence),
+    );
+    log(`Coverage report: ${coverageReport}`);
+  }
+  if (list) {
+    for (const definition of sorted) {
+      log(`${definition.function.name}\t${definition.origin}\t${definition.source}`);
+    }
+  }
+  return sorted;
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const nativeDefinitions = await extractToolDefinitions();
@@ -138,28 +163,15 @@ async function main() {
         new Set(nativeDefinitions.map((definition) => definition.function.name)),
       )
     : [];
-  const definitions = [...nativeDefinitions, ...mcpDefinitions].sort((a, b) =>
-    a.function.name.localeCompare(b.function.name),
+  const definitions = runListMode(
+    [...nativeDefinitions, ...mcpDefinitions],
+    options,
   );
-  if (options.coverageReport) {
-    writeCoverageReport(
-      options.coverageReport,
-      definitions,
-      readJsonEvidence(options.modelEvidence),
-      readJsonEvidence(options.capabilityEvidence),
-    );
-    console.log(`Coverage report: ${options.coverageReport}`);
-  }
   const selected = options.tools.length
     ? definitions.filter((definition) => options.tools.includes(definition.function.name))
     : definitions;
 
-  if (options.list) {
-    for (const definition of definitions) {
-      console.log(`${definition.function.name}\t${definition.origin}\t${definition.source}`);
-    }
-    return;
-  }
+  if (options.list) return;
 
   const missing = options.tools.filter(
     (name) => !definitions.some((definition) => definition.function.name === name),
@@ -225,7 +237,11 @@ async function main() {
   if (failed.length) process.exitCode = 1;
 }
 
-main().catch((err) => {
-  console.error(`ERROR ${err.message}`);
-  process.exitCode = 1;
-});
+// Only run when this file is the entry point: importing runListMode from a test
+// must not bundle and boot the registry a second time.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    console.error(`ERROR ${err.message}`);
+    process.exitCode = 1;
+  });
+}

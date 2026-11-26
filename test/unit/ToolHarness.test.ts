@@ -1,4 +1,3 @@
-import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -8,6 +7,8 @@ import {
   extractToolAuditSnapshot,
   writeCoverageReport,
 } from '../../scripts/tool-audit-catalog.mjs';
+// @ts-expect-error -- the standalone audit script is a plain ESM script
+import { runListMode } from '../../scripts/test-local-tools.mjs';
 // The harness core is deliberately plain ESM so the standalone Node audit script and
 // Vitest exercise the exact same comparison implementation.
 // @ts-expect-error -- the JavaScript audit helper intentionally has no production typings
@@ -116,11 +117,11 @@ describe('local tool harness canonical inventory', () => {
     snapshot = await extractToolAuditSnapshot();
     temp = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-tool-coverage-'));
     const report = path.join(temp, 'coverage.md');
-    output = execFileSync(
-      process.execPath,
-      ['scripts/test-local-tools.mjs', '--list', '--coverage-report', report],
-      { cwd: root, encoding: 'utf8' },
+    const lines: string[] = [];
+    runListMode(snapshot.definitions, { coverageReport: report, list: true }, (line: string) =>
+      lines.push(line),
     );
+    output = lines.join('\n') + '\n';
     coverage = fs.readFileSync(report, 'utf8');
     committed = fs.readFileSync(path.join(root, 'docs/TOOL_COVERAGE.md'), 'utf8');
   }, 20_000);
@@ -152,8 +153,7 @@ describe('local tool harness canonical inventory', () => {
         'view_image',
       ]),
     );
-    // 20 s: spawns a child node process; the 5 s default expired under load
-    // (audit 2026-09-26 F1).
+    // 20 s allows the registry bundle and boot under full CI load.
   }, 20_000);
 
   it('keeps audit inventory names and function schemas equal to the live registry', () => {
