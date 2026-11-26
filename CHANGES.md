@@ -1,5 +1,11 @@
 # Forge — Recent Changes
 
+## 0.17.221
+
+**The Monitor reads a GGUF model with no provider line.** A model entry without `provider:` is a
+llama.cpp model, but the Monitor only recognised one that said so, so for most local models it
+showed nothing but dashes. It now reads them like any other Forge-started llama-server.
+
 ## 0.17.220
 
 **The Monitor shows the model that is serving.** When the active model was an external engine
