@@ -15,7 +15,7 @@
  * Importers: `shellPolicy.ts` (the redirect question) and `shellOwnerRule.ts`
  * (the statement and folder questions).
  */
-import { isDirectoryChange } from './shellReadOnlyRules';
+import { directoryChangeFolder, isDirectoryChange } from './shellReadOnlyRules';
 import { nonWriteArguments } from './shellWritePositions';
 import { expandUserTokens, normalizePathForMatch, tokenPathCandidate } from './secretPaths';
 import {
@@ -101,10 +101,11 @@ export function effectiveDirectoryFor(
     if (!isDirectoryChange(tokens)) continue;
     // `$HOME`, `%USERPROFILE%` and `~` are the home folder whatever the shell
     // does with them, so they are followed; any other variable is not.
-    const dir = expandUserTokens(tokens[1] ?? '', set.home);
-    // The same two things `shellReadOnlyRules.ts` refuses to follow a `cd` past:
-    // more than one argument, or a path built at run time.
-    if (!dir || tokens.length !== 2 || /[$`()%]/u.test(dir)) return undefined;
+    const folder = directoryChangeFolder(tokens);
+    // The same things `shellReadOnlyRules.ts` refuses to follow; its helper
+    // decides what counts as one folder for both plain and switched forms.
+    const dir = expandUserTokens(folder ?? '', set.home);
+    if (folder === undefined || !dir || /[$`()%]/u.test(dir)) return undefined;
     const moved = resolveArgumentTarget(dir, set, current);
     if (!moved) return undefined;
     current = moved;

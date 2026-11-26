@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ownerOnlyInstruction, ownerOnlySetFor, type OwnerOnlySet } from '../../src/tools/ownerPaths';
 import { classifyShellCommand } from '../../src/tools/shellPolicy';
-import { isReadOnly } from '../../src/tools/shellReadOnlyRules';
+import { directoryChangeFolder, isReadOnly } from '../../src/tools/shellReadOnlyRules';
 
 /**
  * The three refusals the 2026-10-30 session-failure list found, each judged
@@ -517,6 +517,53 @@ describe('a write is judged from the folder the `cd`s before it moved to', () =>
     expect(blind.rule?.description).toContain('cannot judge');
     expect(judged('cd $X && cp a.txt b.txt', 'bash')).not.toBe('refused');
     expect(judged('cd ~ && cp a.txt projects/b.txt', 'bash')).not.toBe('refused');
+  });
+});
+
+describe('a PowerShell folder change written with a switch', () => {
+  it('follows one explicit folder and allows writes that stay outside Forge files', () => {
+    for (const command of [
+      "Set-Location -LiteralPath 'N:/Apps/Forge'; node x.mjs .forge/tmp/a.log",
+      "Set-Location -Path 'N:/Apps/Forge'; node x.mjs .forge/tmp/a.log",
+      "sl -LP 'N:/vs code apps/Forge'; node x.mjs .forge/tmp/a.log",
+      'Push-Location N:/Apps/Forge; node x.mjs .forge/tmp/a.log',
+    ]) {
+      expect(classifyShellCommand(command, 'pwsh', check).classification, command).not.toBe('refused');
+    }
+  });
+
+  it("refuses a relative write moved into Forge's own files", () => {
+    for (const command of [
+      'Set-Location -LiteralPath C:/Users/someone; Copy-Item evil.yaml .forge/policy.yaml',
+      'Push-Location C:/Users/someone; Copy-Item evil.yaml .forge/policy.yaml',
+      'Push-Location ~; Copy-Item evil.yaml .forge/policy.yaml',
+    ]) {
+      const result = classifyShellCommand(command, 'pwsh', check);
+      expect(result.classification, command).toBe('refused');
+      expect(result.rule?.description, command).toContain("Forge's own files");
+    }
+  });
+
+  it('refuses folder changes this check cannot follow', () => {
+    for (const command of [
+      'Set-Location -LiteralPath $env:FOO; Copy-Item evil.yaml .forge/policy.yaml',
+      'Pop-Location; Copy-Item evil.yaml .forge/policy.yaml',
+      'Set-Location -Foo N:/x; Copy-Item evil.yaml .forge/policy.yaml',
+    ]) {
+      const result = classifyShellCommand(command, 'pwsh', check);
+      expect(result.classification, command).toBe('refused');
+      expect(result.rule?.description, command).toContain('cannot judge');
+    }
+  });
+
+  it('recognizes only one folder argument in the supported forms', () => {
+    expect(directoryChangeFolder(['cd', 'a'])).toBe('a');
+    expect(directoryChangeFolder(['Set-Location', '-LiteralPath', 'a b'])).toBe('a b');
+    expect(directoryChangeFolder(['Set-Location', '-PATH', 'a'])).toBe('a');
+    expect(directoryChangeFolder(['cd', '-'])).toBeUndefined();
+    expect(directoryChangeFolder(['cd', 'a', 'b'])).toBeUndefined();
+    expect(directoryChangeFolder(['Set-Location', '-LiteralPath:a'])).toBeUndefined();
+    expect(directoryChangeFolder(['popd'])).toBeUndefined();
   });
 });
 

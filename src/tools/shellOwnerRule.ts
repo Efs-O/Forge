@@ -18,7 +18,7 @@
  * two answers would be used against each other.
  */
 import * as os from 'os';
-import { isDirectoryChange, isReadOnly } from './shellReadOnlyRules';
+import { directoryChangeFolder, isDirectoryChange, isReadOnly } from './shellReadOnlyRules';
 import { ownerOnlyInstruction, type OwnerOnlyHit, type OwnerOnlySet } from './ownerPaths';
 import {
   effectiveDirectoryFor,
@@ -57,9 +57,9 @@ export function ownerOnlySetForGuard(guard: {
  * them would leave the agent guessing which one to try.
  */
 function cdCannotFollowReason(tokens: readonly string[]): string {
-  const dir = tokens[1] ?? '';
+  const dir = directoryChangeFolder(tokens) ?? '';
   if (/[$`()]/u.test(dir)) return 'the folder is built at run time';
-  if (tokens.length > 2) return 'it names more than one folder';
+  if (tokens.length > 2 && !tokens[1]?.startsWith('-')) return 'it names more than one folder';
   return 'it names no folder this check can resolve';
 }
 
@@ -153,7 +153,7 @@ export function ownerOnlyShellRule(input: OwnerOnlyShellRuleInput): ShellTokenRu
   const cdUnjudgeableRuleFor = (tokens: readonly string[]): ShellTokenRule => ({
     match: () => true,
     description:
-      `cannot judge \`cd ${tokens[1] ?? ''}\` into Forge's own files ` +
+      `cannot judge \`cd ${directoryChangeFolder(tokens) ?? tokens.slice(1).join(' ')}\` into Forge's own files ` +
       `(${cdCannotFollowReason(tokens)})`,
     alternative:
       'Nothing in this command was classed as a change, so this is not a refusal to write ' +
@@ -171,7 +171,7 @@ export function ownerOnlyShellRule(input: OwnerOnlyShellRuleInput): ShellTokenRu
   const cdRuleFor = (dir: readonly string[], later: readonly string[]): ShellTokenRule => ({
     match: () => true,
     description:
-      `\`cd ${dir[1] ?? ''}\` into Forge's own files, followed by something the read-only ` +
+      `\`cd ${directoryChangeFolder(dir) ?? dir.slice(1).join(' ')}\` into Forge's own files, followed by something the read-only ` +
       `table does not class as a read (\`${later.join(' ')}\`)`,
     alternative:
       'Forge cannot tell where a write after a `cd` lands, so the whole command is ' +

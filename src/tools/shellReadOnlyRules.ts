@@ -245,7 +245,16 @@ export function pipeTargetReadsContents(statement: readonly string[], shell: She
  * `cd ~/.forge && rm x` still judges `rm` a write and still refuses it, and the
  * `cd` itself then names an owner-only path and is refused with it.
  */
-const DIRECTORY_CHANGES = new Set(['cd', 'pushd', 'popd', 'sl', 'set-location', 'chdir']);
+const DIRECTORY_CHANGES = new Set([
+  'cd',
+  'pushd',
+  'popd',
+  'push-location',
+  'pop-location',
+  'sl',
+  'set-location',
+  'chdir',
+]);
 
 /** True when every statement in this command reads, `cd` included. Asked with
  *  `cd` allowed, because its own answer depends on the answer. */
@@ -261,6 +270,20 @@ export function commandIsAllReadOnly(
  *  has to see that the `cd` was not the problem, the write after it was. */
 export function isDirectoryChange(tokens: readonly string[]): boolean {
   return DIRECTORY_CHANGES.has(baseProgram(tokens[0] ?? ''));
+}
+
+/** The one folder a directory change names: `cd <dir>`, or PowerShell's
+ *  `Set-Location -LiteralPath <dir>` / `-Path <dir>` (and their aliases `-LP`,
+ *  `-PSPath`). Undefined for anything else (no folder, a switch it does not
+ *  know, or more than one argument), which callers treat as "cannot follow". */
+export function directoryChangeFolder(tokens: readonly string[]): string | undefined {
+  if (tokens.length === 2 && !tokens[1]!.startsWith('-')) return tokens[1];
+  if (
+    tokens.length === 3 &&
+    ['-literalpath', '-path', '-lp', '-pspath'].includes(tokens[1]!.toLowerCase())
+  )
+    return tokens[2];
+  return undefined;
 }
 
 /**
@@ -298,9 +321,9 @@ export function isReadOnly(
   }
   const program = baseProgram(tokens[0] ?? '');
   if (DIRECTORY_CHANGES.has(program)) {
-    // `cd` with more than one argument, or a computed one, is not a directory
-    // change this table can follow, so it is not free.
-    return cdReadonly && tokens.length === 2 && !/[$`()]/u.test(tokens[1] ?? '');
+    // A folder form the helper cannot follow, or a computed one, is not free.
+    const folder = directoryChangeFolder(tokens);
+    return cdReadonly && folder !== undefined && !/[$`()]/u.test(folder);
   }
   const args = tokens.slice(1).map((token) => token.toLowerCase());
   if (READ_ONLY_BOTH.has(program)) {
