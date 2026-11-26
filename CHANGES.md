@@ -1,5 +1,24 @@
 # Forge — Recent Changes
 
+## 0.17.222
+
+**Forge's own notes stopped looking like something you typed.** The repetition guard's
+"the turn continues" nudge went into the transcript as a plain user message, so the chat
+showed Forge's sentence as if you had written it, the compaction summary kept it as one of
+your words, and the activity counter blamed a turn that was still running for one that
+ended without an answer.
+
+**The Monitor's turn count counts your messages, not Forge's notes.** `today.turns` in
+`GET :8799/stats` counted every user row in the session logs, including background-job
+notices, compaction resumes and tells delivered between tool rounds, so it read about three
+times too high (97 user rows today, 40 of them Forge's own, reported as 95 turns). Turns and
+`turns_without_end` now come from one walk of the log, so the two cannot drift apart.
+
+**The Monitor says so when nothing is loaded.** Unload the model the panel is showing and it
+kept the old reading forever - the model's name, "generating", tok/s, the context fill -
+because a reader with nothing to show sent nothing at all. It now sends a document that says
+there is nothing to show, and says it again after every later unload.
+
 ## 0.17.221
 
 **The Monitor reads a GGUF model with no provider line.** A model entry without `provider:` is a
