@@ -136,3 +136,50 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 
 /* Forge: the licence line under the page. */
 .monitor-credit { margin: var(--st-s-4) 0 0; font-size: var(--st-fs-xs); color: var(--st-ink-muted); }
+
+/* Forge: a compact page, about 0.6 of Strata's sizes (owner, 2026-11-26). The type and
+   spacing tokens are overridden here, after tokens.css, and the fixed pixel sizes that
+   do not come from a token are restated below. Text stops at 8px so the small labels
+   stay readable. CSS zoom is not used: monitor.js drags a card by mouse distance, and
+   a zoomed card would trail the pointer. */
+:root {
+  --st-fs-xs: 8px; --st-fs-sm: 8px; --st-fs-md: 9px; --st-fs-base: 10px;
+  --st-fs-lg: 11px; --st-fs-xl: 14px; --st-fs-stat: 19px; --st-fs-display: 24px;
+  --st-s-1: 2px; --st-s-2: 5px; --st-s-3: 7px; --st-s-4: 10px; --st-s-5: 12px;
+  --st-s-6: 14px; --st-s-8: 19px; --st-s-10: 24px; --st-s-12: 29px; --st-s-16: 38px;
+  --st-r-sm: 5px; --st-r-md: 8px; --st-r-lg: 12px; --st-r-xl: 14px;
+}
+.st-header { height: 36px; }
+.forge-header__mark { width: 11px; height: 11px; }
+.st-icon { width: 12px; height: 12px; }
+.st-icon--sm { width: 10px; height: 10px; }
+.st-icon--lg { width: 14px; height: 14px; }
+.st-metric { gap: 6px; }
+.st-metric__label { gap: 5px; }
+.st-metric__unit, .st-metric__value small { margin-left: 2px; }
+.st-metric__spark { height: 20px; }
+.speed-values .st-metric__value { font-size: clamp(12px, 1.3vw, var(--st-fs-stat)); }
+.speed-values > div { gap: 6px; }
+.stats-graph-note { height: 20px; }
+.st-badge { height: 15px; padding: 0 6px; gap: 4px; }
+.st-badge::before { width: 4px; height: 4px; }
+.st-pill { height: 18px; padding: 0 7px; gap: 5px; }
+.seg { gap: 2px; padding: 2px; }
+.seg button { height: 20px; border-radius: 6px; }
+.gpu-seg button { min-width: 40px; padding: 0 7px; }
+.gpu-select-wrap select { min-width: 110px; height: 22px; }
+.st-btn { height: 26px; padding: 0 11px; gap: 5px; }
+.st-btn--icon, .facts .st-btn--icon, .metric-card__hide { width: 18px; height: 18px; }
+.facts .st-btn--icon .st-icon { width: 10px; height: 10px; }
+@media (min-width: 641px) { .facts { gap: 6px var(--st-s-6); grid-template-columns: minmax(84px, max-content) 1fr; } }
+.st-progress { height: 5px; }
+.ctx-gauge { width: 90px; }
+.st-gauge { width: 72px; height: 72px; }
+.st-table th { padding: 6px 7px; }
+.st-table td { padding: 7px; }
+@media (min-width: 1001px) { .monitor-row { grid-template-columns: minmax(min(156px, 100%), 1fr) minmax(0, 2.4fr); } }
+.table-wrap.all { max-height: 252px; }
+@media (max-width: 640px) {
+  .st-btn, .st-input, .seg button { min-height: 0; }
+  .st-btn--icon { width: 24px; height: 24px; }
+}

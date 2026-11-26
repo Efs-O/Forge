@@ -62,7 +62,9 @@ its place in the file:
    Nothing is ever shown as a made-up zero.
 
 `monitor.css` — the rules that made Strata's `.view--monitor` the scroll area are applied
-to `.monitor`, because this panel has no tab strip; `.monitor-credit` is new. The chat,
+to `.monitor`, because this panel has no tab strip; `.monitor-credit` is new. A compact
+block at the end overrides the type, spacing and radius tokens and the fixed pixel sizes
+to about 0.6 of Strata's (text no smaller than 8px). The chat,
 images, About, MCP, drawer and settings rules were not copied.
 
 `tokens.css` — `url("../fonts/…")` became `url("fonts/…")` for the vendored layout.
