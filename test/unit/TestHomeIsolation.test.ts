@@ -8,7 +8,7 @@
  * The Linux clone (2026-11-25) proved it — a single run created five folders in a
  * clean home — and on Windows the same writes happened unnoticed because the
  * folders were already there. The guard now redirects `USERPROFILE` / `HOME` per
- * test file; these two assertions fail if that redirect is ever removed, or if a
+ * test file; these assertions fail if that redirect is ever removed, or if a
  * suite runs without the guard's setup file.
  */
 import { execFileSync } from 'child_process';
