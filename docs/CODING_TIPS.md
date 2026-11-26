@@ -25,6 +25,7 @@
 10. moving a block of `src/sidebar/SendPipeline.ts` that already calls `deps.requestChains.run(chain, …)` into a module and wrapping the new call in `run` again → `Forge: request chain conv-1 is already running` thrown at the inner call. the wrapper moves with the block
 11. python reading a git blob with `subprocess(text=True)` → this PC's cp1253 turns `—` into mojibake, so a verbatim-move scan of `src/sidebar/ModelTurn.ts` against `git show` reports false differences. read bytes: `.stdout.decode("utf-8")`
 12. a probe in `.forge/tmp/` bundled with esbuild → `Could not resolve` on a relative import: from `.forge/tmp/` the path to `src/agentMesh/verdictArtifact.ts` is two levels up (`../../src/...`). plain `node` cannot run the TS; the vitest route is TEST 12
+13. `scripts/check-changed.mjs` exit 1 in 7 s, `check:changed FAILED at ci`, no `Tests ` line → it died before `npm test`: the chain is ci-static, type-check, lint, test. grep the log for `── ` and read the step whose `(N s, exit M)` is not 0
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green and the tree stood still: never run `record-ci-pass.mjs` by hand — the `ci:steps` chain writes it
@@ -43,6 +44,7 @@
 6. `CommandNamesExist.test.ts` scans `docs/*.md` for a backticked single slash-word as a command a reader types → a bare metrics path in `docs/OWNERS.md` fails it. name the method first (`GET` then the path) or leave the path unbackicked
 7. `const { a, b } = fn()` where one member is reassigned later → `prefer-const` (from `eslint:recommended` in `.eslintrc.json`) errors on every never-reassigned member. bind the result once, destructure the const members, `let` only the reassigned one
 8. rewording `config/templates/builtin/execute.njk` and `resources/instructions/FORGE.starter.md` with the same rule → `InstructionSourceOverlap.test.ts` `over 0.45 is the same claim twice`; keep the two homes worded differently
+9. `resources/tips/CODING_TIPS.md` at 181 lines → `CodingTipsDoc.test.ts` fails `past 180 lines this is a wall again`, so a new FORGE_TOOLS mistake folds into a neighbour; and deleting a row by replacing the one above it with a `new_str` that starts with a newline leaves a blank line behind
 
 ## TEST
 1. `fs.rmSync` on a killed child's cwd → EPERM is not in `maxRetries`' retried set, so the retries do nothing. use `removeTreeWhenFree` (test/support/removeTempTree.ts): polls until removable
