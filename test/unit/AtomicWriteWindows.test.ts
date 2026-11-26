@@ -66,6 +66,6 @@ $file.Dispose()
         await new Promise<void>((resolve) => child.once('exit', () => resolve()));
       }
     },
-    10_000,
+    30_000,
   );
 });

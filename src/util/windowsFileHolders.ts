@@ -1,6 +1,9 @@
 import { spawn, spawnSync } from 'child_process';
 import { powershellScratch } from './powershellScratchDir';
 
+/** `Add-Type` compiles C# on every call, so a loaded machine needs more than 3 s: the v0.17.218 publish run failed at 3 s. */
+export const HOLDER_PROBE_TIMEOUT_MS = 10_000;
+
 const RESTART_MANAGER_SCRIPT = String.raw`
 Add-Type -TypeDefinition @'
 using System;
@@ -58,7 +61,7 @@ function powershellEncodedCommand(script: string): string {
  * is spent.
  *
  * Both forms compile with `Add-Type`, so both get a scratch folder of their own:
- * CodeDom writes five files into the child's temp, a three-second timeout kills
+ * CodeDom writes five files into the child's temp, a probe that times out kills
  * the child before CodeDom can clean them up, and the survivors used to land in
  * whoever's temp folder the save happened to be running in - the test suite's
  * per-file folder, which its temp guard then fails for the whole file. The
@@ -79,7 +82,7 @@ export function windowsFileHolders(target: string): string | undefined {
     ],
     {
       encoding: 'utf8',
-      timeout: 3_000,
+      timeout: HOLDER_PROBE_TIMEOUT_MS,
       windowsHide: true,
       env: { ...process.env, ...scratch.env, FORGE_RM_TARGET: target },
     },
@@ -122,7 +125,7 @@ export function windowsFileHoldersAsync(target: string): Promise<string | undefi
     const timer = setTimeout(() => {
       child.kill();
       finish(undefined);
-    }, 3_000);
+    }, HOLDER_PROBE_TIMEOUT_MS);
     child.stdout?.setEncoding('utf8');
     child.stdout?.on('data', (chunk: string) => {
       stdout += chunk;

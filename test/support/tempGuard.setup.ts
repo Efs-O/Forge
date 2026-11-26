@@ -9,8 +9,10 @@ const TEMP_VARS = process.platform === 'win32' ? ['TEMP', 'TMP'] : ['TMPDIR'];
 const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..');
 // Left by programs the tests start, not by Forge code: Node's shared compile
 // cache (from a node child process), and Chrome's url-fetcher scratch folder
-// (prefixed with the app id on Linux: `com.google.Chrome.chrome_…`).
-const NOT_OURS = [/^node-compile-cache$/u, /^([\w.]+\.)?chrome_.*url_fetcher/u];
+// (prefixed with the app id on Linux: `com.google.Chrome.chrome_…`). `.dotnet`
+// is the .NET runtime's named-mutex store, which pwsh creates in TMPDIR on macOS
+// on its first run in a fresh home and never removes (macos-latest CI, 2026-11-26).
+const NOT_OURS = [/^node-compile-cache$/u, /^([\w.]+\.)?chrome_.*url_fetcher/u, /^\.dotnet$/u];
 
 const fileDir = fs.mkdtempSync(path.join(inject('tempGuardRunDir'), 'file-'));
 const savedTempVars = TEMP_VARS.map((name) => [name, process.env[name]] as const);
