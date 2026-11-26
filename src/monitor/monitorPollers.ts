@@ -336,15 +336,20 @@ function isStrataModel(model: ModelConfig): boolean {
   return model.stats === 'strata' && !!model.endpoint;
 }
 
-/** A Forge-spawned llama-server, or an external engine declared as `stats: llama`. */
+/** A Forge-spawned llama-server, or an external engine declared as `stats: llama`.
+ *  No `provider` means llama.cpp, as the schema says: most GGUF entries leave it out. */
+function isForgeLlama(model: ModelConfig): boolean {
+  return (model.provider ?? 'llama.cpp') === 'llama.cpp';
+}
+
 function isLlamaModel(model: ModelConfig): boolean {
-  return model.provider === 'llama.cpp' || model.stats === 'llama';
+  return isForgeLlama(model) || model.stats === 'llama';
 }
 
 /** Where to ask for slots and Prometheus counters, or undefined when the server has no
  *  address yet (a Forge-spawned one that is still starting). */
 function llamaBaseUrl(options: MonitorPollerOptions, model: ModelConfig): string | undefined {
-  if (model.provider === 'llama.cpp') return options.pool.modelBaseUrl(model.name) ?? undefined;
+  if (isForgeLlama(model)) return options.pool.modelBaseUrl(model.name) ?? undefined;
   return model.endpoint ? new URL(model.endpoint).origin : undefined;
 }
 

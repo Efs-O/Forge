@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ForgeConfig } from '../../src/config/types';
 import type { MonitorPollerOptions } from '../../src/monitor/monitorPollers';
-import { shownModel } from '../../src/monitor/monitorPollers';
+import { createMonitorPollers, shownModel } from '../../src/monitor/monitorPollers';
 
 const config: ForgeConfig = {
   active_model: 'strata-x',
@@ -52,5 +52,29 @@ describe('shownModel', () => {
     } as MonitorPollerOptions;
 
     expect(shownModel(options, config)?.name).toBe(expected);
+  });
+});
+
+describe('a model entry with no provider line', () => {
+  // The schema reads a missing provider as llama.cpp, and most GGUF entries leave it out.
+  // The Monitor compared provider === 'llama.cpp', so such a model got no reading at all
+  // (2026-11-26, Nemotron and Gemma both showed only dashes).
+  it('is read as a Forge-spawned llama-server', async () => {
+    const posts: Record<string, unknown>[] = [];
+    const pollers = createMonitorPollers({
+      pool: { isLoaded: () => true, isModelReady: () => true, modelBaseUrl: () => null },
+      getConfig: () => ({ active_model: 'nemo', models: [{ name: 'nemo' }] }) as ForgeConfig,
+      getStats: () => ({}) as never,
+      getSecret: async () => undefined,
+      probeGpus: async () => [{ index: 0, name: 'Test GPU', utilizationPercent: 12 }] as never,
+      post: (metrics: Record<string, unknown>) => posts.push(metrics),
+    } as unknown as MonitorPollerOptions);
+    pollers.start();
+    try {
+      await vi.waitFor(() => expect(posts.length).toBeGreaterThan(0));
+      expect((posts[0].engine as { model: string }).model).toBe('nemo');
+    } finally {
+      pollers.dispose();
+    }
   });
 });
