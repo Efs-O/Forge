@@ -1,5 +1,19 @@
 # Forge — Recent Changes
 
+## 0.17.220
+
+**The Monitor shows the model that is serving.** When the active model was an external engine
+stopped outside Forge, the Monitor still counted it as loaded and polled its dead port, so a
+llama.cpp model you had just loaded showed no metrics. It now prefers a model that answers.
+
+**A cd written with -LiteralPath no longer blocks a later write.** The shell guard followed a
+folder change only with a bare folder, so `Set-Location -LiteralPath <dir>` made it refuse a
+relative write it could judge. It now follows `-LiteralPath` and `-Path`, and treats
+`Push-Location` and `Pop-Location` as folder changes too, so a write after `Push-Location ~` is
+judged where it lands.
+
+**A failed tool's error wraps to four lines** in the chat instead of being cut to one.
+
 ## 0.17.219
 
 **The agent bus client runs on Linux and macOS.** Forge wrote `~/.forge/agent-bus/forge.sh`
