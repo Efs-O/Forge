@@ -2,12 +2,13 @@
 
 Writes <out>/failed_tools_raw.txt, <out>/failed_tools_sig.txt,
 <out>/scan_summary.txt and freezes <out>/scan_cutoff.txt for the other scripts.
-Run this first; recovery_check.py and version_join.py read what it wrote.
+Run this first; struggle_patterns.py, recovery_check.py and version_join.py reuse
+its frozen window.
 
 Shared argument handling is in session_scan_common.py.
 """
 
-import json, os, re, sys, collections, time
+import json, os, sys, collections, time
 from session_scan_common import (
     parse,
     need_sessions,
@@ -19,6 +20,9 @@ from session_scan_common import (
     version_ok,
     is_forge_workspace,
     writer,
+    txt_of,
+    bucket,
+    sig,
 )
 
 opts = parse('scan session logs for failed tool calls')
@@ -31,43 +35,6 @@ PROBE = exclude_set(opts.exclude)
 # The scanner is the one that fixes the window end: it reuses a saved value, and
 # writes it back so a re-run and the other scripts all read the same moment.
 freeze_cutoff(opts.out, CUT_E)
-
-
-def txt_of(content):
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for b in content:
-            if isinstance(b, dict):
-                parts.append(str(b.get('text') or b.get('content') or ''))
-            else:
-                parts.append(str(b))
-        return '\n'.join(parts)
-    return str(content)
-
-
-def bucket(first):
-    f = first.strip()
-    if f.startswith('User declined') or f.startswith('Denied') or 'declined:' in f[:40].lower():
-        return 'USER_DECLINED'
-    if f.startswith('unattended:'):
-        return 'UNATTENDED_DENIED'
-    if f.startswith('Error:') or f.startswith('REFUSED') or 'Forge cannot' in f[:200] or 'is refused' in f[:200]:
-        return 'TOOL_ERROR'
-    m = re.match(r'^exit (\d+)', f)
-    if m and int(m.group(1)) > 0:
-        return 'SHELL_NONZERO'
-    if re.match(r'^(Tool .*failed|Failed)', f):
-        return 'TOOL_ERROR'
-    return None
-
-
-def sig(t):
-    s = re.sub(r'\d+', 'N', t)
-    s = re.sub(r'[`"\x27]', '', s)
-    s = re.sub(r'\s+', ' ', s).strip()
-    return s[:110]
 
 
 rows = []

@@ -1,9 +1,9 @@
 # session-scan
 
-Four scripts that read the Forge session logs (`~/.forge/sessions/*.jsonl`) and
-write a small report of failed tool calls: which tool, which model, which Forge
-version, whether the agent retried it and worked, and examples of each recurring
-error.
+Core scripts that read the Forge session logs (`~/.forge/sessions/*.jsonl`) and
+write reports of failed tool calls and wasted calls around them: which tool,
+which model, which Forge version, whether the agent retried it and worked, and
+examples of recurring errors or struggle patterns.
 
 They came out of `scratch/`, where the sessions folder, the output folder, the
 window start and the set of probe chats were hard-coded to one machine and one
@@ -43,31 +43,51 @@ window arguments — they share the raw rows and the frozen cutoff.
    `title`, `ARGS: …`, `ERR: …`, `call id`. `failed_tools_sig_outside.txt` — the
    same signatures, counting only chats whose workspace is not Forge (`forge` or
    `forge-*`, any case).
-2. `recovery_check.py` — reads `failed_tools_raw.txt`, `scan_summary.txt`,
+2. `struggle_patterns.py` — runs after `scan_logs.py`, reads the logs and writes
+   `struggle_patterns.txt`: identical repeats within eight calls in one user
+   turn, chains of three or more empty searches, and calls that recover from a
+   refusal after a lookup.
+   It uses the cutoff saved by `scan_logs.py` and does not freeze a cutoff itself.
+   It cannot see a wrong answer that no later call questions.
+3. `recovery_check.py` — reads `failed_tools_raw.txt`, `scan_summary.txt`,
    `scan_cutoff.txt` and the logs. Writes `recovery.txt`: of the failures that are
    not a non-zero shell exit, how many were followed by the same tool succeeding
    later in the same chat, retried and failed again, succeeded inside the same
    minute (the log stamps only to the minute, so that cannot be ordered), or were
    never followed by a call at all.
-3. `version_join.py` — reads `failed_tools_raw.txt` and the logs (for the
+4. `version_join.py` — reads `failed_tools_raw.txt` and the logs (for the
    `forge_version` on each `session_start`). Writes `failed_tools_versions.txt`:
    failure class × Forge version, and per-session counts.
-4. `spot.py` — reads the logs only. Writes `failed_tools_spot.txt`: up to three
+5. `spot.py` — reads the logs only. Writes `failed_tools_spot.txt`: up to three
    full examples (arguments and error text) for each recurring error string.
 
-5. `rate_history.py` — run after `scan_logs.py`. It appends each row of
+6. `rate_history.py` — run after `scan_logs.py`. It appends each row of
    `failed_tools_rate.txt` to a durable TSV history, using the scan's
    `WINDOW_START`, `CUTOFF`, and `MIN_VERSION`. Pass `--out` once for each folder
    being added or backfilled; folders are processed by cutoff. Re-running is safe:
    a cutoff already in the history prints `ALREADY` and adds no rows. A folder with
    no `MIN_VERSION` line is skipped. Keep the history file outside the dated scan
    folders so cleanup of old folders does not delete it.
-6. `fix_levels.py` — run after updating rate history. It reads commits with
+7. `fix_levels.py` — run after updating rate history. It reads commits with
    `Fix-level:` lines since the requested date, matches tool names as whole words
    in commit subjects and bodies, and writes `fix_levels.txt` beside the history.
    Each commit × tool compares the last history window ending before the commit
    date with the first window starting the day after it, then summarizes outcomes
    by fix level. Commits with no history tool name appear under `# no tool named`.
+
+`struggle_patterns.py` applies these rules:
+
+* An identical repeat has the same tool and parsed arguments within eight tool
+  calls in one user turn, the earlier result did not fail, and both result texts
+  are identical. Shell repeats after an intervening edit or write to a file the
+  command reads are treated as reruns. `monitor_execution`, `wait` and
+  `read_tool_result` are excluded because repeated polling is their purpose.
+* A detour is a failed call to X followed within the next three tool calls by a
+  lookup call that did not fail. The report marks it `resolved` if X succeeds
+  within three calls after the lookup, and `not resolved` otherwise. For X =
+  `shell`, count the detour only if the failed result is exit 126 or 127, or if
+  the failed and successful shell commands start with the same first word (the
+  program).
 
 The session logs record a model name that includes the **weight quant** (such as
 `...-iq3_xxs`), which is retained in the per-model rate file. They do not record

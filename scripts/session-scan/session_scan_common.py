@@ -3,16 +3,17 @@
 These scripts used to live in scratch/, where the sessions folder, the output
 folder, the window start and the set of probe chats were hard-coded to one
 machine and one week. A weekly job needs all of them as arguments, so they
-move here. Nothing else is shared: the scanning logic stays in each script.
+move here. The individual scan algorithms stay in their own scripts.
 
-One rule the scripts used to carry inline, kept in one place here: every output
-file is written as UTF-8 with '\n' line endings.
+Shared log-text interpretation and argument helpers live here as well as the
+UTF-8 / '\n' output writer, so the scanners use the same failure boundaries.
 """
 
 import argparse
 import collections
 import json
 import os
+import re
 import sys
 import time
 from datetime import date, timedelta
@@ -23,7 +24,7 @@ SESSIONS = Path.home() / '.forge' / 'sessions'
 # scripts/session-scan/x.py -> scripts -> repository root.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Output names, so the four scripts cannot disagree about who writes what.
+# Output names, so scan scripts cannot disagree about who writes what.
 OUT_FILES = {
     'raw': 'failed_tools_raw.txt',
     'sig': 'failed_tools_sig.txt',
@@ -36,7 +37,45 @@ OUT_FILES = {
     'rate': 'failed_tools_rate.txt',
     'rate_by_model': 'failed_tools_rate_by_model.txt',
     'sig_outside': 'failed_tools_sig_outside.txt',
+    'struggles': 'struggle_patterns.txt',
 }
+
+
+def txt_of(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for b in content:
+            if isinstance(b, dict):
+                parts.append(str(b.get('text') or b.get('content') or ''))
+            else:
+                parts.append(str(b))
+        return '\n'.join(parts)
+    return str(content)
+
+
+def bucket(first):
+    f = first.strip()
+    if f.startswith('User declined') or f.startswith('Denied') or 'declined:' in f[:40].lower():
+        return 'USER_DECLINED'
+    if f.startswith('unattended:'):
+        return 'UNATTENDED_DENIED'
+    if f.startswith('Error:') or f.startswith('REFUSED') or 'Forge cannot' in f[:200] or 'is refused' in f[:200]:
+        return 'TOOL_ERROR'
+    m = re.match(r'^exit (\d+)', f)
+    if m and int(m.group(1)) > 0:
+        return 'SHELL_NONZERO'
+    if re.match(r'^(Tool .*failed|Failed)', f):
+        return 'TOOL_ERROR'
+    return None
+
+
+def sig(t):
+    s = re.sub(r'\d+', 'N', t)
+    s = re.sub(r'[`"\x27]', '', s)
+    s = re.sub(r'\s+', ' ', s).strip()
+    return s[:110]
 
 
 def parse(description):
