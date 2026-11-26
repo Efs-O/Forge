@@ -53,3 +53,9 @@ export type MonitorHostToPanel = { type: 'monitorMetrics'; metrics: MetricsDocum
 export function noStatsReaderMessage(model: string): string {
   return `No stats reader set for "${model}": add stats: llama or stats: strata to its engine in ~/.forge/policy.yaml.`;
 }
+
+/** What the panel says when no loaded model can be read — the state after every model
+ *  was unloaded while the page was open. */
+export function noModelLoadedMessage(): string {
+  return 'Nothing is loaded, so the Monitor has nothing to show. Load a model to see its numbers.';
+}

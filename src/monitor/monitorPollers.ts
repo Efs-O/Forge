@@ -26,7 +26,7 @@ import type {
   SlotStats,
   UpsStats,
 } from './monitorTypes';
-import { noStatsReaderMessage } from './monitorTypes';
+import { noModelLoadedMessage, noStatsReaderMessage } from './monitorTypes';
 
 /** How often the panel's reading is refreshed, as in Strata's own poll loop. */
 const ENGINE_POLL_MS = 2000;
@@ -34,6 +34,12 @@ const ENGINE_POLL_MS = 2000;
 const SLOW_POLL_MS = 5000;
 /** A dead LibreHardwareMonitor must not cost a connection attempt every tick. */
 const CPU_RETRY_MS = 30_000;
+/**
+ * The document a reader sends when no loaded model can be read. Silence would leave the
+ * page showing the reading of a model that is gone: it keeps the last document it was
+ * sent until a new one replaces it, so "nothing loaded" has to arrive as a document.
+ */
+const NOTHING_LOADED: MetricsDocument = { error: noModelLoadedMessage() };
 
 export interface MonitorPollerOptions {
   getConfig: () => ForgeConfig;
@@ -88,6 +94,9 @@ export function createMonitorPollers(options: MonitorPollerOptions): MonitorPoll
   let unsubscribeCaptures: (() => void) | undefined;
   /** True while the panel is collecting Forge's finished requests for the table. */
   let capturing = false;
+  /** Whether the page already holds the "nothing loaded" document. The four readers poll
+   *  on their own clocks, so the panel needs it once per showing, not four times per tick. */
+  let nothingLoadedPosted = false;
 
   const run = async (
     key: string,
@@ -99,7 +108,17 @@ export function createMonitorPollers(options: MonitorPollerOptions): MonitorPoll
     controllers.add(controller);
     try {
       const metrics = await read(controller.signal);
-      if (metrics && active && !disposed) options.post(metrics);
+      if (!metrics || !active || disposed) return;
+      if (metrics === NOTHING_LOADED) {
+        if (nothingLoadedPosted) return;
+        nothingLoadedPosted = true;
+      } else {
+        // A real reading replaced the empty state, so a later unload has to be able to
+        // announce itself again: without this the second unload is swallowed and the
+        // page keeps the second model's numbers forever.
+        nothingLoadedPosted = false;
+      }
+      options.post(metrics);
     } catch (error: unknown) {
       // Hiding the panel cancels the read in flight. That is not a failed engine, so it
       // stays silent rather than putting the page in an error state.
@@ -166,7 +185,7 @@ export function createMonitorPollers(options: MonitorPollerOptions): MonitorPoll
 
   const engineReading = async (signal: AbortSignal): Promise<MetricsDocument | undefined> => {
     const model = shown();
-    if (!model) return undefined;
+    if (!model) return NOTHING_LOADED;
     if (isStrataModel(model) && model.endpoint) {
       const secret = model.api_key_secret
         ? await options.getSecret(model.api_key_secret)
@@ -198,7 +217,8 @@ export function createMonitorPollers(options: MonitorPollerOptions): MonitorPoll
 
   const hardwareReading = async (signal: AbortSignal): Promise<MetricsDocument | undefined> => {
     const model = shown();
-    if (!model || !isLlamaModel(model)) return undefined;
+    if (!model) return NOTHING_LOADED;
+    if (!isLlamaModel(model)) return undefined;
     try {
       parts.gpu = { gpus: await (options.probeGpus ?? probeGpus)(signal) };
     } catch (error: unknown) {
@@ -212,7 +232,8 @@ export function createMonitorPollers(options: MonitorPollerOptions): MonitorPoll
   const cpuReading = async (signal: AbortSignal): Promise<MetricsDocument | undefined> => {
     const model = shown();
     const url = options.getConfig().monitor?.cpu;
-    if (!model || !isLlamaModel(model) || !url) return undefined;
+    if (!model) return NOTHING_LOADED;
+    if (!isLlamaModel(model) || !url) return undefined;
     if (Date.now() < cpuRetryAt) return undefined;
     try {
       parts.cpu = await readLhmCpuStats(url, signal);
@@ -234,7 +255,8 @@ export function createMonitorPollers(options: MonitorPollerOptions): MonitorPoll
   const upsReading = async (signal: AbortSignal): Promise<MetricsDocument | undefined> => {
     const model = shown();
     const spec = options.getConfig().monitor?.ups;
-    if (!model || !isLlamaModel(model) || !spec) return undefined;
+    if (!model) return NOTHING_LOADED;
+    if (!isLlamaModel(model) || !spec) return undefined;
     try {
       parts.ups = await readNutStats(spec, signal);
     } catch (error: unknown) {
@@ -247,6 +269,9 @@ export function createMonitorPollers(options: MonitorPollerOptions): MonitorPoll
     start(): void {
       if (active || disposed) return;
       active = true;
+      // A page that is visible again has no document of its own, so the empty state has
+      // to be able to reach it once more.
+      nothingLoadedPosted = false;
       // Forge's own finished requests feed the table and the totals. The subscription
       // outlives a hidden panel: the rows made while it was hidden are still there when
       // it comes back, and the ring's cap is what bounds it.
