@@ -313,7 +313,10 @@ export function createMonitorPollers(options: MonitorPollerOptions): MonitorPoll
   };
 }
 
-/** The model the panel shows: the active one when it is loaded, else the only loaded one. */
+/**
+ * The model the panel shows: the serving model first, the active one among equals.
+ * An external engine stopped outside Forge stays "loaded" as unknown.
+ */
 export function shownModel(
   options: MonitorPollerOptions,
   config: ForgeConfig,
@@ -322,6 +325,10 @@ export function shownModel(
     .map((model) => mergeGroupsIntoModel(config, model))
     .filter((model) => options.pool.isLoaded(model.name));
   if (!loaded.length) return undefined;
+  const ready = loaded.filter((model) => options.pool.isModelReady(model.name));
+  if (ready.length) {
+    return ready.find((model) => model.name === config.active_model) ?? ready[0];
+  }
   return loaded.find((model) => model.name === config.active_model) ?? loaded[0];
 }
 

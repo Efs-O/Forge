@@ -85,7 +85,7 @@ function setup(loaded = true) {
   } as unknown as ForgeConfig;
   const options = {
     extensionUri: context.extensionUri,
-    pool: { isLoaded: () => loaded, modelBaseUrl: () => null },
+    pool: { isLoaded: () => loaded, isModelReady: () => loaded, modelBaseUrl: () => null },
     getConfig: () => config,
     getStats: () => ({ today: { turns: 7 } }) as never,
     getSecret: async () => undefined,
