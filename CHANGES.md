@@ -1,5 +1,19 @@
 # Forge — Recent Changes
 
+## 0.17.219
+
+**The agent bus client runs on Linux and macOS.** Forge wrote `~/.forge/agent-bus/forge.sh`
+without the execute bit, so on Linux and macOS it ran only as `bash forge.sh`. Forge now marks it
+executable on every start, which also fixes a copy an older Forge left behind.
+
+**A blocked save names what holds the file on a busy machine.** When Windows keeps refusing to
+replace a file, Forge asks Windows which process has it open. That lookup was stopped after 3
+seconds, which a busy machine can need just to start it, so the error said "holder not identified".
+It now has 10 seconds.
+
+0.17.218 never reached the registries (its publish run failed on the second item); this release
+carries it.
+
 ## 0.17.218
 
 **A failed tool call no longer resets the prompt cache.** When the model printed tool-call markup
