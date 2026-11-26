@@ -93,4 +93,24 @@ describe('ToolCallingLoop loop-guard recovery', () => {
     expect(nudges[0]?.content).toContain('1 more automatic retry left');
     expect(nudges[1]?.content).toContain('0 more automatic retries left');
   });
+
+  it('marks every loop-recovery nudge internal, so no projection reads it as the owner typing', async () => {
+    scriptRepeatedCalls(Number.POSITIVE_INFINITY);
+    const messages: ChatMessage[] = [{ role: 'user', content: 'go' }];
+    await expect(
+      runToolCallingLoop(runOptions(messages, vi.fn()) as never),
+    ).rejects.toThrow(ToolLoopDetectedError);
+
+    const nudges = messages.filter(
+      (m) => m.role === 'user' && typeof m.content === 'string' && m.content.includes('The turn continues'),
+    );
+    expect(nudges).toHaveLength(2);
+    // `sessionProjections` and `compactionUserContext` skip only `internal`, and
+    // `countTurnsWithoutEnd` counts a visible user row as ending the turn that is
+    // still running: without this flag the nudge renders as something the owner
+    // typed and inflates the control server's counters.
+    for (const nudge of nudges) expect(nudge.internal).toBe(true);
+    const owner = messages.find((m) => m.role === 'user' && m.content === 'go');
+    expect(owner?.internal).toBeUndefined();
+  });
 });

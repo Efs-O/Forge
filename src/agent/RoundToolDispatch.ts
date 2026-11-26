@@ -64,9 +64,14 @@ export class RoundToolDispatch {
       if (error instanceof ToolLoopDetectedError && this.loopRecoveries < MAX_LOOP_RECOVERIES) {
         this.loopRecoveries++;
         this.loopGuard = new ToolLoopGuard();
+        // Internal: the model and the session log need it; the sidebar must not
+        // render Forge's nudge as something the user typed, and a plain user row
+        // opens a turn in the control server's counters for a turn that is still
+        // running.
         this.options.messages.push({
           role: 'user',
           content: loopRecoveryNudge(error.message, MAX_LOOP_RECOVERIES - this.loopRecoveries),
+          internal: true,
         });
         recoverLoop = true;
       } else {
