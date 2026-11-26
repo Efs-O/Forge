@@ -61,7 +61,7 @@ def bucket(first):
         return 'USER_DECLINED'
     if f.startswith('unattended:'):
         return 'UNATTENDED_DENIED'
-    if f.startswith('Error:') or f.startswith('REFUSED') or 'Forge cannot' in f[:200] or 'is refused' in f[:200]:
+    if f.startswith('Error:') or f.startswith('REFUSED'):
         return 'TOOL_ERROR'
     m = re.match(r'^exit (\d+)', f)
     if m and int(m.group(1)) > 0:
