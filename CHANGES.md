@@ -1,5 +1,24 @@
 # Forge — Recent Changes
 
+## 0.17.223
+
+**A cut-off tool call stops looking like you wrote it.** When the server failed a
+whole request in the middle of a `write_file`, the note Forge sends back to the
+model - "your call was cut off after N bytes of arguments and was NOT executed" -
+came in as a message from you: the sidebar showed it as your own bubble, the
+compaction summary kept it as one of your words, and the activity counter opened a
+turn for it and blamed the turn that was still running. It is an internal row now,
+like the other nudge in the same loop: the model still reads it, you never see it.
+(BL-055)
+
+**A server that says "too big" gets believed.** When a request is larger than the
+running server's real context, that server answers before generating anything, and
+Forge recognised its answer in only two wordings. The wording this machine's model
+uses failed every single turn at once - no retry, no compaction, just the
+provider's raw sentence. Forge now reads the two numbers out of that wording and
+out of OpenAI's as well, so the round goes back with the output cap the server
+just named, instead of losing the turn or compacting history that fitted. (BL-056)
+
 ## 0.17.222
 
 **Forge's own notes stopped looking like something you typed.** The repetition guard's
