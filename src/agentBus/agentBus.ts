@@ -71,6 +71,7 @@ export function ensureBus(paths: BusPaths): void {
   fs.mkdirSync(paths.outbox, { recursive: true });
   writeIfChanged(path.join(paths.root, 'README.md'), BUS_README);
   writeIfChanged(paths.script, CLIENT_SCRIPT);
+  if (process.platform !== 'win32') fs.chmodSync(paths.script, 0o755);
   const legacy = [
     ...LEGACY_FILES.map((name) => path.join(paths.root, name)),
     ...fs

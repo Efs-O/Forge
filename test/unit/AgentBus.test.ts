@@ -153,6 +153,27 @@ describe('ensureBus', () => {
     expect(fs.readFileSync(paths.script, 'utf8')).toBe(CLIENT_SCRIPT);
   });
 
+  it.skipIf(process.platform === 'win32')(
+    'writes the client executable so a POSIX shell can run forge.sh',
+    () => {
+      ensureBus(paths);
+      expect(fs.statSync(paths.script).mode & 0o111).not.toBe(0);
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'fixes a 0644 client left by an older Forge, even when the text matches',
+    () => {
+      // `writeIfChanged` skips the write when the content already matches, so
+      // the mode fix must not live inside it.
+      fs.mkdirSync(paths.root, { recursive: true });
+      fs.writeFileSync(paths.script, CLIENT_SCRIPT, { mode: 0o644 });
+      expect(fs.statSync(paths.script).mode & 0o111).toBe(0);
+      ensureBus(paths);
+      expect(fs.statSync(paths.script).mode & 0o111).not.toBe(0);
+    },
+  );
+
   it('deletes what the watcher design left behind', () => {
     ensureBus(paths);
     fs.writeFileSync(path.join(paths.root, 'watch.sh'), '');

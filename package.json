@@ -607,5 +607,12 @@
     "undici": "^6.29.0",
     "yaml": "^2.9.0",
     "zod": "^4.3.6"
+  },
+  "allowScripts": {
+    "@vscode/vsce-sign": true,
+    "@whiskeysockets/baileys": true,
+    "esbuild": true,
+    "keytar": true,
+    "protobufjs": true
   }
 }
