@@ -117,14 +117,15 @@
 }
 
 .activity-row-error-line {
-  display: block;
+  display: -webkit-box;
   max-width: calc(100% - 30px);
   margin: 0 0 2px 31px;
   overflow: hidden;
+  overflow-wrap: anywhere;
   color: var(--forge-tool-bad);
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: 11px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
 }
 
 .activity-row-collapsed-thumbnails {
@@ -186,6 +187,7 @@
 }
 .activity-row-attempt {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 5px;
   min-width: 0;
@@ -198,18 +200,24 @@
   flex: 0 0 auto;
   color: var(--vscode-foreground);
 }
-.activity-row-attempt-target,
-.activity-row-attempt-error {
+.activity-row-attempt-target {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.activity-row-attempt-target {
-  flex: 1 1 auto;
-}
 .activity-row-attempt-error {
+  flex: 1 0 100%;
+  order: 1;
+  padding-left: 16px;
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
   color: var(--forge-tool-bad);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
 }
 .activity-row-attempt-time {
   flex: 0 0 auto;
