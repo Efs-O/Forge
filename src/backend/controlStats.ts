@@ -144,12 +144,90 @@ function emptyCounts(): CountedRows {
   };
 }
 
+/**
+ * One walk of a session log for both turn counters, so they cannot drift apart:
+ * how many turns started (`turns`), and how many of those openers were displaced by
+ * another turn or a later run without a matching end row (`missing`).
+ *
+ * A `user` row opens a turn unless it is a tell delivered at a round gap
+ * (`delivered: mid_turn`). Forge's own note (`internal: true` - a stop-while-thinking
+ * nudge, a mid-turn compaction resume, a background-job notice) opens one only while no
+ * opener is still pending, which is how a check-in or a job notice starts a turn; a
+ * `session_start` does not clear a pending opener (see below), so a note the reloaded
+ * process writes does not open a second turn there - both counters keep the same rule.
+ *
+ * A `session_start` row is NOT one of the ends that closes a missing turn. The process
+ * that resumes a reloaded chat repairs the interrupted tool calls and then writes
+ * `turn_error` plus `turn_end` for the turn that was open, seconds later, so counting
+ * the opener at the boundary reported a turn that did end as missing one - three hunt
+ * runs in a row had to hand-trace that number back through a session log. The opener is
+ * kept pending across the boundary instead: a later `turn_end` closes it silently, a
+ * later user row still counts it as displaced, and only a restart that left it behind
+ * with nothing after it is counted when the file runs out, where no live process can
+ * still be holding it.
+ */
+function countTurns(
+  rows: Array<Record<string, unknown>>,
+  day: string | undefined,
+): { turns: number; missing: number } {
+  // Older session logs have no end markers at all; they predate the missing counter.
+  const hasEndMarker = rows.some((row) => row['type'] === 'turn_end');
+  const inDay = (epochMs: number): boolean => day === undefined || localDay(epochMs) === day;
+
+  let openedAt: number | undefined;
+  // Set when a `session_start` arrives with an opener still pending: that opener
+  // was left behind by a process that is gone, which is the crash case this
+  // counter exists for, so it is counted once the file runs out.
+  let leftBehindByRestart = false;
+  let turns = 0;
+  let missing = 0;
+  const markMissing = (): void => {
+    if (openedAt !== undefined && inDay(openedAt)) missing += 1;
+    openedAt = undefined;
+    leftBehindByRestart = false;
+  };
+
+  for (const row of rows) {
+    const timestampMs = row['timestamp_ms'];
+    if (typeof timestampMs !== 'number' || !Number.isFinite(timestampMs)) continue;
+    if (row['type'] === 'session_start') {
+      // Nothing was open: this boundary is a plain restart, not a lost turn.
+      if (openedAt === undefined) continue;
+      // A new process has started, so whatever was open cannot still be running
+      // in it. Remember that, and let the end of the file decide.
+      leftBehindByRestart = true;
+    } else if (row['role'] === 'user' && row['delivered'] !== 'mid_turn') {
+      if (row['internal'] === true && openedAt !== undefined) continue;
+      markMissing();
+      openedAt = timestampMs;
+      if (inDay(timestampMs)) turns += 1;
+    } else if (row['type'] === 'turn_end' && row['outcome'] !== 'blocked') {
+      openedAt = undefined;
+      leftBehindByRestart = false;
+    }
+  }
+  // The tail. An opener still pending normally belongs to a turn that may still
+  // be running, so it is not counted - unless a restart left it behind, in which
+  // case no live process can be holding it and it is the crash case.
+  if (openedAt !== undefined && leftBehindByRestart && inDay(openedAt)) missing += 1;
+  return { turns, missing: hasEndMarker ? missing : 0 };
+}
+
+interface RowCounts {
+  counts: CountedRows;
+  lastRequestAtMs: number;
+  turnsMissing: number;
+}
+
 function countRows(
   rows: Array<Record<string, unknown>>,
   day: string | undefined,
   contextLimitFor: (model: string) => number | null,
-): [CountedRows, number] {
+): RowCounts {
   const counts = emptyCounts();
+  // Both turn counters come out of the one walk of the log.
+  const walk = countTurns(rows, day);
+  counts.turns = walk.turns;
   // `usage` rows are session-to-date totals (SessionUsage), so each row's share
   // is the delta from the previous usage row in the same file, whatever day
   // that row was written. A total that went backwards restarted from zero.
@@ -164,7 +242,6 @@ function countRows(
       if (type === 'usage') previousUsage = usageTotals(row);
       continue;
     }
-    if (row['role'] === 'user') counts.turns += 1;
     if (row['role'] === 'tool') {
       counts.tool_calls += 1;
       if (typeof row['content'] === 'string' && isFailureResult(row['content'])) {
@@ -201,7 +278,7 @@ function countRows(
       counts.turn_errors += 1;
     }
   }
-  return [counts, lastRequestAtMs];
+  return { counts, lastRequestAtMs, turnsMissing: walk.missing };
 }
 
 function usageTotals(row: Record<string, unknown>): UsageTotals {
@@ -219,65 +296,6 @@ function usageDelta(previous: UsageTotals, current: UsageTotals): UsageTotals {
     input: current.input - previous.input,
     output: Math.max(0, current.output - previous.output),
   };
-}
-
-/**
- * Count started turns that were displaced by another turn or a later run
- * without a matching end row. A final open turn may still be running, and
- * blocked admissions have an end row without a user-message opener.
- *
- * A `session_start` row is NOT one of those ends. The process that resumes a
- * reloaded chat repairs the interrupted tool calls and then writes `turn_error`
- * plus `turn_end` for the turn that was open, seconds later, so counting the
- * opener at the boundary reported a turn that did end as missing one - three
- * hunt runs in a row had to hand-trace that number back through a session log.
- * The opener is kept pending across the boundary instead: a later `turn_end`
- * closes it silently, a later user row still counts it as displaced, and only a
- * restart that left it behind with nothing after it is counted when the file
- * runs out, where no live process can still be holding it.
- */
-function countTurnsWithoutEnd(rows: Array<Record<string, unknown>>, day: string): number {
-  // Older session logs have no end markers at all; they predate this counter.
-  if (!rows.some((row) => row['type'] === 'turn_end')) return 0;
-
-  let openedAt: number | undefined;
-  // Set when a `session_start` arrives with an opener still pending: that opener
-  // was left behind by a process that is gone, which is the crash case this
-  // counter exists for, so it is counted once the file runs out.
-  let leftBehindByRestart = false;
-  let missing = 0;
-  const markMissing = (): void => {
-    if (openedAt !== undefined && localDay(openedAt) === day) missing += 1;
-    openedAt = undefined;
-    leftBehindByRestart = false;
-  };
-
-  for (const row of rows) {
-    const timestampMs = row['timestamp_ms'];
-    if (typeof timestampMs !== 'number' || !Number.isFinite(timestampMs)) continue;
-    if (row['type'] === 'session_start') {
-      // Nothing was open: this boundary is a plain restart, not a lost turn.
-      if (openedAt === undefined) continue;
-      // A new process has started, so whatever was open cannot still be running
-      // in it. Remember that, and let the end of the file decide.
-      leftBehindByRestart = true;
-    } else if (row['role'] === 'user' && row['delivered'] !== 'mid_turn') {
-      // Forge's own notes (a stop-while-thinking nudge, a mid-turn compaction
-      // resume) land inside a running turn without the mid-turn flag; only a
-      // turn with nothing open can start from one (a check-in, a resume send).
-      if (openedAt !== undefined && row['internal'] === true) continue;
-      markMissing();
-      openedAt = timestampMs;
-    } else if (row['type'] === 'turn_end' && row['outcome'] !== 'blocked') {
-      openedAt = undefined;
-      leftBehindByRestart = false;
-    }
-  }
-  // The tail. An opener still pending normally belongs to a turn that may still
-  // be running, so it is not counted - unless a restart left it behind, in which
-  // case no live process can be holding it and it is the crash case.
-  if (openedAt !== undefined && leftBehindByRestart && localDay(openedAt) === day) missing += 1;
-  return missing;
 }
 
 /** Builds a counts-only summary; persisted row text is never copied to the reply. */
@@ -343,8 +361,12 @@ export class ControlStatsBuilder {
       // files such as voice.jsonl without relying on a filename convention.
       if (!rows.some((row) => row['type'] === 'session_start')) continue;
 
-      const [counted, requestAtMs] = countRows(rows, day, this.options.contextLimitFor);
-      result.today.turns_without_end += countTurnsWithoutEnd(rows, day);
+      const {
+        counts: counted,
+        lastRequestAtMs: requestAtMs,
+        turnsMissing,
+      } = countRows(rows, day, this.options.contextLimitFor);
+      result.today.turns_without_end += turnsMissing;
       result.today.turns += counted.turns;
       result.today.requests += counted.requests;
       result.today.compactions += counted.compactions;
@@ -378,7 +400,7 @@ export class ControlStatsBuilder {
     rows: Array<Record<string, unknown>>,
   ): NonNullable<ControlStats['session']> {
     const firstTimestamp = rows[0]?.['timestamp_ms'];
-    const [counts] = countRows(rows, undefined, this.options.contextLimitFor);
+    const { counts } = countRows(rows, undefined, this.options.contextLimitFor);
     return {
       conversation_id: path.basename(filePath, '.jsonl'),
       ...counts,

@@ -106,6 +106,67 @@ describe('control stats', () => {
     expect(controlStatsSchema.parse(result)).toEqual(result);
   });
 
+  it('counts only the owner messages as turns, not Forge notes or mid-turn tells', () => {
+    const env = setup();
+    env.write('notes.jsonl', [
+      { type: 'session_start', timestamp_ms: FIXED_NOW },
+      { role: 'user', content: 'the owner typed this', timestamp_ms: FIXED_NOW + 1 },
+      // Forge's own words, written as user rows so the model reads them: a
+      // background-job notice, a loop-recovery nudge, a stop-while-thinking note.
+      {
+        role: 'user',
+        content: 'Background job finished: RESULT: ok',
+        internal: true,
+        timestamp_ms: FIXED_NOW + 2,
+      },
+      { role: 'user', content: 'nudge', internal: true, timestamp_ms: FIXED_NOW + 3 },
+      // A steer delivered at a round gap: a real message, but not a new turn.
+      { role: 'user', content: 'a tell', delivered: 'mid_turn', timestamp_ms: FIXED_NOW + 4 },
+      { role: 'user', content: 'the owner typed this too', timestamp_ms: FIXED_NOW + 5 },
+      { type: 'turn_end', outcome: 'completed', timestamp_ms: FIXED_NOW + 6 },
+    ]);
+    const result = builder(env.dir).build();
+    expect(result.today).toMatchObject({ turns: 2, turns_without_end: 1 });
+  });
+
+  it('counts a turn that starts with a Forge note while nothing is open', () => {
+    const env = setup();
+    env.write('checkin.jsonl', [
+      { type: 'session_start', timestamp_ms: FIXED_NOW },
+      // A scheduled job's prompt row, or a check-in: Forge writes the text, but it
+      // opens a real turn, so it counts once the turn ends cleanly.
+      {
+        role: 'user',
+        content: 'Scheduled task for job "Weekly Forge bug hunt"',
+        internal: true,
+        timestamp_ms: FIXED_NOW + 1,
+      },
+      { type: 'turn_end', outcome: 'completed', timestamp_ms: FIXED_NOW + 2 },
+    ]);
+    const result = builder(env.dir).build();
+    expect(result.today).toMatchObject({ turns: 1, turns_without_end: 0 });
+  });
+
+  it('does not open a second turn from a note written after a reload, and calls nothing missing', () => {
+    const env = setup();
+    env.write('reload.jsonl', [
+      { type: 'session_start', timestamp_ms: FIXED_NOW },
+      { role: 'user', content: 'the owner typed this', timestamp_ms: FIXED_NOW + 1 },
+      // The window died here: the opener is left pending across the boundary on purpose,
+      // because the new process repairs the interrupted turn and closes it seconds later.
+      { type: 'session_start', timestamp_ms: FIXED_NOW + 2 },
+      {
+        role: 'user',
+        content: 'Resumed after the reload',
+        internal: true,
+        timestamp_ms: FIXED_NOW + 3,
+      },
+      { type: 'turn_end', outcome: 'completed', timestamp_ms: FIXED_NOW + 4 },
+    ]);
+    const result = builder(env.dir).build();
+    expect(result.today).toMatchObject({ turns: 1, turns_without_end: 0 });
+  });
+
   it('counts usage as deltas of session-to-date totals', () => {
     const env = setup();
     const yesterday = FIXED_NOW - 24 * 60 * 60 * 1_000;
