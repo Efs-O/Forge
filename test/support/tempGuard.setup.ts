@@ -16,6 +16,19 @@ const fileDir = fs.mkdtempSync(path.join(inject('tempGuardRunDir'), 'file-'));
 const savedTempVars = TEMP_VARS.map((name) => [name, process.env[name]] as const);
 for (const name of TEMP_VARS) process.env[name] = fileDir;
 
+// The home folder, same idea: tests used to write the OWNER's real `~/.forge`.
+// `SessionLogger`, `BackgroundRegistry`, `memoryStore`, skill discovery and
+// `windowsJobKeeper` all call `os.homedir()`, and on the Linux clone (2026-11-25)
+// one run created `background-execs`, `job-keeper`, `memories`, `sessions` and
+// `skills` there; Windows had the same writes, hidden because the folders already
+// existed. `os.homedir()` reads `USERPROFILE` on Windows and `HOME` elsewhere, so
+// both point at a throwaway folder. It is a SIBLING of `fileDir`, not inside it:
+// a file a test leaves in the fake home must not be reported as a temp leak.
+const homeDir = fs.mkdtempSync(path.join(inject('tempGuardRunDir'), 'home-'));
+const HOME_VARS = process.platform === 'win32' ? ['USERPROFILE', 'HOME'] : ['HOME'];
+const savedHomeVars = HOME_VARS.map((name) => [name, process.env[name]] as const);
+for (const name of HOME_VARS) process.env[name] = homeDir;
+
 // The policy file is machine-wide, so a test that calls `loadConfig(dir)` or
 // `updateConfigFile()` with no `policyPath` would otherwise read the OWNER's
 // `~/.forge/policy.yaml` — and once they have run `Forge: Move security settings
@@ -59,7 +72,26 @@ afterAll(({}, suite) => {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
     }
+    for (const [name, value] of savedHomeVars) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    // Files the test left in the fake home go with it, but a child the test
+    // started can still be holding it when this runs: a CLI driver spawns with
+    // `cwd: os.homedir()` (src/agentBus/codexDelivery.ts, claudeRelay.ts), and
+    // Windows refuses to remove a folder any process keeps as its working
+    // directory. EBUSY/EPERM means "someone else has it", not "this test
+    // failed": nothing in the fake home is ever checked for leaks, and the run
+    // folder's teardown takes the folder once that child is gone. Any other
+    // error is a real fault in the guard, so it goes up.
+    try {
+      fs.rmSync(homeDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EBUSY' && code !== 'EPERM') throw error;
+    }
   }
+
   if (left.length > 0) {
     throw new Error(
       `temp leak: ${testFile} left ${left.length} entr${left.length === 1 ? 'y' : 'ies'} in os.tmpdir(): ` +

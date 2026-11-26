@@ -56,6 +56,19 @@ export default function setup(project: TestProject): () => void {
       else process.env[name] = value;
     }
     // A just-killed child can hold a folder as its cwd for a few seconds on Windows.
-    fs.rmSync(runDir, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
+    // A child that outlives the run can hold one for good: the job keeper's loaded
+    // DLL and Chromium's shader cache both land in a test file's fake home folder
+    // now, and the process using them may still be up when this teardown runs.
+    // EBUSY/EPERM is that case: name the folder and go on, since the next run's
+    // `sweepDeadRuns` takes it once the process is gone, rather than failing the
+    // run over a temp folder nobody can delete. Any other error is the guard's own
+    // fault, so it goes up.
+    try {
+      fs.rmSync(runDir, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EBUSY' && code !== 'EPERM') throw error;
+      console.warn(`tempGuard: could not remove ${runDir} (${(error as Error).message})`);
+    }
   };
 }

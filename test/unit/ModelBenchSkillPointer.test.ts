@@ -27,7 +27,13 @@ const forgeMdPath = path.join(root, 'FORGE.md');
 
 /** The skill's home, spelled the way `FORGE.md` must spell it. */
 const SKILL_PATH_TEXT = '~/.forge/skills/model-bench/';
-const skillFolder = path.join(os.homedir(), '.forge', 'skills', 'model-bench');
+/** The account's own profile, not the throwaway home `tempGuard.setup.ts` gives
+ *  a test file: what this checks is the skill the operator installed there, so
+ *  it has to look where that install lives. `userInfo()` reads the account (the
+ *  token's profile folder on Windows, the passwd entry elsewhere) and ignores
+ *  the `USERPROFILE` / `HOME` the guard redirects. */
+const REAL_PROFILE = os.userInfo().homedir;
+const skillFolder = path.join(REAL_PROFILE, '.forge', 'skills', 'model-bench');
 
 /** The words the old prose rule used, which must not come back alongside the pointer. */
 const RETIRED_PROCSE = [

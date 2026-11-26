@@ -12,6 +12,10 @@ import { makeRenderHtmlToImageTool } from '../../src/tools/renderHtmlToImageTool
 import type { UserNotificationService } from '../../src/sidebar/UserNotificationService';
 import type { MultimodalToolResult, RegisteredTool } from '../../src/tools/ToolRegistry';
 import { listenLoopback } from '../support/listenLoopback';
+import { useRealProfileForBrowser } from '../support/realHome';
+
+// Chrome hangs on Windows under the throwaway home the temp guard sets; see the helper.
+useRealProfileForBrowser();
 
 /**
  * Preview mode against real headless Chrome (RENDER_PREVIEW_PLAN.md). With the

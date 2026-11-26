@@ -1,5 +1,5 @@
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { parse } from 'yaml';
@@ -18,7 +18,11 @@ const LIVE = process.env.FORGE_LIVE_MCP === '1';
 
 function configuredServers(): McpServerConfig[] {
   try {
-    const doc = parse(readFileSync(join(homedir(), '.forge', 'policy.yaml'), 'utf8')) as {
+    // The account's own profile, not the throwaway home `tempGuard.setup.ts`
+    // gives a test file: this opt-in suite asks what THIS machine configures, so
+    // it reads the `policy.yaml` the operator actually edits. `userInfo()` reads
+    // the account and ignores the `USERPROFILE` / `HOME` the guard redirects.
+    const doc = parse(readFileSync(join(userInfo().homedir, '.forge', 'policy.yaml'), 'utf8')) as {
       mcp_servers?: McpServerConfig[];
     };
     return doc?.mcp_servers ?? [];

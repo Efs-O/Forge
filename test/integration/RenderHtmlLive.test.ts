@@ -12,6 +12,10 @@ import {
 } from '../../src/sidebar/UserNotificationService';
 import type { RegisteredTool, ToolHandlerContext } from '../../src/tools/ToolRegistry';
 import { listenLoopback } from '../support/listenLoopback';
+import { useRealProfileForBrowser } from '../support/realHome';
+
+// Chrome hangs on Windows under the throwaway home the temp guard sets; see the helper.
+useRealProfileForBrowser();
 
 /**
  * The plan's "→ integration" rows for `render_html_to_image`. The unit suite

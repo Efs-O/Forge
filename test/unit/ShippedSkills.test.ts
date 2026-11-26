@@ -25,8 +25,13 @@ import { discoverSkills, parseSkillManifest } from '../../src/skills/discover';
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const SKILLS_ROOT = path.join(REPO_ROOT, 'resources', 'skills');
 const LAB_SKILLS_ROOT = path.join(REPO_ROOT, 'skills-lab');
+// The account's own profile, not the throwaway home `tempGuard.setup.ts` gives a
+// test file: what this compares is the `hf-download` skill the operator installed
+// for themselves, so it has to be read where that install lives. `userInfo()`
+// reads the account (the token's profile folder on Windows, the passwd entry
+// elsewhere) and ignores the `USERPROFILE` / `HOME` the guard redirects.
 const USER_SKILL_SCRIPT = path.join(
-  os.homedir(),
+  os.userInfo().homedir,
   '.forge',
   'skills',
   'hf-download',
