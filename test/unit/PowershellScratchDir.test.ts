@@ -102,5 +102,7 @@ describe('windowsFileHolders', () => {
         .filter((name) => !before.has(name) && CODEDOM_SCRATCH.test(name));
       expect(appeared).toEqual([]);
     },
+    // The probe may run up to HOLDER_PROBE_TIMEOUT_MS (10 s), past vitest's 5 s local default.
+    30_000,
   );
 });
