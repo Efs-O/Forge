@@ -250,7 +250,7 @@ describe('jsonArgumentRepairNote', () => {
       total: 1,
     };
     expect(jsonArgumentRepairNote(report)).toBe(
-      'Note: edits arrived as JSON text with 1 escape slip; read as: a backslash with no valid escape was kept as a literal backslash at character 41',
+      'Note: edits arrived as JSON text with 1 slip; read as: a backslash with no valid escape was kept as a literal backslash at character 41',
     );
   });
 

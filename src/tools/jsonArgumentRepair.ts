@@ -315,5 +315,6 @@ export function jsonArgumentRepairNote(report: JsonArgumentRepairReport): string
   const count = report.total;
   const phrases =
     report.repairs.length > 0 ? report.repairs.join(', ') : 'the text was re-read as JSON';
-  return `Note: ${keys} arrived as JSON text with ${count} escape slip${count === 1 ? '' : 's'}; read as: ${phrases}`;
+  // "slip", not "escape slip": the call-tail repair is a structural one.
+  return `Note: ${keys} arrived as JSON text with ${count} slip${count === 1 ? '' : 's'}; read as: ${phrases}`;
 }
