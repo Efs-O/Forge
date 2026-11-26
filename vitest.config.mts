@@ -136,10 +136,12 @@ export default defineConfig({
           include: SERIAL_SUITES,
           exclude: [...configDefaults.exclude],
           sequence: { groupOrder: 1 },
-          // One file at a time, so these suites are not competing with each
-          // other for the temp folder, the CPU or the same Windows shell.
-          fileParallelism: false,
-          maxWorkers: 1,
+          // Two files at a time, and still only after the parallel pool has
+          // drained, so the pair shares the machine with each other and with
+          // nothing else. One at a time was the wrong trade: the 40 s Chrome
+          // suite held up the 17 files behind it while 16 cores sat idle.
+          // Measured 2026-11-26: docs/reports/ci-speed-2026-11-26.md.
+          maxWorkers: 2,
         },
       },
     ],

@@ -42,9 +42,13 @@ describe('the vitest projects split', () => {
     expect(leaked).toEqual([]);
   });
 
-  it('runs the contention suites one file at a time and leaves the rest parallel', () => {
-    expect(serial.fileParallelism).toBe(false);
-    expect(serial.maxWorkers).toBe(1);
+  it('runs the contention suites two files at a time and leaves the rest parallel', () => {
+    // Two at a time, not one: alone, the 40 s Chrome suite held up the 17
+    // files behind it. `groupOrder: 1` still keeps the pair off the machine
+    // until the parallel pool has drained. Measured 2026-11-26:
+    // docs/reports/ci-speed-2026-11-26.md.
+    expect(serial.fileParallelism).toBeUndefined();
+    expect(serial.maxWorkers).toBe(2);
     // The other project keeps the default: it is the one that passes side by side.
     expect(parallel.fileParallelism).not.toBe(false);
     expect(parallel.maxWorkers).toBeUndefined();

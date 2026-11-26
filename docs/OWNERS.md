@@ -1060,6 +1060,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Bundle load check (circular/TDZ + playwright-core resolve) | `scripts/bundle-load-check.js`            |
 | VSIX contents allow-list check                             | `scripts/check-vsix-contents.mjs`          |
 | One full `npm run ci` per machine (lock in os.tmpdir)       | `scripts/ci-lock.mjs`                      |
+| The three static checks side by side, and their caches       | `scripts/ci-static.mjs`                    |
 | Test temp containment: per-run folder + dead-run sweep     | `test/support/tempGuard.global.ts`        |
 | Test temp leak check: per-file folder, fails a leaking file | `test/support/tempGuard.setup.ts`         |
 | Hermetic fake `claude` executable for tests                | `test/support/fakeCli.ts`                 |
