@@ -141,7 +141,7 @@
 24. `apply_line_edits` · a range counted from an unnumbered `read_file`, or from before a formatter pass → refused: `operation 1 is stale ... they DO match lines 276-279`. read with `numbered: true` in the same round
 25. `write_file` · a backtick I thought it had escaped → it writes exactly what I typed, so a later `old_str` misses. read_file it back before blaming the write
 26. `desktop_click` · on a field may not move the caret → text runs on behind it. move with `tab`, clear with `ctrl+a`+`delete`; a new capture drops the old `capture_id`
-27. `read_tool_result` · `tool_call_id: "read_file"` (a tool's NAME, not an id) or a `message_index` of a tool result → `no text tool result with call ID`: results take the result's own `tool_call_id`, prompts take `message_index`
+27. `read_tool_result` · `tool_call_id: "read_file"` (a tool's NAME, not an id) or a tool result's row index → `no text tool result with call ID`: results take their own `tool_call_id`, prompts take `message_index`, which counts from 0 (`-1` → `must be within at least 0`)
 28. `update_plan` · `items` → refused: `"items" must be a JSON array, not a string`, for a bare-string entry or one missing `"text"`. every entry is exactly `{"text":…,"status":…}`; resend the whole array. If it fires on a list that looks well formed, resend it unchanged once.
 29. `remember` · `title:`, `path:`, `name:` or `content:` → refused: unknown argument. name the memory with `key`, put its text in `value`
 30. `recall` · the fields `remember` takes → refused. send the memory's name alone: `{"key": …}`
