@@ -147,8 +147,12 @@ export function truncationRecoveryMessages(
 ): ChatMessage[] {
   if (!truncation.toolCallId || !truncation.toolName) {
     // The server failed the whole request, so there is no call id to answer —
-    // a plain user-role nudge is the portable alternative.
-    return [{ role: 'user', content: guidance }];
+    // a user-role nudge is the portable alternative. It is Forge's own words,
+    // so it carries `internal` like the reasoning-stop nudge does: without it
+    // the sidebar renders this as a bubble the owner never typed, compaction
+    // keeps it as one of their messages, and the session log gains a user row
+    // that opens a turn and marks the running one missing.
+    return [{ role: 'user', content: guidance, internal: true }];
   }
   // Close the protocol properly: an unanswered tool_call id breaks the next
   // request on strict templates.
@@ -249,7 +253,11 @@ export function isLlamaContextExhaustion(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
   return (
     message.includes('exceeds the available context size') ||
-    message.includes('exceed_context_size_error')
+    message.includes('exceed_context_size_error') ||
+    // The code an OpenAI-compatible server gives for the same refusal, kept as
+    // the fallback when no wording above names the counts (BL-056): compacting
+    // is still better than failing the turn outright.
+    message.includes('context_length_exceeded')
   );
 }
 
@@ -260,13 +268,30 @@ export function isLlamaContextExhaustion(err: unknown): boolean {
  * Unlike llama-server's prompt-only refusal, the prompt still fits: only
  * `max_tokens` was too big, because the chars-per-token estimate read that
  * prompt ~7% short. The server tokenized it, so its number replaces the guess.
+ *
+ * Two servers, two positions for the same two numbers: an OpenAI-compatible
+ * one states the whole context first and leaves it out of the refusal clause
+ * (measured twice on 2026-11-26, BL-056), and OpenAI's own wording counts the
+ * prompt inside its own clause. All three are read, because the alternative is
+ * `isLlamaContextExhaustion` compacting history that fits when only the
+ * requested output was too big.
  */
 export function serverReportedOutputRoom(err: unknown): number | undefined {
   const message = err instanceof Error ? err.message : String(err);
-  const match = /prompt \((\d+) tokens\) \+ max tokens \(\d+\) exceeds the context \((\d+)\)/.exec(
+  const inTheRefusal =
+    /prompt \((\d+) tokens\) \+ max tokens \(\d+\) exceeds the context \((\d+)\)/.exec(message);
+  if (inTheRefusal) return Number(inTheRefusal[2]) - Number(inTheRefusal[1]);
+  const statedFirst = /maximum context length is (\d+) tokens[\s\S]*?prompt \((\d+) tokens\)/.exec(
     message,
   );
-  return match ? Number(match[2]) - Number(match[1]) : undefined;
+  if (statedFirst) return Math.max(0, Number(statedFirst[1]) - Number(statedFirst[2]));
+  // "...you requested 9000 tokens (5000 in the messages, 4001 in the
+  // completion)": the prompt count arrives in a different shape again.
+  const inTheMessages =
+    /maximum context length is (\d+) tokens[\s\S]*?\((\d+) in the messages/.exec(message);
+  return inTheMessages
+    ? Math.max(0, Number(inTheMessages[1]) - Number(inTheMessages[2]))
+    : undefined;
 }
 
 export function isContextExhaustionReason(reason: string | undefined): boolean {

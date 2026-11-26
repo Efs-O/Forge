@@ -39,6 +39,29 @@ const SERVER_MALFORMED_500 =
 const SERVER_CONTEXT_400 =
   'HTTP 400: {"error":{"code":400,"message":"request (71277 tokens) exceeds the available context size (62208 tokens), try increasing it","type":"exceed_context_size_error"}}';
 
+/**
+ * The same refusal from an OpenAI-compatible server, verbatim from the session
+ * log on 2026-11-26: it states the whole context up front and leaves the number
+ * out of the refusal clause (BL-056).
+ */
+const SERVER_CONTEXT_400_OPENAI =
+  'HTTP 400: {"error": {"type": "invalid_request_error", "message": "maximum context length is ' +
+  '98304 tokens; prompt (21720 tokens) + max tokens (101345) exceeds the context; requests are ' +
+  'never truncated", "code": "context_length_exceeded"}}';
+
+/** OpenAI's own wording: the prompt count arrives in a third shape again. */
+const OPENAI_CHAT_CONTEXT_400 =
+  'HTTP 400: {"error": {"message": "This model\'s maximum context length is 8192 tokens. ' +
+  'However, you requested 9000 tokens (5000 in the messages, 4001 in the completion). ' +
+  'Please reduce the length of the messages or completion.", "type": "invalid_request_error", ' +
+  '"code": "context_length_exceeded"}}';
+
+/** The same refusal once the prompt alone fills the context. */
+const SERVER_CONTEXT_400_OVERFULL =
+  'HTTP 400: {"error": {"type": "invalid_request_error", "message": "maximum context length is ' +
+  '98304 tokens; prompt (100000 tokens) + max tokens (101345) exceeds the context; requests are ' +
+  'never truncated", "code": "context_length_exceeded"}}';
+
 function runOptions(messages: ChatMessage[], extra: Record<string, unknown> = {}) {
   return {
     resolveBaseUrl: async () => 'http://localhost:0',
@@ -97,6 +120,117 @@ describe('truncated tool calls', () => {
     await expect(
       runToolCallingLoop(runOptions([{ role: 'user', content: 'continue' }]) as never),
     ).rejects.toThrow(CONTEXT_INPUT_EXHAUSTED_MESSAGE);
+  });
+
+  // BL-056: measured twice on 2026-11-26 on maya-glm53-flash-s24 — every turn
+  // failed at rounds=0 with the raw provider text, because the matcher only
+  // knew the wording that names the context inside the refusal clause.
+  it('retries an OpenAI-shaped context 400 with the room that server just named', async () => {
+    const seen: number[] = [];
+    let round = 0;
+    streamModelChatCompletion.mockImplementation(
+      async (_url: string, req: { max_tokens?: number }, _model: unknown, h: Handlers) => {
+        round += 1;
+        seen.push(req.max_tokens ?? -1);
+        if (round === 1) {
+          h.onError(new Error(SERVER_CONTEXT_400_OPENAI));
+          return;
+        }
+        h.onToken('now it fits');
+        h.onDone('stop');
+      },
+    );
+
+    await runToolCallingLoop(
+      runOptions([{ role: 'user', content: 'tell me a story' }], {
+        // As the failing config had it: a max_tokens above the server's whole
+        // context, so the cap has something to lower.
+        maxOutputTokens: 101345,
+        getOutputRoom: () => 101345,
+      }) as never,
+    );
+
+    expect(seen).toHaveLength(2);
+    // 98304 - 21720 = 76584, less the output margin the cap keeps.
+    expect(seen[1]).toBe(76584 - 512);
+    expect(seen[0]).toBeGreaterThan(seen[1]);
+  });
+
+  it('fails an OpenAI-shaped context 400 that outlived its retry as a context problem', async () => {
+    streamModelChatCompletion.mockImplementation(
+      async (_url: string, _req: unknown, _model: unknown, h: Handlers) => {
+        h.onError(new Error(SERVER_CONTEXT_400_OPENAI));
+      },
+    );
+
+    await expect(
+      runToolCallingLoop(runOptions([{ role: 'user', content: 'continue' }]) as never),
+    ).rejects.toThrow(CONTEXT_INPUT_EXHAUSTED_MESSAGE);
+  });
+
+  // Claude's reject of the first BL-056 fix: OpenAI's own wording counts the
+  // prompt in its own clause. Unread, that refusal reaches the exhaustion
+  // branch and throws away history that fits; read, it just caps the retry.
+  it('caps the retry instead of compacting on OpenAI\'s own context 400', async () => {
+    const seen: number[] = [];
+    let round = 0;
+    streamModelChatCompletion.mockImplementation(
+      async (_url: string, req: { max_tokens?: number }, _model: unknown, h: Handlers) => {
+        round += 1;
+        seen.push(req.max_tokens ?? -1);
+        if (round === 1) {
+          h.onError(new Error(OPENAI_CHAT_CONTEXT_400));
+          return;
+        }
+        h.onToken('now it fits');
+        h.onDone('stop');
+      },
+    );
+    const compactMidTurn = vi.fn().mockResolvedValue(false);
+
+    await runToolCallingLoop(
+      runOptions([{ role: 'user', content: 'go' }], {
+        maxOutputTokens: 9000,
+        getOutputRoom: () => 9000,
+        compactMidTurn,
+      }) as never,
+    );
+
+    expect(seen).toHaveLength(2);
+    // 8192 - 5000 = 3192, less the output margin the cap keeps.
+    expect(seen[1]).toBe(3192 - 512);
+    // The recovery was the resend, not a compaction: nothing was ever exhausted.
+    expect(compactMidTurn.mock.calls.every((call) => call[0].exhausted === false)).toBe(true);
+  });
+
+  // A room of 0 must never go out as max_tokens 0: applyOutputCap leaves such a
+  // request alone, so the pre-flight has to be the thing that stops the round.
+  it('refuses the round when the server says the prompt alone fills the context', async () => {
+    const seen: number[] = [];
+    let round = 0;
+    streamModelChatCompletion.mockImplementation(
+      async (_url: string, req: { max_tokens?: number }, _model: unknown, h: Handlers) => {
+        round += 1;
+        seen.push(req.max_tokens ?? -1);
+        if (round === 1) {
+          h.onError(new Error(SERVER_CONTEXT_400_OVERFULL));
+          return;
+        }
+        h.onToken('unreachable');
+        h.onDone('stop');
+      },
+    );
+
+    await expect(
+      runToolCallingLoop(
+        runOptions([{ role: 'user', content: 'go' }], {
+          maxOutputTokens: 101345,
+          getOutputRoom: () => 101345,
+        }) as never,
+      ),
+    ).rejects.toThrow(CONTEXT_INPUT_EXHAUSTED_MESSAGE);
+    // Only the request that failed was sent; the room-0 retry never was.
+    expect(seen).toEqual([100833]);
   });
 
   it('asks for the write in chunks instead of downgrading the model', async () => {
@@ -278,6 +412,33 @@ describe('truncated tool calls', () => {
     // No call id survives a whole-request failure, so the nudge goes in as a user turn.
     const nudge = messages.filter((m) => m.role === 'user').at(-1);
     expect(nudge?.content).toContain('mode "append"');
+  });
+
+  // BL-055: that nudge is Forge's own words. Without the flag the sidebar shows
+  // it as a bubble the owner never typed, compaction keeps it as one of their
+  // messages, and the session log gains a user row that opens a turn and marks
+  // the running one missing.
+  it('marks the whole-request truncation nudge internal so the owner never sees it', async () => {
+    let round = 0;
+    streamModelChatCompletion.mockImplementation(
+      async (_url: string, _req: unknown, _model: unknown, h: Handlers) => {
+        round += 1;
+        if (round === 1) {
+          h.onError(new Error(SERVER_TRUNCATION_500));
+          return;
+        }
+        h.onToken('ok');
+        h.onDone('stop');
+      },
+    );
+    const messages: ChatMessage[] = [{ role: 'user', content: 'go' }];
+    await runToolCallingLoop(runOptions(messages) as never);
+
+    const nudge = messages.filter((m) => m.role === 'user').at(-1);
+    expect(nudge?.content).toContain('was NOT executed');
+    expect(nudge?.internal).toBe(true);
+    // The owner's own message stays the only visible one.
+    expect(messages.filter((m) => m.role === 'user' && m.internal !== true)).toHaveLength(1);
   });
 
   it('does not charge the failure tracker for a truncated tool call', async () => {
