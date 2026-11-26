@@ -4,10 +4,6 @@ import { describe, expect, it } from 'vitest';
 import type { ForgeConfig } from '../../src/config/types';
 import { printHtmlToPdf } from '../../src/documents/pdfExport';
 import { renderPdfPages } from '../../src/documents/pdfRenderer';
-import { useRealProfileForBrowser } from '../support/realHome';
-
-// Chrome hangs on Windows under the throwaway home the temp guard sets; see the helper.
-useRealProfileForBrowser();
 
 const configFor = (channel: 'chrome' | 'msedge'): ForgeConfig =>
   ({ browser: { channel, headless: true } }) as ForgeConfig;

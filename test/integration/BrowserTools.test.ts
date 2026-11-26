@@ -2,10 +2,6 @@ import * as path from 'path';
 import { afterAll, describe, expect, it } from 'vitest';
 import type { MultimodalToolResult } from '../../src/tools/ToolRegistry';
 import { EMPTY_PAGE, PAGE, RICH_PAGE, createBrowserHarness } from '../support/browserHarness';
-import { useRealProfileForBrowser } from '../support/realHome';
-
-// Chrome hangs on Windows under the throwaway home the temp guard sets; see the helper.
-useRealProfileForBrowser();
 
 /**
  * Browser tool integration gates. Runs real headless Chrome on the configured

@@ -5,10 +5,6 @@ import {
   createBrowserHarness,
   isBrowserUnavailable,
 } from '../support/browserHarness';
-import { useRealProfileForBrowser } from '../support/realHome';
-
-// Chrome hangs on Windows under the throwaway home the temp guard sets; see the helper.
-useRealProfileForBrowser();
 
 /**
  * `browser_type` against a real `<select>`, in headless Chrome.

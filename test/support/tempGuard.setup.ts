@@ -25,6 +25,15 @@ for (const name of TEMP_VARS) process.env[name] = fileDir;
 // both point at a throwaway folder. It is a SIBLING of `fileDir`, not inside it:
 // a file a test leaves in the fake home must not be reported as a temp leak.
 const homeDir = fs.mkdtempSync(path.join(inject('tempGuardRunDir'), 'home-'));
+// Windows resolves LocalAppData and AppData under USERPROFILE and answers '' when
+// the folder is missing. Under a bare fake home PowerShell then wrote its module
+// cache relative to its cwd (a `Microsoft/` folder in the repo root) and system
+// Chrome never finished launching; with these two folders both behave (measured
+// 2026-11-26: Chrome 324 ms, against a hang).
+if (process.platform === 'win32') {
+  fs.mkdirSync(path.join(homeDir, 'AppData', 'Local'), { recursive: true });
+  fs.mkdirSync(path.join(homeDir, 'AppData', 'Roaming'), { recursive: true });
+}
 const HOME_VARS = process.platform === 'win32' ? ['USERPROFILE', 'HOME'] : ['HOME'];
 const savedHomeVars = HOME_VARS.map((name) => [name, process.env[name]] as const);
 for (const name of HOME_VARS) process.env[name] = homeDir;

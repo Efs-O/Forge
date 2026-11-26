@@ -3,10 +3,6 @@ import * as path from 'node:path';
 import * as esbuild from 'esbuild';
 import { describe, expect, it } from 'vitest';
 import { launchSeededBrowser, type SeededBrowser } from '../../src/tools/browser/seededBrowser';
-import { useRealProfileForBrowser } from '../support/realHome';
-
-// Edge hangs on Windows under the throwaway home the temp guard sets; see the helper.
-useRealProfileForBrowser();
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
 

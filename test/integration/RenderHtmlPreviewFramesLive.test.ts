@@ -9,10 +9,6 @@ import type { ForgeConfig } from '../../src/config/types';
 import { makeRenderHtmlToImageTool } from '../../src/tools/renderHtmlToImageTool';
 import type { UserNotificationService } from '../../src/sidebar/UserNotificationService';
 import type { MultimodalToolResult, RegisteredTool } from '../../src/tools/ToolRegistry';
-import { useRealProfileForBrowser } from '../support/realHome';
-
-// Chrome hangs on Windows under the throwaway home the temp guard sets; see the helper.
-useRealProfileForBrowser();
 
 const CHANNEL = 'chrome';
 
