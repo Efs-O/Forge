@@ -116,6 +116,73 @@ describe('background output helpers', () => {
     }
   });
 
+  // Measured 2026-11-27 over 14 days of logs: every one of the 10 `cwd does not
+  // exist` refusals was the same slip — a separator written where the real
+  // folder name has a space (`N:/vs code/apps/Forge`). The tool now runs in the
+  // folder that does exist and says so, rather than buying the same slip again.
+  describe('a cwd whose space was written as a separator', () => {
+    /** Runs `body` with the workspace root pointed at a temp folder holding
+     *  `vs code apps/Forge`, plus `file name.txt` as the file case. */
+    function withWorkspace(body: (root: string) => void): void {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-shell-cwd-space-'));
+      fs.mkdirSync(path.join(root, 'vs code apps', 'Forge'), { recursive: true });
+      fs.writeFileSync(path.join(root, 'file name.txt'), '');
+      const folders = vscode.workspace.workspaceFolders;
+      const previous = folders ? [...folders] : undefined;
+      folders?.splice(0, Infinity, { uri: vscode.Uri.file(root) });
+      try {
+        body(root);
+      } finally {
+        folders?.splice(0, Infinity, ...(previous ?? []));
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    }
+
+    it('runs in the real folder and names it in the note', () => {
+      withWorkspace((root) => {
+        const real = path.join(root, 'vs code apps', 'Forge');
+        expect(resolveExecCwd('vs code/apps/Forge')).toEqual({
+          cwd: real,
+          note:
+            `Note: cwd "vs code/apps/Forge" does not exist; ran in ${real} instead, ` +
+            'the same path with a space where a separator was.',
+        });
+      });
+    });
+
+    it('adds no note when the folder exists as written', () => {
+      withWorkspace((root) => {
+        const real = path.join(root, 'vs code apps', 'Forge');
+        expect(resolveExecCwd(path.join('vs code apps', 'Forge'))).toEqual({ cwd: real });
+      });
+    });
+
+    it('refuses a folder that is missing for another reason', () => {
+      withWorkspace(() => {
+        let message = '';
+        try {
+          resolveExecCwd('nothing/here');
+        } catch (error) {
+          message = (error as Error).message;
+        }
+        expect(message).toContain('cwd "nothing/here" does not exist (resolved to ');
+        expect(message).toContain('Create it first');
+      });
+    });
+
+    it('refuses when the respaced form is a file, not a folder', () => {
+      withWorkspace(() => {
+        let message = '';
+        try {
+          resolveExecCwd('file/name.txt');
+        } catch (error) {
+          message = (error as Error).message;
+        }
+        expect(message).toContain('cwd "file/name.txt" does not exist (resolved to ');
+      });
+    });
+  });
+
   it('classifies a timeout', async () => {
     await expect(
       spawnAndWait(process.execPath, ['-e', 'setTimeout(() => {}, 1000)'], process.cwd(), 10),

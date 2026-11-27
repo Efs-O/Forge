@@ -83,6 +83,7 @@
 2. `wc -l test/unit/BusContent.test.ts` → no such file: busContent's tests live in `test/unit/AgentBus.test.ts`. find the file first with `find_files "test/**/*<topic>*.test.ts"`
 3. `grep_search` include `src/tools/memoryStore.ts` → `nothing at it exists under the workspace root`: the store is `src/memory/memoryStore.ts`, `src/tools/memoryTools.ts` is only its tool wrapper. glob `**/memoryStore.ts` before naming a src path
 4. `os.path.exists("V:/vs code apps/Blender/assets/textures")` → False: the Blender *project* is `N:/vs code apps/Blender`, only the program is `V:/Tools/Blender`. a `texture_set` miss prints the folder you passed, so it reads like a naming bug
+5. `path.normalize('C:/x/')` keeps the trailing separator → `normalize(a) === normalize(a + '/')` is false. strip `[/]+$` from both sides before comparing a path to itself (`src/util/respacedPath.ts`)
 
 ## FORENSICS
 1. a Canon print job parked in `Printing`, `PrinterStatus 4` → it waits in Canon IJ Preview (Start Printing); `Get-PrintJob` is not installed here: use `Get-CimInstance Win32_PrintJob` / `Win32_Printer`

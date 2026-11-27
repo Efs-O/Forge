@@ -1089,6 +1089,7 @@ the configured override stays the existing `video.ffmpeg_path` key.
 | Streamed child-output head+tail cap         | `src/util/outputCap.ts`       |
 | Workspace path resolution + realpath        | `src/util/WorkspacePaths.ts`  |
 | Missing workspace path error (vscode-free)  | `src/util/workspacePathMissingError.ts` |
+| The folder a path was meant to name when a separator stands for a space in its name (`respacedExistingDir`) | `src/util/respacedPath.ts` |
 | Structured logging                          | `src/util/logger.ts`          |
 | Error message + cause-chain description     | `src/util/describeError.ts`   |
 | The "keys are per computer" sentence on every missing-secret message | `src/util/secretHint.ts` |

@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../src/tools/execHelpers', () => ({
   execCwdPreview: () => 'N:\\workspace',
-  resolveExecCwd: () => 'N:\\workspace',
+  resolveExecCwd: () => ({ cwd: 'N:\\workspace' }),
   runShellInForeground: async () => ({
     code: 0,
     seconds: 0.1,

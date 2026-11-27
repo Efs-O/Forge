@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { terminateCliProcessTree } from '../agents/cliProcess';
+import { respacedExistingDir } from '../util/respacedPath';
 import { protectProcessTree, warmWindowsJobKeeper } from '../util/windowsJobKeeper';
 import { ShellOutputCollector } from './shellOutput';
 
@@ -97,13 +98,36 @@ export function execCwdPreview(cwd: string | undefined): string | undefined {
   );
 }
 
-export function resolveExecCwd(cwd: string | undefined): string {
+export interface ExecCwd {
+  /** The folder the command actually ran in. */
+  cwd: string;
+  /**
+   * Set when the requested folder did not exist and the same path with a space
+   * where a separator was does: the model must be told which folder ran, or it
+   * keeps writing the spelling that never existed.
+   */
+  note?: string;
+}
+
+export function resolveExecCwd(cwd: string | undefined): ExecCwd {
   // normalizeSpawnCwd here as well as at the spawn, so the cwd reported back to
   // the model is the same spelling the process actually ran under.
   const resolved = execCwdPreview(cwd);
   if (resolved === undefined) throw new Error('No workspace folder open');
   const problem = cwdProblem(resolved);
   if (problem === 'missing') {
+    // The overwhelmingly common case is a separator written where the real
+    // folder name has a space, so that folder is used and said out loud rather
+    // than refused: a refusal only bought the same slip again.
+    const respaced = respacedExistingDir(resolved);
+    if (respaced !== undefined) {
+      return {
+        cwd: respaced,
+        note:
+          `Note: cwd ${JSON.stringify(cwd)} does not exist; ran in ${respaced} instead, ` +
+          'the same path with a space where a separator was.',
+      };
+    }
     throw new Error(
       `shell: cwd ${JSON.stringify(cwd ?? resolved)} does not exist (resolved to ${resolved}). ` +
         'Create it first - write_file to a file inside it, or mkdir in the command - ' +
@@ -115,7 +139,7 @@ export function resolveExecCwd(cwd: string | undefined): string {
       `shell: cwd ${JSON.stringify(cwd ?? resolved)} is not a folder (resolved to ${resolved}).`,
     );
   }
-  return resolved;
+  return { cwd: resolved };
 }
 
 // ── Core spawn helper ──────────────────────────────────────────────────────────

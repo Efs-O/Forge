@@ -393,7 +393,8 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
       const wakeOnExit =
         notifyOnExit !== false &&
         (notifyOnExit === true || !isAgentTaskTurn(context?.conversationId));
-      const cwd = resolveExecCwd(typeof args['cwd'] === 'string' ? args['cwd'] : undefined);
+      const resolvedCwd = resolveExecCwd(typeof args['cwd'] === 'string' ? args['cwd'] : undefined);
+      const cwd = resolvedCwd.cwd;
       const timeout = typeof args['timeout_ms'] === 'number' ? args['timeout_ms'] : 120_000;
       const resolved = invocation(shell, command, options);
       const environment = {
@@ -419,8 +420,13 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
             : {}),
         });
         return appendElevationResultNote(
-          `execution_id: ${start.id}\nstatus: ${start.status}\npid: ${start.pid ?? 'unknown'}` +
-            (timeoutPlan.note ? `\n${timeoutPlan.note}` : ''),
+          [
+            ...(resolvedCwd.note ? [resolvedCwd.note] : []),
+            `execution_id: ${start.id}`,
+            `status: ${start.status}`,
+            `pid: ${start.pid ?? 'unknown'}`,
+            ...(timeoutPlan.note ? [timeoutPlan.note] : []),
+          ].join('\n'),
           classified.elevatedProcess,
         );
       }
@@ -450,7 +456,8 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
             `shell "${command}"`,
           );
         return appendElevationResultNote(
-          formatResult(result.code, result.seconds, result.timedOut, capped.text) +
+          (resolvedCwd.note ? `${resolvedCwd.note}\n` : '') +
+            formatResult(result.code, result.seconds, result.timedOut, capped.text) +
             pwshHint(shell, result.code, command) +
             andChainHint(shell, result.code, result.timedOut, command) +
             gitIdentityHint(capped.text),
