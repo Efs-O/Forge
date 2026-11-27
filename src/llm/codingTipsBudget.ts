@@ -16,8 +16,9 @@
  * `CodingTipsInjection.test.ts` now pins the relationship.
  */
 
-/** The table's shape, pinned by `CodingTipsDoc.test.ts` for the project table
- *  and used here to size both allowances. Raised from 200 characters per entry
+/** The table's shape, pinned by `CodingTipsDoc.test.ts` for both tables (the
+ *  line cap counts lines outside `## FORGE_TOOLS`, whose rows are capped per
+ *  tool) and used here to size both allowances. Raised from 200 characters per entry
  *  on 2026-11-16: entries were being cut to fit, and the part that went first
  *  was "what to write instead". */
 export const TIPS_TABLE_MAX_LINES = 180;

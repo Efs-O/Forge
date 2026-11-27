@@ -82,6 +82,18 @@ function parseTable(text: string) {
   };
 }
 
+/** Lines the line cap counts: the whole table minus its `## FORGE_TOOLS`
+ *  section (heading through the line before the next heading, or to the end).
+ *  Those rows leave the table for their tools' descriptions and are capped per
+ *  tool instead (`TOOL_TIPS_MAX_PER_TOOL`), so they cost the big list nothing. */
+function linesInPromptTable(table: ReturnType<typeof parseTable>): number {
+  const at = table.headingLines.findIndex((h) => h.name === 'FORGE_TOOLS');
+  if (at === -1) return table.lines.length;
+  const start = table.headingLines[at]!.at;
+  const end = table.headingLines[at + 1] ? table.headingLines[at + 1]!.at : table.lines.length;
+  return table.lines.length - (end - start);
+}
+
 const docRel = 'docs/CODING_TIPS.md';
 const doc = read(docRel);
 const docTable = parseTable(doc);
@@ -99,7 +111,7 @@ describe.each(TABLES)('%s stays an exact-syntax table', (rel, allowance) => {
 
   it('stays small enough to read whole, once a turn', () => {
     expect(
-      lines.length,
+      linesInPromptTable(parseTable(read(rel))),
       `past ${MAX_LINES} lines this is a wall again, not a lookup table`,
     ).toBeLessThanOrEqual(MAX_LINES);
   });
@@ -207,5 +219,31 @@ describe(docRel, () => {
     expect(named, 'the pointer and the file disagree about which sections exist').toEqual(
       [...docTable.headings].sort(),
     );
+  });
+});
+
+describe('the line cap counts only the table the prompt carries', () => {
+  const rows = (n: number) => Array.from({ length: n }, (_, i) => `${i + 1}. tip ${i} → x`);
+  const toolRows = (n: number) =>
+    Array.from({ length: n }, (_, i) => `${i + 1}. \`shell\` · tip ${i} → x`);
+
+  it('does not count FORGE_TOOLS rows', () => {
+    const text = ['# t', '', '## RUN', ...rows(170), '', '## FORGE_TOOLS', ...toolRows(63)].join(
+      '\n',
+    );
+    expect(linesInPromptTable(parseTable(text))).toBe(174);
+  });
+
+  it('still counts every line of a table without FORGE_TOOLS, so 181 is over the cap', () => {
+    const text = ['# t', '', '## RUN', ...rows(178)].join('\n');
+    expect(linesInPromptTable(parseTable(text))).toBe(181);
+    expect(181).toBeGreaterThan(MAX_LINES);
+  });
+
+  it('counts a section that comes after FORGE_TOOLS', () => {
+    const text = ['# t', '', '## FORGE_TOOLS', ...toolRows(3), '', '## RUN', ...rows(2)].join(
+      '\n',
+    );
+    expect(linesInPromptTable(parseTable(text))).toBe(5);
   });
 });
