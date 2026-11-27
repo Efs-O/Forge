@@ -35,13 +35,13 @@
 13. `npm test 2>&1 > run.log` → vitest writes failures to stderr, so the file holds only the summary. write `> run.log 2>&1`
 14. an approval-gated command inside `A && B && C` → the card can expire with the owner away and B/C never run. restore a tracked file with `git show HEAD:path > path`: no card
 15. a pid taken in Git Bash (`$$`, `$!`) → an MSYS pid, so Win32 `OpenProcess` answers 87. take it from the Windows side (PowerShell `$PID`) or a Win32 tool
-16. `"$Config:"` in a PowerShell double-quoted string → `ParserError: ':' was not followed by a valid variable name character`. write `${Config}:`
+16. `"$Config:"` in a PowerShell double-quoted string → `ParserError: ':' was not followed by a valid variable name character`. write `${Config}:`; and `[BitConverter]::Int64(b,4)` → no such method: it is `ToInt64`
 17. `node -e "import('C:/x/y.mjs')"` on Windows → `ERR_UNSUPPORTED_ESM_URL_SCHEME ... Received protocol 'c:'`. pass a file URL: `import('file:///C:/x/y.mjs')`
 18. `sed -n '140,185'` → `missing command`: the range alone prints nothing. write `sed -n '140,185p'`
 19. `npx prettier --check .dir/x.ts` → "All matched files use Prettier code style!" while nothing was checked: prettier skips dot-folders. copy the file out of the dot-folder first
 20. `grep -P "(^|[^-])word" f` in Git Bash → "grep: -P supports only unibyte and UTF-8 locales"; adding `-E` → "conflicting matchers specified". use `rg -n` instead
 21. `python -c "…split('\\\\')…"` under bash → bash eats the backslashes first → `SyntaxError: unterminated string literal`. keep backslashes out of a double-quoted `-c` body
-22. a pwsh log name with a space (`> logs/run 1.log`) → a later `Select-String -Path` says the path does not exist. no spaces in log file names
+22. a pwsh log name with a space (`> logs/run 1.log`) → a later `Select-String -Path` says the path does not exist. no spaces in log file names; a pwsh `-notmatch '\$\RECYCLE'` → `Invalid pattern … Unrecognized escape sequence \R` (.NET has no `\R`): write `\$RECYCLE`
 23. `tail -5 a.log b.log` in Git Bash → `tail: option used in invalid context -- 5`: the old `-N` form takes one file only. write `tail -n 5`
 24. `export PATH="$APPDATA/npm:$PATH"` in Git Bash → node resolves `C:\Program Files\Git\Users\…` → MODULE_NOT_FOUND: MSYS ate the `C:`. write the POSIX form `/c/Users/<name>/AppData/Roaming/npm`
 25. `powershell -Command "… $p …"` from bash → bash substitutes EVERY `$var` first (`$_` → `/usr/bin/bash`), so PowerShell sees `/usr/bin/bash.Name` → CommandNotFoundException. set `shell: "pwsh"` on the call
@@ -98,7 +98,7 @@
 
 ## FORENSICS
 1. pairing calls with results → pair the `tool_calls` row with the `tool` rows that follow it, positionally; the rendered chat hides tool failures entirely
-2. reading the newest row of a session log → the newest rows are metadata (`type: request`, `written_count`) with no `role`. judge the newest row that has a `role`
+2. reading the newest row of a session log → the newest rows are metadata (`type: request`, `written_count`) with no `role`. judge the newest row that has a `role`; a `request_prefix` row's `messages` is a COUNT and its body only hashes: the body is in `~/.forge/requests/<convId>/`
 3. scripting over `tool_calls` rows → the keys are `name`, `input`, `raw_arguments`. guessing `args` returns null — print one row's keys first
 4. attributing a log row or a file write to one chat → other chats share the workspace and the files, and this chat's own rows are still being written. attribute by session id from the row; counting hits, exclude the live log: `max(files, key=os.path.getmtime)`
 5. reading a `tool_calls` row printed via `json.dumps` → `\n` there is a real newline in the argument. read the raw value before calling a call malformed
@@ -126,7 +126,7 @@
 9. `grep_search` · query `constructor(` → `rg: regex parse error: ... unclosed group`; a balanced `(a, b)` is a valid group and silently finds nothing. the query is ripgrep regex: escape every paren or set `literal: true`
 10. `find_files` · `path:` or an absolute, `~` or `..` pattern → refused, or opens nothing outside the workspace. put the folder in the pattern: `{"pattern":"src/**/*.ts"}`; outside it, `list_directory` the absolute path
 11. `shell` · `cd "<dir>" && …`, or `cwd` inside `~/.forge/sessions` → refused: writes are judged from the start folder. pass `cwd:` and the command alone; scan sessions from the workspace
-12. `shell` · bash↔pwsh mix-ups: `wc`/`sed`/`tail` in a `shell: pwsh` call → "The term 'wc' is not recognized" (`tail` → `Get-Content -Tail`); a pwsh cmdlet in a bash call → `command not found`; `2>/dev/null` → `Out-File: Could not find a part of the path`. rerun with the other `shell`
+12. `shell` · bash↔pwsh mix-ups: `wc`/`sed`/`tail`/`head` in a `shell: pwsh` call → "The term 'wc' is not recognized" (`tail` → `Get-Content -Tail`); a pwsh cmdlet in a bash call → `command not found`; `2>/dev/null` → `Out-File: Could not find a part of the path`. rerun with the other `shell`
 13. `shell` · a write on `~/.forge/` refused: `rm -f ~/.forge/x` → "refuses to change Forge's own files"; a path there as a script argument → `cannot tell whether ... changes Forge's own files`. read with `grep_search`; to feed a script, `cp -r` the folder into the workspace and pass the copy
 14. `shell` · `query:`/`include:` or another tool's field → refused: unknown argument. fields are `command`/`cwd`/`timeout_ms`/`background`/…; an empty call → `missing required argument "command"`, resend with `command`
 15. `stop_execution` · on a background `npm run ci` → the wrapper dies, the child tree may live and hold its lock: `MSYS_NO_PATHCONV=1 taskkill /PID <top> /T /F`; with NO_PATHCONV `//PID` → `Invalid argument/option - '//PID'`
@@ -145,7 +145,7 @@
 28. `update_plan` · `items` → refused: `"items" must be a JSON array, not a string`, for a bare-string entry or one missing `"text"`. every entry is exactly `{"text":…,"status":…}`; resend the whole array. If it fires on a list that looks well formed, resend it unchanged once.
 29. `remember` · `title:`, `path:`, `name:` or `content:` → refused: unknown argument. name the memory with `key`, put its text in `value`
 30. `recall` · the fields `remember` takes → refused. send the memory's name alone: `{"key": …}`
-31. `ask_user` · a top-level `header` → refused: unknown argument. `header` belongs to each question
+31. `ask_user` · a top-level `header`, or the whole call wrapped in a nested `ask_user` key → refused: unknown argument; it takes prompt, questions, options, placeholder, and `header` belongs inside each question
 32. `image_search` · `query:"red fox"` → refused: unknown argument "query"; it takes `image_url`/`attachment_index`. it is a reverse search of an image you have; for pictures by words use `web_search`
 33. `render_html_to_image` · `html` plus `path:"out/x.png"` → refused: exactly one of html or path. `path` is an HTML file to render, not the output; send html alone, then `move_file` the PNG it names
 34. `notify_user` · with no remote chat bound → `Shown in the VS Code window only`: a local toast, never a phone ping. do not report that the user was notified remotely
