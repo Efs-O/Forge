@@ -1,5 +1,14 @@
 # Forge — Recent Changes
 
+## 0.17.227
+
+**Switching between two models that share one server port now works.** Forge used to
+trust any server that answered on the port, so moving a chat from one model entry to
+another on the same endpoint kept the first model answering every request - sometimes
+for hours - and the second model never started at all. Forge now stops the model that
+holds the port before starting the one you asked for, and when nothing configured can
+free it, it says so instead of quietly using the wrong model.
+
 ## 0.17.226
 
 **The coding-tips lists were reviewed.** 37 notes that no one had audited were read
