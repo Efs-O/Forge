@@ -31,6 +31,7 @@ import {
 import { makeAskUserTool } from '../../src/tools/askUserTool';
 import { MESSAGE_CHAT_MESSAGE_MAX_CHARS } from '../../src/tools/messageChatSchema';
 import { makeShellTool } from '../../src/tools/shellTool';
+import { FOREGROUND_TIMEOUT_MAX_MS } from '../../src/tools/shellToolTimeout';
 
 const root = path.resolve(__dirname, '..', '..');
 const read = (rel: string): string => fs.readFileSync(path.join(root, rel), 'utf8');
@@ -63,7 +64,7 @@ function numbersIn(text: string): number[] {
  */
 function liveBounds(): Record<string, number[]> {
   const shell = makeShellTool().definition.function.parameters as {
-    properties: { timeout_ms: { minimum: number; maximum: number } };
+    properties: { timeout_ms: { minimum: number } };
   };
   const ask = makeAskUserTool(new UserQuestionService()).definition.function
     .parameters as unknown as {
@@ -85,10 +86,9 @@ function liveBounds(): Record<string, number[]> {
     properties: { label: { maxLength: number }; description: { maxLength: number } };
   };
   return {
-    'shell timeout_ms': [
-      shell.properties.timeout_ms.minimum,
-      shell.properties.timeout_ms.maximum,
-    ],
+    // The upper bound left the schema with the refusal (an over-limit value now
+    // runs in the background), so it is read from the constant that decides that.
+    'shell timeout_ms': [shell.properties.timeout_ms.minimum, FOREGROUND_TIMEOUT_MAX_MS],
     ask_user: [
       ask.properties.questions.minItems,
       ask.properties.questions.maxItems,

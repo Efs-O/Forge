@@ -23,7 +23,7 @@ import { ShellOutputCollector } from './shellOutput';
 import { DEFAULT_TOOL_OUTPUT_LIMITS } from './toolOutputLimits';
 import type { RegisteredTool } from './ToolRegistry';
 import { markConversationReadSecret } from './exfilTaint';
-import { shellTimeoutError, TIMEOUT_HINT } from './shellToolTimeout';
+import { shellTimeoutPlan, TIMEOUT_HINT } from './shellToolTimeout';
 import { appendElevationResultNote } from './shellScriptFiles';
 import { andChainHint, gitIdentityHint, pwshHint } from './commandHints';
 
@@ -168,7 +168,6 @@ function definition(windows: boolean, shell: ShellKind): ToolDefinition {
     timeout_ms: {
       type: 'integer',
       minimum: 1000,
-      maximum: 600000,
       description: TIMEOUT_HINT,
     },
     background: {
@@ -279,7 +278,6 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
             timeout_ms: {
               type: 'integer',
               minimum: 1000,
-              maximum: 600000,
               description: TIMEOUT_HINT,
             },
             background: {
@@ -353,8 +351,11 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
         throw new Error('shell: command must be a non-empty string.');
       if (args['cwd'] !== undefined && typeof args['cwd'] !== 'string')
         throw new Error('shell: cwd must be a string.');
-      const timeoutError = shellTimeoutError(args['timeout_ms']);
-      if (timeoutError) throw new Error(timeoutError);
+      // A `timeout_ms` over the foreground limit is not refused: the plan moves
+      // the call to the background, so it — not `args['background']` — decides
+      // how the rest of this handler runs.
+      const timeoutPlan = shellTimeoutPlan(args['timeout_ms'], args['background'] === true);
+      if ('error' in timeoutPlan) throw new Error(timeoutPlan.error);
       if (
         args['shell'] !== undefined &&
         (platform !== 'win32' || !['pwsh', 'bash'].includes(String(args['shell'])))
@@ -377,7 +378,7 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
           `shell: ${classified.rule?.description ?? 'command refused'} (deny list) — ${classified.rule?.alternative ?? 'choose a safe alternative'}`,
         );
       }
-      const background = args['background'] === true;
+      const background = timeoutPlan.background;
       const notifyOnExit = args['notify_on_exit'];
       if (notifyOnExit === true && !background)
         throw new Error('shell: notify_on_exit requires background=true.');
@@ -418,7 +419,8 @@ export function makeShellTool(options: ShellToolOptions = {}): RegisteredTool {
             : {}),
         });
         return appendElevationResultNote(
-          `execution_id: ${start.id}\nstatus: ${start.status}\npid: ${start.pid ?? 'unknown'}`,
+          `execution_id: ${start.id}\nstatus: ${start.status}\npid: ${start.pid ?? 'unknown'}` +
+            (timeoutPlan.note ? `\n${timeoutPlan.note}` : ''),
           classified.elevatedProcess,
         );
       }

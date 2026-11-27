@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as vscode from 'vscode';
 import { classifyShellCommand } from '../../src/tools/shellPolicy';
 import { makeShellTool } from '../../src/tools/shellTool';
+import type { BackgroundExecutionManager } from '../../src/tools/BackgroundExecutionManager';
 import type { ForgeConfig } from '../../src/config/types';
 
 const HOME = 'C:/Users/someone';
@@ -315,10 +317,101 @@ describe('the shell tool carries the gate to the card', () => {
     const error =
       'shell: timeout_ms must be a whole number of milliseconds. ' +
       'Foreground timeout: 1,000–600,000 ms (default 120,000); set background: true for longer commands.';
-    await expect(tool.handler({ command: 'echo hi', timeout_ms: 600001 })).rejects.toThrow(
-      error,
-    );
+    // A value over the limit is no longer refused (see the tests below); a value
+    // that is not a whole number of milliseconds still is.
     await expect(tool.handler({ command: 'echo hi', timeout_ms: 1500.5 })).rejects.toThrow(error);
+    await expect(tool.handler({ command: 'echo hi', timeout_ms: 500 })).rejects.toThrow(error);
+  });
+
+  describe('a timeout_ms over the foreground limit', () => {
+    let restoreWorkspace: () => void;
+
+    beforeEach(() => {
+      // The handler resolves `cwd` against the workspace, and this file's shared
+      // vscode mock starts with no folder open.
+      const folders = vscode.workspace.workspaceFolders;
+      const previous = folders ? [...folders] : undefined;
+      folders?.splice(0, Infinity, { uri: vscode.Uri.file(process.cwd()) });
+      restoreWorkspace = () => folders?.splice(0, Infinity, ...(previous ?? []));
+    });
+
+    afterEach(() => restoreWorkspace());
+
+    /**
+     * The manager seam, so a background run can be inspected without spawning
+     * anything. No forced platform: the foreground case runs a real `echo` on the
+     * host shell, so these still pass on the Linux and macOS runners.
+     */
+    function backgroundRunner(): {
+      runner: ReturnType<typeof makeShellTool>;
+      starts: Array<Record<string, unknown>>;
+    } {
+      const starts: Array<Record<string, unknown>> = [];
+      const manager = {
+        start: (spec: Record<string, unknown>) => {
+          starts.push(spec);
+          return { id: 'exec-fake-1', status: 'running', pid: 4242 };
+        },
+      } as unknown as BackgroundExecutionManager;
+      return { runner: makeShellTool({ home: HOME, manager }), starts };
+    }
+
+    // Measured 2026-11-27 over 14 days: 8 refusals in 12,562 shell calls were
+    // `timeout_ms` over 600,000 — six of them `900000` for a CI run or a large
+    // test file, two already `background: true` and refused anyway. A background
+    // run may last as long as it needs, so an over-limit value now runs there.
+    it('runs an over-limit timeout_ms in the background instead of refusing it', async () => {
+      const { runner, starts } = backgroundRunner();
+
+      const result = await runner.handler({ command: 'npm run ci', timeout_ms: 900000 });
+
+      expect(starts).toHaveLength(1);
+      expect(starts[0]).toMatchObject({ timeoutMs: 900000 });
+      expect(String(result)).toBe(
+        'execution_id: exec-fake-1\nstatus: running\npid: 4242\n' +
+          'Note: timeout_ms 900000 is over the 600,000 ms foreground limit, so this command ' +
+          'runs in the background (execution_id above) and stops after 900000 ms.',
+      );
+    });
+
+    it('keeps an explicit background timeout_ms as the kill timer and adds no note', async () => {
+      const { runner, starts } = backgroundRunner();
+
+      const result = await runner.handler({
+        command: 'npm run ci',
+        timeout_ms: 900000,
+        background: true,
+      });
+
+      expect(starts).toHaveLength(1);
+      expect(starts[0]).toMatchObject({ timeoutMs: 900000 });
+      expect(String(result)).toBe('execution_id: exec-fake-1\nstatus: running\npid: 4242');
+    });
+
+    it('accepts notify_on_exit with an over-limit timeout even when background was not asked', async () => {
+      const { runner, starts } = backgroundRunner();
+
+      const result = await runner.handler(
+        { command: 'npm run ci', timeout_ms: 900000, notify_on_exit: true },
+        { conversationId: 'chat-timeout-1' } as never,
+      );
+
+      expect(starts).toHaveLength(1);
+      expect(starts[0]).toMatchObject({
+        timeoutMs: 900000,
+        notifyConversationId: 'chat-timeout-1',
+      });
+      expect(String(result)).toContain('execution_id: exec-fake-1');
+    });
+
+    it('still runs a timeout_ms at the foreground limit in the foreground', async () => {
+      const { runner, starts } = backgroundRunner();
+
+      const result = await runner.handler({ command: 'echo hi', timeout_ms: 600000 });
+
+      expect(starts).toHaveLength(0);
+      expect(String(result)).toContain('exit 0');
+    });
   });
 
   it('asks as dangerous, naming the pattern, as a gate only the owner may answer', () => {
