@@ -30,6 +30,7 @@
 15. `winget upgrade Microsoft.PowerShell` → the msixbundle (7.7 ships no MSI): per-user WindowsApps pwsh the Codex sandbox cannot execute (`CreateProcessAsUserW failed: 5`), and no `Program Files\PowerShell\7\pwsh.exe` for `shellTool.ts`. `winget show --id` first; there is no `--dry-run`
 16. a recursive `dist`/`build` sweep over `N:\` → deletes the editor's own build output at `N:\VScode\Microsoft VS Code\<commit>\resources\app\extensions\*\dist`. exclude `N:\VScode`; repair with `robocopy <archive>\resources\app <install>\resources\app /E /XC /XN /XO` (copies only missing files)
 17. `Remove-Item -Recurse` on a folder holding a file literally named `nul` → `Incorrect function`, and `cmd /c "del \\?\N:\path\nul"` says `The system cannot find the path specified`. wipe it with `robocopy <empty-dir> <folder> /MIR` then `Remove-Item` the empty folder
+18. `spawn('powershell.exe', ['-EncodedCommand', b64])` → blocks the caller ~830 ms on this PC whatever the payload (an 8-character command costs the same); `-File <script.ps1>` returns in 13 ms. `src/util/windowsJobKeeper.ts` launches the keeper with `-File` for that reason
 
 ## GIT
 1. `.forge/ci-pass/<tree>.json` → certifies that tree only, and only if green and the tree stood still: never run `record-ci-pass.mjs` by hand — the `ci:steps` chain writes it

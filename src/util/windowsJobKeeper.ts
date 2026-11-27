@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { ChildProcess, spawn } from 'child_process';
 import { powershellScratch, type PowershellScratch } from './powershellScratchDir';
 import { KEEPER_SCRIPT } from './windowsJobKeeperScript';
@@ -46,22 +48,52 @@ import { KEEPER_SCRIPT } from './windowsJobKeeperScript';
  */
 const KEEPER_COMMAND_ENV = 'FORGE_JOB_KEEPER_CMD';
 
-function keeperCommand(): { file: string; args: string[] } | undefined {
-  const override = process.env[KEEPER_COMMAND_ENV];
-  if (override) return { file: process.execPath, args: [override] };
-  if (process.platform === 'win32') {
-    return {
-      file: 'powershell.exe',
-      args: [
-        '-NoLogo',
-        '-NoProfile',
-        '-NonInteractive',
-        '-EncodedCommand',
-        Buffer.from(KEEPER_SCRIPT, 'utf16le').toString('base64'),
-      ],
-    };
+/** Whether this platform has a keeper to start at all. */
+function keeperLaunchable(): boolean {
+  return process.env[KEEPER_COMMAND_ENV] !== undefined || process.platform === 'win32';
+}
+
+const POWERSHELL_FLAGS = ['-NoLogo', '-NoProfile', '-NonInteractive'];
+
+/** The keeper script, next to the folder the keeper compiles into. Returns
+ *  nothing when the folder or the write failed, and the caller falls back to
+ *  putting the script on the command line. */
+function writeKeeperScript(dir: string): string | undefined {
+  const file = path.join(dir, 'keeper.ps1');
+  try {
+    // Windows PowerShell 5.1 reads a `.ps1` as ANSI unless it carries a BOM.
+    fs.writeFileSync(file, `\uFEFF${KEEPER_SCRIPT}`, 'utf8');
+    return file;
+  } catch {
+    return undefined;
   }
-  return undefined;
+}
+
+/**
+ * How to start the keeper.
+ *
+ * `-File` and `-EncodedCommand` are the same script at wildly different cost:
+ * measured 2026-11-27 on this machine, `spawn()` of `powershell.exe
+ * -EncodedCommand <base64>` does not return for about 830 ms — and the payload
+ * size is irrelevant, an eight-character command costs the same — while the same
+ * script handed over as `-File <path>` returns in 13 ms. `protectProcessTree`
+ * runs on the extension host's thread, so the encoded form stalls the first
+ * background command of every window for that long. It also broke
+ * `BackgroundRegistry.test.ts` on the machine where 830 ms is longer than the
+ * test's child lives: the registry entry was written and then removed by the
+ * child's own exit inside 8 ms, and `vi.waitFor` never saw it.
+ */
+function keeperInvocation(scratchDir: string | undefined): { file: string; args: string[] } {
+  const script = scratchDir ? writeKeeperScript(scratchDir) : undefined;
+  if (script) return { file: 'powershell.exe', args: [...POWERSHELL_FLAGS, '-File', script] };
+  return {
+    file: 'powershell.exe',
+    args: [
+      ...POWERSHELL_FLAGS,
+      '-EncodedCommand',
+      Buffer.from(KEEPER_SCRIPT, 'utf16le').toString('base64'),
+    ],
+  };
 }
 
 /** PowerShell's `Add-Type` compiles the shim and leaves its sources, its
@@ -169,10 +201,12 @@ function ensureKeeper(): ChildProcess | undefined {
   if (keeper && keeper.stdin && !keeper.stdin.destroyed && !keeper.stdin.writableEnded) {
     return keeper;
   }
-  const command = keeperCommand();
-  if (!command) return undefined;
+  if (!keeperLaunchable()) return undefined;
   let child: ChildProcess;
   const keeperTemp = keeperScratch();
+  const command = process.env[KEEPER_COMMAND_ENV]
+    ? { file: process.execPath, args: [process.env[KEEPER_COMMAND_ENV] as string] }
+    : keeperInvocation(keeperTemp.dir);
   try {
     child = spawn(command.file, command.args, {
       stdio: ['pipe', 'pipe', 'ignore'],
@@ -254,7 +288,7 @@ const KEEPER_WARM_CEILING_MS = 3_000;
  * resolves anyway, and the stop keeps its `taskkill` fallback.
  */
 export async function warmWindowsJobKeeper(): Promise<void> {
-  if (!keeperCommand()) return;
+  if (!keeperLaunchable()) return;
   const target = ensureKeeper();
   if (!target || keeperReady) return;
   await new Promise<void>((resolve) => {
@@ -277,7 +311,7 @@ export async function warmWindowsJobKeeper(): Promise<void> {
 export function protectProcessTree(proc: ChildProcess): void {
   const pid = proc.pid;
   if (pid === undefined || jobs.has(pid)) return;
-  if (!keeperCommand()) return;
+  if (!keeperLaunchable()) return;
   // A child that is already gone — a stubbed spawn in a test, a command that
   // failed to start — needs no job, and asking for one would start a PowerShell
   // to be told the pid is not there. EPERM means it is there and merely not

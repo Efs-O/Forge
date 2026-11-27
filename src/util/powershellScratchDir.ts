@@ -49,6 +49,9 @@ function pruneStaleScratch(root: string): void {
 }
 
 export interface PowershellScratch {
+  /** The folder itself, when one could be made: a caller that has a script to
+   *  hand its child puts it here, so the child's command line stays short. */
+  dir: string | undefined;
   /** What to merge into the child's environment. Empty if no folder could be made. */
   env: Record<string, string>;
   /** Remove the folder once the child that used it has exited. Idempotent, and
@@ -80,6 +83,7 @@ export function powershellScratch(
   }
   let removed = false;
   return {
+    dir,
     // TMP and TEMP are what .NET's Path.GetTempPath reads on Windows; TMPDIR is
     // the POSIX spelling, harmless to set and correct if the same child runs there.
     env: dir ? { TMP: dir, TEMP: dir, TMPDIR: dir } : {},
