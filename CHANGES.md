@@ -1,5 +1,16 @@
 # Forge — Recent Changes
 
+## 0.17.226
+
+**The coding-tips lists were reviewed.** 37 notes that no one had audited were read
+and decided, and one new note was added: in PowerShell `$?` is True/False, never an
+exit code.
+
+**The tips size check counts less than it used to.** The 180-line limit now ignores
+the `## FORGE_TOOLS` section, because those rows leave the list at request time and
+go into each tool's own description, where they are capped per tool instead. The
+shipped list now counts 116 of 180, so there is room to record new mistakes again.
+
 ## 0.17.225
 
 **The coding-tips lists were reviewed.** 37 notes that no one had audited were read
