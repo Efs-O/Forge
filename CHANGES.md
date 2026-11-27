@@ -1,5 +1,13 @@
 # Forge — Recent Changes
 
+## 0.17.225
+
+**The coding-tips lists were reviewed.** 37 notes that no one had audited were read
+and decided: two that looked like general advice now name the files that prove they
+belong to this repository, one more joined the shipped list every user sees, a
+duplicated row was renumbered, and the review mark was re-stamped so the review
+reminder starts counting from zero again.
+
 ## 0.17.224
 
 **The Monitor panel says so when there is nothing to show.** Unload the model the
