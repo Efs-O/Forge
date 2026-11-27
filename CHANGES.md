@@ -1,5 +1,18 @@
 # Forge — Recent Changes
 
+## 0.17.228
+
+**Long shell commands are no longer refused for asking a timeout that is too long.**
+Asking for more than the 10-minute foreground limit used to fail with "must be within
+1000 to 600000", so the command had to be sent again by hand. It now runs in the
+background with the number you asked for as its stop timer, and the result says that
+is what happened.
+
+**A working folder whose name has a space works even when written with a slash.**
+Asking to run in a folder like `N:/vs code/apps/Forge` - a slash where the real name
+has a space - used to fail with "does not exist". Forge now runs in the folder that
+does exist and says which one it used.
+
 ## 0.17.227
 
 **Switching between two models that share one server port now works.** Forge used to

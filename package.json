@@ -2,7 +2,7 @@
   "name": "forge-llm",
   "displayName": "Forge LLM",
   "description": "Run your own models in VS Code: full llama.cpp/GGUF control, 80+ agent tools, review and undo Forge's own file edits, Forge itself sends no telemetry.",
-  "version": "0.17.227",
+  "version": "0.17.228",
   "publisher": "Efsoo",
   "icon": "assets/publisher-logo.png",
   "galleryBanner": {
