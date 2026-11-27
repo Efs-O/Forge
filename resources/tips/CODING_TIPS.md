@@ -21,7 +21,7 @@
 
 ## RUN
 1. `node -e '… /regex/ …'` under bash → quoting dies through bash → node → regex. use plain string comparisons, or a script file
-2. `… | tail -3; echo "exit: $?"` → `$?` is tail's code, not the command's; a background job ending `echo "exit: $?"` says 0 whatever ran. read the line the command wrote
+2. `… | tail -3; echo "exit: $?"` → `$?` is tail's code, not the command's; a background job ending `echo "exit: $?"` says 0 whatever ran. in pwsh `$?` is True/False, never a code — use `$LASTEXITCODE`. read the line the command wrote
 3. an f-string containing `\|` or `\n` inside `{…}` on Python 3.10 → SyntaxError: f-string expression part cannot include a backslash. build the escaped text into a variable first
 4. a Python scan printing × or reading a child (`subprocess.run(text=True)`) → charmap codec error. first line: `sys.stdout.reconfigure(encoding="utf-8")`; give it `encoding='utf-8', errors='replace'`; `cat -A` in Git Bash prints CRLF as plain `$` — check endings with `open(..., newline='')`
 5. `json.loads` on every line of a session log → one bad line kills the scan halfway. guard each line with `try/except` and keep going
