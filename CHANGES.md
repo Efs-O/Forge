@@ -1,5 +1,18 @@
 # Forge — Recent Changes
 
+## 0.17.224
+
+**The Monitor panel says so when there is nothing to show.** Unload the model the
+panel is watching and the page kept the last reading forever - the model's name, its
+tokens per second, the context fill - with nothing to replace them. It now says
+nothing is loaded, and goes back to live numbers as soon as a model is. (BL-054)
+
+**The panel page is smaller.** It renders at about 0.6 of Strata's own sizes, so it
+fits the VS Code editor area instead of overflowing it.
+
+No code change since 0.17.223: this version exists so the Monitor work above, which
+no tagged release has carried, ships as its own file.
+
 ## 0.17.223
 
 **A cut-off tool call stops looking like you wrote it.** When the server failed a
