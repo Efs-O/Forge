@@ -92,6 +92,40 @@ export async function probeExternalModelResidency(
   return { state: 'unloaded' };
 }
 
+/**
+ * Which model ids the server at `endpoint` says it serves, loaded or not, or
+ * `undefined` when it cannot be told: a refused connection, a non-200 response,
+ * a body that does not parse, or an entry with no id. Strata lists every model it
+ * can serve with a `status`, and answers `/v1/status` with the model it is
+ * configured for even when nothing is resident, so the fallback covers a server
+ * that will not say which model it will load next. Used to tell WHICH managed
+ * entry a reachable endpoint belongs to, not merely whether something is up.
+ */
+export async function readServedModelIds(
+  endpoint: string,
+  token: string | undefined,
+  fetchImpl: typeof fetch,
+): Promise<string[] | undefined> {
+  const base = endpoint.replace(/\/+$/, '');
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  const models = await readJson(`${base}/v1/models`, headers, fetchImpl);
+  if (models.state === 'ok') {
+    const parsed = ModelsSchema.safeParse(models.body);
+    if (parsed.success) {
+      const ids = parsed.data.data
+        .map((entry) => entry.id)
+        .filter((id): id is string => id !== undefined);
+      if (ids.length) return ids;
+    }
+  }
+  const status = await readJson(`${base}/v1/status`, headers, fetchImpl);
+  if (status.state !== 'ok') return undefined;
+  const parsedStatus = ResidencyStatusSchema.safeParse(status.body);
+  if (!parsedStatus.success) return undefined;
+  const claimed = parsedStatus.data.model;
+  return typeof claimed === 'string' && claimed.length > 0 ? [claimed] : undefined;
+}
+
 /** Probe distinct managed endpoints in parallel, using the first entry's credentials. */
 export async function probeExternalResidencyEndpoints(
   candidates: readonly ExternalResidencyCandidate[],

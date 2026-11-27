@@ -11,7 +11,13 @@ import { listenLoopback } from '../support/listenLoopback';
 
 interface FakeStrata {
   models: Array<{ id: string; status: { value: 'loaded' | 'unloaded' } }>;
-  status: { service: string; model: string; loaded: boolean };
+  status: { service: string; model?: string | undefined; loaded: boolean };
+  /**
+   * What `/v1/status` names after an unload. Unset means the launcher holds no
+   * claim and loads on demand; naming an id is the `auto_load: true` launcher
+   * that stays on its port and reloads that model on the next request.
+   */
+  claimAfterUnload?: string | undefined;
   events: string[];
   unloads: number;
 }
@@ -28,7 +34,9 @@ function startFakeStrata(state: FakeStrata): Promise<{ port: number; server: htt
       state.events.push(`unload:${model}`);
       state.unloads += 1;
       state.models = [];
-      state.status = { service: 'strata', model, loaded: false };
+      // Nothing resident. With no `claimAfterUnload` the launcher makes no claim
+      // either and loads whatever is asked for next.
+      state.status = { service: 'strata', model: state.claimAfterUnload, loaded: false };
       response.end('{}');
     } else {
       response.end('{}');
@@ -75,6 +83,7 @@ describe('managed external residency across two windows', () => {
     state = {
       models: [{ id: 'model-x', status: { value: 'loaded' } }],
       status: { service: 'strata', model: 'model-x', loaded: true },
+      claimAfterUnload: undefined,
       events: [],
       unloads: 0,
     };
@@ -127,6 +136,46 @@ describe('managed external residency across two windows', () => {
     expect(state.events).toEqual(['unload:model-x', 'start:y']);
     expect(state.unloads).toBe(1);
     expect(windowA.isConfirmedLoaded('y')).toBe(true);
+  });
+
+  // The 2026-11-27 8090 incident, end to end against a real server: a launcher
+  // stays on its port after an unload (`auto_load: true`) and still names the
+  // model it will load next. Answering Y from that port served X for two hours.
+  it('refuses Y when the shared launcher still claims X and no entry can stop it', async () => {
+    const models = config(fake.port);
+    const windowA = new ExternalModelServers(() => models, async () => undefined);
+    const registryA = new SharedRuntimeRegistry(root);
+
+    await windowA.unload('x');
+    state.events.length = 0;
+    state.unloads = 0;
+    state.models = [];
+    state.claimAfterUnload = 'model-x';
+    state.status = { service: 'strata', model: 'model-x', loaded: false };
+
+    await expect(
+      prepareExternalForRequest('y', {
+        external: windowA,
+        slots: new Map(),
+        ollamaSlots: new Map(),
+        sharedSlots: new Map(),
+        registry: registryA,
+        sharedRuntimeEnabled: false,
+        runtimeKey: () => 'unused',
+        freeSlot: () => {},
+        isBusy: () => false,
+        isDelegationPinned: () => false,
+        isOllamaModel: () => false,
+      }),
+    ).rejects.toThrow(
+      /the server there is serving "model-x", and no model entry on that endpoint can stop it/,
+    );
+    // Nothing was started and the port was left alone: the free path still
+    // POSTed its unload of X (this window cannot prove its residency map
+    // current, so every overlapping server is offered), but Y was never claimed
+    // onto a port that would have answered it with X.
+    expect(state.events).toEqual(['unload:empty']);
+    expect(windowA.isConfirmedLoaded('y')).toBe(false);
   });
 
   it('refuses Y while B holds X for a turn and sends no unload', async () => {

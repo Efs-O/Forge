@@ -494,6 +494,7 @@ overlaps with an existing owner, extend the owner instead.
 | one `SdServerBackend` per configured sdcpp backend  | `src/backend/sdServerRegistry.ts`    |
 | External server log → output channel (`server_log`) | `src/backend/serverLogFollower.ts`   |
 | Unloading local servers Forge does not spawn (`unload_path`, Strata) | `src/backend/ExternalModelServers.ts` |
+| Managed external server engine process control (`start_command` launch, stop and wait for the port, readiness polling) | `src/backend/externalServerProcess.ts` |
 | The detached deferred-stop watcher a managed external server leaves behind (`stop_command`, grace period, lease re-check) | `src/backend/ExternalServerStopWatcher.ts` |
 | Managed external server residency classification (`/v1/models` and stale `/v1/status` claims) | `src/backend/ExternalModelResidencyProbe.ts` |
 | Deferred `stop_on_exit` watcher (reload vs close) | `src/backend/deferredStop.ts` |

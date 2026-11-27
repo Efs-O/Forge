@@ -111,6 +111,50 @@ function twoManagedConfig(): ForgeConfig {
   } as ForgeConfig;
 }
 
+/**
+ * Two managed entries on ONE endpoint, each naming the model it wants: the
+ * `http://127.0.0.1:8090` shape that broke a chat on 2026-11-27. A Strata
+ * launcher stays on its port after `/unload` (`auto_load: true`), so switching
+ * entries used to return "already up" and the launcher answered every request
+ * with the model that had been loaded before.
+ */
+function sharedEndpointConfig(): ForgeConfig {
+  return {
+    models: [
+      {
+        name: 'a',
+        provider: 'openai-compatible',
+        endpoint: 'http://127.0.0.1:8090',
+        model: 'm-a',
+        unload_path: '/unload',
+        start_command: ['start-a'],
+        stop_command: ['stop-a'],
+      },
+      {
+        name: 'b',
+        provider: 'openai-compatible',
+        endpoint: 'http://127.0.0.1:8090',
+        model: 'm-b',
+        unload_path: '/unload',
+        stop_command: ['stop-b'],
+      },
+    ],
+    active_model: 'a',
+    llama_server: { port: 9100 },
+  } as ForgeConfig;
+}
+
+/** The endpoint's two residency reads: `null` for either body means 404 there. */
+function sharedEndpointFetch(models: unknown, status: unknown): typeof fetch {
+  return async (input) => {
+    const pathname = new URL(String(input)).pathname;
+    const body = pathname === '/v1/models' ? models : pathname === '/v1/status' ? status : null;
+    return body === null
+      ? new Response('{}', { status: 404 })
+      : new Response(JSON.stringify(body), { status: 200 });
+  };
+}
+
 function makeServers(respond: () => Promise<Response>): {
   servers: ExternalModelServers;
   calls: Array<{ url: string; init: RequestInit }>;
@@ -996,6 +1040,149 @@ describe('ExternalModelServers', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // The 2026-11-27 8090 incident: `strata-flashnext-unsloth-iq3xxs` and
+  // `strata-flashnext-unsloth-iq2xs` shared one endpoint, and after a chat
+  // switched to the IQ2 entry all 103 requests of the next two hours were
+  // answered by the IQ3_XXS server — its engine never started, and its log file
+  // was never created. A reachable port is not proof it is OUR port.
+  it('ensureStarted stops the entry that holds a shared port before starting this one', async () => {
+    const config = sharedEndpointConfig();
+    const order: string[] = [];
+    const spawnImpl = vi.fn((command: string) => {
+      order.push(command);
+      return { unref: vi.fn() };
+    });
+    // 8090 answers until b's stop command takes it away, then a's start brings it back.
+    probeHttpMock
+      .mockResolvedValueOnce({ reachable: true, ok: true })
+      .mockResolvedValueOnce({ reachable: false, ok: false })
+      .mockResolvedValue({ reachable: true, ok: true });
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => undefined,
+      sharedEndpointFetch({ data: [{ id: 'm-b', status: { value: 'loaded' } }] }, null),
+      spawnImpl,
+    );
+    servers.markInUse('b');
+
+    await servers.ensureStarted('a');
+
+    // The order is the whole fix: stopping b must precede starting a, or a's
+    // launcher races b's server for the same port.
+    expect(order).toEqual(['stop-b', 'start-a']);
+    expect(spawnImpl).toHaveBeenNthCalledWith(1, 'stop-b', [], {
+      detached: true,
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+    expect(spawnImpl).toHaveBeenNthCalledWith(2, 'start-a', [], {
+      detached: true,
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+    // The entry that gave up the port is no longer resident in this window's map.
+    expect(servers.isLoaded('b')).toBe(false);
+  });
+
+  it('ensureStarted refuses a shared port that no model entry can stop', async () => {
+    const config = sharedEndpointConfig();
+    // Nothing claims the id on the port, so Forge has no command that could free it.
+    config.models[1]!.model = 'old-hand-started-model';
+    const spawnImpl = vi.fn(() => ({ unref: vi.fn() }));
+    probeHttpMock.mockResolvedValue({ reachable: true, ok: true });
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => undefined,
+      sharedEndpointFetch({ data: [{ id: 'm-b', status: { value: 'loaded' } }] }, null),
+      spawnImpl,
+    );
+
+    const message = await servers.ensureStarted('a').then(
+      () => undefined,
+      (error: unknown) => (error as Error).message,
+    );
+
+    expect(message).toBe(
+      '"a" needs http://127.0.0.1:8090, but the server there is serving "m-b", ' +
+        'and no model entry on that endpoint can stop it. Stop that server, then retry.',
+    );
+    // Nothing was stopped and nothing was started: the owner's server is left
+    // for the user to deal with, rather than answering with the wrong model.
+    expect(spawnImpl).not.toHaveBeenCalled();
+  });
+
+  it('ensureStarted leaves a shared port alone when it already serves this model', async () => {
+    const config = sharedEndpointConfig();
+    const spawnImpl = vi.fn(() => ({ unref: vi.fn() }));
+    probeHttpMock.mockResolvedValue({ reachable: true, ok: true });
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => undefined,
+      sharedEndpointFetch(
+        {
+          data: [
+            { id: 'm-a', status: { value: 'loaded' } },
+            { id: 'm-b', status: { value: 'unloaded' } },
+          ],
+        },
+        null,
+      ),
+      spawnImpl,
+    );
+
+    await servers.ensureStarted('a');
+
+    expect(spawnImpl).not.toHaveBeenCalled();
+  });
+
+  it('ensureStarted still trusts a port that cannot say which model it serves', async () => {
+    const config = sharedEndpointConfig();
+    const spawnImpl = vi.fn(() => ({ unref: vi.fn() }));
+    probeHttpMock.mockResolvedValue({ reachable: true, ok: true });
+    // llama-server's /v1/models carries no per-model `status`, and there is no
+    // /v1/status to fall back to: "cannot tell" must keep working as it did.
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => undefined,
+      sharedEndpointFetch({ data: [{ id: 'm-b', object: 'model' }] }, null),
+      spawnImpl,
+    );
+
+    await servers.ensureStarted('a');
+
+    expect(spawnImpl).not.toHaveBeenCalled();
+  });
+
+  it('ensureStarted asks no residency question at all when nothing answers the port', async () => {
+    const config = sharedEndpointConfig();
+    const requests: string[] = [];
+    const fetchImpl = (async (input: string) => {
+      requests.push(new URL(String(input)).pathname);
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+    const spawnImpl = vi.fn(() => ({ unref: vi.fn() }));
+    // Down for the "is it up?" probe, then a's start brings it back.
+    probeHttpMock
+      .mockResolvedValueOnce({ reachable: false, ok: false })
+      .mockResolvedValue({ reachable: true, ok: true });
+    const servers = new ExternalModelServers(
+      () => config,
+      async () => undefined,
+      fetchImpl,
+      spawnImpl,
+    );
+
+    await servers.ensureStarted('a');
+
+    expect(spawnImpl).toHaveBeenCalledWith('start-a', [], {
+      detached: true,
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+    // A free port is ours without asking who was there.
+    expect(requests).toEqual([]);
   });
 });
 

@@ -8,7 +8,10 @@ import {
   prepareExternalForRequest,
   type ExternalCoordinationContext,
 } from '../../src/backend/BackendPoolExternal';
-import { probeExternalModelResidency } from '../../src/backend/ExternalModelResidencyProbe';
+import {
+  probeExternalModelResidency,
+  readServedModelIds,
+} from '../../src/backend/ExternalModelResidencyProbe';
 import { ExternalModelServers } from '../../src/backend/ExternalModelServers';
 import { SharedRuntimeRegistry } from '../../src/backend/SharedRuntimeRegistry';
 import type { ForgeConfig } from '../../src/config/types';
@@ -142,9 +145,11 @@ describe('external residency reconciliation', () => {
     const fetchImpl: typeof fetch = async (input, init) => {
       const url = new URL(String(input));
       if (url.pathname === '/v1/models') {
-        return new Response(
-          JSON.stringify({ data: [{ id: 'model-x', status: { value: state.value } }] }),
-        );
+        // Each endpoint reports its own configured model, so the "which model
+        // serves this port?" read `ensureStarted` now makes for 8091 answers
+        // with 8091's model rather than x's.
+        const id = url.port === '8090' ? 'model-x' : 'model-y';
+        return new Response(JSON.stringify({ data: [{ id, status: { value: state.value } }] }));
       }
       if (url.pathname === '/unload' && init?.method === 'POST') {
         unloads.push(url.origin);
@@ -201,7 +206,10 @@ describe('external residency reconciliation', () => {
 
       await prepareExternalForRequest('y', makeContext(external, new SharedRuntimeRegistry(board)));
 
-      expect(requests).toEqual([]);
+      // `ensureStarted('y')` now reads y's own endpoint to learn which model
+      // serves it. What must not happen is any request to x, whose GPUs the
+      // caller proved do not overlap this one.
+      expect(requests.filter((request) => request.includes(':8090/'))).toEqual([]);
       expect(state.unloads).toBe(0);
     } finally {
       fs.rmSync(board, { recursive: true, force: true });
@@ -262,6 +270,11 @@ describe('external residency reconciliation', () => {
         'GET http://127.0.0.1:8090/v1/models',
         'GET http://127.0.0.1:8090/v1/status',
         'POST http://127.0.0.1:8090/unload',
+        // 8091 has no state in this harness, so the read `ensureStarted('y')`
+        // now makes before trusting a port that answers gets a 404 both times,
+        // which is "cannot tell": Forge starts the model without stopping anyone.
+        'GET http://127.0.0.1:8091/v1/models',
+        'GET http://127.0.0.1:8091/v1/status',
       ]);
       expect(state.unloads).toBe(1);
       await external.refreshResidency();
@@ -555,6 +568,86 @@ describe('probeExternalModelResidency', () => {
     await expect(
       probeExternalModelResidency(endpoint, 'model-x', undefined, unnamedFetch),
     ).resolves.toEqual({ state: 'loaded', matchesModel: true });
+  });
+});
+
+describe('readServedModelIds', () => {
+  const endpoint = 'http://127.0.0.1:8090';
+
+  it.each(['loaded', 'unloaded'] as const)(
+    'returns every id /v1/models lists, %s or not',
+    async (value) => {
+      const requests: string[] = [];
+      const fetchImpl: typeof fetch = async (input) => {
+        requests.push(new URL(String(input)).pathname);
+        return new Response(
+          JSON.stringify({
+            data: [
+              { id: 'model-x', status: { value } },
+              { id: 'model-y', status: { value: 'unloaded' } },
+            ],
+          }),
+          { status: 200 },
+        );
+      };
+
+      await expect(readServedModelIds(endpoint, undefined, fetchImpl)).resolves.toEqual([
+        'model-x',
+        'model-y',
+      ]);
+      // Residency is not the question here, so the status list answers it alone.
+      expect(requests).toEqual(['/v1/models']);
+    },
+  );
+
+  it('falls back to the model /v1/status claims when /v1/models lists none', async () => {
+    const requests: string[] = [];
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = new URL(String(input));
+      requests.push(url.pathname);
+      return new Response(
+        JSON.stringify(
+          url.pathname === '/v1/models'
+            ? { data: [] }
+            : { service: 'strata', model: 'deepseek-v4.1-flash', loaded: false },
+        ),
+        { status: 200 },
+      );
+    };
+
+    // A Strata launcher stays on its port after an unload and still names the
+    // model it will load, which is the only clue that the port is not free.
+    await expect(readServedModelIds(endpoint, undefined, fetchImpl)).resolves.toEqual([
+      'deepseek-v4.1-flash',
+    ]);
+    expect(requests).toEqual(['/v1/models', '/v1/status']);
+  });
+
+  it.each([
+    [
+      'a refused connection',
+      () => {
+        const cause = Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
+        throw Object.assign(new TypeError('fetch failed'), { cause });
+      },
+    ],
+    ['a 404', () => new Response('{}', { status: 404 })],
+    ['an unparseable body', () => new Response('{', { status: 200 })],
+  ])('cannot tell what a server with %s serves', async (_name, respond) => {
+    const fetchImpl: typeof fetch = async () => respond();
+
+    await expect(readServedModelIds(endpoint, undefined, fetchImpl)).resolves.toBeUndefined();
+  });
+
+  it('cannot tell when /v1/models has no status field and /v1/status is missing', async () => {
+    // llama-server's shape: ids, but no per-model status, and no /v1/status at
+    // all. Guessing from that would stop a server Forge was not sure about.
+    const fetchImpl: typeof fetch = async (input) =>
+      new URL(String(input)).pathname === '/v1/models'
+        ? new Response(JSON.stringify({ data: [{ id: 'model-x', object: 'model' }] }))
+        : new Response('{}', { status: 404 });
+
+    await expect(readServedModelIds(endpoint, undefined, fetchImpl)).resolves.toBeUndefined();
   });
 });
 

@@ -13,23 +13,28 @@ import {
   isConnectionRefused,
   probeExternalModelResidency,
   probeExternalResidencyEndpoints,
+  readServedModelIds,
   selectorResidency,
   type ExternalResidency,
   type ExternalResidencyCandidate,
 } from './ExternalModelResidencyProbe';
+import {
+  describeError,
+  launchStartCommand,
+  START_TIMEOUT_MS,
+  stopServerAndAwaitPort,
+  waitUntilReachable,
+} from './externalServerProcess';
 import { probeHttp } from './HealthCheck';
 import { ResidencyPublisher } from './externalResidencyPublication';
+
+/** The cold-start budget lives with the process control; readers name it here. */
+export { START_POLL_MS, START_TIMEOUT_MS } from './externalServerProcess';
 
 const log = getLogger();
 
 /** How long an unload POST may take; Strata answers once the GPU is free. */
 const UNLOAD_TIMEOUT_MS = 60_000;
-/** An explicit stop waits for the server to leave its port before reporting success. */
-const STOP_TIMEOUT_MS = 90_000;
-/** How long to wait for a started server to accept connections before giving up. */
-export const START_TIMEOUT_MS = 180_000;
-/** How often to probe while waiting for a started server. */
-export const START_POLL_MS = 2_000;
 
 export type SecretLookup = (key: string) => Promise<string | undefined>;
 
@@ -262,7 +267,7 @@ export class ExternalModelServers {
         log.info(`[ExternalModelServers] "${name}" is not running — nothing to unload`);
         return;
       }
-      throw new Error(`Could not unload "${name}" (${url}): ${describe(err)}`);
+      throw new Error(`Could not unload "${name}" (${url}): ${describeError(err)}`);
     }
     if (!response.ok) {
       const body = (await response.text().catch(() => '')).slice(0, 300);
@@ -293,35 +298,7 @@ export class ExternalModelServers {
     const model = this.managed(name);
     if (!model?.stop_command || !model.endpoint) return;
     if (!(await probeHttp(model.endpoint)).reachable) return;
-    const [command, ...args] = model.stop_command;
-    let launchError: Error | undefined;
-    try {
-      const child = this.spawnImpl(command, args, {
-        detached: true,
-        windowsHide: true,
-        stdio: 'ignore',
-      });
-      child.once?.('error', (error) => {
-        launchError = error;
-      });
-      child.unref();
-    } catch (error) {
-      throw new Error(`Could not stop "${name}": ${describe(error)}`);
-    }
-    const deadline = Date.now() + STOP_TIMEOUT_MS;
-    for (;;) {
-      if (launchError) throw new Error(`Could not stop "${name}": ${launchError.message}`);
-      if (!(await probeHttp(model.endpoint)).reachable) {
-        log.info(`[ExternalModelServers] stopped "${name}" after explicit unload`);
-        return;
-      }
-      if (Date.now() >= deadline) {
-        throw new Error(
-          `"${name}" was unloaded but its server did not stop within ${STOP_TIMEOUT_MS / 1000}s`,
-        );
-      }
-      await new Promise((resolve) => setTimeout(resolve, START_POLL_MS));
-    }
+    await stopServerAndAwaitPort(this.spawnImpl, model, 'after explicit unload');
   }
 
   /**
@@ -344,7 +321,13 @@ export class ExternalModelServers {
   private async startOnce(name: string): Promise<void> {
     const model = this.managed(name);
     if (!model?.endpoint) return;
-    if ((await probeHttp(model.endpoint)).reachable) return; // already up
+    if ((await probeHttp(model.endpoint)).reachable) {
+      // Reachable is not enough. A Strata launcher stays on its port after an
+      // unload (`auto_load: true`), so switching from one model entry to another
+      // on the same endpoint returned here and the launcher answered every
+      // request with the model that was loaded before. Hand the port over.
+      if (!(await this.takeSharedPort(name, model))) return;
+    }
     if (!model.start_command?.length) {
       throw new Error(
         `"${name}" is not running (nothing is listening at ${model.endpoint}). ` +
@@ -354,10 +337,10 @@ export class ExternalModelServers {
     // A command that cannot run (ENOENT, EACCES) fails asynchronously; stop
     // polling on it rather than wait out START_TIMEOUT_MS.
     let launchError: Error | undefined;
-    this.launchStart(model, (error) => (launchError = error));
-    const ready = await this.waitReachable(model.endpoint, () => launchError !== undefined);
+    launchStartCommand(this.spawnImpl, model, (error) => (launchError = error));
+    const ready = await waitUntilReachable(model.endpoint, () => launchError !== undefined);
     if (launchError) {
-      throw new Error(`Start command for "${name}" failed: ${describe(launchError)}`);
+      throw new Error(`Start command for "${name}" failed: ${describeError(launchError)}`);
     }
     if (!ready) {
       throw new Error(
@@ -368,44 +351,54 @@ export class ExternalModelServers {
     log.info(`[ExternalModelServers] started "${name}"`);
   }
 
-  /** Launch `start_command` detached so it survives the extension host. */
-  private launchStart(model: ModelConfig, onError: (error: Error) => void): void {
-    const [command, ...args] = model.start_command!;
-    try {
-      const resolvedArgs = args.map((arg) => {
-        if (arg !== '{num_ctx}') return arg;
-        const numCtx = model.num_ctx;
-        if (numCtx === undefined || !Number.isInteger(numCtx) || numCtx <= 0) {
-          throw new Error(
-            `start_command uses "{num_ctx}", but "${model.name}" has no valid num_ctx`,
-          );
-        }
-        return String(numCtx);
-      });
-      const child = this.spawnImpl(command, resolvedArgs, {
-        detached: true,
-        windowsHide: true,
-        stdio: 'ignore',
-      });
-      child.once?.('error', (error) => {
-        log.error(`[ExternalModelServers] start command failed for "${model.name}"`, error);
-        onError(error);
-      });
-      child.unref();
-      log.info(`[ExternalModelServers] launched start command for "${model.name}"`);
-    } catch (error) {
-      throw new Error(`Could not launch start command for "${model.name}": ${describe(error)}`);
+  /**
+   * Whether `start_command` may run now. False means the server already answering
+   * the endpoint is ours to use (it serves this model, or cannot be told apart).
+   * True means another managed entry held the port and has now been stopped, so
+   * the port is free. Throws when the server there belongs to no entry Forge can
+   * stop, rather than answering the request with the wrong model.
+   */
+  private async takeSharedPort(name: string, model: ModelConfig): Promise<boolean> {
+    const token = model.api_key_secret ? await this.secret(model.api_key_secret) : undefined;
+    const served = await readServedModelIds(model.endpoint!, token, this.fetchImpl);
+    if (served === undefined || model.model === undefined || served.includes(model.model)) {
+      return false;
     }
+    const owner = this.findPortOwner(model, served);
+    if (!owner) {
+      const ids = served.map((id) => `"${id}"`).join(', ');
+      throw new Error(
+        `"${name}" needs ${model.endpoint}, but the server there is serving ${ids}, ` +
+          'and no model entry on that endpoint can stop it. Stop that server, then retry.',
+      );
+    }
+    log.info(
+      `[ExternalModelServers] "${owner.name}" holds ${model.endpoint}; ` +
+        `stopping it to start "${name}"`,
+    );
+    const generation = this.activityGeneration.get(owner.name) ?? 0;
+    await stopServerAndAwaitPort(this.spawnImpl, owner.model, 'to free its port');
+    this.markUnloadedUnlessReused(owner.name, generation, 'port handover');
+    return true;
   }
 
-  /** Poll the endpoint until it accepts connections or the timeout is reached. */
-  private async waitReachable(endpoint: string, failed: () => boolean): Promise<boolean> {
-    const deadline = Date.now() + START_TIMEOUT_MS;
-    for (;;) {
-      if ((await probeHttp(endpoint)).reachable) return true;
-      if (failed() || Date.now() >= deadline) return false;
-      await new Promise((resolve) => setTimeout(resolve, START_POLL_MS));
+  /** The other managed entry that owns this endpoint: same endpoint (trailing
+   *  slashes trimmed), its `model` among the served ids, and a `stop_command`
+   *  that can take the port back. */
+  private findPortOwner(
+    model: ModelConfig,
+    served: readonly string[],
+  ): { name: string; model: ModelConfig } | undefined {
+    const endpoint = model.endpoint!.replace(/\/+$/, '');
+    for (const entry of this.getConfig().models) {
+      if (entry.name === model.name) continue;
+      const other = this.managed(entry.name);
+      if (!other?.endpoint || !other.stop_command?.length) continue;
+      if (other.endpoint.replace(/\/+$/, '') !== endpoint) continue;
+      if (other.model === undefined || !served.includes(other.model)) continue;
+      return { name: entry.name, model: other };
     }
+    return undefined;
   }
 
   /** Unload every managed server that may hold memory; reports every failure.
@@ -473,12 +466,6 @@ export class ExternalModelServers {
   private launchStop(model: ModelConfig, leaseDir: string): StopChild | undefined {
     return launchStopWatcher(this.spawnImpl, model, leaseDir);
   }
-}
-
-function describe(err: unknown): string {
-  if (!(err instanceof Error)) return String(err);
-  const cause = (err as Error & { cause?: unknown }).cause;
-  return cause instanceof Error ? `${err.message} (${cause.message})` : err.message;
 }
 
 /**
