@@ -36,21 +36,26 @@ function skipIfNoBrowser(ctx: { skip: (msg: string) => void }, err: unknown): ne
   ctx.skip(`no ${CHANNEL} on this host: ${message}`);
 }
 
-/** Whether the allowlisted CDN is reachable from this host at all. */
-async function cdnReachable(): Promise<boolean> {
+/**
+ * Whether one public HTTPS host completes TLS from this host. A test that loads
+ * a real script from it can say nothing about the tool when the handshake fails
+ * — a local proxy that answers for the name is enough to break it.
+ */
+async function httpsReachable(url: string): Promise<boolean> {
   return new Promise((resolve) => {
-    const req = https.request(
-      'https://cdn.jsdelivr.net/npm/three@0.160.1/package.json',
-      { method: 'HEAD', timeout: 8_000 },
-      (res) => {
-        res.resume();
-        resolve((res.statusCode ?? 0) < 400);
-      },
-    );
+    const req = https.request(url, { method: 'HEAD', timeout: 8_000 }, (res) => {
+      res.resume();
+      resolve((res.statusCode ?? 0) < 400);
+    });
     req.on('timeout', () => req.destroy());
     req.on('error', () => resolve(false));
     req.end();
   });
+}
+
+/** Whether the allowlisted CDN is reachable from this host at all. */
+async function cdnReachable(): Promise<boolean> {
+  return httpsReachable('https://cdn.jsdelivr.net/npm/three@0.160.1/package.json');
 }
 
 describe('render_html_to_image preview against real Chrome', () => {
@@ -214,6 +219,10 @@ describe('render_html_to_image preview against real Chrome', () => {
     }
     if (nonCdnAddress.startsWith('127.') || nonCdnAddress.startsWith('10.')) {
       ctx.skip('example.com does not resolve to a public address on this host');
+      return;
+    }
+    if (!(await httpsReachable('https://example.com/'))) {
+      ctx.skip('example.com does not complete TLS from this host (offline, or a proxy answers for it)');
       return;
     }
     let result: string | MultimodalToolResult;
